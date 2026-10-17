@@ -24,6 +24,7 @@
     heatThrottle: 0.15, heatBurner: 0.12, heatRamjet: 0.35, coolBase: 0.05, coolSpeed: 0.10,
     batteryDrain: 0.08, batteryCharge: 0.05, repairRate: 0.12, damagePerMs: 0.012,
     rideH: 1.5, hoverOmega: 9, hoverZeta: 0.9,
+    binderKz: 3e6, binderCz: 60000, towKz: 2e5, towCz: 16000,
     track: 'circuit', startX: 0, startY: 0,
     seed: 1337
   };
@@ -172,11 +173,11 @@
     // Repulsor hover: spring-damper toward ride height over the ground, push-only, plus
     // gravity. Exactly balanced at ride height on flat ground, so flat tracks are unchanged.
     // Grip fades as a body lifts clear (0.5 to 2 m above ride height) and returns on landing.
-    function hover(b, dt) {
+    function hover(b, dt, az) {
       const h = ground(T, b.x, b.y), dhdt = (ground(T, b.x + b.vx * dt, b.y + b.vy * dt) - h) / dt;
       const w = P.hoverOmega;
       const up = Math.max(0, G + w * w * (P.rideH - (b.z - h)) - 2 * P.hoverZeta * w * (b.vz - dhdt));
-      b.vz += (up - G) * dt; b.z += b.vz * dt;
+      b.vz += (up - G + az) * dt; b.z += b.vz * dt;
       if (b.z - h < 0.3) {
         b.z = h + 0.3;
         if (b.vz < dhdt) {
@@ -211,7 +212,17 @@
         }
         return;
       }
-      for (const b of S.bodies) { b.fx = 0; b.fy = 0; b.t = 0; hover(b, dt); }
+      // Vertical ties: the binder holds both engines at one height and the tow bar lifts the
+      // pod toward their mean, so a one-sided ramp hit lifts the whole craft instead of
+      // flinging one engine skyward. Exactly zero when heights match (flat ground).
+      const az = [0, 0, 0];
+      if (!S.binderBroken) {
+        const fz = P.binderKz * (R.z - L.z) + P.binderCz * (R.vz - L.vz);
+        az[0] += fz / L.m; az[1] -= fz / R.m;
+      }
+      const ft = P.towKz * ((L.z + R.z) / 2 - Pd.z) + P.towCz * ((L.vz + R.vz) / 2 - Pd.vz);
+      az[2] += ft / Pd.m; az[0] -= ft / 2 / L.m; az[1] -= ft / 2 / R.m;
+      S.bodies.forEach((b, k) => { b.fx = 0; b.fy = 0; b.t = 0; hover(b, dt, az[k]); });
       S.time += dt;
       const inGate = inp.thrL >= P.gate && inp.thrR >= P.gate && !inp.repair;
       const ramjet = S.armed && inGate;

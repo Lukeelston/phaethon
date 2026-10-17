@@ -22,6 +22,7 @@ const DEFAULTS := {
 	"heatThrottle": 0.15, "heatBurner": 0.12, "heatRamjet": 0.35, "coolBase": 0.05, "coolSpeed": 0.10,
 	"batteryDrain": 0.08, "batteryCharge": 0.05, "repairRate": 0.12, "damagePerMs": 0.012,
 	"rideH": 1.5, "hoverOmega": 9.0, "hoverZeta": 0.9,
+	"binderKz": 3.0e6, "binderCz": 60000.0, "towKz": 2.0e5, "towCz": 16000.0,
 	"track": "circuit", "startX": 0.0, "startY": 0.0,
 	"seed": 1337,
 }
@@ -180,12 +181,12 @@ func ground(x: float, y: float) -> float:
 
 ## Repulsor hover: spring-damper toward ride height, push-only, plus gravity. Exactly
 ## balanced on flat ground, so flat tracks are unchanged. Grip fades as a body lifts clear.
-func _hover(b: Body, dt: float) -> void:
+func _hover(b: Body, dt: float, az: float) -> void:
 	var h := ground(b.x, b.y)
 	var dhdt := (ground(b.x + b.vx * dt, b.y + b.vy * dt) - h) / dt
 	var w: float = P.hoverOmega
 	var up := maxf(0.0, G + w * w * (P.rideH - (b.z - h)) - 2.0 * P.hoverZeta * w * (b.vz - dhdt))
-	b.vz += (up - G) * dt
+	b.vz += (up - G + az) * dt
 	b.z += b.vz * dt
 	if b.z - h < 0.3:
 		b.z = h + 0.3
@@ -421,11 +422,24 @@ func step(inp: Dictionary, dt: float) -> void:
 				result = {}
 			respawn()
 		return
-	for b: Body in bodies:
+	# Vertical ties: the binder holds both engines at one height and the tow bar lifts the
+	# pod toward their mean, so a one-sided ramp hit lifts the whole craft instead of
+	# flinging one engine skyward. Exactly zero when heights match (flat ground).
+	var az := [0.0, 0.0, 0.0]
+	if not binder_broken:
+		var fz: float = P.binderKz * (R.z - L.z) + P.binderCz * (R.vz - L.vz)
+		az[0] += fz / L.m
+		az[1] -= fz / R.m
+	var ftz: float = P.towKz * ((L.z + R.z) / 2.0 - Pd.z) + P.towCz * ((L.vz + R.vz) / 2.0 - Pd.vz)
+	az[2] += ftz / Pd.m
+	az[0] -= ftz / 2.0 / L.m
+	az[1] -= ftz / 2.0 / R.m
+	for k in 3:
+		var b: Body = bodies[k]
 		b.fx = 0.0
 		b.fy = 0.0
 		b.t = 0.0
-		_hover(b, dt)
+		_hover(b, dt, az[k])
 	time += dt
 	var repair: bool = inp.get("repair", false)
 	var reignite: bool = inp.get("reignite", false)

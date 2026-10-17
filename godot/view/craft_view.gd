@@ -153,9 +153,9 @@ func _process(delta: float) -> void:
 		acc -= DT
 	_track_braking()
 	_follow_origin()
-	_sync_world()
 	_sync_craft()
 	_place_camera(1.0 - exp(-delta * 6.0))
+	_sync_world()   # after the camera: distant anchors scale about its current position
 	top_kmh = maxf(top_kmh, _kmh())
 	_update_hud()
 	frames += 1
@@ -242,11 +242,12 @@ func _build_world() -> void:
 	add_child(sun)
 
 	# The ground rides along under the pod; its texture offset keeps the sand fixed in the world.
+	# 60 km across so its far edge sits near the true horizon even 100+ m up a jump.
 	ground = MeshInstance3D.new()
 	var plane := PlaneMesh.new()
-	plane.size = Vector2(12000, 12000)
+	plane.size = Vector2(60000, 60000)
 	ground.mesh = plane
-	ground_mat = _grain(Color(0.79, 0.64, 0.42), 2000.0)
+	ground_mat = _grain(Color(0.79, 0.64, 0.42), 10000.0)
 	ground.material_override = ground_mat
 	ground.position = Vector3(0, -0.05, 0)
 	add_child(ground)
@@ -310,7 +311,7 @@ func _sync_world() -> void:
 	if range_world:
 		range_world.sync(org_x, org_y)
 	if landmark:
-		landmark.sync(org_x, org_y, sim.time)
+		landmark.sync(org_x, org_y, sim.time, cam.global_position)
 
 
 func _build_craft() -> void:

@@ -149,22 +149,27 @@ func _build_beacon() -> void:
 	add_child(marker)
 
 
-## Place an anchored object: true position within R, else a scaled impostor at R.
-static func _impostor(node: Node3D, dx: float, dz: float) -> float:
-	var dist := sqrt(dx * dx + dz * dz)
+## Place an anchored object: true position within R of the camera, else a scaled impostor
+## at R along the camera's line of sight. Scaling about the CAMERA (height included) keeps the
+## angular position exact; scaling about the ground under the pod sank it below the horizon
+## whenever you were airborne (100 m up: 0.95 deg too low vs 0.04 deg true).
+static func _impostor(node: Node3D, anchor: Vector3, cam: Vector3) -> float:
+	var d := anchor - cam
+	var dist := d.length()
 	var s := 1.0 if dist <= R else R / dist
-	node.position = Vector3(dx * s, 0.0, dz * s)
+	node.position = cam + d * s
 	node.scale = Vector3(s, s, s)
 	return dist
 
 
-func sync(ox: float, oy: float, t: float) -> void:
-	# both anchors sit on sim y = 0; render z = -(0 - oy)
-	var bdist := _impostor(beacon_root, Sim.BOX_X - ox, oy)
-	var bs := 1.0 if bdist <= 4000.0 else 4000.0 / bdist
-	marker.position = Vector3((Sim.BOX_X - ox) * bs, 90.0, oy * bs)
+func sync(ox: float, oy: float, t: float, cam: Vector3) -> void:
+	# both anchors sit on sim y = 0 at ground level; render z = -(0 - oy)
+	var bdist := _impostor(beacon_root, Vector3(Sim.BOX_X - ox, 0.0, oy), cam)
+	var md := Vector3(Sim.BOX_X - ox, 90.0, oy) - cam
+	var ms := 1.0 if md.length() <= 4000.0 else 4000.0 / md.length()
+	marker.position = cam + md * ms
 	marker.visible = bdist > 120.0   # hide it once you're on top of the box
-	var dist := _impostor(root, CIT_X - ox, oy)
+	var dist := _impostor(root, Vector3(CIT_X - ox, 0.0, oy), cam)
 	var f := clampf(1.0 - exp(-dist / HAZE_K), 0.0, 1.0)
 	for p in parts:
 		var m: StandardMaterial3D = p[0]
