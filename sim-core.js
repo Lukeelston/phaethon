@@ -33,6 +33,8 @@
   // the view draws. No walls, no laps. Launch speed is slope x speed, so the kickers are
   // long and shallow, sized for 2,000-5,000 mph; at a few hundred mph they're bumps.
   const RANGE_LEN = 160934.4, JUMP_Y = 400, JUMP_W = 40, RAMP_X0 = 8000, RAMP_EVERY = 4000;
+  // Sprint: stop dead inside a 50 m box at mile 100. Past BOX_X + OVERRUN is a DNF.
+  const BOX_X = RANGE_LEN, BOX_HALF = 25, OVERRUN = 15000, STOPPED = 0.5;
   const RAMP_H = [3, 6, 10, 15], RAMP_SLOPE = [0.007, 0.011, 0.0157, 0.022];
   function buildRange() {
     const ramps = [];
@@ -116,12 +118,15 @@
       battery: 1, armed: false, mode: 'normal', binderBroken: false, crashT: 0, time: 0,
       lap: 0, lapStart: null, lastLap: null, bestLap: null, visited: new Set(), checkpoint: 0,
       progressI: 0, cables: [{ f: 0 }, { f: 0 }], events: [], rand: xorshift32(P.seed),
-      runStart: null, lastRun: null, bestRun: null, finished: false
+      runStart: null, lastRun: null, bestRun: null, finished: false, runActive: false, result: null
     };
     S.bodies = [S.eL, S.eR, S.pod];
 
     function respawn(ci) {
-      const ahead = P.cableLen + P.podLen / 2 + P.engineLen / 2;
+      // engines placed so each cable is exactly at length: a stretched spawn makes the stiff
+      // cables yank the pod forward on the first step
+      const lat = P.engineGap / 2 - P.podAnchorW * P.podWidth / 2;
+      const ahead = Math.sqrt(P.cableLen * P.cableLen - lat * lat) + P.podLen / 2 + P.engineLen / 2;
       // Circuit: back at a checkpoint. Range: 30 m behind where the pod is, facing +x.
       let a, idx = 0;
       if (T.kind === 'range') {
@@ -201,7 +206,7 @@
       if (S.crashT > 0) {
         S.crashT -= dt;
         if (S.crashT <= 0) {
-          if (S.finished) { S.pod.x = 30; S.finished = false; }   // back to the start line
+          if (S.finished) { S.pod.x = 30; S.pod.y = 0; S.finished = false; S.result = null; }   // back to the start line
           respawn();
         }
         return;
@@ -326,13 +331,25 @@
       if (Pd.health <= 0 && S.crashT <= 0) { S.events.push({ type: 'wreck' }); S.crashT = 1.6; Pd.health = 0; }
 
       if (T.kind === 'range') {
-        // Run timer from the first move; crossing mile 100 records the run and resets to the start.
-        if (S.runStart === null && pv > 2) S.runStart = S.time;
-        if (Pd.x >= T.length && S.crashT <= 0) {
-          S.lastRun = S.runStart === null ? 0 : S.time - S.runStart;
-          S.bestRun = S.bestRun === null ? S.lastRun : Math.min(S.bestRun, S.lastRun);
-          S.events.push({ type: 'finish', t: S.lastRun });
-          S.runStart = null; S.finished = true; S.crashT = 1.6;
+        // Sprint: the clock starts on the first move and stops when the pod sits still inside
+        // the box. Overrunning by OVERRUN, or crashing mid-run, is a DNF back to the start line.
+        if (!S.runActive && S.result === null && inp.thrL + inp.thrR > 0.02) { S.runActive = true; S.runStart = S.time; }
+        if (S.runActive) {
+          const inBox = Math.abs(Pd.x - BOX_X) <= BOX_HALF && Math.abs(Pd.y) <= BOX_HALF;
+          let end = null;
+          if (inBox && pv < STOPPED) {
+            const t = S.time - S.runStart;
+            end = { type: 'finish', t, err: Math.hypot(Pd.x - BOX_X, Pd.y) };
+            S.lastRun = t; S.bestRun = S.bestRun === null ? t : Math.min(S.bestRun, t);
+          } else if (Pd.x > BOX_X + OVERRUN) {
+            end = { type: 'overrun' };
+          } else if (S.crashT > 0) {
+            end = { type: 'crash' };
+          }
+          if (end) {
+            S.runActive = false; S.result = end; S.events.push(end);
+            if (end.type !== 'finish') { S.finished = true; S.crashT = Math.max(S.crashT, 1.6); }
+          }
         }
         return;
       }
@@ -348,10 +365,18 @@
       S.progressI = cur;
     }
 
+    // Range: back to the start line, run cleared (the Y button).
+    function restart() {
+      S.pod.x = 30; S.pod.y = 0; S.crashT = 0; S.finished = false;
+      S.runActive = false; S.runStart = null; S.result = null;
+      respawn();
+    }
+
     S.pod.x = P.startX + 30; S.pod.y = P.startY;   // range spawn point (respawn backs off 30 m)
     respawn(0);
     S.visited.add(0);
-    return { S, P, T, step, respawn, DEFAULTS, ground: (x, y) => ground(T, x, y) };
+    return { S, P, T, step, respawn, restart, DEFAULTS, ground: (x, y) => ground(T, x, y),
+      box: { x: BOX_X, half: BOX_HALF, overrun: OVERRUN } };
   }
 
   window.PhaethonSim = { makeSim, DEFAULTS, xorshift32 };

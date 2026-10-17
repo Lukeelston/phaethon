@@ -181,7 +181,7 @@ func _read_input(delta: float) -> void:
 	if p.arm or _pressed_once("arm", r.is_button_pressed("by_button")):
 		sim.armed = not sim.armed
 	if p.respawn or _pressed_once("respawn", l.is_button_pressed("by_button")):
-		sim.respawn()
+		_respawn()
 	if _pressed_once("recenter", l.is_button_pressed("primary_click") or r.is_button_pressed("primary_click")):
 		XRServer.center_on_hmd(XRServer.RESET_BUT_KEEP_TILT, true)
 	_diag(delta, l, r, p)

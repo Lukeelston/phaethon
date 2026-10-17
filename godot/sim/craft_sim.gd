@@ -35,6 +35,11 @@ const RAMP_X0 := 8000.0
 const RAMP_EVERY := 4000.0
 const RAMP_H := [3.0, 6.0, 10.0, 15.0]
 const RAMP_SLOPE := [0.007, 0.011, 0.0157, 0.022]
+# Sprint: stop dead inside a 50 m box at mile 100. Past BOX_X + OVERRUN is a DNF.
+const BOX_X := RANGE_LEN
+const BOX_HALF := 25.0
+const OVERRUN := 15000.0
+const STOPPED := 0.5
 const CTRL := [[0.0, 0.0], [900.0, -100.0], [1700.0, 150.0], [2300.0, 700.0], [2400.0, 1300.0],
 	[2000.0, 1700.0], [1400.0, 1600.0], [1100.0, 1150.0], [700.0, 1300.0], [300.0, 1800.0],
 	[-400.0, 1700.0], [-900.0, 1100.0], [-800.0, 400.0], [-400.0, 80.0]]
@@ -110,6 +115,8 @@ var run_start := -1.0   # range run timer; -1 = not started (JS null)
 var last_run := -1.0
 var best_run := -1.0
 var finished := false
+var run_active := false
+var result: Dictionary = {}   # empty = no result (JS null); else {type, t, err}
 var pair_th := 0.0
 var binder_stretch := 0.0
 
@@ -274,8 +281,23 @@ func _point_vel(b: Body, px: float, py: float) -> void:
 	_pvy = b.vy + b.w * (px - b.x)
 
 
+## Range: back to the start line, run cleared (the Y button).
+func restart() -> void:
+	pod.x = 30.0
+	pod.y = 0.0
+	crash_t = 0.0
+	finished = false
+	run_active = false
+	run_start = -1.0
+	result = {}
+	respawn()
+
+
 func respawn(ci: int = -1) -> void:
-	var ahead: float = P.cableLen + P.podLen / 2.0 + P.engineLen / 2.0
+	# engines placed so each cable is exactly at length: a stretched spawn makes the stiff
+	# cables yank the pod forward on the first step
+	var lat: float = P.engineGap / 2.0 - P.podAnchorW * P.podWidth / 2.0
+	var ahead: float = sqrt(P.cableLen * P.cableLen - lat * lat) + P.podLen / 2.0 + P.engineLen / 2.0
 	# Circuit: back at a checkpoint. Range: 30 m behind where the pod is, facing +x.
 	var idx := 0
 	var ax: float
@@ -394,7 +416,9 @@ func step(inp: Dictionary, dt: float) -> void:
 		if crash_t <= 0.0:
 			if finished:   # back to the start line
 				pod.x = 30.0
+				pod.y = 0.0
 				finished = false
+				result = {}
 			respawn()
 		return
 	for b: Body in bodies:
@@ -602,16 +626,30 @@ func step(inp: Dictionary, dt: float) -> void:
 		Pd.health = 0.0
 
 	if kind == "range":
-		# Run timer from the first move; crossing mile 100 records the run and resets to the start.
-		if run_start < 0.0 and pv > 2.0:
+		# Sprint: the clock starts on the first lever input and stops when the pod sits still
+		# inside the box. Overrunning by OVERRUN, or crashing mid-run, is a DNF back to the start.
+		if not run_active and result.is_empty() and inp.thrL + inp.thrR > 0.02:
+			run_active = true
 			run_start = time
-		if Pd.x >= track_length and crash_t <= 0.0:
-			last_run = 0.0 if run_start < 0.0 else time - run_start
-			best_run = last_run if best_run < 0.0 else minf(best_run, last_run)
-			events.append({"type": "finish", "t": last_run})
-			run_start = -1.0
-			finished = true
-			crash_t = 1.6
+		if run_active:
+			var in_box := absf(Pd.x - BOX_X) <= BOX_HALF and absf(Pd.y) <= BOX_HALF
+			var end := {}
+			if in_box and pv < STOPPED:
+				var t := time - run_start
+				end = {"type": "finish", "t": t, "err": sqrt((Pd.x - BOX_X) * (Pd.x - BOX_X) + Pd.y * Pd.y)}
+				last_run = t
+				best_run = t if best_run < 0.0 else minf(best_run, t)
+			elif Pd.x > BOX_X + OVERRUN:
+				end = {"type": "overrun"}
+			elif crash_t > 0.0:
+				end = {"type": "crash"}
+			if not end.is_empty():
+				run_active = false
+				result = end
+				events.append(end)
+				if end.type != "finish":
+					finished = true
+					crash_t = maxf(crash_t, 1.6)
 		return
 	if kind != "circuit":
 		return

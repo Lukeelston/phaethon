@@ -16,6 +16,8 @@ const TWIST_HALF := 30.0
 const LAMBDA0 := 3000.0   # sweeper wavelength at mile 0 ...
 const LAMBDA1 := 700.0    # ... tightening to this by mile 100
 const RAMP_NAMES := {3.0: "SMALL  3 m", 6.0: "MEDIUM  6 m", 10.0: "LARGE  10 m", 15.0: "HUGE  15 m"}
+const COUNTDOWN_MI := [20, 15, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1]   # miles to the stop box
+const COUNTDOWN_M := [1000, 500, 250, 100]                      # metres to the stop box
 
 var sim
 var view
@@ -33,6 +35,7 @@ func build(s, v) -> void:
 	mats.pylon = v._mat(Color(1.0, 0.42, 0.08))
 	mats.rock = v._mat(Color(0.55, 0.42, 0.28))
 	mats.post = v._mat(Color(0.18, 0.19, 0.21))
+	mats.box_fill = v._mat(Color(0.78, 0.22, 0.12))
 
 
 ## Centreline of the twisty lane: sweepers whose wavelength shrinks linearly with distance.
@@ -43,7 +46,7 @@ static func twist_y(x: float) -> float:
 
 
 func sync(ox: float, oy: float) -> void:
-	var last := int(ceil(Sim.RANGE_LEN / CHUNK))
+	var last := int(ceil((Sim.RANGE_LEN + Sim.OVERRUN) / CHUNK))   # runway runs on through the overrun zone
 	var lo := maxi(-1, int(floor((ox - BEHIND) / CHUNK)))
 	var hi := mini(last, int(floor((ox + AHEAD) / CHUNK)))
 	for idx in chunks.keys():
@@ -82,7 +85,7 @@ func _make_chunk(idx: int) -> Node3D:
 	add_child(node)
 	var cx := idx * CHUNK
 	var x0 := maxf(0.0, cx) - cx
-	var x1 := minf(Sim.RANGE_LEN, cx + CHUNK) - cx
+	var x1 := minf(Sim.RANGE_LEN + Sim.OVERRUN, cx + CHUNK) - cx
 	if x1 <= x0:
 		return node
 
@@ -147,6 +150,19 @@ func _make_chunk(idx: int) -> Node3D:
 		_sign(node, x0 + 300.0, Sim.JUMP_Y + 45.0, "JUMP LANE", 160)
 		_sign(node, x0 + 300.0, twist_y(cx + x0 + 300.0) + 60.0, "TWISTY LANE", 160)
 
+	# sprint: countdown boards to the stop box, then the box itself
+	for mi in COUNTDOWN_MI:
+		var bx: float = Sim.BOX_X - mi * MILE - cx
+		if bx >= 0.0 and bx < CHUNK:
+			_board(node, bx, "%d MI" % mi)
+	for metres in COUNTDOWN_M:
+		var bx: float = Sim.BOX_X - metres - cx
+		if bx >= 0.0 and bx < CHUNK:
+			_board(node, bx, "%d m" % metres)
+	var box_lx: float = Sim.BOX_X - cx
+	if box_lx >= -Sim.BOX_HALF and box_lx < CHUNK + Sim.BOX_HALF:
+		_stop_box(node, box_lx)
+
 	# rocks: a speed cue off the lanes, deterministic per chunk
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 9001 + idx
@@ -188,6 +204,54 @@ func _ramp(node: Node3D, rx: float, length: float, h: float) -> void:
 	_mesh(node, st, mats.ramp)
 	var label: String = RAMP_NAMES.get(h, "%d m" % h)
 	_sign(node, rx - 60.0, Sim.JUMP_Y + 32.0, label, 120)
+
+
+## Countdown board: big red numbers on both sides of the runway.
+func _board(node: Node3D, lx: float, text: String) -> void:
+	for s in [-1.0, 1.0]:
+		var y: float = s * (RUNWAY_HALF + 35.0)
+		var post := MeshInstance3D.new()
+		var box := BoxMesh.new()
+		box.size = Vector3(2.0, 30.0, 40.0)
+		post.mesh = box
+		post.material_override = mats.post
+		post.position = Vector3(lx, 15.0, -y)
+		node.add_child(post)
+		var l := Label3D.new()
+		l.text = text
+		l.font_size = 520
+		l.pixel_size = 0.05
+		l.outline_size = 24
+		l.modulate = Color(0.9, 0.12, 0.06)
+		l.outline_modulate = Color(1.0, 0.97, 0.9)
+		l.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
+		l.position = Vector3(lx, 48.0, -y)
+		node.add_child(l)
+
+
+## The stop box: a 50 m square painted across the runway centreline, STOP written in it.
+func _stop_box(node: Node3D, lx: float) -> void:
+	var h: float = Sim.BOX_HALF
+	var fill := SurfaceTool.new()
+	fill.begin(Mesh.PRIMITIVE_TRIANGLES)
+	_quad(fill, lx - h, lx + h, -h, h, 0.03)
+	_mesh(node, fill, mats.box_fill)
+	var edge := SurfaceTool.new()
+	edge.begin(Mesh.PRIMITIVE_TRIANGLES)
+	_quad(edge, lx - h - 1.5, lx + h + 1.5, -h - 1.5, -h, 0.04)
+	_quad(edge, lx - h - 1.5, lx + h + 1.5, h, h + 1.5, 0.04)
+	_quad(edge, lx - h - 1.5, lx - h, -h, h, 0.04)
+	_quad(edge, lx + h, lx + h + 1.5, -h, h, 0.04)
+	_mesh(node, edge, mats.line)
+	var l := Label3D.new()
+	l.text = "STOP"
+	l.font_size = 400
+	l.pixel_size = 0.05
+	l.modulate = Color(1.0, 0.97, 0.9)
+	# lying flat, reading left-to-right for a pilot approaching along +x
+	l.basis = Basis(Vector3(0, 0, 1), Vector3(1, 0, 0), Vector3(0, 1, 0))
+	l.position = Vector3(lx, 0.06, 0)
+	node.add_child(l)
 
 
 func _sign(node: Node3D, lx: float, y: float, text: String, size: int) -> void:
