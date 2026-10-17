@@ -38,6 +38,12 @@ func _make_view() -> void:
 				xr.connect(sig, _on_xr_event.bind(sig))
 		if "display_refresh_rate" in xr:
 			xr.set("display_refresh_rate", 90.0)
+		# Sound in the headset, not on the desk: Windows' default output may be the PC speakers.
+		for dev in AudioServer.get_output_device_list():
+			if dev.contains("Oculus Virtual Audio"):
+				AudioServer.output_device = dev
+				print("AUDIO: output -> ", dev)
+				break
 		print("OPENXR: initialized")
 	else:
 		print("OPENXR: NOT initialized, running flat (is the Quest on and in Link mode?)")
