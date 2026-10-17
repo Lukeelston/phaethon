@@ -1,0 +1,386 @@
+<title>Phaethon Podracer</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;800&family=Barlow:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+/* Layout: an engineering dossier. A live cockpit up top, then a numbered spec in one
+   reading column; tables, diagrams and the lab break out wider. */
+:root {
+  --bg: #eceff1;        /* anodised aluminium */
+  --surface: #f7f8f9;
+  --ink: #1b1f24;
+  --muted: #56616b;
+  --rule: #cfd5da;
+  --binder: #1a74aa;    /* energy-binder arc */
+  --heat: #b8500e;      /* heat / warnings */
+  --ok: #2f7d4f;
+  --display: "Big Shoulders Display", "Arial Narrow", Impact, sans-serif;
+  --body: "Barlow", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  --col: 68ch;
+  --wide: 1120px;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #14171b; --surface: #1b1f24; --ink: #e5e9ec; --muted: #98a3ad; --rule: #2d343b;
+  --binder: #6cc6ff; --heat: #ff8d45; --ok: #6fcf97; color-scheme: dark;
+} }
+:root[data-theme="dark"] {
+  --bg: #14171b; --surface: #1b1f24; --ink: #e5e9ec; --muted: #98a3ad; --rule: #2d343b;
+  --binder: #6cc6ff; --heat: #ff8d45; --ok: #6fcf97; color-scheme: dark;
+}
+body {
+  background: var(--bg); color: var(--ink); font: 400 17px/1.6 var(--body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 0 64px;
+}
+.wrap { max-width: var(--wide); margin: 0 auto; }
+.col { max-width: var(--col); }
+h1, h2, h3 { font-family: var(--display); text-wrap: balance; line-height: 1.02; margin: 0; }
+h1 { font-weight: 800; font-size: clamp(64px, 12vw, 148px); letter-spacing: 0.01em; text-transform: uppercase; }
+h2 { font-weight: 800; font-size: clamp(32px, 4.6vw, 48px); text-transform: uppercase; letter-spacing: 0.01em; }
+h3 { font-weight: 600; font-size: 24px; text-transform: uppercase; letter-spacing: 0.03em; margin-top: 28px; }
+p, li { max-width: var(--col); }
+a { color: var(--binder); text-underline-offset: 3px; }
+a:focus-visible, button:focus-visible, input:focus-visible, canvas:focus-visible, textarea:focus-visible { outline: 2px solid var(--binder); outline-offset: 3px; }
+code, .mono { font-family: var(--mono); font-size: 0.86em; }
+.eyebrow { font: 600 12px/1.4 var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+
+header.hero { padding-block: 40px 20px; display: grid; gap: 14px; }
+.hero .lede { font-size: 20px; line-height: 1.5; max-width: 60ch; margin: 0; }
+.hero h1 .arc { color: var(--binder); }
+
+.lab { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 18px; margin-top: 18px; }
+.lab-stage { min-width: 0; display: grid; gap: 10px; }
+#lab-canvas { width: 100%; aspect-ratio: 16 / 9; max-width: 100%; display: block; border-radius: 6px; background: #c9a46c; cursor: pointer; touch-action: none; }
+.lab-caption { font-size: 15px; color: var(--muted); margin: 0; max-width: 80ch; }
+.lab-side { min-width: 0; background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 14px; display: grid; gap: 10px; align-content: start; }
+.lab-side h3 { margin: 0; font-size: 18px; }
+#lab-tune { display: grid; gap: 6px; }
+.tune-row { display: grid; grid-template-columns: 1fr auto; grid-template-areas: "name val" "range range"; font-size: 13px; column-gap: 8px; }
+.tune-name { grid-area: name; }
+.tune-val { grid-area: val; font: 500 12px var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+.tune-row input { grid-area: range; width: 100%; accent-color: var(--binder); margin: 2px 0 0; }
+.btns { display: flex; flex-wrap: wrap; gap: 8px; }
+button { font: 600 13px var(--body); letter-spacing: 0.02em; background: var(--ink); color: var(--bg); border: 0; border-radius: 4px; padding: 7px 12px; cursor: pointer; }
+button.ghost { background: transparent; color: var(--ink); border: 1px solid var(--rule); }
+#lab-json { width: 100%; box-sizing: border-box; height: 92px; font: 11px/1.4 var(--mono); background: var(--bg); color: var(--ink); border: 1px solid var(--rule); border-radius: 4px; padding: 6px; resize: vertical; }
+
+section.spec { border-top: 1px solid var(--rule); padding-block: 44px 8px; margin-top: 40px; display: grid; gap: 14px; }
+.sec-no { font: 600 13px var(--mono); color: var(--binder); letter-spacing: 0.1em; }
+.spec > p, .spec > ul, .spec > ol { margin: 0; }
+.spec ul, .spec ol { padding-left: 1.2em; display: grid; gap: 6px; }
+
+.table-scroll { overflow-x: auto; border: 1px solid var(--rule); border-radius: 6px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 15px; min-width: 640px; }
+th, td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--rule); }
+tr:last-child td { border-bottom: 0; }
+th { font: 600 11px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); background: var(--bg); }
+td.num, .num { font-family: var(--mono); font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+td:first-child { font-weight: 600; }
+
+.finding { border-left: 3px solid var(--heat); background: var(--surface); padding: 12px 16px; border-radius: 0 6px 6px 0; max-width: var(--col); }
+.finding h4 { margin: 0 0 4px; font: 600 12px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--heat); }
+.finding p { margin: 0; }
+.findings { display: grid; gap: 12px; }
+
+.diagram { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 12px; }
+.diagram svg { display: block; width: 100%; min-width: 620px; height: auto; }
+.d-line { stroke: var(--ink); fill: none; }
+.d-cable { stroke: var(--muted); stroke-width: 2; fill: none; }
+.d-arc { stroke: var(--binder); stroke-width: 2.5; fill: none; }
+.d-body { fill: var(--bg); stroke: var(--ink); stroke-width: 1.5; }
+.d-heat { fill: var(--heat); }
+.d-binder { fill: var(--binder); }
+.d-text { fill: var(--ink); font: 500 13px var(--mono); }
+.d-muted { fill: var(--muted); font: 400 12px var(--mono); }
+.d-arrow { stroke: var(--heat); stroke-width: 2; fill: none; }
+.d-arrow-b { stroke: var(--binder); stroke-width: 2; fill: none; }
+
+.steps { counter-reset: s; list-style: none; padding: 0 !important; }
+.steps li { counter-increment: s; display: grid; grid-template-columns: 34px 1fr; gap: 8px; }
+.steps li::before { content: counter(s); font: 600 13px var(--mono); color: var(--binder); border: 1px solid var(--rule); border-radius: 50%; width: 26px; height: 26px; display: grid; place-items: center; }
+.gate-tag { font: 600 11px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; padding: 2px 7px; border-radius: 3px; border: 1px solid currentColor; }
+.gate-tag.done { color: var(--ok); }
+.gate-tag.todo { color: var(--muted); }
+.sources { font-size: 14px; color: var(--muted); }
+.sources li { word-break: break-word; }
+
+@media (max-width: 860px) { .lab { grid-template-columns: minmax(0, 1fr); } }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+
+<div class="wrap">
+<header class="hero">
+  <div class="eyebrow">VR podracer · twin printed throttles · design spec v0.1 · 16 Oct 2026</div>
+  <h1>Phae<span class="arc">th</span>on</h1>
+  <p class="lede">A seated VR podracer flown with two physical throttle levers, one per engine. Benchmarked against <em>Star Wars: Galactic Racer</em> (Fuse Games, 6 Oct 2026), and built around the one thing a gamepad game can't do: put your hands on the engines.</p>
+</header>
+
+<div class="lab" id="lab">
+  <div class="lab-stage">
+    <canvas id="lab-canvas" aria-label="Feel lab: top-down podracer simulation. Click to take the controls."></canvas>
+    <p class="lab-caption">This is the flight model from §3, seen from above. Equal levers fly straight. Lead with one lever to turn. Squeeze one brake to pivot. Push both levers past the white line for the afterburner, or arm the ramjet first with R. An Xbox pad works too: the sticks become the levers and the triggers become the brakes. When the printed levers exist, they plug into this same page.</p>
+  </div>
+  <aside class="lab-side" aria-label="Flight model tuning">
+    <h3>Tune the craft</h3>
+    <div id="lab-tune"></div>
+    <div class="btns">
+      <button type="button" id="lab-respawn">Reset craft</button>
+      <button type="button" class="ghost" id="lab-defaults">Restore defaults</button>
+    </div>
+    <textarea id="lab-json" readonly aria-label="Current tuning as JSON"></textarea>
+    <button type="button" class="ghost" id="lab-copy">Copy tuning JSON</button>
+  </aside>
+</div>
+
+<section class="spec" id="thesis">
+  <div class="sec-no">§1</div>
+  <h2>A podracer is a chariot</h2>
+  <p>The Boonta Eve race is staged after the chariot race in <em>Ben-Hur</em>, and the hardware matches. The two engines are the horses, the cables are the traces, and the pod is the chariot. A car steers with its front wheels. A chariot steers by making one horse work harder than the other. So the core verb of this game is differential thrust, and you feel it in two hands.</p>
+  <p>That decides almost everything else. The input is two levers, not a wheel. The physics is three bodies on a tether, not one rigid car. The camera is your seat, because the pod is the thing being dragged. The name fits too: Phaethon borrowed his father's sun chariot, couldn't hold the horses, and was struck down by Zeus. Consider it a difficulty setting.</p>
+</section>
+
+<section class="spec" id="benchmark">
+  <div class="sec-no">§2</div>
+  <h2>Benchmark: Galactic Racer</h2>
+  <p><em>Star Wars: Galactic Racer</em> launched on 6 October 2026 from Fuse Games, a studio founded by ex-Criterion developers. It's built on Unreal Engine 5 and sits at 84–88 on Metacritic. It is the bar for how a Star Wars racer should feel at speed. It is also a flat-screen gamepad game whose podracer is the least stable craft and lives mostly in Arcade mode. That leaves a gap.</p>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>Area</th><th>Galactic Racer</th><th>Phaethon</th></tr></thead>
+      <tbody>
+        <tr><td>Platform</td><td>Flat screen, PC / PS5 / Xbox Series, gamepad</td><td>PCVR, seated, Quest 3 over Link. Physical levers plus a switch dash.</td></tr>
+        <tr><td>Role of the podracer</td><td>Fastest craft (~1000 km/h) and the least stable. Mostly in Arcade mode. Reviewers call it two engines held together by a prayer.</td><td>The only craft. The whole game is built around holding it together.</td></tr>
+        <tr><td>Handling</td><td>Arcade, in the Burnout tradition. Brake into a turn to drift.</td><td>Three-body tether physics. Lead with one lever to turn, brake one engine to pivot-drift.</td></tr>
+        <tr><td>Boost</td><td>Afterburner recharges. Ramjet is a bigger boost that overheats and can destroy you. One review says podracers can't use the ramjet.</td><td>Afterburner through a physical detent. Ramjet sits behind a flip-cover arming switch. Heat is tracked per engine.</td></tr>
+        <tr><td>Damage</td><td>Broken parts cause status effects (the craft pulls to one side), fixed with a quick-time repair.</td><td>Damage costs that engine real thrust, and you trim the lever to fly straight. Repair is a held switch that costs speed.</td></tr>
+        <tr><td>Track</td><td>Terrain changes heat (ice cools you, lava heats you). No single racing line.</td><td>Keep both: heat zones and split routes.</td></tr>
+        <tr><td>Contact</td><td>Slam, shunt, takedown.</td><td>Version 2: a shunt button. Hitting a rival's binder beam counts as a takedown.</td></tr>
+        <tr><td>Camera</td><td>Includes a between-the-engines podracer cam that one reviewer warns may be too much for some players.</td><td>One camera: your seat. The pod is your frame of reference.</td></tr>
+        <tr><td>Structure</td><td>Roguelite Galactic Tour with a paddock hub on foot. Critics knock its progression, event variety and the on-foot sections.</td><td>MVP is time trial, a ghost and three AI. No roguelite until the craft itself is fun.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p><strong>Match</strong> its sense of speed, the risk in its two-tier boost, and heat-aware tracks. <strong>Skip</strong> the on-foot hub, the roguelite meta, and slow-motion crash replays, because in VR a replay takes the camera away from your head.</p>
+</section>
+
+<section class="spec" id="model">
+  <div class="sec-no">§3</div>
+  <h2>The craft model</h2>
+  <p>Three bodies and two kinds of joint. Steering, sway and drift fall out of the model instead of being scripted. The lab at the top runs exactly this model in 2D. The 3D version adds a hover spring per body and nothing else.</p>
+  <div class="diagram">
+    <svg viewBox="0 0 760 380" role="img" aria-label="Top-down diagram: two engines joined by an energy binder, two cables converging on the pod's nose ring">
+      <defs>
+        <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="d-heat"/></marker>
+        <marker id="ab" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="d-binder"/></marker>
+      </defs>
+      <line x1="312" y1="58" x2="312" y2="18" class="d-arrow" marker-end="url(#ah)"/>
+      <line x1="448" y1="58" x2="448" y2="18" class="d-arrow" marker-end="url(#ah)"/>
+      <text x="298" y="30" class="d-muted" text-anchor="end">thrust = lever</text>
+      <rect x="296" y="58" width="32" height="118" rx="14" class="d-body"/>
+      <rect x="432" y="58" width="32" height="118" rx="14" class="d-body"/>
+      <path d="M328 82 L346 74 L360 90 L376 72 L392 88 L408 74 L420 86 L432 82" class="d-arc"/>
+      <path d="M302 176 L312 198 L322 176 Z" class="d-heat"/>
+      <path d="M438 176 L448 198 L458 176 Z" class="d-heat"/>
+      <path d="M312 178 L376 300" class="d-cable"/>
+      <path d="M448 178 L384 300" class="d-cable"/>
+      <circle cx="380" cy="302" r="5" class="d-body"/>
+      <rect x="354" y="306" width="52" height="58" rx="12" class="d-body"/>
+      <rect x="364" y="312" width="32" height="18" rx="6" class="d-binder"/>
+      <path d="M470 120 C 520 120, 520 160, 470 160" class="d-arrow-b" marker-end="url(#ab)"/>
+      <text x="40" y="96" class="d-text">LEFT ENGINE</text>
+      <text x="40" y="114" class="d-muted">1,200 kg · 8 m · 70 kN</text>
+      <text x="536" y="96" class="d-text">RIGHT ENGINE</text>
+      <text x="536" y="114" class="d-muted">air brake flaps</text>
+      <text x="536" y="144" class="d-muted">yaw ← lever split</text>
+      <text x="300" y="250" class="d-muted" text-anchor="end">cables: 16 m,</text>
+      <text x="300" y="266" class="d-muted" text-anchor="end">tension only</text>
+      <text x="460" y="250" class="d-muted">converge on a</text>
+      <text x="460" y="266" class="d-muted">nose ring (§3 finding)</text>
+      <text x="380" y="122" class="d-text" text-anchor="middle">BINDER</text>
+      <text x="380" y="138" class="d-muted" text-anchor="middle">6 m gap</text>
+      <text x="420" y="342" class="d-text">POD · 500 kg</text>
+      <text x="420" y="358" class="d-muted">you sit here</text>
+    </svg>
+  </div>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>Part</th><th>Model</th><th>Starting value</th></tr></thead>
+      <tbody>
+        <tr><td>Engines ×2</td><td>Rigid bodies. Thrust along the nose, quadratic drag, saturating lateral repulsor grip.</td><td class="num">1200 kg · 70 kN · grip cap 5.5 g</td></tr>
+        <tr><td>Energy binder</td><td>Distance spring holding the gap, plus an alignment torque that keeps both noses parallel. The reaction feeds back as a force couple so angular momentum is conserved. Snaps when stretched too far.</td><td class="num">6 m · 540 kN/m · snaps at ±3 m</td></tr>
+        <tr><td>Cables ×2</td><td>Tension-only springs from each engine's tail to the pod's nose ring. 80% of the pull reaches the engines through a bridle on the binder.</td><td class="num">16 m · 90 kN/m · couple 0.2</td></tr>
+        <tr><td>Pod</td><td>Towed body with lower grip, so it swings. A sway damper ties its yaw to the engines'.</td><td class="num">500 kg · grip cap 4.5 g</td></tr>
+        <tr><td>Air brakes</td><td>Extra drag on that engine. They also lower its grip cap, which is what produces the drift.</td><td class="num">Cd +3.0 at full squeeze</td></tr>
+        <tr><td>Boost</td><td>Multiplies thrust while both levers sit past the gate.</td><td class="num">×1.3 afterburner · ×1.75 ramjet</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>What the lab found</h3>
+  <p>All four results came from headless runs of the lab's physics core at 480 Hz.</p>
+  <div class="findings">
+    <div class="finding"><h4>Corner cables go unstable near 715 km/h</h4><p>With one cable on each front corner of the pod, its yaw grows exponentially at top speed until one cable goes slack and the pod hangs off the other. That's a stable but lopsided state, and the craft spirals at about 7°/s. Moving both cables onto a nose ring fixed it. Over 60 s at 716 km/h the drift measured 0.00°/s, and a 25 m/s sideways kick damped out completely, with peak sway of 6°.</p></div>
+    <div class="finding"><h4>Per-engine tension is trailer sway</h4><p>If each cable pulls only its own engine, a feedback loop forms. The pod drifts right, the left cable goes taut, the left engine lags, the craft turns left, and the pod is flung further right. Result: a 16°/s spiral at 683 km/h. Sending 80% of the tension through a bridle on the binder removes the loop. The remaining 20% lets sway still tug at the craft.</p></div>
+    <div class="finding"><h4>Steering is proportional</h4><p>At about 700 km/h, a 25% lever split turns at about 6°/s and a 50% split at about 12°/s. A full split turns at 46°/s, but the craft slides and bleeds down to about 390 km/h. One air brake alone turns at about 20°/s. Small moves give small turns, so the levers can be precise.</p></div>
+    <div class="finding"><h4>Boost numbers land near the benchmark</h4><p>Cruise at full lever is 716 km/h. The afterburner reaches 805 km/h on a 3.6 s battery. The ramjet reaches 934 km/h and flames out after 4.2 s from cold. A 9.2 km test track takes about 80 s per lap on a crude autopilot.</p></div>
+  </div>
+</section>
+
+<section class="spec" id="controls">
+  <div class="sec-no">§4</div>
+  <h2>The physical cockpit</h2>
+  <p>Every in-game verb maps to something your hand can find blind, with the headset on. Nothing is on a menu.</p>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>Control</th><th>Physical form</th><th>Effect</th></tr></thead>
+      <tbody>
+        <tr><td>Throttle levers L / R</td><td>60° fore-and-aft quadrant with a friction lock, so the lever stays where you leave it</td><td>That engine's thrust, 0–100%</td></tr>
+        <tr><td>The gate</td><td>Spring-loaded detent at 88% of travel. Hold the lever past it; let go and it springs back.</td><td>Both levers past the gate gives the afterburner, or the ramjet if it's armed</td></tr>
+        <tr><td>Grip brakes L / R</td><td>Squeeze paddle under the fingers, spring return</td><td>That engine's air-brake flaps. Both slow you down; one alone pivots or drifts.</td></tr>
+        <tr><td>Left thumb button</td><td>Domed momentary button</td><td>Reignite a flamed-out engine once it has cooled below 60%</td></tr>
+        <tr><td>Right thumb button</td><td>Domed momentary button</td><td>Shunt: a sideways repulsor kick for contact (version 2)</td></tr>
+        <tr><td>Ignition toggles ×3</td><td>Dash toggles labelled BINDER, LEFT and RIGHT</td><td>The startup sequence below</td></tr>
+        <tr><td>Ramjet arm</td><td>Toggle under a flip cover</td><td>The next pass through the gate fires the ramjet instead of the afterburner</td></tr>
+        <tr><td>Repair</td><td>Momentary button on the dash, held</td><td>Heals 12%/s, but caps thrust at 60% while held</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <h3>Startup sequence</h3>
+  <ol class="steps">
+    <li><span><strong>BINDER on.</strong> An arc snaps between the engines and the cockpit picks up a hum.</span></li>
+    <li><span><strong>LEFT ignition.</strong> The left engine coughs, catches and spools up over about 2 s. Audio is panned left.</span></li>
+    <li><span><strong>RIGHT ignition.</strong> The same on the right. Now you can hear both engines as separate machines.</span></li>
+    <li><span><strong>Levers to idle.</strong> The start lights won't run until both levers sit in the idle notch, like the interlock on a real engine.</span></li>
+    <li><span><strong>Lights.</strong> Go.</span></li>
+  </ol>
+  <p>This is the moment Galactic Racer can't touch. Thirty seconds of flipping real switches before every race does more for presence than any shader.</p>
+</section>
+
+<section class="spec" id="systems">
+  <div class="sec-no">§5</div>
+  <h2>Heat, damage, repair</h2>
+  <ul>
+    <li><strong>Heat is per engine.</strong> It rises above 60% lever and much faster in the afterburner or ramjet. Cooling grows with airspeed. Track zones change it, matching the benchmark: ice doubles cooling, while lava and exhaust vents add heat.</li>
+    <li><strong>Flameout at 100%.</strong> That engine dies, and the craft yaws hard toward the dead side. The instinctive save is to pull the other lever back. The drama is native to the levers, with no button prompt involved. Reignite works once the engine is below 60%.</li>
+    <li><strong>Ramjet past the limit.</strong> In the full game, holding the ramjet past 115% heat blows the engine and ends the race, which matches the benchmark. The lab stops at flameout.</li>
+    <li><strong>Damage costs thrust.</strong> A wall strike harder than 6 m/s damages whichever body hit. A damaged engine delivers 45–100% of its thrust depending on health, and sputters below 50%. To fly straight you have to hold a lever split. You feel the damage in your hands rather than reading it off a gauge.</li>
+    <li><strong>Binder snap.</strong> If the engines are forced more than 3 m off their spacing, the binder breaks and the race is over. Hitting a rival's binder beam becomes the takedown move in version 2.</li>
+  </ul>
+</section>
+
+<section class="spec" id="comfort">
+  <div class="sec-no">§6</div>
+  <h2>VR comfort at 900 km/h</h2>
+  <p>Steady forward speed is cheap in VR. Unexpected rotation is what makes people sick. The design works on the rotation side.</p>
+  <ul>
+    <li><strong>The pod is the reference frame.</strong> You sit 1:1 in a solid cockpit that never moves relative to your body. Sim racers ride high speeds in VR on exactly this principle.</li>
+    <li><strong>The tether filters your head motion.</strong> The engines yaw first and the pod follows a beat later through the cables. You see a turn start out in front of you before your viewpoint rotates. Whether that measurably helps comfort is an open question until someone wears it.</li>
+    <li><strong>You cause the motion.</strong> Drivers get carsick less than passengers, and two physical levers put you firmly in the driver's role.</li>
+    <li><strong>Rules:</strong> never change the field of view. No camera cuts or slow-motion replays during a race; a crash fades to black and respawns you. Pod roll is clamped to ±8° on screen, with a full horizon lock as an option. An optional vignette appears when yaw passes 40°/s. Frame rate never drops below 90 Hz (11.1 ms per frame), with 120 Hz if the budget allows. Speed comes across through ground detail, audio and wind, never through FOV.</li>
+    <li><strong>Virtual levers line up with the real ones.</strong> Calibration is one step: rest a Quest controller on each grip and press a button. It's the same anchor trick Euterpe uses on the piano. Your hand meets the lever exactly where you see it.</li>
+  </ul>
+</section>
+
+<section class="spec" id="hardware">
+  <div class="sec-no">§7</div>
+  <h2>The printed levers</h2>
+  <p>Two lever units and a switch dash on one baseplate, connected by one USB cable. The whole rig shows up as a standard HID game controller with four axes and eight buttons, so it needs no drivers. Godot reads it, and so does this page through the Gamepad API.</p>
+  <h3>Mechanism, per lever</h3>
+  <ul>
+    <li><strong>Quadrant:</strong> two printed cheeks with 608ZZ bearings pressed in, an 8 mm stainless or aluminium D-shaft, and 60° of throw. Two bumper posts across the top double as the hard stops. They sit exactly where the hub's socket lands at −2° and 62°.</li>
+    <li><strong>Arm:</strong> a 16 mm aluminium tube, 189 mm long, clamped into a printed hub and grip. The grip centre sits about 260 mm from the pivot. This changes the original plan: a printed arm is the weakest part in bending and doesn't fit a 220 bed, and the tube carries the grip wiring inside it.</li>
+    <li><strong>Friction lock:</strong> a felt-faced shoe pressed against the hub rim by an M5 thumbscrew, so the lever holds where you leave it, the way a real throttle quadrant does.</li>
+    <li><strong>Detents (M4):</strong> the same hub rim gets the profile: an idle notch at 0%, a step at the 88% gate, and a spring ramp past it. A spring-loaded follower replaces the shoe. Reprinting the hub retunes the feel without touching firmware.</li>
+    <li><strong>Grip:</strong> printed in two halves, chunky and pod-style. The brake paddle pivots on an M3 shoulder bolt with a return spring, and the thumb button sits on top.</li>
+    <li><strong>Base:</strong> 18 mm plywood. The levers sit in slots so their spacing adjusts; start at about 380 mm centre to centre. The base clamps to a desk or bolts to a chair rig.</li>
+  </ul>
+  <h3>Sensing and electronics</h3>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>Signal</th><th>Sensor</th><th>Pico pin</th><th>HID report</th></tr></thead>
+      <tbody>
+        <tr><td>Left throttle</td><td>AS5600 magnetic angle sensor plus a 6×2.5 mm diametric magnet in a printed cap on the shaft end, 4 mm clear of the shaft. Contactless, 12-bit, about 680 counts across 60°.</td><td class="num">I2C0 (GP4/5)</td><td class="num">X</td></tr>
+        <tr><td>Right throttle</td><td>Second AS5600. It has a fixed address (0x36), so it goes on the Pico's second I2C bus rather than through a mux.</td><td class="num">I2C1 (GP6/7)</td><td class="num">Y</td></tr>
+        <tr><td>Left brake</td><td>SS49E linear Hall sensor plus a 5×2 mm magnet on the paddle</td><td class="num">ADC0 (GP26)</td><td class="num">Z</td></tr>
+        <tr><td>Right brake</td><td>SS49E plus magnet</td><td class="num">ADC1 (GP27)</td><td class="num">Rz</td></tr>
+        <tr><td>Buttons and toggles</td><td>Thumb ×2, ignition ×3, arm, repair, respawn. Internal pull-ups.</td><td class="num">GP10–GP17</td><td class="num">Buttons 0–7</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <ul>
+    <li><strong>Firmware:</strong> the Arduino-Pico core's USB Joystick library, or TinyUSB directly. Axes report idle to maximum across the full range, which the Gamepad API reads as −1 to 1. Holding both thumb buttons for 3 s captures each axis's minimum and maximum and saves them to flash.</li>
+    <li><strong>Gotcha:</strong> tie the AS5600's DIR pin to ground. Left floating, the direction can flip at random.</li>
+    <li><strong>Wiring:</strong> run the grip wires down a channel inside the arm. Where they leave near the pivot, use a grommet and a service loop, so the 60° swing never flexes wire over a hard edge.</li>
+  </ul>
+  <h3>Printing</h3>
+  <ul>
+    <li>PETG for the cheeks, arm and cam. Four walls, 35% gyroid infill.</li>
+    <li>Print the arm on its side so the layers run along it. Bending across layer lines is how a lever snaps.</li>
+    <li>Use brass heat-set inserts (M3/M4) anywhere you'll unscrew more than twice.</li>
+    <li>Every part fits a 220×220 mm bed. The arm splits at a dovetail if it needs to.</li>
+    <li>Finish in the used-universe style: grey primer, silver base coat, chipped paint over it, an oil wash in the recesses, and hazard stripes on the gate.</li>
+  </ul>
+</section>
+
+<section class="spec" id="software">
+  <div class="sec-no">§8</div>
+  <h2>Software</h2>
+  <p>Godot 4 Forward+ on the PC, through OpenXR to the Quest 3 over the same Link path you already run for Firefly Catcher. Standalone Quest is ruled out because the levers are a USB device on the PC. Each module below has one job.</p>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>Module</th><th>Job</th><th>Depends on</th></tr></thead>
+      <tbody>
+        <tr><td>CraftSim</td><td>Port of the lab's physics core. A pure function, step(state, input, dt), with fixed substeps at 240–480 Hz. Reads the same tuning JSON this page exports.</td><td>TrackQuery</td></tr>
+        <tr><td>TrackQuery</td><td>Ground height, surface type (ice, sand, lava) and walls, from raycasts and shape casts against Jolt collision</td><td>Track scene</td></tr>
+        <tr><td>Hover</td><td>Ride-height spring-damper: 3 rays per engine, 4 for the pod. Pitch and roll follow the terrain.</td><td>TrackQuery</td></tr>
+        <tr><td>LeverInput</td><td>Reads the HID device through Godot's joypad API. Handles deadzones and calibration, shows a debug overlay, and falls back to the XR controller sticks.</td><td>None</td></tr>
+        <tr><td>CockpitRig</td><td>XROrigin parented to the pod. Drives the virtual levers from LeverInput and holds the calibration anchor.</td><td>LeverInput</td></tr>
+        <tr><td>RaceDirector</td><td>Laps, checkpoints, ghost recording (input log plus state keyframes every 0.5 s), AI.</td><td>CraftSim</td></tr>
+        <tr><td>EngineAudio</td><td>One voice per engine, panned left and right, so an imbalance is audible. Plus binder hum and cable creak under load.</td><td>CraftSim</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="spec" id="roadmap">
+  <div class="sec-no">§9</div>
+  <h2>Roadmap and gates</h2>
+  <p>Each milestone ships only when its gate passes on the real thing.</p>
+  <ol class="steps">
+    <li><span><strong>Feel lab.</strong> <span class="gate-tag done">passed</span> The straight line is stable at 716 km/h, steering is proportional, laps complete, and nothing goes NaN. Verified headless; the browser render was checked before publishing.</span></li>
+    <li><span><strong>Godot flat-screen port.</strong> <span class="gate-tag done">passed</span> A recorded 4,912-frame input log, replayed through both sims, gives 81.8229 s in each: zero error at four decimals over 39,000 steps. The RNG and the track match exactly. A chase-cam view runs on keyboard, gamepad or the levers.</span></li>
+    <li><span><strong>VR seat.</strong> <span class="gate-tag todo">gate</span> A 10-minute session holds 90 Hz on a frame-timing log, and you rate comfort "mild" or better on a 0–3 scale. This one needs you in the headset.</span></li>
+    <li><span><strong>One lever.</strong> <span class="gate-tag todo">gate</span> One lever, no detents yet. It shows up in Windows game controllers and in this page's input readout, and jitters no more than ±2 counts at rest. Ready to print: 10 parametric parts, all inside a 220 bed. The swing is clash-tested free from −1.5° to 61.5°, with real overlap at −4° and 64° proving the stops. The firmware compiles to a 64 KB UF2 with a built-in jitter test.</span></li>
+    <li><span><strong>Full cockpit.</strong> <span class="gate-tag todo">gate</span> The startup sequence and a clean VR lap, using only the physical controls.</span></li>
+    <li><span><strong>Race.</strong> <span class="gate-tag todo">gate</span> Three AI, a ghost, and one canyon track with an ice zone and a lava zone. Your lap times improve across 5 sessions, which proves it's learnable.</span></li>
+  </ol>
+  <p>Version 2 adds shunt combat, binder takedowns and a second track. One candidate for that track is your own drone-scanned terrain: race podracers through the back forty.</p>
+</section>
+
+<section class="spec" id="assumptions">
+  <div class="sec-no">§10</div>
+  <h2>Assumptions to veto</h2>
+  <ul>
+    <li><strong>PCVR on Quest 3, seated.</strong> Taken from your existing VR setup notes.</li>
+    <li><strong>Godot 4 over Unreal.</strong> Galactic Racer uses UE5, but this game doesn't need that renderer. It needs fast iteration and the VR pipeline you already have.</li>
+    <li><strong>Printer.</strong> The model is unknown, so the parts assume a 220×220 bed and PETG.</li>
+    <li><strong>Personal project.</strong> If it ever goes public, the Star Wars names come off. The mechanics are generic.</li>
+    <li><strong>Single-player first.</strong> No roguelite, no hub on foot.</li>
+  </ul>
+</section>
+
+<section class="spec" id="sources">
+  <div class="sec-no">Sources</div>
+  <ul class="sources">
+    <li><a href="https://en.wikipedia.org/wiki/Star_Wars:_Galactic_Racer">Star Wars: Galactic Racer, Wikipedia</a>: release date, Fuse Games and Criterion background, UE5, review scores</li>
+    <li><a href="https://news.xbox.com/en-us/2026/06/23/star-wars-galactic-racer-turns-podracing-into-roguelite/">Xbox Wire: Galactic Racer turns podracing into a roguelite</a>: Afterburner, Ramjet, vehicle classes, tour structure</li>
+    <li><a href="https://www.theouterhaven.net/everything-we-know-about-star-wars-galactic-racer-after-playing-it-at-sgf-2026/">The Outer Haven, SGF 2026 hands-on</a>: drift, AI aggression, ~1000 km/h podracers</li>
+    <li><a href="https://kotaku.com/star-wars-galactic-racer-the-kotaku-review-2000739105">Kotaku review</a>: podracer cam, damage and repair QTE, criticism</li>
+    <li><a href="https://gamingbolt.com/star-wars-galactic-racer-review-now-this-is-podracing">GamingBolt review</a>: ramjet heat, terrain heat zones, criticism</li>
+    <li><a href="https://hardcoregamer.com/review-star-wars-galactic-racer/">Hardcore Gamer review</a> and <a href="https://powerup-gaming.com/star-wars-galactic-racer-review-ps5-pro-pod-tier-racing/">PowerUp! review</a>: podracer stability</li>
+  </ul>
+</section>
+</div>
+<script src="sim-core.js"></script>
+<script src="feel-lab.js"></script>

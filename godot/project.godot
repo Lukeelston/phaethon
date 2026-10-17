@@ -1,0 +1,19 @@
+; Engine configuration file.
+config_version=5
+
+[application]
+
+config/name="Phaethon"
+run/main_scene="res://main.tscn"
+
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=720
+
+[xr]
+
+; OpenXR stays off for the flat view and tests; launch_vr.ps1 passes --xr-mode on.
+openxr/enabled=false
+openxr/reference_space=0
+shaders/enabled=true

@@ -1,0 +1,7 @@
+godot/.godot/
+godot/shots/
+firmware/build/*
+!firmware/build/phaethon_levers.ino.uf2
+cad/stl/clash_*.stl
+__pycache__/
+.claude/launch.json
