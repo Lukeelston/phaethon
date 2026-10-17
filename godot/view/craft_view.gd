@@ -8,7 +8,7 @@
 ##   --replay        circuit only: fly the recorded parity lap instead of live input
 ##   --seek=S        pre-simulate S seconds before the first frame
 ##   --shot=PATH     save a screenshot after 90 rendered frames, then quit
-##   --mute          no engine audio
+##   --mute          no engine or wind audio
 extends Node3D
 
 const CraftSimScript := preload("res://sim/craft_sim.gd")
@@ -16,6 +16,7 @@ const LeverInputScript := preload("res://input/lever_input.gd")
 const RangeWorldScript := preload("res://view/range_world.gd")
 const LandmarkScript := preload("res://view/landmark.gd")
 const EngineAudioScript := preload("res://audio/engine_audio.gd")
+const WindAudioScript := preload("res://audio/wind_audio.gd")
 const DT := 1.0 / 480.0
 const STEEL := Color(0.60, 0.65, 0.70)
 const HOT := Color(1.0, 0.54, 0.16)
@@ -25,6 +26,7 @@ const HAZE := Color(0.78, 0.66, 0.52)
 var sim
 var levers
 var engine_audio
+var wind_audio
 var replay: Array = []
 var replay_i := 0
 var shot_path := ""
@@ -94,6 +96,9 @@ func _ready() -> void:
 		engine_audio = EngineAudioScript.new()
 		add_child(engine_audio)
 		engine_audio.setup(sim)
+		wind_audio = WindAudioScript.new()
+		add_child(wind_audio)
+		wind_audio.setup(sim)
 	for i in int(seek / DT):
 		_sim_step()
 	_follow_origin()
@@ -164,6 +169,8 @@ func _process(delta: float) -> void:
 	_track_braking()
 	if engine_audio:
 		engine_audio.update(inp, delta)
+	if wind_audio:
+		wind_audio.update(inp, delta)
 	_follow_origin()
 	_sync_craft()
 	_place_camera(1.0 - exp(-delta * 6.0))
