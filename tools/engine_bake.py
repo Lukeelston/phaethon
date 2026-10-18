@@ -12,6 +12,11 @@ There are no oscillators here. Every sound starts as a Salamander Grand Piano re
   roar      A dense cloud of hammer-release (damper) noise. EngineAudio opens a low-pass on it
             with the spool.
   burner    A dense cloud of low hammer strikes (rumble and crackle) over the roar.
+  second    The second engine, which lights at speed: a big-bang four. Pistons fire in close
+            pairs (0/60, then 360/420 degrees), so it growls in doublets instead of buzzing,
+            on the lowest piano key slowed right down, with long pipes, a lumpy cam and heavy
+            saturation. EngineAudio gives it a fixed throat (EQ) and a dark muffler.
+  bang      One-shot: the second engine catching, and its backfire when it shuts down.
 
 Every loop is periodic by construction: grains are placed circularly and filters run to
 steady state. So it loops without a seam, and EngineAudio can pitch-shift it freely.
@@ -252,6 +257,8 @@ def bake_piston(piano, spec, n_cyc, rng):
     for b, (delay, fb), level in zip(banks, spec["pipes"], spec["bank_gain"]):
         out += level * soft_clip(pipe(b, delay, fb), spec["drive"])
     out = circular(lambda v: butter(v, 30, "highpass"), out)
+    if "seam_deg" in spec:   # start the loop in a firing gap, so its seam isn't on a pulse
+        out = np.roll(out, -int(round(spec["seam_deg"] / 720.0 * cyc)))
     return normalize(out), rpm_true
 
 
@@ -316,6 +323,45 @@ def release_grains(piano, length_s, count):
             if len(seg) == gl:
                 out.append(seg * hann(gl) / (np.max(np.abs(seg)) + 1e-12))
     return out
+
+
+SECOND = {
+    "name": "second", "cyl": 4,
+    # Big-bang four: two banks, each firing evenly (bank A at 0/360, bank B at 60/420), so the
+    # pulses land in doublets 60 degrees apart. The pattern repeats every revolution: its
+    # fundamental is rpm / 60 (pulse_per_cycle 2), deep enough to rumble, and the 60-degree pair
+    # gap leans on harmonics near 6x that, which is the throat.
+    "events": [(0, 0), (60, 1), (360, 0), (420, 1)], "pulse_per_cycle": 2,
+    "bank_notes": [21, 21], "bank_vels": [16, 16], "bank_gain": [1.0, 0.72],
+    "grain_s": 0.16, "tau": 0.030, "grain_lp": 700, "click": 0.25,
+    "pipes": [(0.0110, 0.6), (0.0125, 0.6)], "drive": 3.8,
+    "jitter_deg": 3.0, "gain_sd": 0.16, "cyl_sd": 0.10,
+    # Baked near where it runs (it lights at speed, usually on a big lever), so the heavy thud is
+    # what you hear at full power. Baked at 600 rpm and pitched 6x up, its body slid to ~500 Hz:
+    # buzzy, not rumbly (measured 1% of the energy under 150 Hz at 3,600 rpm).
+    "rate_at": 3000, "grain_speed": 0.5, "p_max": 1.45,
+    "seam_deg": 200,   # the loop starts mid-way through the long gap between doublets
+}
+
+
+def bake_bang(piano, roar_bed, rng):
+    """One-shot, 0.9 s: three slowed low hammer strikes piled up over a burst of roar, driven
+    hard. The second engine catching, or backfiring as it dies."""
+    n = int(0.9 * SR)
+    buf = np.zeros(n)
+    for t0, gain, m in ((0.0, 1.0, 21), (0.018, 0.75, 24), (0.041, 0.55, 21)):
+        g = resample(strike(piano, m, 16, 0.4, 0.06, 900), 0.5)   # half speed: an octave down
+        i = int(t0 * SR)
+        k = min(len(g), n - i)
+        buf[i:i + k] += gain * g[:k]
+    t = np.arange(n) / SR
+    burst = butter(roar_bed[:n] / (np.max(np.abs(roar_bed)) + 1e-12), 1500, "lowpass") * np.exp(-t / 0.12)
+    buf += 0.5 * burst
+    buf = np.tanh(3.0 * buf / (np.max(np.abs(buf)) + 1e-12))
+    buf = butter(butter(buf, 2500, "lowpass"), 25, "highpass")
+    fade = int(0.05 * SR)
+    buf[-fade:] *= np.linspace(1.0, 0.0, fade)
+    return buf / np.max(np.abs(buf)) * 10 ** (-3 / 20)
 
 
 TURBINE = {
@@ -450,15 +496,18 @@ def main():
         manifest["layers"][name] = dict(unit=unit, sync=True, rate_at=round(rate_at, 4), bands=bands, **extra)
         return bad
 
-    for spec in (V8, V12):
-        master, rpm_true = bake_piston(piano, spec, N_CYC, rng)
+    # The second engine draws from its own stream, so adding it changed none of the other loops.
+    rng_second = np.random.default_rng(args.seed + 2)
+    for spec in (V8, V12, SECOND):
+        master, rpm_true = bake_piston(piano, spec, N_CYC, rng_second if spec is SECOND else rng)
         cyc = harmonic_share(master, N_CYC, 1)
-        fire = harmonic_share(master, N_CYC, spec["cyl"])
+        fire = harmonic_share(master, N_CYC, spec.get("pulse_per_cycle", spec["cyl"]))
         ok = fire >= MIN_FIRE and seam_ratio(master) < 1
         fails += 0 if ok else 1
         print("  %s %s master  %.1f rpm, %.2f s  on cycle harmonics %3.0f%%, on firing harmonics %3.0f%%" % (
             "ok  " if ok else "FAIL", spec["name"], rpm_true, len(master) / SR, 100 * cyc, 100 * fire))
-        fails += write_levels(spec["name"], "rpm", master, rpm_true, spec["p_max"], {"cyl": spec["cyl"]})
+        fails += write_levels(spec["name"], "rpm", master, rpm_true, spec["p_max"],
+                              {"cyl": spec["cyl"], "pulse_per_cycle": spec.get("pulse_per_cycle", spec["cyl"])})
 
     whine = bake_whine(piano, 6.0, rng)
     f1 = TURBINE["blade_hz"] * TURBINE["rate_at"]
@@ -487,9 +536,15 @@ def main():
     print("  %s %-14s seam %.2f" % ("ok  " if seam < 1 else "FAIL", "burner.wav", seam))
     manifest["layers"]["burner"] = {"unit": "spool", "bands": [{"file": "burner.wav", "at": 1.0}]}
 
+    bang = bake_bang(piano, roar_bed, rng_second)
+    write("bang.wav", bang)
+    print("  ok   bang.wav       one-shot %.2f s, peak %.1f dBFS" % (len(bang) / SR, 20 * np.log10(np.max(np.abs(bang)))))
+    manifest["oneshots"] = {"bang": "bang.wav"}
+
     with open(os.path.join(args.out, "manifest.json"), "w") as f:
         json.dump(manifest, f, indent=1)
     used = {b["file"] for layer in manifest["layers"].values() for b in layer["bands"]}
+    used |= set(manifest.get("oneshots", {}).values())
     for name in os.listdir(args.out):   # loops from an older layout of this tool's own output
         if name.endswith(".wav") and name not in used:
             os.remove(os.path.join(args.out, name))

@@ -1,9 +1,9 @@
 """EngineAudio gate: does the sound actually follow the levers?
 
-Runs godot/tests/test_engine_audio.gd seven times in parallel: V8, V12 and turbine solo, the
+Runs godot/tests/test_engine_audio.gd nine times in parallel: V8, V12 and turbine solo, the
 same three --flat (every gain held at 1, low-pass open, so only the crossfader can move the
-level), and the full mix (the listening copy). Each run flies the same scripted lever profile
-and records the game's master bus.
+level), the full mix, and the second engine's own run (--profile=second) solo and mixed.
+Each run records the game's master bus.
 Then it measures the recordings against the RPM each run logged:
   pitch     V8/V12 firing pitch (subharmonic summation) and turbine blade-pass line, within 3%
             of the logged RPM, wherever the RPM holds steady across the window
@@ -11,7 +11,11 @@ Then it measures the recordings against the RPM each run logged:
             engine is at least 9 dB louder on its own side
   flameout  a dead left engine drops the pistons out of the left channel (at least 9 dB)
   relight   after the reignite, the left engine is back on pitch
-  one tone  flat runs, slow rev: brightness doesn't pulse with band position (no more than 30
+  second    the second engine lights within 150 mph of second_on_mph, right side ~0.3 s after
+            the left, coughs ~0.7 s before it catches, is silent before and dead after (below
+            second_off_mph), its doublet pitch (rpm / 60, above 1,800 rpm) follows the lever, and it is rumbly
+            at full lever: >= 35% of its energy under 150 Hz, centroid <= 300 Hz
+  one tone  flat runs, slow rev: brightness doesn't pulse with band position (no more than 50
             cents or than it wanders at unrelated spacings), so a ramp is one rising tone
   steady    flat runs: each channel's 150 ms level stays within 2.5 dB of a smooth curve in RPM
             while both engines share an RPM, lever blips included. Crossfade artifacts are local
@@ -42,7 +46,10 @@ CYL = {"v8": 8, "v12": 12}
 BLADE_HZ = 2400.0
 PAN_LOUD = 1.6   # Godot's panner at +-0.6 on a mono source: 1.6x near side, 0.4x far side
 WIN = 0.25
-MAX_SWING = 30.0   # cents: brightness may not pulse with band position more than this, or chance
+# cents: brightness may not pulse with band position more than this, or than chance. The fixed
+# design measured 13-42 cents over five runs (chance 30-69, itself noisy); the stepping band
+# design measured 109-198. 50 sits between with margin both ways.
+MAX_SWING = 50.0
 
 
 def godot_exe():
@@ -58,14 +65,16 @@ def godot_exe():
 
 def capture(out_dir):
     procs = {}
-    for run in ["v8", "v12", "turbine", "v8_flat", "v12_flat", "turbine_flat", "all"]:
+    for run in ["v8", "v12", "turbine", "v8_flat", "v12_flat", "turbine_flat", "all", "second", "second_all"]:
         wav = os.path.join(out_dir, "engine_%s.wav" % run)
         args = [godot_exe(), "--headless", "--path", os.path.join(ROOT, "godot"), "-s",
                 "res://tests/test_engine_audio.gd", "--", "--out=" + wav.replace("\\", "/")]
-        if run != "all":
+        if run not in ("all", "second_all"):
             args.append("--solo=" + run.split("_")[0])
         if run.endswith("_flat"):
             args.append("--flat")
+        if run.startswith("second"):
+            args.append("--profile=second")
         procs[run] = (subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True), wav)
     fails = 0
     for solo, (p, wav) in procs.items():
@@ -77,17 +86,19 @@ def capture(out_dir):
 
 
 def listen(out_dir):
-    """The full mix, recorded one mix per rendered frame (Movie Maker, 96 fps), as heard in game."""
-    wav = os.path.join(out_dir, "engine_listen.wav")
-    avi = os.path.join(out_dir, "_listen.avi")
-    args = [godot_exe(), "--path", os.path.join(ROOT, "godot"), "--resolution", "160x90",
-            "--write-movie", avi, "--fixed-fps", "96", "-s", "res://tests/test_engine_audio.gd",
-            "--", "--out=" + wav.replace("\\", "/")]
-    out = subprocess.run(args, capture_output=True, text=True, timeout=600).stdout
-    if os.path.exists(avi):
-        os.remove(avi)
-    print("\n".join(l for l in out.splitlines() if l.startswith(("  ok", "  FAIL", "capture:", "ENGINE AUDIO"))))
-    print("listening copy ->", wav)
+    """The full mix, recorded one mix per rendered frame (Movie Maker, 96 fps), as heard in game:
+    the main run and the second engine's run."""
+    for name, extra in (("engine_listen", []), ("engine_listen_second", ["--profile=second"])):
+        wav = os.path.join(out_dir, name + ".wav")
+        avi = os.path.join(out_dir, "_listen.avi")
+        args = [godot_exe(), "--path", os.path.join(ROOT, "godot"), "--resolution", "160x90",
+                "--write-movie", avi, "--fixed-fps", "96", "-s", "res://tests/test_engine_audio.gd",
+                "--", "--out=" + wav.replace("\\", "/")] + extra
+        out = subprocess.run(args, capture_output=True, text=True, timeout=600).stdout
+        if os.path.exists(avi):
+            os.remove(avi)
+        print("\n".join(l for l in out.splitlines() if l.startswith(("  ok", "  FAIL", "capture:", "ENGINE AUDIO"))))
+        print("listening copy ->", wav)
 
 
 def load(wav):
@@ -286,6 +297,69 @@ def check_layer(layer, wav, flat_wav, tally):
               int(drop >= 9.0), 1, 1.0)
 
 
+SECOND_ON_MPH, SECOND_OFF_MPH = 1500.0, 1300.0   # EngineAudio.TUNE second_on_mph / second_off_mph
+
+
+def check_second(wav, tally):
+    """The second engine's run (solo): when it lights, how it catches, that it follows the lever,
+    that it dies, and that it is rumbly."""
+    x, sr, log = load(wav)
+    mono = x.mean(axis=1)
+    t = log["t"]
+    print("[second]")
+
+    def first(side, state):
+        hit = np.where(log["secSt" + side] == state)[0]
+        return (float(t[hit[0]]), int(hit[0])) if len(hit) else (None, None)
+
+    def rms_db(t0, t1):
+        a = mono[int(t0 * sr):int(t1 * sr)]
+        return 10 * np.log10(np.mean(a * a) + 1e-20)
+    crank_l, i_crank = first("L", 2)
+    crank_r, _ = first("R", 2)
+    run_l, _ = first("L", 3)
+    run_r, _ = first("R", 3)
+    stop_l, i_stop = first("L", 4)
+    if None in (crank_l, crank_r, run_l, run_r, stop_l):
+        tally.add("second engine: lit, caught and stopped (it never got there)", 0, 1, 1.0)
+        return
+    mph_on, mph_off = log["mph"][i_crank], log["mph"][i_stop]
+    tally.add("second lights at %.0f mph (threshold %.0f)" % (mph_on, SECOND_ON_MPH),
+              int(SECOND_ON_MPH <= mph_on <= SECOND_ON_MPH + 150), 1, 1.0)
+    tally.add("second right side lights %.2f s after the left" % (crank_r - crank_l), int(0.2 <= crank_r - crank_l <= 0.45), 1, 1.0)
+    tally.add("second coughs %.2f s before it catches" % (run_l - crank_l), int(0.55 <= run_l - crank_l <= 0.85), 1, 1.0)
+    before = rms_db(0.5, crank_l - 0.2)   # the log samples state every 50 ms: stay clear of the first cough
+    running = rms_db(run_r + 0.5, stop_l - 0.2)
+    after = rms_db(stop_l + 1.2, t[-1] - 0.1)
+    tally.add("second silent before (%.0f dBFS), loud running (%.0f dBFS)" % (before, running),
+              int(before < -60 and running > -30), 1, 1.0)
+    tally.add("second dies at %.0f mph (threshold %.0f): %.0f dBFS after" % (mph_off, SECOND_OFF_MPH, after),
+              int(SECOND_OFF_MPH - 150 <= mph_off <= SECOND_OFF_MPH and after < -50), 1, 1.0)
+    hits = n = 0
+    for tc in np.arange(run_r + 0.4, stop_l - 0.3, 0.1):
+        fl, fr = np.interp(tc, t, log["secL"]) / 60.0, np.interp(tc, t, log["secR"]) / 60.0
+        a, b = np.interp(tc - WIN / 2, t, log["secL"]), np.interp(tc + WIN / 2, t, log["secL"])
+        # below 1,800 rpm the doublets come slower than 30 Hz: a rhythm, not a pitch to track
+        if fl < 30.0 or abs(fl / fr - 1) > 0.01 or abs(a / b - 1) > 0.03:
+            continue
+        n += 1
+        hits += abs(pitch(seg(mono, sr, tc), sr, fl) / fl - 1) < 0.03
+    tally.add("second doublet pitch follows the lever", hits, n)
+    # Rumbly where it matters: the steady full-lever hold (it lights at speed, so that's where it
+    # lives). Averaging in the idle under braking flattered an engine that buzzed at full power.
+    hold = (log["thrL"] > 0.86) & (log["thrL"] < 0.88) & (log["secStL"] == 3) & (t > 9.2)
+    if not hold.any():
+        tally.add("second rumbly at full lever (no full-lever hold in the log)", 0, 1, 1.0)
+        return
+    a = mono[int((t[hold][0] + 0.2) * sr):int(t[hold][-1] * sr)]
+    X = np.abs(np.fft.rfft(a * np.hanning(len(a)))) ** 2
+    f = np.fft.rfftfreq(len(a), 1 / sr)
+    low = X[(f > 20) & (f < 150)].sum() / X[f > 20].sum()
+    cen = np.sum(f * X) / np.sum(X)
+    tally.add("second rumbly at full lever (%.0f rpm): %.0f%% under 150 Hz, centroid %.0f Hz" % (
+        np.mean(log["secL"][hold]), 100 * low, cen), int(low >= 0.35 and cen <= 300), 1, 1.0)
+
+
 def plot(wav, png):
     import matplotlib
     matplotlib.use("Agg")
@@ -328,6 +402,7 @@ def main():
     tally = Tally()
     for layer in ("v8", "v12", "turbine"):
         check_layer(layer, wavs[layer], wavs[layer + "_flat"], tally)
+    check_second(wavs["second"], tally)
     if args.plot:
         plot(wavs["all"], os.path.join(args.out, "engine_all.png"))
     fails += sum(not ok for ok in tally.rows)

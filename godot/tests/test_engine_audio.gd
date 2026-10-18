@@ -2,8 +2,10 @@
 ## and logs each layer's RPM, so tools/engine_audio_check.py can confirm the pitch follows
 ## the levers. Real time (the audio thread runs at wall-clock pace), about 31 s.
 ## Run: Godot_v4.7.1-stable_win64_console.exe --headless --audio-output-latency 10 --max-fps 90 --path godot -s res://tests/test_engine_audio.gd
-##        -- --out=C:/path/capture.wav [--solo=v8|v12|turbine|burner] [--flat]
+##        -- --out=C:/path/capture.wav [--solo=v8|v12|turbine|roar|burner|second] [--flat] [--profile=second]
 ## --flat holds every gain at 1 and the low-pass open, so only the band crossfades move the level.
+## --profile=second flies the second engine's run instead: accelerate through second_on_mph, blip,
+## then brake below second_off_mph (22.5 s).
 ## Writes capture.wav and capture.csv. Exit code 0 = streams loaded, audio captured, no clipping.
 extends SceneTree
 
@@ -11,6 +13,7 @@ const CraftSimScript := preload("res://sim/craft_sim.gd")
 const EngineAudioScript := preload("res://audio/engine_audio.gd")
 const DT := 1.0 / 480.0
 const END := 30.5
+const END_SECOND := 22.5
 
 var sim
 var audio
@@ -18,10 +21,12 @@ var rec: AudioEffectRecord
 var out_path := "user://engine_capture.wav"
 var solo := ""
 var flat := false
+var prof := "default"
+var end_t := END
 var t := 0.0
 var acc := 0.0
 var log_t := 0.0
-var rows := PackedStringArray(["t,thrL,thrR,mode,outL,outR,sL,sR,v8L,v8R,v12L,v12R,turbL,turbR"])
+var rows := PackedStringArray(["t,thrL,thrR,mode,outL,outR,sL,sR,v8L,v8R,v12L,v12R,turbL,turbR,mph,secL,secR,secStL,secStR"])
 var started := false
 var clock: AudioStreamPlayer
 
@@ -59,6 +64,25 @@ static func profile(time: float) -> Dictionary:
 	return {"thrL": l, "thrR": r, "brkL": 0.0, "brkR": 0.0, "repair": false, "reignite": time >= 24.0}
 
 
+## The second engine's run: full lever until it lights at 1,500 mph (~4 s), blips that alternate
+## the afterburner and half lever, a steady hold, then full brakes until it dies below 1,300 mph
+## (~20 s).
+static func profile_second(time: float) -> Dictionary:
+	var l := 0.0
+	var brk := 0.0
+	if time < 1.0:
+		pass
+	elif time < 6.0:
+		l = 0.87
+	elif time < 9.0:
+		l = 1.0 if int((time - 6.0) / 0.5) % 2 == 0 else 0.5
+	elif time < 11.0:
+		l = 0.87
+	else:
+		brk = 1.0
+	return {"thrL": l, "thrR": l, "brkL": brk, "brkR": brk, "repair": false, "reignite": false}
+
+
 func _initialize() -> void:
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--out="):
@@ -67,6 +91,10 @@ func _initialize() -> void:
 			solo = a.get_slice("=", 1)
 		elif a == "--flat":
 			flat = true
+		elif a.begins_with("--profile="):
+			prof = a.get_slice("=", 1)
+	if prof == "second":
+		end_t = END_SECOND
 	sim = CraftSimScript.new({"track": "range"})
 	rec = AudioEffectRecord.new()
 	AudioServer.add_bus_effect(0, rec)
@@ -85,7 +113,7 @@ func _process(_delta: float) -> bool:
 		var silence := AudioStreamWAV.new()
 		silence.mix_rate = 8000
 		var zeros := PackedByteArray()
-		zeros.resize(8000 * int(END + 10.0))
+		zeros.resize(8000 * int(end_t + 10.0))
 		silence.data = zeros
 		clock = AudioStreamPlayer.new()
 		clock.stream = silence
@@ -98,8 +126,8 @@ func _process(_delta: float) -> bool:
 	var now := clock.get_playback_position() + AudioServer.get_time_since_last_mix()
 	var delta := maxf(0.0, now - t)
 	t = now
-	var inp := profile(t)
-	if t >= 21.0 and t - delta < 21.0:
+	var inp := profile_second(t) if prof == "second" else profile(t)
+	if prof == "default" and t >= 21.0 and t - delta < 21.0:
 		sim.eL.heat = 1.1   # force a left flameout
 	acc += minf(delta, 0.05)
 	while acc >= DT:
@@ -111,10 +139,13 @@ func _process(_delta: float) -> bool:
 		log_t = t
 		var vl: Dictionary = audio.voices[0]
 		var vr: Dictionary = audio.voices[1]
-		rows.append("%.3f,%.3f,%.3f,%s,%d,%d,%.4f,%.4f,%.1f,%.1f,%.1f,%.1f,%.4f,%.4f" % [t, inp.thrL, inp.thrR,
+		var mph: float = sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy) * 2.23694
+		rows.append("%.3f,%.3f,%.3f,%s,%d,%d,%.4f,%.4f,%.1f,%.1f,%.1f,%.1f,%.4f,%.4f,%.1f,%.1f,%.1f,%d,%d" % [t, inp.thrL, inp.thrR,
 			sim.mode, int(sim.eL.flameout), int(sim.eR.flameout), vl.spool, vr.spool,
-			vl.at.v8, vr.at.v8, vl.at.v12, vr.at.v12, vl.at.turbine, vr.at.turbine])
-	if t < END:
+			vl.at.v8, vr.at.v8, vl.at.v12, vr.at.v12, vl.at.turbine, vr.at.turbine,
+			mph, vl.at.second, vr.at.second,
+			EngineAudioScript.SECOND_STATES.find(vl.sec.state), EngineAudioScript.SECOND_STATES.find(vr.sec.state)])
+	if t < end_t:
 		return false
 	rec.set_recording_active(false)
 	var wav := rec.get_recording()
@@ -139,7 +170,7 @@ func _process(_delta: float) -> bool:
 	var rms_db := 20.0 * log(sqrt(sq / (frames * 2 / 7.0)) / 32768.0) / log(10.0)
 	print("capture: %.1f s, peak %.1f dBFS, rms %.1f dBFS" % [float(frames) / wav.mix_rate,
 		20.0 * log(maxf(peak, 1) / 32768.0) / log(10.0), rms_db])
-	fails += _check("captured %.1f s of the %.0f s profile" % [float(frames) / wav.mix_rate, END], frames > wav.mix_rate * (END - 2.0))
+	fails += _check("captured %.1f s of the %.0f s profile" % [float(frames) / wav.mix_rate, end_t], frames > wav.mix_rate * (end_t - 2.0))
 	fails += _check("audible (rms above -45 dBFS)", rms_db > -45.0)
 	fails += _check("no clipping (peak below full scale)", peak < 32767)
 	wav.save_to_wav(out_path)
