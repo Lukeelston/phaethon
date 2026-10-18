@@ -68,6 +68,16 @@ var second_on := false   # craft fast enough for the second engine (with hystere
 func setup(craft_sim) -> void:
 	sim = craft_sim
 	_load_streams()
+	# Engines and Wind each limit their own bus to -1 dB, but their sum lands on Master unlimited:
+	# with both peaking together it could clip (engines + wind measured -0.05 dBFS on Master).
+	# A last-resort limiter there touches only true overs.
+	var has_limiter := false
+	for i in AudioServer.get_bus_effect_count(0):
+		has_limiter = has_limiter or AudioServer.get_bus_effect(0, i) is AudioEffectHardLimiter
+	if not has_limiter:
+		var safety := AudioEffectHardLimiter.new()
+		safety.ceiling_db = -0.3
+		AudioServer.add_bus_effect(0, safety)
 	var engines_bus := _bus("Engines", "Master")
 	if AudioServer.get_bus_effect_count(engines_bus) == 0:
 		var lim := AudioEffectHardLimiter.new()
