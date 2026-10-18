@@ -32,7 +32,8 @@
      "at": 12800.0
     }
    ],
-   "cyl": 8
+   "cyl": 8,
+   "pulse_per_cycle": 8
   },
   "v12": {
    "unit": "rpm",
@@ -64,7 +65,26 @@
      "at": 16000.0
     }
    ],
-   "cyl": 12
+   "cyl": 12,
+   "pulse_per_cycle": 12
+  },
+  "second": {
+   "unit": "rpm",
+   "sync": true,
+   "rate_at": 3000.0,
+   "bands": [
+    {
+     "file": "second_mip0.wav",
+     "at": 3000.0,
+     "rho_next": 1.0
+    },
+    {
+     "file": "second_mip1.wav",
+     "at": 6000.0
+    }
+   ],
+   "cyl": 4,
+   "pulse_per_cycle": 2
   },
   "turbine": {
    "unit": "spool",
@@ -96,5 +116,8 @@
     }
    ]
   }
+ },
+ "oneshots": {
+  "bang": "bang.wav"
  }
 }

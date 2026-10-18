@@ -9,14 +9,19 @@
 ## crossfading them only fades the top octave. The muffler is a fixed low-pass per layer and the
 ## roar's low-pass follows the spool, so neither moves with pitch. The left engine pans left and
 ## the right engine pans right, so a lever split or a dead engine is something you hear.
+## The second engine is a big-bang four that lights once the craft passes second_on_mph: each
+## side cranks and coughs, catches with a bang (left first, right a beat later), runs on its
+## lever behind a fixed throat EQ, and backfires and winds down below second_off_mph. Sound
+## only for now: it adds no thrust.
 ##   add_child(audio); audio.setup(sim)    once, inside the tree
 ##   audio.update(inp, delta)              every frame, after the sim steps
 class_name EngineAudio
 extends Node
 
 const DIR := "res://audio/engines/"
-const LAYERS := ["v8", "v12", "turbine", "roar", "burner"]
-const FILTERED := ["v8", "v12", "roar"]   # layers with their own low-pass bus under each engine
+const LAYERS := ["v8", "v12", "turbine", "roar", "burner", "second"]
+const FILTERED := ["v8", "v12", "roar", "second"]   # layers with their own low-pass bus under each engine
+const SECOND_STATES := ["off", "wait", "crank", "run", "stop"]
 
 ## Everything that shapes the sound. Spool s: -0.33 stopped, 0 idle, 1 full lever; the
 ## afterburner and ramjet push past 1. Mix curves are [s, gain] knots, piecewise linear.
@@ -30,13 +35,22 @@ const TUNE := {
 	"mix_v12": [[0.0, 0.12], [0.3, 0.45], [0.7, 0.95], [1.3, 1.0]],
 	"mix_turbine": [[-0.33, 0.0], [0.0, 0.3], [0.6, 0.5], [1.0, 0.7], [1.3, 0.9]],
 	"burner_gain": 0.8, "burner_fade": 0.25,
-	"muffler_hz": {"v8": 2400.0, "v12": 7000.0},   # fixed, so the exhaust colour doesn't ride the pitch
+	"muffler_hz": {"v8": 2400.0, "v12": 7000.0, "second": 1200.0},   # fixed: the exhaust colour doesn't ride the pitch
 	"roar_hz": [250.0, 3450.0],      # roar low-pass, turbine spool 0 -> 1
 	"roar_gain": [0.35, 1.0],        # roar level relative to the whine, spool 0 -> 1
 	"level_db": [-15.0, -8.0],       # whole voice, idle -> full lever
 	"lp_hz": [700.0, 16000.0],       # bus low-pass, off-load (lifting) -> on-load (pulling)
 	"pan": 0.6,
 	"cough_s": 0.7,                  # after a reignite, combustion catches in fits for this long
+	# The second engine (sound only): lights above second_on_mph, dies below second_off_mph.
+	"second_on_mph": 1500.0, "second_off_mph": 1300.0,
+	"second_rpm": [600.0, 3800.0],   # low and slow: ~63 Hz doublets at full lever, the lope at half that
+	"second_stagger": 0.3,           # the right side lights this long after the left
+	"second_crank_s": 0.7,           # cranking and coughing before it catches
+	"second_spool_up": 0.6, "second_spool_down": 0.5, "second_wind": 1.2,
+	"second_level_db": [-15.0, -7.0],   # its own level, idle -> full lever: leads the mix by ~6 dB when lit
+	"second_eq_db": [6.0, 8.0, 2.0, -2.0, -8.0, -14.0],   # EQ6 at 32/100/320/1k/3.2k/10k Hz: chest and throat
+	"bang_db": [-2.0, -8.0],         # catching, backfiring on the way down
 }
 
 var sim
@@ -47,11 +61,23 @@ var _bands := {}   # layer -> PackedFloat64Array of baked rpm / spool values
 var _streams := {}   # layer -> Array[AudioStreamWAV]
 var _rho := {}   # layer -> PackedFloat64Array: correlation of level i with level i + 1
 var _rate_at := {}   # layer -> rpm (or spool) the master sounds at on pitch 1, 0 = pitch per band
+var _bang: AudioStreamWAV
+var second_on := false   # craft fast enough for the second engine (with hysteresis)
 
 
 func setup(craft_sim) -> void:
 	sim = craft_sim
 	_load_streams()
+	# Engines and Wind each limit their own bus to -1 dB, but their sum lands on Master unlimited:
+	# with both peaking together it could clip (engines + wind measured -0.05 dBFS on Master).
+	# A last-resort limiter there touches only true overs.
+	var has_limiter := false
+	for i in AudioServer.get_bus_effect_count(0):
+		has_limiter = has_limiter or AudioServer.get_bus_effect(0, i) is AudioEffectHardLimiter
+	if not has_limiter:
+		var safety := AudioEffectHardLimiter.new()
+		safety.ceiling_db = -0.3
+		AudioServer.add_bus_effect(0, safety)
 	var engines_bus := _bus("Engines", "Master")
 	if AudioServer.get_bus_effect_count(engines_bus) == 0:
 		var lim := AudioEffectHardLimiter.new()
@@ -72,9 +98,19 @@ func setup(craft_sim) -> void:
 				AudioServer.add_bus_effect(sub, AudioEffectLowPassFilter.new())
 			var lp := AudioServer.get_bus_effect(sub, 0) as AudioEffectLowPassFilter
 			lp.cutoff_hz = TUNE.muffler_hz.get(layer, TUNE.roar_hz[0])
+			if layer == "second" and AudioServer.get_bus_effect_count(sub) == 1:
+				var eq := AudioEffectEQ6.new()
+				for band in 6:
+					eq.set_band_gain_db(band, TUNE.second_eq_db[band])
+				AudioServer.add_bus_effect(sub, eq)
 			subs[layer] = sub
+		var bang := AudioStreamPlayer.new()
+		bang.stream = _bang
+		bang.bus = "%s_second" % name
+		add_child(bang)
 		var v := {"bus": bus, "subs": subs, "spool": 0.0, "comb": 1.0, "fire": 1.0, "load": 0.5, "burn": 0.0,
-			"was_out": false, "cough_t": 0.0, "cough_k": 1.0, "cough_next": 0.0, "players": {}, "at": {}}
+			"was_out": false, "cough_t": 0.0, "cough_k": 1.0, "cough_next": 0.0, "players": {}, "at": {},
+			"bang": bang, "sec": {"state": "off", "t": 0.0, "spool": -0.33, "fire": 0.0, "cough_k": 0.0, "cough_next": 0.0}}
 		for layer in LAYERS:
 			var ps: Array[AudioStreamPlayer] = []
 			var start := randf()   # per engine, so the two engines never phase against each other
@@ -116,6 +152,8 @@ func _load_streams() -> void:
 		_bands[layer] = ats
 		_rho[layer] = rhos
 		_rate_at[layer] = float(spec.get("rate_at", 0.0)) if spec.get("sync", false) else 0.0
+	_bang = AudioStreamWAV.load_from_file(DIR + manifest.oneshots.bang, {"compress/mode": 0})
+	_bang.loop_mode = AudioStreamWAV.LOOP_DISABLED
 
 
 ## Get or create a bus routed into `send`.
@@ -148,7 +186,7 @@ static func _follow(cur: float, target: float, tau: float, dt: float) -> float:
 ## down, a reignite catching) the pistons sink toward cranking speed and the turbine to a stop.
 func layer_at(layer: String, s: float) -> float:
 	match layer:
-		"v8", "v12":
+		"v8", "v12", "second":
 			var r: Array = TUNE[layer + "_rpm"]
 			if s >= 0.0:
 				return lerpf(r[0], r[1], s)
@@ -166,6 +204,11 @@ func update(inp: Dictionary, delta: float) -> void:
 	var duck := 0.0 if sim.crash_t > 0.0 else 1.0   # crash: the engines go with the picture
 	var bodies := [sim.eL, sim.eR]
 	var thr := [inp.thrL, inp.thrR]
+	var mph: float = sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy) * 2.23694
+	if not second_on and mph >= TUNE.second_on_mph:
+		second_on = true
+	elif second_on and mph < TUNE.second_off_mph:
+		second_on = false
 	for k in 2:
 		var v: Dictionary = voices[k]
 		var e = bodies[k]
@@ -216,15 +259,83 @@ func update(inp: Dictionary, delta: float) -> void:
 			"roar": turb * lerpf(TUNE.roar_gain[0], TUNE.roar_gain[1], n_spool) * (0.4 + 0.6 * burning),
 			"burner": TUNE.burner_gain * v.burn * burning,
 		}
+		var sec_gain := _second(v, k, lever + boost, dt, duck)
+		gains["second"] = sec_gain
 		if flat:
-			gains = {"v8": burning, "v12": burning, "turbine": 1.0, "roar": 1.0, "burner": v.burn * burning}
+			gains = {"v8": burning, "v12": burning, "turbine": 1.0, "roar": 1.0, "burner": v.burn * burning,
+				"second": v.sec.fire}
 		var roar_lp := AudioServer.get_bus_effect(v.subs.roar, 0) as AudioEffectLowPassFilter
 		roar_lp.cutoff_hz = TUNE.roar_hz[1] if flat else lerpf(TUNE.roar_hz[0], TUNE.roar_hz[1], n_spool)
 		for layer in LAYERS:
-			var g: float = gains[layer] * level if solo == "" or solo == layer else 0.0
-			var at: float = 1.0 + 0.1 * maxf(0.0, s - 1.0) if layer == "burner" else layer_at(layer, s)
+			var own: float = level if layer != "second" or flat else 1.0   # the second engine has its own level
+			var g: float = gains[layer] * own if solo == "" or solo == layer else 0.0
+			var at: float = layer_at("second", v.sec.spool) if layer == "second" else (
+				1.0 + 0.1 * maxf(0.0, s - 1.0) if layer == "burner" else layer_at(layer, s))
 			v.at[layer] = at
 			_drive(v.players[layer], layer, at, g)
+
+
+## One side of the second engine: off, waiting its turn (the right side lights a beat after the
+## left), cranking in coughs, running on its lever, or stopping. Returns its gain, level included.
+func _second(v: Dictionary, k: int, target_run: float, dt: float, duck: float) -> float:
+	var sc: Dictionary = v.sec
+	match sc.state:
+		"off":
+			if second_on:
+				sc.state = "wait"
+				sc.t = TUNE.second_stagger * k
+		"wait":
+			sc.t -= dt
+			if not second_on:
+				sc.state = "off"
+			elif sc.t <= 0.0:
+				sc.state = "crank"
+				sc.t = TUNE.second_crank_s
+		"crank":
+			sc.t -= dt
+			sc.cough_next -= dt
+			if sc.cough_next <= 0.0:
+				sc.cough_next = randf_range(0.05, 0.14)
+				sc.cough_k = 1.0 if randf() < 0.45 else 0.0
+			if not second_on:
+				sc.state = "stop"
+			elif sc.t <= 0.0:
+				sc.state = "run"
+				_play_bang(v, TUNE.bang_db[0], duck)
+		"run":
+			if not second_on:
+				sc.state = "stop"
+				_play_bang(v, TUNE.bang_db[1], duck)
+		"stop":
+			if second_on:
+				sc.state = "crank"
+				sc.t = TUNE.second_crank_s
+			elif sc.spool < -0.3:
+				sc.state = "off"
+	var target := -0.33
+	var tau: float = TUNE.second_wind
+	var fire := 0.0
+	match sc.state:
+		"crank":
+			target = -0.15   # turning over on the starter
+			tau = 0.3
+			fire = sc.cough_k
+		"run":
+			target = target_run
+			tau = TUNE.second_spool_up if target > sc.spool else TUNE.second_spool_down
+			fire = 1.0
+	sc.spool = _follow(sc.spool, target, tau, dt)
+	sc.fire = _follow(sc.fire, fire, 0.05 if fire > sc.fire else 0.08, dt)
+	var lvl := db_to_linear(lerpf(TUNE.second_level_db[0], TUNE.second_level_db[1], clampf(sc.spool, 0.0, 1.0)))
+	return sc.fire * lvl * duck
+
+
+func _play_bang(v: Dictionary, db: float, duck: float) -> void:
+	if duck <= 0.0 or (solo != "" and solo != "second"):
+		return
+	var p: AudioStreamPlayer = v.bang
+	p.volume_db = db
+	p.play()
 
 
 ## Crossfade weights for the levels around `at` (log spacing): linear shapes, normalized for the
