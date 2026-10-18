@@ -8,7 +8,7 @@
 ##   --replay        circuit only: fly the recorded parity lap instead of live input
 ##   --seek=S        pre-simulate S seconds before the first frame
 ##   --shot=PATH     save a screenshot after 90 rendered frames, then quit
-##   --mute          no engine audio
+##   --mute          no engine or wind audio
 extends Node3D
 
 const CraftSimScript := preload("res://sim/craft_sim.gd")
@@ -16,6 +16,7 @@ const LeverInputScript := preload("res://input/lever_input.gd")
 const RangeWorldScript := preload("res://view/range_world.gd")
 const LandmarkScript := preload("res://view/landmark.gd")
 const EngineAudioScript := preload("res://audio/engine_audio.gd")
+const WindAudioScript := preload("res://audio/wind_audio.gd")
 const DT := 1.0 / 480.0
 const STEEL := Color(0.60, 0.65, 0.70)
 const HOT := Color(1.0, 0.54, 0.16)
@@ -25,6 +26,7 @@ const HAZE := Color(0.78, 0.66, 0.52)
 var sim
 var levers
 var engine_audio
+var wind_audio
 var replay: Array = []
 var replay_i := 0
 var shot_path := ""
@@ -33,6 +35,12 @@ var acc := 0.0
 var sub := 0
 var inp := {"thrL": 0.0, "thrR": 0.0, "brkL": 0.0, "brkR": 0.0, "repair": false, "reignite": false}
 var cruise := -1.0   # --cruise=T holds both levers at T (demos, screenshots)
+const BEST_PATH := "user://sprint_best.json"
+var best_saved := -1.0     # sprint best, persisted across launches
+var flash_msg := ""        # DNF / new-best message, shown for a few seconds
+var flash_until := -1.0
+var brake_point := -1.0    # metres before the box where this run's hard braking began
+var was_active := false
 var org_x := 0.0   # floating origin, in sim metres
 var org_y := 0.0
 var top_kmh := 0.0
@@ -75,6 +83,10 @@ func _ready() -> void:
 	if sim.kind != "circuit":
 		replay = []
 	levers = LeverInputScript.new()
+	if sim.kind == "range" and FileAccess.file_exists(BEST_PATH):
+		var saved = JSON.parse_string(FileAccess.get_file_as_string(BEST_PATH))
+		if saved is Dictionary and saved.has("best"):
+			best_saved = float(saved.best)
 	if cruise >= 0.0:
 		inp = {"thrL": cruise, "thrR": cruise, "brkL": 0.0, "brkR": 0.0, "repair": false, "reignite": true}
 	_follow_origin()
@@ -84,6 +96,9 @@ func _ready() -> void:
 		engine_audio = EngineAudioScript.new()
 		add_child(engine_audio)
 		engine_audio.setup(sim)
+		wind_audio = WindAudioScript.new()
+		add_child(wind_audio)
+		wind_audio.setup(sim)
 	for i in int(seek / DT):
 		_sim_step()
 	_follow_origin()
@@ -97,7 +112,41 @@ func _sim_step() -> void:
 		replay_i += 1
 	sub += 1
 	sim.step(inp, DT)
+	for e in sim.events:
+		_on_event(e)
 	sim.events.clear()
+
+
+func _on_event(e: Dictionary) -> void:
+	if sim.kind != "range":
+		return
+	match e.type:
+		"finish":
+			if best_saved < 0.0 or e.t < best_saved:
+				best_saved = e.t
+				var f := FileAccess.open(BEST_PATH, FileAccess.WRITE)
+				if f:
+					f.store_string(JSON.stringify({"best": best_saved}))
+				_flash("NEW BEST")
+		"overrun":
+			_flash("OVERRUN  -  DNF")
+		"crash":
+			_flash("CRASHED  -  DNF")
+
+
+func _flash(msg: String) -> void:
+	flash_msg = msg
+	flash_until = sim.time + 5.0
+
+
+## Y / respawn: on the range it restarts the sprint at the start line.
+func _respawn() -> void:
+	if sim.kind == "range":
+		sim.restart()
+		brake_point = -1.0
+		flash_until = -1.0
+	else:
+		sim.respawn()
 
 
 ## Overridable: fill `inp` for this frame and handle arm/respawn edges.
@@ -107,7 +156,7 @@ func _read_input(delta: float) -> void:
 	if p.arm:
 		sim.armed = not sim.armed
 	if p.respawn:
-		sim.respawn()
+		_respawn()
 
 
 func _process(delta: float) -> void:
@@ -117,12 +166,15 @@ func _process(delta: float) -> void:
 	while acc >= DT:
 		_sim_step()
 		acc -= DT
+	_track_braking()
 	if engine_audio:
 		engine_audio.update(inp, delta)
+	if wind_audio:
+		wind_audio.update(inp, delta)
 	_follow_origin()
-	_sync_world()
 	_sync_craft()
 	_place_camera(1.0 - exp(-delta * 6.0))
+	_sync_world()   # after the camera: distant anchors scale about its current position
 	top_kmh = maxf(top_kmh, _kmh())
 	_update_hud()
 	frames += 1
@@ -130,6 +182,17 @@ func _process(delta: float) -> void:
 		await RenderingServer.frame_post_draw
 		get_viewport().get_texture().get_image().save_png(shot_path)
 		get_tree().quit()
+
+
+## Remember where this run's hard braking began (both brakes past half, still fast).
+func _track_braking() -> void:
+	if sim.kind != "range":
+		return
+	if sim.run_active and not was_active:
+		brake_point = -1.0
+	if sim.run_active and brake_point < 0.0 and inp.brkL >= 0.5 and inp.brkR >= 0.5 and _kmh() > 1000.0:
+		brake_point = sim.BOX_X - sim.pod.x
+	was_active = sim.run_active
 
 
 func _follow_origin() -> void:
@@ -198,11 +261,12 @@ func _build_world() -> void:
 	add_child(sun)
 
 	# The ground rides along under the pod; its texture offset keeps the sand fixed in the world.
+	# 60 km across so its far edge sits near the true horizon even 100+ m up a jump.
 	ground = MeshInstance3D.new()
 	var plane := PlaneMesh.new()
-	plane.size = Vector2(12000, 12000)
+	plane.size = Vector2(60000, 60000)
 	ground.mesh = plane
-	ground_mat = _grain(Color(0.79, 0.64, 0.42), 2000.0)
+	ground_mat = _grain(Color(0.79, 0.64, 0.42), 10000.0)
 	ground.material_override = ground_mat
 	ground.position = Vector3(0, -0.05, 0)
 	add_child(ground)
@@ -266,7 +330,7 @@ func _sync_world() -> void:
 	if range_world:
 		range_world.sync(org_x, org_y)
 	if landmark:
-		landmark.sync(org_x, org_y, sim.time)
+		landmark.sync(org_x, org_y, sim.time, cam.global_position)
 
 
 func _build_craft() -> void:
@@ -381,9 +445,18 @@ func _place_camera(k: float) -> void:
 ## Second HUD line: lap info on the circuit, mileage and top speed on the range.
 func _progress_text() -> String:
 	if sim.kind == "range":
-		var run: float = 0.0 if sim.run_start < 0.0 else sim.time - sim.run_start
-		return "MILE %.2f / 100   TOP %d mph   RUN %.1fs   BEST %s" % [sim.pod.x / 1609.344, top_kmh / 1.609344,
-			run, "--" if sim.best_run < 0.0 else "%.1fs" % sim.best_run]
+		var best := "--" if best_saved < 0.0 else "%.2fs" % best_saved
+		var braked := "" if brake_point < 0.0 else "   braked %.2f km out" % (brake_point / 1000.0)
+		if sim.time < flash_until:
+			return "%s   BEST %s" % [flash_msg, best]
+		if sim.run_active:
+			var togo: float = sim.BOX_X - sim.pod.x
+			var dist := "%.2f km" % (togo / 1000.0) if absf(togo) >= 1000.0 else "%d m" % int(togo)
+			return "TO BOX %s   RUN %.1fs   BEST %s" % [dist, sim.time - sim.run_start, best]
+		if sim.result.get("type", "") == "finish":
+			return "STOPPED IN BOX  %.2fs   %.1f m off%s\nBEST %s   (Y: go again)" % [
+				sim.result.t, sim.result.err, braked, best]
+		return "READY: push the levers   BEST %s" % best
 	var cur: float = 0.0 if sim.lap_start < 0.0 else sim.time - sim.lap_start
 	return "LAP %d  %.2fs   LAST %s  BEST %s" % [sim.lap + 1, cur,
 		"--" if sim.last_lap < 0.0 else "%.2f" % sim.last_lap, "--" if sim.best_lap < 0.0 else "%.2f" % sim.best_lap]

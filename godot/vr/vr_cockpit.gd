@@ -38,6 +38,12 @@ func _make_view() -> void:
 				xr.connect(sig, _on_xr_event.bind(sig))
 		if "display_refresh_rate" in xr:
 			xr.set("display_refresh_rate", 90.0)
+		# Sound in the headset, not on the desk: Windows' default output may be the PC speakers.
+		for dev in AudioServer.get_output_device_list():
+			if dev.contains("Oculus Virtual Audio"):
+				AudioServer.output_device = dev
+				print("AUDIO: output -> ", dev)
+				break
 		print("OPENXR: initialized")
 	else:
 		print("OPENXR: NOT initialized, running flat (is the Quest on and in Link mode?)")
@@ -181,7 +187,7 @@ func _read_input(delta: float) -> void:
 	if p.arm or _pressed_once("arm", r.is_button_pressed("by_button")):
 		sim.armed = not sim.armed
 	if p.respawn or _pressed_once("respawn", l.is_button_pressed("by_button")):
-		sim.respawn()
+		_respawn()
 	if _pressed_once("recenter", l.is_button_pressed("primary_click") or r.is_button_pressed("primary_click")):
 		XRServer.center_on_hmd(XRServer.RESET_BUT_KEEP_TILT, true)
 	_diag(delta, l, r, p)

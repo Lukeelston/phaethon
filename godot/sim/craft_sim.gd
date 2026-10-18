@@ -22,6 +22,7 @@ const DEFAULTS := {
 	"heatThrottle": 0.15, "heatBurner": 0.12, "heatRamjet": 0.35, "coolBase": 0.05, "coolSpeed": 0.10,
 	"batteryDrain": 0.08, "batteryCharge": 0.05, "repairRate": 0.12, "damagePerMs": 0.012,
 	"rideH": 1.5, "hoverOmega": 9.0, "hoverZeta": 0.9,
+	"binderKz": 3.0e6, "binderCz": 60000.0, "towKz": 2.0e5, "towCz": 16000.0,
 	"track": "circuit", "startX": 0.0, "startY": 0.0,
 	"seed": 1337,
 }
@@ -35,6 +36,11 @@ const RAMP_X0 := 8000.0
 const RAMP_EVERY := 4000.0
 const RAMP_H := [3.0, 6.0, 10.0, 15.0]
 const RAMP_SLOPE := [0.007, 0.011, 0.0157, 0.022]
+# Sprint: stop dead inside a 50 m box at mile 100. Past BOX_X + OVERRUN is a DNF.
+const BOX_X := RANGE_LEN
+const BOX_HALF := 25.0
+const OVERRUN := 15000.0
+const STOPPED := 0.5
 const CTRL := [[0.0, 0.0], [900.0, -100.0], [1700.0, 150.0], [2300.0, 700.0], [2400.0, 1300.0],
 	[2000.0, 1700.0], [1400.0, 1600.0], [1100.0, 1150.0], [700.0, 1300.0], [300.0, 1800.0],
 	[-400.0, 1700.0], [-900.0, 1100.0], [-800.0, 400.0], [-400.0, 80.0]]
@@ -110,6 +116,8 @@ var run_start := -1.0   # range run timer; -1 = not started (JS null)
 var last_run := -1.0
 var best_run := -1.0
 var finished := false
+var run_active := false
+var result: Dictionary = {}   # empty = no result (JS null); else {type, t, err}
 var pair_th := 0.0
 var binder_stretch := 0.0
 
@@ -173,12 +181,12 @@ func ground(x: float, y: float) -> float:
 
 ## Repulsor hover: spring-damper toward ride height, push-only, plus gravity. Exactly
 ## balanced on flat ground, so flat tracks are unchanged. Grip fades as a body lifts clear.
-func _hover(b: Body, dt: float) -> void:
+func _hover(b: Body, dt: float, az: float) -> void:
 	var h := ground(b.x, b.y)
 	var dhdt := (ground(b.x + b.vx * dt, b.y + b.vy * dt) - h) / dt
 	var w: float = P.hoverOmega
 	var up := maxf(0.0, G + w * w * (P.rideH - (b.z - h)) - 2.0 * P.hoverZeta * w * (b.vz - dhdt))
-	b.vz += (up - G) * dt
+	b.vz += (up - G + az) * dt
 	b.z += b.vz * dt
 	if b.z - h < 0.3:
 		b.z = h + 0.3
@@ -274,8 +282,23 @@ func _point_vel(b: Body, px: float, py: float) -> void:
 	_pvy = b.vy + b.w * (px - b.x)
 
 
+## Range: back to the start line, run cleared (the Y button).
+func restart() -> void:
+	pod.x = 30.0
+	pod.y = 0.0
+	crash_t = 0.0
+	finished = false
+	run_active = false
+	run_start = -1.0
+	result = {}
+	respawn()
+
+
 func respawn(ci: int = -1) -> void:
-	var ahead: float = P.cableLen + P.podLen / 2.0 + P.engineLen / 2.0
+	# engines placed so each cable is exactly at length: a stretched spawn makes the stiff
+	# cables yank the pod forward on the first step
+	var lat: float = P.engineGap / 2.0 - P.podAnchorW * P.podWidth / 2.0
+	var ahead: float = sqrt(P.cableLen * P.cableLen - lat * lat) + P.podLen / 2.0 + P.engineLen / 2.0
 	# Circuit: back at a checkpoint. Range: 30 m behind where the pod is, facing +x.
 	var idx := 0
 	var ax: float
@@ -394,14 +417,29 @@ func step(inp: Dictionary, dt: float) -> void:
 		if crash_t <= 0.0:
 			if finished:   # back to the start line
 				pod.x = 30.0
+				pod.y = 0.0
 				finished = false
+				result = {}
 			respawn()
 		return
-	for b: Body in bodies:
+	# Vertical ties: the binder holds both engines at one height and the tow bar lifts the
+	# pod toward their mean, so a one-sided ramp hit lifts the whole craft instead of
+	# flinging one engine skyward. Exactly zero when heights match (flat ground).
+	var az := [0.0, 0.0, 0.0]
+	if not binder_broken:
+		var fz: float = P.binderKz * (R.z - L.z) + P.binderCz * (R.vz - L.vz)
+		az[0] += fz / L.m
+		az[1] -= fz / R.m
+	var ftz: float = P.towKz * ((L.z + R.z) / 2.0 - Pd.z) + P.towCz * ((L.vz + R.vz) / 2.0 - Pd.vz)
+	az[2] += ftz / Pd.m
+	az[0] -= ftz / 2.0 / L.m
+	az[1] -= ftz / 2.0 / R.m
+	for k in 3:
+		var b: Body = bodies[k]
 		b.fx = 0.0
 		b.fy = 0.0
 		b.t = 0.0
-		_hover(b, dt)
+		_hover(b, dt, az[k])
 	time += dt
 	var repair: bool = inp.get("repair", false)
 	var reignite: bool = inp.get("reignite", false)
@@ -602,16 +640,30 @@ func step(inp: Dictionary, dt: float) -> void:
 		Pd.health = 0.0
 
 	if kind == "range":
-		# Run timer from the first move; crossing mile 100 records the run and resets to the start.
-		if run_start < 0.0 and pv > 2.0:
+		# Sprint: the clock starts on the first lever input and stops when the pod sits still
+		# inside the box. Overrunning by OVERRUN, or crashing mid-run, is a DNF back to the start.
+		if not run_active and result.is_empty() and inp.thrL + inp.thrR > 0.02:
+			run_active = true
 			run_start = time
-		if Pd.x >= track_length and crash_t <= 0.0:
-			last_run = 0.0 if run_start < 0.0 else time - run_start
-			best_run = last_run if best_run < 0.0 else minf(best_run, last_run)
-			events.append({"type": "finish", "t": last_run})
-			run_start = -1.0
-			finished = true
-			crash_t = 1.6
+		if run_active:
+			var in_box := absf(Pd.x - BOX_X) <= BOX_HALF and absf(Pd.y) <= BOX_HALF
+			var end := {}
+			if in_box and pv < STOPPED:
+				var t := time - run_start
+				end = {"type": "finish", "t": t, "err": sqrt((Pd.x - BOX_X) * (Pd.x - BOX_X) + Pd.y * Pd.y)}
+				last_run = t
+				best_run = t if best_run < 0.0 else minf(best_run, t)
+			elif Pd.x > BOX_X + OVERRUN:
+				end = {"type": "overrun"}
+			elif crash_t > 0.0:
+				end = {"type": "crash"}
+			if not end.is_empty():
+				run_active = false
+				result = end
+				events.append(end)
+				if end.type != "finish":
+					finished = true
+					crash_t = maxf(crash_t, 1.6)
 		return
 	if kind != "circuit":
 		return

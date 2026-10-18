@@ -1,23 +1,28 @@
-## The citadel at the end of mile 100: an original titan megastructure in the Star Wars
-## spirit, about 9 km tall on a 14.7 km stepped base. Its front face sits on the end of
-## the range and the runway runs straight into its hangar gate.
+## The sprint's end of the range, as seen from up to 100 miles away:
+## - a light column standing in the stop box, with a "STOP" marker that stays readable at any
+##   distance (fixed-size, drawn over everything): the braking reference;
+## - the citadel, an original titan megastructure in the Star Wars spirit, now a backdrop
+##   18 km past the box (beyond the overrun zone) and scaled down so it doesn't read as the target.
 ##
-## Beyond 6 km it's drawn as a scaled impostor at a fixed 6 km along its true bearing
-## (identical angular size, no depth-precision breakup at 150 km), and it is hazed by its
-## TRUE distance: a ~3 degree silhouette with a blinking beacon at mile 10, sky-filling at the end.
+## Anything farther than 6 km is drawn as a scaled impostor at a fixed 6 km along its true
+## bearing (identical angular size, no depth-precision breakup at 150 km), hazed by its
+## TRUE distance.
 extends Node3D
 
 const Sim := preload("res://sim/craft_sim.gd")
-const SC := 1.6                      # every dimension below is multiplied by this
-const X := Sim.RANGE_LEN + 4600.0 * SC + 600.0   # base centre: the gate stands just past the finish line
-const R := 6000.0                    # impostor distance
+const SC := 0.6                       # citadel dimensions below are multiplied by this
+const CIT_X := Sim.BOX_X + 18000.0 + 4600.0 * SC   # citadel base centre
+const R := 6000.0                     # impostor distance
 const HAZE := Color(0.78, 0.66, 0.52)
-const HAZE_K := 90000.0              # 1 - exp(-d/K): ~0.8 at mile 10, ~0.1 at 10 km
+const HAZE_K := 90000.0               # 1 - exp(-d/K)
 
-var root: Node3D    # impostor transform
-var body: Node3D    # true-shape geometry, scaled by SC, origin at the base centre
+var root: Node3D        # citadel impostor transform
+var body: Node3D        # citadel geometry, scaled by SC
+var beacon_root: Node3D # light column impostor transform, anchored on the box
+var marker: Label3D
 var parts: Array = []   # [material, base colour, base emission energy]
 var beacon: StandardMaterial3D
+var column_mat: StandardMaterial3D
 
 
 func _material(c: Color, emit := 0.0) -> StandardMaterial3D:
@@ -32,13 +37,13 @@ func _material(c: Color, emit := 0.0) -> StandardMaterial3D:
 	return m
 
 
-func _part(mesh: Mesh, pos: Vector3, mat: Material) -> void:
+func _part(mesh: Mesh, pos: Vector3, mat: Material, parent: Node3D = null) -> void:
 	var mi := MeshInstance3D.new()
 	mi.mesh = mesh
 	mi.position = pos
 	mi.material_override = mat
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	body.add_child(mi)
+	(parent if parent else body).add_child(mi)
 
 
 func _box(size: Vector3, pos: Vector3, mat: Material) -> void:
@@ -57,6 +62,7 @@ func _cyl(bottom: float, top: float, height: float, y0: float, xz: Vector2, mat:
 
 
 func build(_view) -> void:
+	_build_beacon()
 	root = Node3D.new()
 	add_child(root)
 	body = Node3D.new()
@@ -80,7 +86,7 @@ func build(_view) -> void:
 			_box(Vector3(w + 4.0, 6.0, w + 4.0), Vector3(0, y0 + tier_h * band, 0), lit)
 	var top_y := widths.size() * tier_h
 
-	# hangar gate on the approach face (-X), where the runway ends: a dark door with lit seams
+	# hangar gate on the approach face (-X): a dark door with lit seams
 	var front: float = -widths[0] / 2.0
 	for s in [-1.0, 1.0]:
 		_box(Vector3(260.0, 1100.0, 260.0), Vector3(front - 130.0, 550.0, s * 480.0), dark)
@@ -114,18 +120,61 @@ func build(_view) -> void:
 	_part(s, Vector3(0, top_y + 3840.0, 0), beacon)
 
 
-func sync(ox: float, oy: float, t: float) -> void:
-	var dx := X - ox
-	var dz := oy   # landmark sits on sim y = 0; render z = -(0 - oy)
-	var dist := sqrt(dx * dx + dz * dz)
+## Light column standing in the stop box, plus a fixed-size STOP marker over it.
+func _build_beacon() -> void:
+	beacon_root = Node3D.new()
+	add_child(beacon_root)
+	column_mat = StandardMaterial3D.new()
+	column_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	column_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	column_mat.albedo_color = Color(0.55, 0.9, 1.0, 0.55)
+	column_mat.disable_fog = true
+	column_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	var col := CylinderMesh.new()
+	col.top_radius = 10.0
+	col.bottom_radius = 10.0
+	col.height = 3000.0
+	_part(col, Vector3(0, 1500.0, 0), column_mat, beacon_root)
+	marker = Label3D.new()
+	marker.text = "▼\nSTOP"
+	marker.fixed_size = true
+	marker.pixel_size = 0.0012
+	marker.font_size = 48
+	marker.outline_size = 10
+	marker.modulate = Color(1.0, 0.25, 0.12)
+	marker.outline_modulate = Color(1.0, 0.97, 0.9)
+	marker.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	marker.no_depth_test = true
+	marker.render_priority = 100
+	add_child(marker)
+
+
+## Place an anchored object: true position within R of the camera, else a scaled impostor
+## at R along the camera's line of sight. Scaling about the CAMERA (height included) keeps the
+## angular position exact; scaling about the ground under the pod sank it below the horizon
+## whenever you were airborne (100 m up: 0.95 deg too low vs 0.04 deg true).
+static func _impostor(node: Node3D, anchor: Vector3, cam: Vector3) -> float:
+	var d := anchor - cam
+	var dist := d.length()
 	var s := 1.0 if dist <= R else R / dist
-	root.position = Vector3(dx * s, 0.0, dz * s)
-	root.scale = Vector3(s, s, s)
+	node.position = cam + d * s
+	node.scale = Vector3(s, s, s)
+	return dist
+
+
+func sync(ox: float, oy: float, t: float, cam: Vector3) -> void:
+	# both anchors sit on sim y = 0 at ground level; render z = -(0 - oy)
+	var bdist := _impostor(beacon_root, Vector3(Sim.BOX_X - ox, 0.0, oy), cam)
+	var md := Vector3(Sim.BOX_X - ox, 90.0, oy) - cam
+	var ms := 1.0 if md.length() <= 4000.0 else 4000.0 / md.length()
+	marker.position = cam + md * ms
+	marker.visible = bdist > 120.0   # hide it once you're on top of the box
+	var dist := _impostor(root, Vector3(CIT_X - ox, 0.0, oy), cam)
 	var f := clampf(1.0 - exp(-dist / HAZE_K), 0.0, 1.0)
 	for p in parts:
 		var m: StandardMaterial3D = p[0]
 		m.albedo_color = (p[1] as Color).lerp(HAZE, f)
 		if p[2] > 0.0:
 			m.emission_energy_multiplier = p[2] * (1.0 - 0.8 * f)
-	# beacon: a red blink every 1.2 s that cuts through the haze
+	# citadel beacon: a red blink every 1.2 s that cuts through the haze
 	beacon.emission_energy_multiplier = (14.0 if fmod(t, 1.2) < 0.3 else 1.0) * (1.0 - 0.4 * f)

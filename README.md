@@ -16,17 +16,39 @@ Spec: https://claude.ai/artifact/VeY5CdSPzxcEq568JgkJh8 (source: `phaethon.html`
 | `docs/lever-v1-build.md` | Print list, hardware, assembly, wiring, flash and test |
 | `docs/superpowers/plans/` | M1 and M3 implementation plans |
 
+## Sprint mode (the range)
+
+Sprint 100 miles from a standing start, then stop dead inside the 50 m box at mile 100. The
+clock starts when you push the levers and stops when the pod is still (under 0.5 m/s) inside
+the box. More than 15 km past the box, or a crash, is a DNF. **Y restarts.** The best time is
+saved to `user://sprint_best.json`. Full brakes from 4,450 mph take about 11.1 km (6.9 mi), so
+the decision comes around miles 92–93. Countdown boards stand at 20, 15 and 10 down to 1 miles
+to go, then at 1000, 500, 250 and 100 m; a light column and a STOP marker sit on the box.
+
+```bash
+.\launch_vr.ps1 -Track range                 # headset; add -WaitForHeadset to wait for Link
+.\launch_vr.ps1 -Track range -StartMile 90   # practise just the braking
+```
+
 ## Commands
 
 ```bash
 # CAD: build all STLs, bed check, previews, swing clash test
 python cad/build.py
 
-# Parity gate: GDScript sim vs JS reference (exit 0 = pass)
+# Gates (each prints ... PASS): circuit lap, range jumps, full sprint, lever input, script load
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_parity.gd
+Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_range_parity.gd
+Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_sprint_parity.gd
+Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_lever_input.gd
 
-# Re-record the reference lap after changing the JS model
+# Re-record every reference after changing the JS model
 node tools/record_lap.js sim-core.js godot/tests/replay
+node tools/record_range.js sim-core.js godot/tests/replay
+node tools/record_sprint.js sim-core.js godot/tests/replay
+
+# Handling report card (speeds, turn rates, sway, brakes)
+node tools/handling_test.js sim-core.js
 
 # Flat-screen view: live input, or fly the recorded lap
 Godot_v4.7.1-stable_win64.exe --path godot
