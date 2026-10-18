@@ -18,13 +18,34 @@ const DEFAULTS := {
 	"yawDamp": 150000.0, "podYawDamp": 50000.0, "podAlignK": 1.0e6, "towK": 1.0e6, "towC": 40000.0,
 	"cableLen": 16.0, "cableK": 600000.0, "cableC": 30000.0, "cableCouple": 0.2, "podAnchorW": 0.15,
 	"binderK": 3.0e6, "binderC": 70000.0, "alignK": 2.0e7, "alignC": 6.0e5, "binderBreak": 3.0,
-	"wallK": 6.0e6, "wallC": 1.5e5, "wallMu": 0.35,
+	"wallK": 6.0e6, "wallC": 1.5e5, "wallMu": 0.35, "wallDmgMin": 6.0,
+	"damage": false,   # wall hits cost health (and can wreck you) only when this is on
+	"towLongK": 2.0e6, "towLongC": 8.0e4, "towLongSlack": 0.3,   # pod stand-off: never closer to the engines than its taut-cable spot
+	"bank": 1.0, "bankDown": 3.9e-4,   # banked corners: downforce per (m/s)^2, as g, presses you into the bank (~8 g at 1,000 mph)
+	"towAudit": true, "towAuditG": 3.0,   # tow-bar energy audit: drag on the speed, never harder than this (g) ...
+	"towIntF0": 0.05, "towIntF1": 0.3, "towIntMax": 60.0,   # ... shifting onto the swing and spin as their share of the energy grows
 	"heatThrottle": 0.15, "heatBurner": 0.12, "heatRamjet": 0.35, "coolBase": 0.05, "coolSpeed": 0.10,
 	"batteryDrain": 0.08, "batteryCharge": 0.05, "repairRate": 0.12, "damagePerMs": 0.012,
 	"rideH": 1.5, "hoverOmega": 9.0, "hoverZeta": 0.9,
 	"binderKz": 3.0e6, "binderCz": 60000.0, "towKz": 2.0e5, "towCz": 16000.0,
-	"track": "circuit", "startX": 0.0, "startY": 0.0,
+	"track": "circuit", "startX": 0.0, "startY": 0.0, "handling": "speed",
 	"seed": 1337,
+}
+# Handling modes, mirroring sim-core.js: named overrides on top of DEFAULTS (explicit
+# overrides still win). speed = the v3 sprint model; starfighter = ~990 mph lever / 1,200
+# burner, 50 g grip, ~56 deg/s at 320 mph, stiff tow bar.
+# Track settings, mirroring sim-core.js TRACKS: the GP's walls deflect rather than wreck (only
+# impacts harder than 25 m/s into the wall do damage, a third as much; lower friction).
+const TRACKS := {
+	"gp": {"wallDmgMin": 25.0, "damagePerMs": 0.004, "wallMu": 0.22},
+}
+const HANDLING := {
+	"speed": {},
+	"starfighter": {
+		"thrustMax": 180000.0, "engineCd": 0.725, "podCd": 0.3625,
+		"gripCapG": 50.0, "engineGrip": 90.0, "podGrip": 30.0, "podCapG": 30.0, "finK": 3.0, "yawDamp": 20000.0,
+		"podAlignK": 6.0e6, "podYawDamp": 250000.0, "towK": 5.0e6, "towC": 200000.0,
+	},
 }
 # The range: 100 miles of open desert. Speed runway along y = 0, a jump lane at y = +400
 # with a kicker every 1.5 km, and a twisty lane at y = -400 that only the view draws.
@@ -44,6 +65,20 @@ const STOPPED := 0.5
 const CTRL := [[0.0, 0.0], [900.0, -100.0], [1700.0, 150.0], [2300.0, 700.0], [2400.0, 1300.0],
 	[2000.0, 1700.0], [1400.0, 1600.0], [1100.0, 1150.0], [700.0, 1300.0], [300.0, 1800.0],
 	[-400.0, 1700.0], [-900.0, 1100.0], [-800.0, 400.0], [-400.0, 80.0]]
+
+
+# The grand prix, mirroring sim-core.js: a 29.3 km circuit for STARFIGHTER at ~1,000 mph,
+# straights and exact arcs (tools/design_gp.py closed it), sampled every ~12 m, 64 m wide.
+const GP_SEGS := [["S", 2798.158], ["R", 230.0, 90.0], ["S", 450.0], ["L", 230.0, 90.0], ["S", 1500.0], ["L", 1100.0, 70.0],
+	["S", 700.0], ["R", 600.0, 40.0], ["S", 900.0], ["L", 380.0, 150.0], ["S", 1100.0], ["R", 260.0, 120.0],
+	["S", 700.0], ["L", 900.0, 30.0], ["S", 1278.727], ["L", 500.0, 90.0], ["S", 5200.0], ["R", 420.0, 40.0],
+	["L", 420.0, 80.0], ["R", 420.0, 40.0], ["S", 1400.0], ["L", 160.0, 180.0], ["S", 500.0], ["R", 350.0, 90.0],
+	["S", 3200.0], ["L", 1300.0, 90.0]]
+const GP_STEP := 12.0
+const GP_WIDTH := 96.0   # wider, and every corner banked GP_BANK degrees toward its inside (Luke, 2026-10-18),
+const GP_BANK := 15.0    # easing in and out over ~360 m: two passes of a (2 * GP_BANK_R + 1)-sample box (was 30: "50% smaller")
+const GP_BANK_R := 7
+var track_name := ""   # "gp" on the grand prix
 
 
 class Body:
@@ -95,12 +130,14 @@ var tnx := PackedFloat64Array()
 var tny := PackedFloat64Array()
 var tlen := PackedFloat64Array()
 var tw := PackedFloat64Array()
+var tb := PackedFloat64Array()   # GP: bank per sample, radians (+ = tilted down to the left, a left-hander)
 
 # race and craft state
 var battery := 1.0
 var armed := false
 var mode := "normal"
 var binder_broken := false
+var _tow_u := -1.0          # tow bar's stored energy last substep (-1 = none yet), for the energy audit
 var crash_t := 0.0
 var time := 0.0
 var lap := 0
@@ -127,19 +164,31 @@ var _n_lat := 0.0
 var _n_w := 0.0
 var _n_nx := 0.0
 var _n_ny := 0.0
+var _n_t := 0.0   # how far along sample _n_i's segment the nearest point lies, 0..1
 var _pvx := 0.0
 var _pvy := 0.0
 
 
+var _overrides := {}
+
+
 func _init(overrides: Dictionary = {}) -> void:
+	_overrides = overrides.duplicate()
 	P = DEFAULTS.duplicate()
+	# the grand prix is a STARFIGHTER track unless a handling is asked for
+	var hname: String = overrides.get("handling", "starfighter" if overrides.get("track", "") == "gp" else DEFAULTS.handling)
+	P.merge(HANDLING.get(hname, {}), true)
+	P.merge(TRACKS.get(overrides.get("track", ""), {}), true)
 	P.merge(overrides, true)
+	P.handling = hname
 	_rng = int(P.seed) & 0xFFFFFFFF
 	if _rng == 0:
 		_rng = 1
 	if P.track == "range":
 		kind = "range"
 		_build_range()
+	elif P.track == "gp":
+		_build_gp()
 	else:
 		_build_track()
 	var e_i: float = P.engineMass * pow(P.engineLen, 2) / 12.0
@@ -152,6 +201,17 @@ func _init(overrides: Dictionary = {}) -> void:
 	pod.y = float(P.startY)
 	respawn(0)
 	visited[0] = true
+
+
+## Switch handling mode in place (Godot only: the game's in-cockpit toggle; not part of the
+## JS parity surface). Presets only change per-step tuning, never masses or the track, so
+## nothing built in _init goes stale. Restart or respawn afterwards.
+func set_handling(name: String) -> void:
+	_overrides["handling"] = name
+	P = DEFAULTS.duplicate()
+	P.merge(HANDLING.get(name, {}), true)
+	P.merge(TRACKS.get(_overrides.get("track", ""), {}), true)
+	P.merge(_overrides, true)
 
 
 func _build_range() -> void:
@@ -253,6 +313,74 @@ func _build_track() -> void:
 	track_length = s
 
 
+func _build_gp() -> void:
+	track_name = "gp"
+	checkpoints = 12
+	var x := 0.0
+	var y := 0.0
+	var h := 0.0
+	var raw := PackedFloat64Array()
+	for sg in GP_SEGS:
+		if sg[0] == "S":
+			var n := maxi(1, int(ceil(sg[1] / GP_STEP)))
+			var d: float = sg[1] / n
+			for k in n:
+				tpx.append(x)
+				tpy.append(y)
+				raw.append(0.0)
+				x += d * cos(h)
+				y += d * sin(h)
+		else:
+			var r: float = sg[1]
+			var sn := 1.0 if sg[0] == "L" else -1.0
+			var ang: float = sg[2] * PI / 180.0
+			var n := maxi(1, int(ceil(r * ang / GP_STEP)))
+			var da := ang / n
+			var c := 2.0 * r * sin(da / 2.0)
+			for k in n:
+				tpx.append(x)
+				tpy.append(y)
+				raw.append(sn * GP_BANK * PI / 180.0)
+				x += c * cos(h + sn * da / 2.0)
+				y += c * sin(h + sn * da / 2.0)
+				h += sn * da
+	N = tpx.size()
+	ttx.resize(N)
+	tty.resize(N)
+	tnx.resize(N)
+	tny.resize(N)
+	tlen.resize(N)
+	tw.resize(N)
+	var s := 0.0
+	for i in N:
+		var j := (i + 1) % N
+		var dx := tpx[j] - tpx[i]
+		var dy := tpy[j] - tpy[i]
+		var l := sqrt(dx * dx + dy * dy)
+		ttx[i] = dx / l
+		tty[i] = dy / l
+		tnx[i] = -tty[i]
+		tny[i] = ttx[i]
+		tlen[i] = l
+		s += l
+		tw[i] = GP_WIDTH
+	track_length = s
+	tb = _smooth_bank(_smooth_bank(raw))
+
+
+## A centred moving average round the closed loop (box of 2 * GP_BANK_R + 1 samples).
+static func _smooth_bank(a: PackedFloat64Array) -> PackedFloat64Array:
+	var n := a.size()
+	var out := PackedFloat64Array()
+	out.resize(n)
+	for i in n:
+		var acc := 0.0
+		for k in range(-GP_BANK_R, GP_BANK_R + 1):
+			acc += a[posmod(i + k, n)]
+		out[i] = acc / (2 * GP_BANK_R + 1)
+	return out
+
+
 ## Nearest centreline point in a window around hint. Results land in _n_*.
 func _nearest(x: float, y: float, hint: int, win: int) -> void:
 	var bd := INF
@@ -269,6 +397,7 @@ func _nearest(x: float, y: float, hint: int, win: int) -> void:
 			_n_w = tw[i]
 			_n_nx = tnx[i]
 			_n_ny = tny[i]
+			_n_t = t
 
 
 func _apply_at(b: Body, fx: float, fy: float, px: float, py: float) -> void:
@@ -282,19 +411,53 @@ func _point_vel(b: Body, px: float, py: float) -> void:
 	_pvy = b.vy + b.w * (px - b.x)
 
 
+## For the view (not the physics): the banked GP's surface at (x, y), near sample `hint`:
+## Vector2(height above the desert, bank radians + = tilted down to the left). Corners pivot on
+## their inside edge, so it stays at ground level and the outside climbs (96 m at 30 deg: 55 m);
+## past the outside wall a 45-degree berm runs back down. (0, 0) everywhere else.
+func surface_at(x: float, y: float, hint: int) -> Vector2:
+	if tb.is_empty():
+		return Vector2.ZERO
+	_nearest(x, y, hint, 40)
+	var bk: float = lerpf(tb[_n_i], tb[(_n_i + 1) % N], _n_t)
+	return Vector2(bank_height(_n_w / 2.0, _n_lat, bk), bk)
+
+
+## Height of the banked surface `off` metres left of the centreline, half-width hw, bank bk.
+static func bank_height(hw: float, off: float, bk: float) -> float:
+	var t := tan(bk)
+	var base := hw * absf(t) - clampf(off, -hw, hw) * t
+	return maxf(0.0, base - maxf(0.0, absf(off) - hw))   # the berm outside: down at 45 deg
+
+
 ## Range: back to the start line, run cleared (the Y button).
+## A fresh start (the player's restart), mirroring sim-core.js: whole engines and pod, full
+## battery, cool engines; the range goes back to its start line, a circuit to its grid with the
+## lap count reset. Crashes still respawn through respawn(), keeping the damage.
 func restart() -> void:
-	pod.x = 30.0
-	pod.y = 0.0
 	crash_t = 0.0
 	finished = false
 	run_active = false
 	run_start = -1.0
 	result = {}
-	respawn()
+	for e in [eL, eR]:
+		e.health = 1.0
+		e.heat = 0.3
+	pod.health = 1.0
+	battery = 1.0
+	if kind == "range":
+		pod.x = 30.0
+		pod.y = 0.0
+		respawn()
+	else:
+		lap = 0
+		lap_start = -1.0
+		visited = {0: true}
+		checkpoint = 0
+		respawn(0)
 
 
-func respawn(ci: int = -1) -> void:
+func respawn(ci: int = -1, at_idx: int = -1) -> void:   # at_idx: a debug start at that track sample (views only)
 	# engines placed so each cable is exactly at length: a stretched spawn makes the stiff
 	# cables yank the pod forward on the first step
 	var lat: float = P.engineGap / 2.0 - P.podAnchorW * P.podWidth / 2.0
@@ -313,6 +476,8 @@ func respawn(ci: int = -1) -> void:
 	else:
 		var c := checkpoint if ci < 0 else ci
 		idx = int(round(float(c) * N / checkpoints)) % N
+		if at_idx >= 0:
+			idx = at_idx % N
 		ax = tpx[idx]
 		ay = tpy[idx]
 		atx = ttx[idx]
@@ -343,6 +508,7 @@ func respawn(ci: int = -1) -> void:
 	if pod.health <= 0.0:
 		pod.health = 1.0
 	binder_broken = false
+	_tow_u = -1.0
 	crash_t = 0.0
 	progress_i = idx
 
@@ -367,14 +533,17 @@ func _collide_walls(b: Body, circles: Array, dt: float) -> void:
 		var vy := _pvy
 		var vn := vx * nx + vy * ny
 		if not b.contact[ci]:
-			var dmg: float = P.damagePerMs * maxf(0.0, -vn - 6.0)
-			if b == pod:
-				pod.health -= dmg
-			else:
-				b.health = maxf(0.0, b.health - dmg)
+			var dmg: float = P.damagePerMs * maxf(0.0, -vn - P.wallDmgMin)
+			if P.damage:   # off by default (Luke): a hit still registers (and buzzes), it just costs nothing
+				if b == pod:
+					pod.health -= dmg
+				else:
+					b.health = maxf(0.0, b.health - dmg)
+			var who := "pod" if b == pod else ("L" if b == eL else "R")
 			if dmg > 0.05:
-				var who := "pod" if b == pod else ("L" if b == eL else "R")
 				events.append({"type": "hit", "who": who, "dmg": dmg})
+			else:
+				events.append({"type": "scrape", "who": who})   # contact without (much) damage
 			b.contact[ci] = true
 		var fn: float = P.wallK * pen - (P.wallC * vn if vn < 0.0 else 0.0)
 		var tx := -ny
@@ -613,8 +782,88 @@ func step(inp: Dictionary, dt: float) -> void:
 		L.fy -= ft * ly / 2.0
 		R.fx -= ft * lx / 2.0
 		R.fy -= ft * ly / 2.0
-		Pd.t -= P.podAlignK * wrap_angle(Pd.th - pair_th) + P.podYawDamp * (Pd.w - wpair)
+		# Stand-off: the pod never closes on the engines past its taut-cable spot. Brake hard (or
+		# spin the pair) and the cables go slack: without this the pod flew on into the engines
+		# and knocked them about (Luke: "the pod flies forward and throws the engines off
+		# balance"). Compression only (the cables already pull), along the pair's axis through
+		# its centre, equal and opposite on the engines: it can't twist them or make energy.
+		# (its spot: where the diagonal cables are just taut, as respawn() lays them out, plus a
+		# little slack, so it only ever meets a real overrun and never fights the cables)
+		var lat_c: float = P.engineGap / 2.0 - P.podAnchorW * P.podWidth / 2.0
+		var rest: float = sqrt(P.cableLen * P.cableLen - lat_c * lat_c) + P.podLen / 2.0 + P.engineLen / 2.0
+		var el: float = (Pd.x - tx) * pf + (Pd.y - ty) * ps2 - (back - rest) - P.towLongSlack
+		if el > 0.0 and P.towLongK > 0.0:
+			var elv := (Pd.vx - (L.vx + R.vx) / 2.0) * pf + (Pd.vy - (L.vy + R.vy) / 2.0) * ps2
+			var fl: float = minf(0.0, -P.towLongK * el - P.towLongC * elv)
+			Pd.fx += fl * pf
+			Pd.fy += fl * ps2
+			L.fx -= fl * pf / 2.0
+			L.fy -= fl * ps2 / 2.0
+			R.fx -= fl * pf / 2.0
+			R.fy -= fl * ps2 / 2.0
+		var pod_tw: float = P.podAlignK * wrap_angle(Pd.th - pair_th) + P.podYawDamp * (Pd.w - wpair)
+		Pd.t -= pod_tw
+		# Energy audit. The tow bar is one-way on purpose (the pod follows the engines without
+		# yawing them back: that trailer feedback made the pair sway), so its pull and the pod's
+		# twist have no equal and opposite, and that let it create energy: the pod whirled round a
+		# pivoting pair, or swung by a spinning one after wall hits, gained speed from nothing and
+		# the craft pinballed (pod 159 -> 495 km/h coasting with no thrust). So each substep,
+		# whatever power these forces put in beyond what their springs gave up is taken back out.
+		# Normal flight is untouched (yaw response, coast-down and the GP lap identical), and it
+		# can never add energy (tests/test_energy.gd).
+		if P.towAudit:
+			var mvx := (L.vx + R.vx) / 2.0
+			var mvy := (L.vy + R.vy) / 2.0
+			var p_in: float = ft * ((Pd.vx - mvx) * lx + (Pd.vy - mvy) * ly) - pod_tw * Pd.w
+			var dth := wrap_angle(Pd.th - pair_th)
+			var u: float = 0.5 * P.towK * te * te + 0.5 * P.podAlignK * dth * dth
+			if _tow_u >= 0.0:
+				var created: float = p_in + (u - _tow_u) / dt
+				if created > 0.0:
+					# Where it comes out depends on where the craft's energy is. Travelling (nearly
+					# all of it is speed down the track), it comes out of the speed, gently (never
+					# past towAuditG); taking it out of the swing there would deaden the steering,
+					# since every yaw step swings the pod. Whirling (much of it is swing and spin
+					# about the centre of mass: the pod whirled round a pivoting pair, or pinballing
+					# off walls), it comes out of the swing and spin, where it was made.
+					var msum: float = Pd.m + L.m + R.m
+					var cvx: float = (Pd.m * Pd.vx + L.m * L.vx + R.m * R.vx) / msum
+					var cvy: float = (Pd.m * Pd.vy + L.m * L.vy + R.m * R.vy) / msum
+					var ke := 0.0    # speed
+					var rot := 0.0   # spin
+					var kin := 0.0   # swing and spin about the centre of mass
+					for b: Body in [Pd, L, R]:
+						ke += 0.5 * b.m * (b.vx * b.vx + b.vy * b.vy)
+						rot += 0.5 * b.inertia * b.w * b.w
+						kin += 0.5 * b.m * ((b.vx - cvx) * (b.vx - cvx) + (b.vy - cvy) * (b.vy - cvy))
+					kin += rot
+					var c_int: float = created * smoothstep(P.towIntF0, P.towIntF1, kin / maxf(ke + rot, 1.0))
+					var c_lin: float = created - c_int
+					if c_int > 0.0 and kin > 1.0:
+						var gi: float = minf(c_int / (2.0 * kin), P.towIntMax)
+						for b: Body in [Pd, L, R]:
+							b.fx -= gi * b.m * (b.vx - cvx)
+							b.fy -= gi * b.m * (b.vy - cvy)
+							b.t -= gi * b.inertia * b.w
+					if c_lin > 0.0 and ke > 1.0:
+						var vrms: float = sqrt(2.0 * ke / msum)
+						var gam: float = minf(c_lin / (2.0 * ke), P.towAuditG * G / maxf(vrms, 1.0))
+						for b: Body in [Pd, L, R]:
+							b.fx -= gam * b.m * b.vx
+							b.fy -= gam * b.m * b.vy
+			_tow_u = u
 
+	# Banked corners: the surface tilts toward the inside, so its push has a part toward the
+	# corner's centre: gravity's (g tan bank) plus downforce's (bankDown v^2 sin bank).
+	if track_name == "gp":
+		for b: Body in bodies:
+			var bk: float = tb[b.hint]
+			if bk == 0.0:
+				continue
+			var v2 := b.vx * b.vx + b.vy * b.vy
+			var fb: float = P.bank * b.m * (G * tan(bk) + P.bankDown * v2 * sin(bk)) * b.grip
+			b.fx += fb * tnx[b.hint]
+			b.fy += fb * tny[b.hint]
 	var cl := _engine_circles(L)
 	var cr := _engine_circles(R)
 	var cp := [[Pd.x, Pd.y, 1.6]]

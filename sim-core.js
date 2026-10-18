@@ -20,13 +20,44 @@
     yawDamp: 150000, podYawDamp: 50000, podAlignK: 1e6, towK: 1e6, towC: 40000,
     cableLen: 16, cableK: 600000, cableC: 30000, cableCouple: 0.2, podAnchorW: 0.15,
     binderK: 3e6, binderC: 70000, alignK: 2e7, alignC: 6e5, binderBreak: 3.0,
-    wallK: 6e6, wallC: 1.5e5, wallMu: 0.35,
+    wallK: 6e6, wallC: 1.5e5, wallMu: 0.35, wallDmgMin: 6,   // impacts below wallDmgMin m/s (into the wall) do no damage
+    damage: false,   // wall hits cost health (and can wreck you) only when this is on
+    towLongK: 2e6, towLongC: 8e4, towLongSlack: 0.3,   // pod stand-off: never closer to the engines than its taut-cable spot
+    bank: 1, bankDown: 3.9e-4,   // banked corners: downforce per (m/s)^2, as g, presses you into the bank (~8 g at 1,000 mph)
+    towAudit: true, towAuditG: 3,   // tow-bar energy audit: drag on the speed, never harder than this (g) ...
+    towIntF0: 0.05, towIntF1: 0.3, towIntMax: 60,   // ... shifting onto the swing and spin as their share of the energy grows
     heatThrottle: 0.15, heatBurner: 0.12, heatRamjet: 0.35, coolBase: 0.05, coolSpeed: 0.10,
     batteryDrain: 0.08, batteryCharge: 0.05, repairRate: 0.12, damagePerMs: 0.012,
     rideH: 1.5, hoverOmega: 9, hoverZeta: 0.9,
     binderKz: 3e6, binderCz: 60000, towKz: 2e5, towCz: 16000,
-    track: 'circuit', startX: 0, startY: 0,
+    track: 'circuit', startX: 0, startY: 0, handling: 'speed',
     seed: 1337
+  };
+
+  // Handling modes: named overrides on top of DEFAULTS (explicit overrides still win).
+  // speed: the v3 model above, built for the 100-mile sprint.
+  // starfighter (2026-10-17, retuned per Luke: "top out at maybe 1200"): tight. Less thrust and
+  // more drag cap it at ~990 mph on the lever and 1,200 on the burner (still supersonic); 50 g
+  // grip, light yaw damping and small fins bring the nose round ~56 deg/s at 320 mph and ~60
+  // flat out; a stiffer tow bar keeps pod sway under 3 deg.
+  // tools/handling_test.js '{"handling":"starfighter"}' measures it.
+  // Track settings: named overrides per track, on top of DEFAULTS and the handling (explicit
+  // overrides still win). The GP's walls deflect rather than wreck (Luke, 2026-10-17): at
+  // ~1,000 mph even a shallow scrape meets the wall at 30-60 m/s, which the circuit's rule
+  // (damage above 6 m/s) turned into a wrecked engine. On the GP only impacts harder than
+  // 25 m/s into the wall do damage, a third as much, and lower wall friction lets you slide
+  // off: a scrape costs speed, not health.
+  const TRACKS = {
+    gp: { wallDmgMin: 25, damagePerMs: 0.004, wallMu: 0.22 }
+  };
+
+  const HANDLING = {
+    speed: {},
+    starfighter: {
+      thrustMax: 180000, engineCd: 0.725, podCd: 0.3625,
+      gripCapG: 50, engineGrip: 90, podGrip: 30, podCapG: 30, finK: 3, yawDamp: 20000,
+      podAlignK: 6e6, podYawDamp: 250000, towK: 5e6, towC: 200000
+    }
   };
 
   // The range: 100 miles of open desert. Speed runway along y = 0, a jump lane at
@@ -65,6 +96,8 @@
   const G = 9.81;
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+  // as Godot's smoothstep, so the two sims stay bit-identical
+  const smoothstep = (a, b, x) => { const s = Math.min(Math.max((x - a) / (b - a), 0), 1); return s * s * (3 - 2 * s); };
 
   function buildTrack() {
     const ctrl = [[0, 0], [900, -100], [1700, 150], [2300, 700], [2400, 1300], [2000, 1700],
@@ -90,6 +123,57 @@
     return { kind: 'circuit', pts, N, length: s, checkpoints: 8 };
   }
 
+  // The grand prix: a 29.3 km circuit built for STARFIGHTER at ~1,000 mph (tools/design_gp.py
+  // designed it: two straights solved so it closes, never within 184 m of itself). Straights and
+  // exact arcs, sampled every ~12 m (arc steps are chords on the circle); 64 m wide; walls as on
+  // the circuit. Braking: T1-T2 (r230), T5 (r380), T6 (r260), the esses (r420), the hairpin (r160).
+  const GP_SEGS = [['S', 2798.158], ['R', 230, 90], ['S', 450], ['L', 230, 90], ['S', 1500], ['L', 1100, 70], ['S', 700],
+    ['R', 600, 40], ['S', 900], ['L', 380, 150], ['S', 1100], ['R', 260, 120], ['S', 700], ['L', 900, 30],
+    ['S', 1278.727], ['L', 500, 90], ['S', 5200], ['R', 420, 40], ['L', 420, 80], ['R', 420, 40], ['S', 1400],
+    ['L', 160, 180], ['S', 500], ['R', 350, 90], ['S', 3200], ['L', 1300, 90]];
+  // 96 m wide, every corner banked to GP_BANK degrees toward its inside (Luke, 2026-10-18: "a
+  // wider, more banked track"), easing in and out over ~360 m (two passes of a 15-sample box).
+  const GP_STEP = 12, GP_WIDTH = 96, GP_BANK = 15, GP_BANK_R = 7;   // bank was 30: "50% smaller"
+  function buildGP() {
+    const pts = [], raw = [];
+    let x = 0, y = 0, h = 0;
+    for (const sg of GP_SEGS) {
+      if (sg[0] === 'S') {
+        const n = Math.max(1, Math.ceil(sg[1] / GP_STEP)), d = sg[1] / n;
+        for (let k = 0; k < n; k++) { pts.push({ x, y }); raw.push(0); x += d * Math.cos(h); y += d * Math.sin(h); }
+      } else {
+        const r = sg[1], sn = sg[0] === 'L' ? 1 : -1, ang = sg[2] * Math.PI / 180;
+        const n = Math.max(1, Math.ceil(r * ang / GP_STEP)), da = ang / n, c = 2 * r * Math.sin(da / 2);
+        for (let k = 0; k < n; k++) {
+          pts.push({ x, y }); raw.push(sn * GP_BANK * Math.PI / 180);
+          x += c * Math.cos(h + sn * da / 2); y += c * Math.sin(h + sn * da / 2); h += sn * da;
+        }
+      }
+    }
+    const bank = smoothBank(smoothBank(raw));
+    for (let i = 0; i < pts.length; i++) pts[i].bank = bank[i];
+    const N = pts.length;
+    let s = 0;
+    for (let i = 0; i < N; i++) {
+      const a = pts[i], b = pts[(i + 1) % N];
+      const dx = b.x - a.x, dy = b.y - a.y, L = Math.hypot(dx, dy);
+      a.tx = dx / L; a.ty = dy / L; a.nx = -a.ty; a.ny = a.tx; a.len = L; a.s = s; s += L;
+      a.w = GP_WIDTH;
+    }
+    return { kind: 'circuit', name: 'gp', pts, N, length: s, checkpoints: 12 };
+  }
+
+  // A centred moving average round the closed loop (box of 2 * GP_BANK_R + 1 samples).
+  function smoothBank(a) {
+    const N = a.length, out = new Array(N);
+    for (let i = 0; i < N; i++) {
+      let acc = 0;
+      for (let k = -GP_BANK_R; k <= GP_BANK_R; k++) acc += a[(((i + k) % N) + N) % N];
+      out[i] = acc / (2 * GP_BANK_R + 1);
+    }
+    return out;
+  }
+
   // Nearest centreline point, searched in a window around a hint index.
   function nearest(T, x, y, hint, win) {
     let best = null, bd = Infinity;
@@ -110,13 +194,15 @@
   function pointVel(b, px, py) { return [b.vx - b.w * (py - b.y), b.vy + b.w * (px - b.x)]; }
 
   function makeSim(overrides) {
-    const P = Object.assign({}, DEFAULTS, overrides || {});
-    const T = P.track === 'range' ? buildRange() : buildTrack();
+    // the grand prix is a STARFIGHTER track unless a handling is asked for
+    const hname = (overrides && overrides.handling) || ((overrides && overrides.track) === 'gp' ? 'starfighter' : DEFAULTS.handling);
+    const P = Object.assign({}, DEFAULTS, HANDLING[hname] || {}, TRACKS[(overrides && overrides.track) || ''] || {}, overrides || {}, { handling: hname });
+    const T = P.track === 'range' ? buildRange() : P.track === 'gp' ? buildGP() : buildTrack();
     const eI = P.engineMass * P.engineLen ** 2 / 12;
     const pI = P.podMass * (P.podLen ** 2 + P.podWidth ** 2) / 12;
     const S = {
       P, T, eL: body(P.engineMass, eI), eR: body(P.engineMass, eI), pod: body(P.podMass, pI),
-      battery: 1, armed: false, mode: 'normal', binderBroken: false, crashT: 0, time: 0,
+      battery: 1, armed: false, mode: 'normal', binderBroken: false, crashT: 0, time: 0, towU: -1,
       lap: 0, lapStart: null, lastLap: null, bestLap: null, visited: new Set(), checkpoint: 0,
       progressI: 0, cables: [{ f: 0 }, { f: 0 }], events: [], rand: xorshift32(P.seed),
       runStart: null, lastRun: null, bestRun: null, finished: false, runActive: false, result: null
@@ -145,7 +231,7 @@
       }
       for (const e of [S.eL, S.eR]) { e.heat = Math.min(e.heat ?? 0.3, 0.5); e.flameout = false; e.health = e.health ?? 1; e.sputter = 1; e.sputterT = 0; }
       S.pod.health = S.pod.health > 0 ? S.pod.health : 1;
-      S.binderBroken = false; S.crashT = 0; S.progressI = idx;
+      S.binderBroken = false; S.towU = -1; S.crashT = 0; S.progressI = idx;
     }
 
     function collideWalls(b, circles, dt) {
@@ -158,9 +244,11 @@
         const sgn = n.lat > 0 ? -1 : 1, nx = n.nx * sgn, ny = n.ny * sgn;
         const [vx, vy] = pointVel(b, cx, cy), vn = vx * nx + vy * ny;
         if (!b.contact[ci]) {
-          const dmg = P.damagePerMs * Math.max(0, -vn - 6);
-          if (b === S.pod) S.pod.health -= dmg; else b.health = Math.max(0, b.health - dmg);
-          if (dmg > 0.05) S.events.push({ type: 'hit', who: b === S.pod ? 'pod' : b === S.eL ? 'L' : 'R', dmg });
+          const dmg = P.damagePerMs * Math.max(0, -vn - P.wallDmgMin);
+          if (P.damage) { if (b === S.pod) S.pod.health -= dmg; else b.health = Math.max(0, b.health - dmg); }
+          const who = b === S.pod ? 'pod' : b === S.eL ? 'L' : 'R';
+          if (dmg > 0.05) S.events.push({ type: 'hit', who, dmg });
+          else S.events.push({ type: 'scrape', who });   // contact without (much) damage: feel it, don't pay for it
           b.contact[ci] = true;
         }
         const fn = P.wallK * pen - (vn < 0 ? P.wallC * vn : 0);
@@ -327,9 +415,75 @@
         const ft = -P.towK * e - P.towC * ev;
         Pd.fx += ft * lx; Pd.fy += ft * ly;
         L.fx -= ft * lx / 2; L.fy -= ft * ly / 2; R.fx -= ft * lx / 2; R.fy -= ft * ly / 2;
-        Pd.t -= P.podAlignK * wrap(Pd.th - S.pairTh) + P.podYawDamp * (Pd.w - wpair);
+        // Stand-off: the pod never closes on the engines past its taut-cable spot (hard or
+        // one-sided braking used to fling it into them). Compression only, along the pair's axis
+        // through its centre, equal and opposite: it can't twist them or make energy.
+        // (its spot: where the diagonal cables are just taut, as respawn lays them out, plus a
+        // little slack, so it only ever meets a real overrun and never fights the cables)
+        const latC = P.engineGap / 2 - P.podAnchorW * P.podWidth / 2;
+        const rest = Math.sqrt(P.cableLen * P.cableLen - latC * latC) + P.podLen / 2 + P.engineLen / 2;
+        const el = (Pd.x - tx) * pf + (Pd.y - ty) * ps2 - (back - rest) - P.towLongSlack;
+        if (el > 0 && P.towLongK > 0) {
+          const elv = (Pd.vx - (L.vx + R.vx) / 2) * pf + (Pd.vy - (L.vy + R.vy) / 2) * ps2;
+          const fl = Math.min(0, -P.towLongK * el - P.towLongC * elv);
+          Pd.fx += fl * pf; Pd.fy += fl * ps2;
+          L.fx -= fl * pf / 2; L.fy -= fl * ps2 / 2; R.fx -= fl * pf / 2; R.fy -= fl * ps2 / 2;
+        }
+        const podTw = P.podAlignK * wrap(Pd.th - S.pairTh) + P.podYawDamp * (Pd.w - wpair);
+        Pd.t -= podTw;
+        // Energy audit (see godot/sim/craft_sim.gd). The tow bar is one-way on purpose, so its
+        // pull and the pod's twist have no equal and opposite, and that let it create energy:
+        // the pod whirled round a pivoting or spinning pair and the craft pinballed. Whatever
+        // power these forces put in beyond what their springs gave up is taken back out: from
+        // the speed when the craft is travelling (gently, never past towAuditG), from the swing
+        // and spin about the centre of mass as their share of the energy grows. Normal flight is
+        // untouched; it can never add energy (godot/tests/test_energy.gd).
+        if (P.towAudit) {
+          const mvx = (L.vx + R.vx) / 2, mvy = (L.vy + R.vy) / 2;
+          const pIn = ft * ((Pd.vx - mvx) * lx + (Pd.vy - mvy) * ly) - podTw * Pd.w;
+          const dth = wrap(Pd.th - S.pairTh);
+          const u = 0.5 * P.towK * e * e + 0.5 * P.podAlignK * dth * dth;
+          if (S.towU >= 0) {
+            const created = pIn + (u - S.towU) / dt;
+            if (created > 0) {
+              const msum = Pd.m + L.m + R.m;
+              const cvx = (Pd.m * Pd.vx + L.m * L.vx + R.m * R.vx) / msum;
+              const cvy = (Pd.m * Pd.vy + L.m * L.vy + R.m * R.vy) / msum;
+              let ke = 0, rot = 0, kin = 0;
+              for (const b of [Pd, L, R]) {
+                ke += 0.5 * b.m * (b.vx * b.vx + b.vy * b.vy);
+                rot += 0.5 * b.I * b.w * b.w;
+                kin += 0.5 * b.m * ((b.vx - cvx) * (b.vx - cvx) + (b.vy - cvy) * (b.vy - cvy));
+              }
+              kin += rot;
+              const cInt = created * smoothstep(P.towIntF0, P.towIntF1, kin / Math.max(ke + rot, 1));
+              const cLin = created - cInt;
+              if (cInt > 0 && kin > 1) {
+                const gi = Math.min(cInt / (2 * kin), P.towIntMax);
+                for (const b of [Pd, L, R]) { b.fx -= gi * b.m * (b.vx - cvx); b.fy -= gi * b.m * (b.vy - cvy); b.t -= gi * b.I * b.w; }
+              }
+              if (cLin > 0 && ke > 1) {
+                const vrms = Math.sqrt(2 * ke / msum);
+                const gam = Math.min(cLin / (2 * ke), P.towAuditG * G / Math.max(vrms, 1));
+                for (const b of [Pd, L, R]) { b.fx -= gam * b.m * b.vx; b.fy -= gam * b.m * b.vy; }
+              }
+            }
+          }
+          S.towU = u;
+        }
       }
 
+      // Banked corners: the surface tilts toward the inside, so its push has a part toward the
+      // corner's centre: gravity's (g tan bank) plus downforce's (bankDown v^2 sin bank).
+      if (T.name === 'gp') {
+        for (const b of S.bodies) {
+          const a = T.pts[b.hint], bk = a.bank;
+          if (bk === 0) continue;
+          const v2 = b.vx * b.vx + b.vy * b.vy;
+          const f = P.bank * b.m * (G * Math.tan(bk) + P.bankDown * v2 * Math.sin(bk)) * b.grip;
+          b.fx += f * a.nx; b.fy += f * a.ny;
+        }
+      }
       const cL = engineCircles(L), cR = engineCircles(R), cP = [[Pd.x, Pd.y, 1.6]];
       if (T.kind === 'circuit') { collideWalls(L, cL, dt); collideWalls(R, cR, dt); collideWalls(Pd, cP, dt); }
       bodyPush(L, cL, Pd, cP); bodyPush(R, cR, Pd, cP); bodyPush(L, cL, R, cR);
@@ -377,10 +531,15 @@
     }
 
     // Range: back to the start line, run cleared (the Y button).
+    // A fresh start (the player's restart): whole engines and pod, full battery, cool engines;
+    // the range goes back to its start line, a circuit to its grid with the lap count reset.
+    // Crashes still respawn through respawn(), keeping the damage.
     function restart() {
-      S.pod.x = 30; S.pod.y = 0; S.crashT = 0; S.finished = false;
-      S.runActive = false; S.runStart = null; S.result = null;
-      respawn();
+      S.crashT = 0; S.finished = false; S.runActive = false; S.runStart = null; S.result = null;
+      for (const e of [S.eL, S.eR]) { e.health = 1; e.heat = 0.3; }
+      S.pod.health = 1; S.battery = 1;
+      if (T.kind === 'range') { S.pod.x = 30; S.pod.y = 0; respawn(); }
+      else { S.lap = 0; S.lapStart = null; S.visited = new Set([0]); S.checkpoint = 0; respawn(0); }
     }
 
     S.pod.x = P.startX + 30; S.pod.y = P.startY;   // range spawn point (respawn backs off 30 m)
@@ -390,5 +549,5 @@
       box: { x: BOX_X, half: BOX_HALF, overrun: OVERRUN } };
   }
 
-  window.PhaethonSim = { makeSim, DEFAULTS, xorshift32 };
+  window.PhaethonSim = { makeSim, DEFAULTS, HANDLING, TRACKS, xorshift32 };
 })();

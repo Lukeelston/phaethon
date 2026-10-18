@@ -4,6 +4,8 @@
 extends Node3D
 
 const Sim := preload("res://sim/craft_sim.gd")
+const Kit := preload("res://view/mesh_kit.gd")
+const RouteScript := preload("res://view/route_features.gd")
 
 const CHUNK := 2000.0
 const AHEAD := 14000.0
@@ -18,17 +20,26 @@ const LAMBDA1 := 700.0    # ... tightening to this by mile 100
 const RAMP_NAMES := {3.0: "SMALL  3 m", 6.0: "MEDIUM  6 m", 10.0: "LARGE  10 m", 15.0: "HUGE  15 m"}
 const COUNTDOWN_MI := [20, 15, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1]   # miles to the stop box
 const COUNTDOWN_M := [1000, 500, 250, 100]                      # metres to the stop box
+const POST_Y := RUNWAY_HALF + 4.0   # marker poles both sides of the runway, every 50 m
+const POST_DX := 50.0
+const POLE_Y := -110.0              # telegraph line south of the runway
+const POLE_DX := 50.0
+const WIRE_Z := [-1.1, 0.0, 1.1]    # three wires across the crossarm
+const HWY_Y := -950.0               # traffic corridors (TrafficView drives on them)
+const RAIL_Y := 700.0
 
 var sim
 var view
 var chunks := {}
 var mats := {}
+var route   # overpasses and landmarks (view/route_features.gd)
 
 
 func build(s, v) -> void:
 	sim = s
 	view = v
-	mats.runway = v._mat(Color(0.66, 0.55, 0.40))
+	route = RouteScript.new()
+	mats.runway = v._grain(Color(0.66, 0.55, 0.40), 0.0)   # grain under you: the nearest speed cue
 	mats.line = v._mat(Color(0.96, 0.94, 0.88))
 	mats.jump = v._mat(Color(0.95, 0.55, 0.15))
 	mats.ramp = v._mat(Color(0.40, 0.37, 0.35))
@@ -36,6 +47,14 @@ func build(s, v) -> void:
 	mats.rock = v._mat(Color(0.55, 0.42, 0.28))
 	mats.post = v._mat(Color(0.18, 0.19, 0.21))
 	mats.box_fill = v._mat(Color(0.78, 0.22, 0.12))
+	mats.white = v._mat(Color(0.92, 0.92, 0.9))
+	mats.reflect = v._mat(Color(1.0, 0.55, 0.1), true)
+	mats.wood = v._mat(Color(0.33, 0.24, 0.17))
+	mats.wire = v._mat(Color(0.08, 0.08, 0.09), true)
+	mats.asphalt = v._mat(Color(0.24, 0.23, 0.22))
+	mats.ballast = v._mat(Color(0.45, 0.41, 0.37))
+	mats.rail = v._mat(Color(0.5, 0.5, 0.52))
+	mats.strata = Kit.vertex_colors()
 
 
 ## Centreline of the twisty lane: sweepers whose wavelength shrinks linearly with distance.
@@ -45,7 +64,8 @@ static func twist_y(x: float) -> float:
 	return TWIST_Y + TWIST_AMP * sin(phase)
 
 
-func sync(ox: float, oy: float) -> void:
+func sync(ox: float, oy: float, t := 0.0) -> void:
+	route.animate(t)
 	var last := int(ceil((Sim.RANGE_LEN + Sim.OVERRUN) / CHUNK))   # runway runs on through the overrun zone
 	var lo := maxi(-1, int(floor((ox - BEHIND) / CHUNK)))
 	var hi := mini(last, int(floor((ox + AHEAD) / CHUNK)))
@@ -140,6 +160,32 @@ func _make_chunk(idx: int) -> Node3D:
 	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	node.add_child(mmi)
 
+	_roadside(node, cx, x0, x1)
+
+	# the highway and the railway the traffic runs on
+	var road := SurfaceTool.new()
+	road.begin(Mesh.PRIMITIVE_TRIANGLES)
+	_quad(road, x0, x1, HWY_Y - 7.5, HWY_Y + 7.5, 0.02)
+	_mesh(node, road, mats.asphalt)
+	var bed := SurfaceTool.new()
+	bed.begin(Mesh.PRIMITIVE_TRIANGLES)
+	_quad(bed, x0, x1, RAIL_Y - 2.6, RAIL_Y + 2.6, 0.04)
+	_mesh(node, bed, mats.ballast)
+	var steel := SurfaceTool.new()
+	steel.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for s in [-1.0, 1.0]:
+		_quad(steel, x0, x1, RAIL_Y + s * 0.72 - 0.04, RAIL_Y + s * 0.72 + 0.04, 0.2)
+	_mesh(node, steel, mats.rail)
+	var lanes := SurfaceTool.new()
+	lanes.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for s in [-1.0, 1.0]:
+		_quad(lanes, x0, x1, HWY_Y + s * 6.8 - 0.12, HWY_Y + s * 6.8 + 0.12, 0.03)
+	var hd := ceilf((cx + x0) / 12.0) * 12.0 - cx
+	while hd < x1:
+		_quad(lanes, hd, minf(hd + 3.0, x1), HWY_Y - 0.1, HWY_Y + 0.1, 0.03)
+		hd += 12.0
+	_mesh(node, lanes, mats.line)
+
 	# mile signs between the runway and the jump lane
 	var m := int(ceil((cx + x0) / MILE))
 	while m * MILE < cx + x1:
@@ -163,21 +209,14 @@ func _make_chunk(idx: int) -> Node3D:
 	if box_lx >= -Sim.BOX_HALF and box_lx < CHUNK + Sim.BOX_HALF:
 		_stop_box(node, box_lx)
 
+	_spires(node, idx, cx, x0, x1)
+	route.build_chunk(node, cx, x0, x1)
+
 	# rocks: a speed cue off the lanes, deterministic per chunk
-	var rng := RandomNumberGenerator.new()
-	rng.seed = 9001 + idx
+	var placed := rock_xforms(idx, cx, x0, x1)
 	var rocks := MultiMesh.new()
 	rocks.transform_format = MultiMesh.TRANSFORM_3D
 	rocks.mesh = BoxMesh.new()
-	var placed: Array[Transform3D] = []
-	while placed.size() < 160:
-		var lx := rng.randf_range(x0, x1)
-		var y := rng.randf_range(-1800.0, 1800.0)
-		if absf(y) < RUNWAY_HALF + 20.0 or absf(y - Sim.JUMP_Y) < 50.0 or absf(y - twist_y(cx + lx)) < 60.0:
-			continue
-		var sz := rng.randf_range(0.6, 4.0)
-		var b := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(sz, sz * rng.randf_range(0.4, 1.2), sz * rng.randf_range(0.6, 1.4)))
-		placed.append(Transform3D(b, Vector3(lx, sz * 0.3, -y)))
 	rocks.instance_count = placed.size()
 	for i in placed.size():
 		rocks.set_instance_transform(i, placed[i])
@@ -187,6 +226,131 @@ func _make_chunk(idx: int) -> Node3D:
 	rmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	node.add_child(rmi)
 	return node
+
+
+## Rock placements for chunk idx (chunk-local), clear of every lane, corridor and route
+## feature. Deterministic per chunk; tests/test_route.gd checks them.
+func rock_xforms(idx: int, cx: float, x0: float, x1: float) -> Array[Transform3D]:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 9001 + idx
+	var placed: Array[Transform3D] = []
+	while placed.size() < 160:
+		var lx := rng.randf_range(x0, x1)
+		var y := rng.randf_range(-1800.0, 1800.0)
+		if absf(y) < RUNWAY_HALF + 20.0 or absf(y - Sim.JUMP_Y) < 50.0 or absf(y - twist_y(cx + lx)) < 60.0 				or absf(y - POLE_Y) < 8.0 or absf(y - HWY_Y) < 25.0 or absf(y - RAIL_Y) < 15.0 				or route.blocked(cx + lx, y, 8.0):
+			continue
+		var sz := rng.randf_range(0.6, 4.0)
+		var b := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(sz, sz * rng.randf_range(0.4, 1.2), sz * rng.randf_range(0.6, 1.4)))
+		placed.append(Transform3D(b, Vector3(lx, sz * 0.3, -y)))
+	return placed
+
+
+## Sandstone spires and mesas out in the desert, 0.7-4.5 km off the runway either side, clear
+## of every lane and corridor: big parallax, so the middle distance moves too. One mesh per
+## chunk, banded in strata.
+func _spires(node: Node3D, idx: int, cx: float, x0: float, x1: float) -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 4040 + idx
+	var bands := [Color(0.62, 0.38, 0.24), Color(0.74, 0.52, 0.33), Color(0.68, 0.45, 0.29), Color(0.82, 0.64, 0.44)]
+	var parts := []
+	var tries := 0
+	var placed := 0
+	while placed < 5 and tries < 40:
+		tries += 1
+		var lx := rng.randf_range(x0, x1)
+		var y := rng.randf_range(700.0, 4500.0) * (1.0 if rng.randf() < 0.5 else -1.0)
+		if absf(y - HWY_Y) < 140.0 or absf(y - RAIL_Y) < 100.0 or absf(y - twist_y(cx + lx)) < 160.0 \
+				or route.blocked(cx + lx, y, 260.0):
+			continue
+		placed += 1
+		var mesa := rng.randf() < 0.3
+		var h := rng.randf_range(40.0, 110.0) if mesa else rng.randf_range(60.0, 230.0)
+		var r_bot := rng.randf_range(110.0, 240.0) if mesa else rng.randf_range(10.0, 26.0)
+		var r_top := r_bot * (rng.randf_range(0.7, 0.85) if mesa else rng.randf_range(0.25, 0.45))
+		var segs := 7 if mesa else 6
+		var spin := rng.randf() * TAU
+		var nb := 3 if mesa else 4
+		var z0 := 0.0
+		for b in nb:
+			var f0 := float(b) / nb
+			var f1 := float(b + 1) / nb
+			var ra := lerpf(r_bot, r_top, f0)
+			var rb := lerpf(r_bot, r_top, f1)
+			var bh := h / nb
+			parts.append([Kit.cyl(rb, ra, bh, segs), Kit.at(Vector3(lx, z0 + bh / 2.0, -y), Vector3(0, spin, 0)),
+				bands[(b + idx) % bands.size()]])
+			z0 += bh
+		if not mesa:   # hoodoo cap: a harder slab, wider than the neck under it
+			parts.append([Kit.cyl(r_top * 1.5, r_top * 1.3, h * 0.06, 6), Kit.at(Vector3(lx, h + h * 0.03, -y), Vector3(0, spin + 0.3, 0)),
+				Color(0.5, 0.33, 0.22)])
+	if parts.is_empty():
+		return
+	var mi := MeshInstance3D.new()
+	mi.mesh = Kit.compound(parts)
+	mi.material_override = mats.strata
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	node.add_child(mi)
+
+
+## Things at a known spacing beside the runway, so speed reads as a rate: 3 m marker poles
+## with reflector tops every 50 m on both edges, and a telegraph line (poles every 50 m, three sagging wires).
+func _roadside(node: Node3D, cx: float, x0: float, x1: float) -> void:
+	var first := ceilf((cx + x0) / POST_DX) * POST_DX - cx
+	var xs: Array[float] = []
+	var x := first
+	while x < x1:
+		xs.append(x)
+		x += POST_DX
+	var body := BoxMesh.new()
+	body.size = Vector3(0.22, 3.0, 0.22)
+	var cap := BoxMesh.new()
+	cap.size = Vector3(0.26, 0.7, 0.26)
+	var posts: Array[Transform3D] = []
+	var caps: Array[Transform3D] = []
+	for px in xs:
+		for sy in [-POST_Y, POST_Y]:
+			posts.append(Transform3D(Basis(), Vector3(px, 1.5, -sy)))
+			caps.append(Transform3D(Basis(), Vector3(px, 2.75, -sy)))
+	_multi(node, body, posts, mats.white)
+	_multi(node, cap, caps, mats.reflect)
+
+	var pole := CylinderMesh.new()
+	pole.top_radius = 0.12
+	pole.bottom_radius = 0.17
+	pole.height = 11.0
+	pole.radial_segments = 8
+	var arm := BoxMesh.new()
+	arm.size = Vector3(0.14, 0.14, 2.7)
+	var poles: Array[Transform3D] = []
+	var arms: Array[Transform3D] = []
+	for px in xs:
+		poles.append(Transform3D(Basis(), Vector3(px, 5.5, -POLE_Y)))
+		arms.append(Transform3D(Basis(), Vector3(px, 10.3, -POLE_Y)))
+	_multi(node, pole, poles, mats.wood)
+	_multi(node, arm, arms, mats.wood)
+	var wires := SurfaceTool.new()
+	wires.begin(Mesh.PRIMITIVE_LINES)
+	for px in xs:   # each pole strings its span to the next, even across the chunk edge
+		for wz in WIRE_Z:
+			for k in 6:
+				for e in [k, k + 1]:
+					var u: float = e / 6.0
+					wires.add_vertex(Vector3(px + u * POLE_DX, 10.45 - 3.2 * u * (1.0 - u), -POLE_Y + wz))
+	_mesh(node, wires, mats.wire)
+
+
+func _multi(node: Node3D, mesh: Mesh, xf: Array[Transform3D], mat: Material) -> void:
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.mesh = mesh
+	mm.instance_count = xf.size()
+	for i in xf.size():
+		mm.set_instance_transform(i, xf[i])
+	var mmi := MultiMeshInstance3D.new()
+	mmi.multimesh = mm
+	mmi.material_override = mat
+	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	node.add_child(mmi)
 
 
 ## Kicker wedge in chunk-local coordinates: 1:slope face up to h, 45-degree back face.
