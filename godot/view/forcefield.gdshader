@@ -45,7 +45,7 @@ void fragment() {
 	}
 	vec3 d = normalize(lp);
 	float facing = abs(dot(normalize(NORMAL), normalize(VIEW)));
-	float rim = pow(1.0 - facing, 3.0);
+	float rim = pow(max(1.0 - facing, 0.0), 3.0);   // max: pow() of a hair under 0 is NaN (MSAA edges)
 	// the bow: a ring round the nose (local -z), brightest 15-40 deg off the axis, clear dead ahead
 	float off = acos(clamp(-d.z, -1.0, 1.0));
 	float bow = smoothstep(0.12, 0.3, off) * (1.0 - smoothstep(0.45, 1.0, off));

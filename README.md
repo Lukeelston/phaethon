@@ -128,7 +128,7 @@ The lap starts with a 2.8 km main straight into the T1-T2 braking drop (~510 mph
 
 New: thrust-vectoring vanes in the nozzle that swing with your steering, side intake louvres, top exhaust ports, coolant louvres, raised access covers with rivets, lights (red and green nav lights, a double-flash fin strobe, tail and landing lights, cyan repulsor underglow), and an upgraded energy binder: ring emitters on the inner faces, with a core beam and three crackling strands that shift toward violet as the binder strains. They bank and pitch with the turns and the track.
 
-**Hard braking.** The pod keeps its place behind the engines. Brake hard, or spin the pair, and the cables go slack, so a stand-off pushes back if the pod closes in past its taut-cable spot. It acts along the engines' centreline, compression only, equal and opposite, so it can't twist them or create energy. The grips magnet like the triggers, so nearly-even hands brake exactly evenly. Above 300 mph the difference between your grips fades as (300 mph / speed)²: a one-hand brake at 900 mph slows you and turns you about 40°, where it used to spin you 150° and fling the pod into the engines (`tests/test_brakes.gd`). The cables flex: they sag with their slack and sway and twang when their tension jumps. Their glow follows their engine's thrust and turns amber, then pulsing red, as their tension nears its limit. **Banked corners.** Every GP corner banks up to 15° toward its inside (it was 30°), easing in and out over about 360 m. The corners pivot on the inside edge, so that edge stays at ground level and the outside climbs up to 26 m on an earth berm. The banking is real physics in both sims: the surface pushes you toward the corner's centre with g·tan(bank), plus a downforce term that grows with speed squared (`bankDown`). In the big sweepers at 1,000 mph that's about 4–5 g of help; in the hairpins it's under 1 g. The craft and cockpit ride up the banking, roll with it on top of the lean (capped at 70° in total), and pitch with its rise and fall. Trackside: 96 m of asphalt, kerbs on every apex, and tall walls where the sim's walls are, so you can read where the track goes. Each wall is concrete topped with panels to 5.5 m, with a lit strip along the top: red on the left wall and green on the right, like navigation lights. Yellow chevrons on the outside wall of every corner start 120 m before it and point the way it turns. A lit mast every 96 m shows the line over the inside wall. There are braking boards at 3000/2000/1000 ft before the slow corners (raised above the walls), turn numbers, a start gantry and grandstands. The pod's nose is an open tube cage from the footwell forward, so you can see the track coming through it. Inside the cockpit there's a grated deck plate, a footrest bar and pedals out over the cage, frame ribs and coloured hoses along the walls, and a switch console down each side with toggles, backlit buttons and placards. A gate plate sits round each throttle lever, with the burner gate in orange, and there's a harness on the seat. A light strip runs just under the rim, coloured by mode: blue, amber on the burner, violet on the ramjet (`vr/cockpit_interior.gd`). The pod rides 0.4 m higher than the sim's body, which is a visual change only, and in VR you sit in it with your eyes a little above the cockpit rim (raised 12 cm: "view higher by default"). The tow cables glow with their own engine's real thrust. They're dark at idle, energized blue as thrust rises, and white-hot and crackling on the burner. A damaged engine's sputter flickers its cable, and a flameout goes dark. The lap record is saved per handling.
+**Hard braking.** The pod keeps its place behind the engines. Brake hard, or spin the pair, and the cables go slack, so a stand-off pushes back if the pod closes in past its taut-cable spot. It acts along the engines' centreline, compression only, equal and opposite, so it can't twist them or create energy. The grips magnet like the triggers, so nearly-even hands brake exactly evenly. Above 300 mph the difference between your grips fades as (300 mph / speed)²: a one-hand brake at 900 mph slows you and turns you about 40°, where it used to spin you 150° and fling the pod into the engines (`tests/test_brakes.gd`). The cables flex: they sag with their slack and sway and twang when their tension jumps. Their glow follows their engine's thrust and turns amber, then pulsing red, as their tension nears its limit. **Banked corners.** Every GP corner banks up to 15° toward its inside (it was 30°), easing in and out over about 360 m. The corners pivot on the inside edge, so that edge stays at ground level and the outside climbs up to 26 m on an earth berm. The banking is real physics in both sims: the surface pushes you toward the corner's centre with g·tan(bank), plus a downforce term that grows with speed squared (`bankDown`). In the big sweepers at 1,000 mph that's about 4–5 g of help; in the hairpins it's under 1 g. The craft and cockpit ride up the banking, roll with it on top of the lean (capped at 70° in total), and pitch with its rise and fall. Trackside: 96 m of asphalt, kerbs on every apex, and tall walls where the sim's walls are, so you can read where the track goes. Each wall is concrete topped with panels to 5.5 m, with a lit strip along the top: red on the left wall and green on the right, like navigation lights. Yellow chevrons on the outside wall of every corner start 120 m before it and point the way it turns. A lit mast every 96 m shows the line over the inside wall. There are braking boards at 3000/2000/1000 ft before the slow corners (raised above the walls), turn numbers, a start gantry and grandstands. The pod's nose is an open tube cage from the footwell forward, so you can see the track coming through it. Inside the cockpit there's a grated deck plate, a footrest bar and pedals out over the cage, frame ribs and coloured hoses along the walls, and a switch console down each side with toggles, backlit buttons and placards. A gate plate sits round each throttle lever, with the burner gate in orange, and there's a harness on the seat. A light strip runs just under the rim, coloured by mode: blue, amber on the burner, violet on the ramjet (`vr/cockpit_interior.gd`). The pod rides 1.3 m higher than the sim's body ("higher than the engines just a little bit more - a few feet": it was 0.4). That's a visual change only, and in VR your eye rides up with it, a little above the cockpit rim and further over the engines. The tow cables glow with their own engine's real thrust. They're dark at idle, energized blue as thrust rises, and white-hot and crackling on the burner. A damaged engine's sputter flickers its cable, and a flameout goes dark. The lap record is saved per handling.
 
 `tools/design_gp.py` designed the layout. It solves two straights so the loop closes, keeps the track 184 m clear of itself, and plots the result. The scripted pilot laps it clean in 81.2 s (top 991 mph on the lever alone, 806 mph average). The GP parity gate replays that lap in Godot exactly.
 
@@ -170,6 +170,25 @@ into the river Eridanus; the course runs down its valley.
   the walls, and their numbers sat inside the boards themselves, hidden.) A STARFIGHTER ZONE
   gantry spans each town's mouth, and a SPEEDCRAFT gantry marks where the loop begins. Flip the
   MODE switch at the boards: it waits for the speed, then blends in.
+- **The speed guide** (Luke: "a series of variable lights that tell you how close you're gonna
+  cut it ... a 'proximity sensor' to the line of least wrecks"; `view/speed_guide.gd`). Every
+  track sample has a safe speed: the limits the autopilot plans its clean lap to, with 1,200 mph
+  or less in the towns so STARFIGHTER can engage. Full braking is modelled from the sim's own
+  drag for the live handling: the air brakes, the front speed brakes above 1,500 mph, and
+  STARFIGHTER's drag below 1,250 mph, since you flip as you slow. It stops within 1% of the sim:
+  4,000 to 1,250 mph is 4.10 mi in the sim and 4.11 mi in the guide. For any point ahead, the
+  guide works out the share of full braking it takes to be down to that point's safe speed when
+  you get there.
+  - **The beacons and light columns** light by that share for their own point: green where your
+    speed is safe, amber from 0.6 (brake now), red when even full brakes won't make it. Out of
+    reach (30 km) or behind you, they're white. The wall strips are white now too, so red and
+    green only ever mean the guide.
+  - **The braking boards** light the same way for the town ahead (the worst over its first
+    2 mi), blink red when you'll blow past it, and fill a ten-lamp gauge, one lamp per tenth of
+    full braking. At 4,000 mph the 8-mile board reads green (0.53) and the 4-mile board red
+    (1.06); at 2,000 mph the 4-mile board is green (0.38).
+  - The autopilot's clean lap never needs more than 0.89 for a town, so the guide doesn't cry
+    wolf (`tests/test_speed_guide.gd`).
 
 The world round it is green: a blue-grey haze and clearer air (fog 0.0002 against 0.00035), and
 the river, with poplar lines down its banks and both bridges where the track crosses it. There's
@@ -193,6 +212,51 @@ python tools/design_eridanus.py godot/shots/eridanus_layout.png   # layout, clos
 python tools/sync_eridanus.py                                     # write the solved segments into both sims
 node tools/record_course.js sim-core.js godot/tests/replay        # autopilot lap + parity reference
 .\launch_vr.ps1 -Track eridanus -WaitForHeadset
+```
+
+## The emergency run (Eridanus)
+
+The first job with stakes (Luke: "I wanna drive the emergency one so the speed feels like it means
+something"). The world it lives in is `docs/lore.md`: twin suns, a lethal day, a dawn line sweeping
+the ground at 1,000 mph, nothing flies, and information has to be carried. The lake town has had a
+mine collapse; you carry the medical team out and get home before the dawn.
+
+- **The run.** The briefing is on the dash: `EMERGENCY  LAKE TOWN MINE  DAWN m:ss`. The clock starts
+  when you push the levers (you're SPEED AUTHORIZED; the shade line opens). Out to the lake town's
+  medical pad (a lit red-and-white box with a red cross), stop on it and hold 1.5 s (`HOLD`), then
+  home (`HOME  DAWN m:ss`). The result: `MADE IT  +m.m s  (OPEN)` or `(SHADE LINE)`, against your
+  best (`user://eridanus_emergency_best.json`), or `CAUGHT BY THE DAWN`, and the view burns white.
+- **The dawn** is a straight front that lights the lake town first and sweeps across the valley
+  toward the start town; on the final straight home you're flying toward it. It's always visible: a wall of light on the
+  horizon (shafts standing up from a hot line on the ground, `view/dawn.gd`), the suns' glow under
+  that horizon growing as it nears, the land behind it lit, and its line and countdown on the
+  minimap. It only catches you in the open: the towns, the covered ramps and the shade line's
+  canopy are shelter. Tuned by `tools/tune_dawn.js` against the autopilot's runs: the open loop
+  makes it by 5.0 s, the shade line by 3.6 s, a run 6 s slower on the pad is caught, and the lake
+  town stays dark 16.8 s after the drop.
+- **The covered ramps** (Luke: "a 'receiving' and 'outgoing' onramp ... such that the vehicle can
+  reach speed inside of a structure before being exposed to light"): halls 110 m tall over the
+  loop's first and last 4 miles at each town, lit bars across the roof every 48 m. Full lever takes
+  SPEEDCRAFT from 1,200 to 4,000 mph in 3.9 mi; full brakes take it back to 1,250 in 4.1 mi. Home,
+  the deadline is getting back under cover: the start town's receiving ramp on the open loop.
+- **The shade line** is a private covered STARFIGHTER line, 10 mi long, from the loop's final
+  straight into the start town. Its gate says PRIVATE LINE unless the job authorizes you, and like
+  a town's it only takes you below 1,250 mph (the gate is decided as you reach its zone, 1.4 km
+  before the split). A corkscrew rolls you over (at most ~86 deg/s at 1,200 mph), you ride the
+  canopy's underside upside down 62 m up (a 120 m road on edge is 120 m tall), with lit bars
+  overhead, and a corkscrew rolls you back upright as you come into the town. Its deadline is
+  reaching the canopy. In the sim it's a second path with junction zones where the roads are one
+  (`tools/branch_test.js`); the view twists the flat sim onto the rolled road (`CraftModel.road_xf`).
+- **The light.** The run is flown in pre-dawn twilight (free Eridanus keeps its afternoon): no sun,
+  the sky's light carrying the ground, so the grain, the asphalt joints, the dust and the lights
+  still read (`tests/render_twilight.gd`: 91% of the afternoon's ground detail).
+
+```bash
+python tools/design_eridanus.py                                   # + the shade line, the pad, the ramps
+python tools/sync_eridanus.py                                     # ... into both sims, with the dawn
+node tools/tune_dawn.js sim-core.js                               # the dawn's direction and timing
+node tools/record_job.js sim-core.js godot/tests/replay open      # (and shade, late): job parity references
+.\launch_vr.ps1 -Job emergency -WaitForHeadset
 ```
 
 ## Handling modes
@@ -248,7 +312,7 @@ at 1,000 / 2,000 / 3,000 ft, the range's countdown in feet and its ramps' height
 
 ## Quest controls
 
-A tap on the left menu button cycles four schemes (saved). **Hold the menu button 1.5 s to switch track**: range, grand prix, Eridanus, and round again. The scene reloads on the next track and the headset session carries on (`tests/test_track_switch.gd`).
+A tap on the left menu button cycles four schemes (saved). **Hold the menu button 1.5 s to switch track**: range, grand prix, Eridanus, the emergency run, and round again. The scene reloads on the next track and the headset session carries on (`tests/test_track_switch.gd`).
 
 - **Trigger throttles:** the triggers are crossed, so each hand steers its own way. The right trigger throttles the left engine: squeeze right harder to go right. Together the triggers are the throttle, on a softened curve: about 25% less lever per bit of pull on average, most at the bottom, still full at a full pull. The triggers *magnet* to each other: fingers that are nearly together act exactly together. At the 0.07 mismatch measured from a real session they steer 14% as hard, while a real split still turns 78% as hard. The magnet is smooth, with no dead zone to snap out of. Each engine's lever rises over about 0.6 s at most, so a finger that lands first can't spin you off the line. Letting off is instant, and letting go of both triggers is idle at once. Steering authority grows with speed, because the same split yaws you about five times harder at 240 mph than at 750. Authority is full from 500 mph, so every GP corner has all of it, and never drops below 15%. Below 500 mph the stronger engine is eased toward the weaker, never the weaker raised, so a trigger you've let go of keeps its engine off at any speed. Each engine follows its own trigger: it rises on the ramp, eases down over about 0.08 s, and never moves because the other trigger did. (An earlier version shaped one shared throttle plus a smoothed split, so a quick one-sided squeeze briefly raised both engines and drove you straight on instead of turning.) With the triggers together the craft holds itself straight, fly-by-wire style: it cancels its own yaw, so a correction stops instead of overshooting. The hold fades out as the triggers part, so it never fights a turn. It only shares out throttle you're already giving, so it does nothing at idle, and it stands aside while either air brake is in and on the burner. It never fires an engine you didn't ask for. An earlier version did that while you braked one side. The remaining difference steers gentler near the middle, smoothed over ~0.08 s. `tests/test_controls_flyable.gd` checks an ideal pilot on the GP and a jittery-fingered straight hold (32 m of drift in 8 s at ~1,000 mph, against 120 m before). It also checks six mashed launches (0.2° of heading swing on average, against 13.9° before). And it checks a stroke pilot that corrects the way a real session log showed, with a 0.3 squeeze whenever it's 1.5° off: accelerating from the line, its heading swing drops from 34° unassisted to about 8°. (A squared curve with a 1.25 s ramp was tried once and made the craft unflyable. That test guards against it too.) Both spring back. The last few percent of pull is the burner detent. Grips are the air brakes, same side, so the left grip turns you left.
 - **Throttle + steer:** the left stick sets one throttle for both engines, and it holds. The right stick steers and springs back, by easing the inside engine (on the burner, by feathering its air brake). Triggers brake.
@@ -307,7 +371,7 @@ Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/tes
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_dashboard.gd           # instrument panel
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_route.gd -- --track=range --mute   # overpasses + landmarks placement
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_scenery.gd -- --track=range --mute   # mountains, light, ground, asphalt, props, streaming budget
-Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_track_switch.gd -- --track=range --mute   # menu tap = scheme, hold = next track (range, gp, eridanus)
+Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_track_switch.gd -- --track=range --mute   # menu tap = scheme, hold = next track (range, gp, eridanus, emergency)
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_mode_parity.gd                # live handling switch parity
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_mode_switch.gd                # the MODE switch, lamps, cable and rim lighting
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_canopy.gd -- --track=range --mute   # windscreen + forcefield
@@ -315,11 +379,20 @@ Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/tes
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_eridanus_world.gd -- --mute   # chunks, zones, boards, bridges, trees off the track, beacons, mountains clear
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_minimap.gd -- --mute          # path ahead: heading-up, zoom, next change, the headset panel
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_ride.gd                      # the cockpit's ride over the banking: no jitter, never in the road, gentle
+Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_speed_guide.gd               # the speed guide: braking model vs the sim, the line, the cut, honest on a clean lap
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_gp_parity.gd                  # grand prix lap parity
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_gp_world.gd -- --track=gp --mute   # GP trackside matches the track
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_engine_damage.gd -- --track=gp --mute   # wall damage, repair, restart
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_craft_model.gd -- --mute   # per-engine air brakes, the nose cage, the slab engines' detail, vanes and strobes
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_wind_audio.gd             # wind + sonic boom
+Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_branch.gd                 # the shade line in the sim: gate, junctions, parity with JS
+Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_job.gd                    # the emergency run: dawn, shelter, ramps, pad, finish
+Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_job_parity.gd             # the job's runs (open, shade, late) match JS
+Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_shade_line.gd -- --mute   # the shade line's world: roll, ground, canopy, gate, clearance
+Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_job_flow.gd -- --mute     # the dash through the run, best time, guide and minimap on the shade line
+Godot_v4.7.1-stable_win64_console.exe --path godot --resolution 1600x900 -s res://tests/render_twilight.gd -- --mute --print-fps   # windowed: twilight keeps the speed cues, no NaNs, frame time
+node tools/branch_test.js sim-core.js     # the shade line's gate and junctions in JS
+node tools/job_test.js sim-core.js        # the job in JS
 
 # Re-record every reference after changing the JS model
 node tools/record_lap.js sim-core.js godot/tests/replay
@@ -328,6 +401,8 @@ node tools/record_sprint.js sim-core.js godot/tests/replay
 node tools/record_handling.js sim-core.js godot/tests/replay
 node tools/record_modes.js sim-core.js godot/tests/replay
 node tools/record_course.js sim-core.js godot/tests/replay
+node tools/branch_test.js sim-core.js --dump godot/tests/replay/branch_expected.json
+for k in open shade late; do node tools/record_job.js sim-core.js godot/tests/replay $k; done
 
 # Handling report card (speeds, turn rates, sway, brakes)
 node tools/handling_test.js sim-core.js

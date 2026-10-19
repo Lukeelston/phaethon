@@ -7,6 +7,9 @@
 ##                track, in the right mode; it's marked on the map once it's in range; tracks
 ##                without modes have none
 ##   layout       every segment inside the panel's frame; the clip cuts at the edge
+##   dawn         on the emergency run the dawn front's line crosses the map (here 2 mi ahead), and
+##                the readout counts down to it lighting the job's next stop: DAWN m:ss; no line,
+##                no countdown, without a job
 ##   headset      the panel is built into the cockpit on a course, 1 m from the eye, up and left of
 ##                the instrument panel and clear of it, facing the eye; it draws the path and the
 ##                readout; the flat view's map is hidden on the range
@@ -19,7 +22,8 @@ const MiniMap := preload("res://view/minimap.gd")
 const MapPanel := preload("res://vr/minimap_panel.gd")
 const ViewScript := preload("res://view/craft_view.gd")
 const VRScript := preload("res://vr/vr_cockpit.gd")
-const CHECKS := 12
+const CHECKS := 13
+const MI := 1609.344
 var fails := 0
 var passed := 0
 var v
@@ -118,6 +122,32 @@ func _logic() -> void:
 	_check("clip: cut at the top edge %s, a miss %s, straight across %s" % [cut, miss, across],
 		cut.size() == 2 and cut[1].is_equal_approx(Vector2(0, 1)) and miss.is_empty()
 		and across.size() == 2 and across[0].is_equal_approx(Vector2(-1, 0.5)) and across[1].is_equal_approx(Vector2(1, 0.5)))
+	# the dawn: a job, the clock running, the front 2 mi ahead of the craft
+	var js = Sim.new({"track": "eridanus", "job": "emergency"})
+	var mj := MiniMap.new()
+	mj.setup(js)
+	th = _place(js, 3000, 1000.0 / 2.236936)
+	var ax: float = js.pod.x + cos(th) * 2.0 * MI
+	var ay: float = js.pod.y + sin(th) * 2.0 * MI
+	js.job.t0 = 0.0
+	js.time = js.t_lit(ax, ay)   # the front is passing the point 2 mi ahead now
+	f = mj.update(th, 30.0)
+	var dawn: Dictionary = f.get("dawn", {})
+	var lj := MiniMap.layout(f, 0.22, 0.22, 0.007, 0.026)
+	var off := INF
+	var eta_err := INF
+	if not dawn.is_empty():
+		var a: Vector2 = dawn.a
+		var b: Vector2 = dawn.b
+		off = absf((b - a).normalized().cross(Vector2(0.0, 2.0 * MI) - a))   # the point 2 mi up the map, off the chord
+		eta_err = absf(float(dawn.eta) - (js.t_lit(js.tpx[js.pad], js.tpy[js.pad]) - (js.time - js.job.t0)))
+	var eta: float = dawn.get("eta", 0.0)
+	var want_txt := "DAWN %d:%02d" % [int(eta) / 60, int(eta) % 60]
+	var fn: Dictionary = mm.update(th, 30.0)
+	_check("dawn: the front's chord crosses the map (%s), through the point 2 mi ahead (%.2f m off); %.1f s until it lights the pad (off by %.3f s); readout '%s'; none without a job (%s)" % [
+			lj.get("dawn") != null, off, eta, eta_err, MiniMap.readout(f), fn.get("dawn", {}).is_empty()],
+		lj.get("dawn") != null and off < 1.0 and eta_err < 0.1 and MiniMap.readout(f).contains(want_txt) and fn.get("dawn", {}).is_empty()
+		and not MiniMap.readout(fn).contains("DAWN"))
 	# no modes, no readout
 	var gp = Sim.new({"track": "gp"})
 	var mg := MiniMap.new()

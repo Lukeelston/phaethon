@@ -106,8 +106,10 @@ var _prev_f := [0.0, 0.0]
 var arc: ImmediateMesh
 var pod_frame: Node3D = null          # VR: the cockpit rig stands in for the hidden pod
 const POD_FRAME_UP := 0.6             # pod mesh centre above the rig floor
-const POD_LIFT := 0.4                 # the pod rides this much higher than the sim's body (looks only:
-                                      # Luke wanted it "sitting a bit higher up entirely")
+const POD_LIFT := 1.3                 # the pod rides this much higher than the sim's body (looks only:
+                                      # Luke wanted it "sitting a bit higher up entirely", then "higher than
+                                      # the engines just a little bit more - a few feet": 0.4 -> 1.3 m, +3 ft;
+                                      # in VR your eye rides up with it, over the engines)
 const POD_EYE_H := -0.05              # hardpoint height on the nose, pod-local
 const ENGINE_EYE := Vector3(0, -0.95, 3.45)   # engine-local: the eye at the tail of the lug
 var _fan_w := [0.0, 0.0]
@@ -729,8 +731,12 @@ func sync(sim, inp: Dictionary, delta: float) -> void:
 		eng.position = view.w3(e.x, e.y, e.z + 0.1)
 		var vh: float = sqrt(e.vx * e.vx + e.vy * e.vy)
 		var pitch: float = atan2(e.vz, maxf(vh, 1.0)) if vh > 5.0 else 0.0
-		pitch += slope_pitch(view, e.x, e.y, e.th, maxf(4.0, pitch_half(vh)))   # nose follows the banking's rise and fall
-		eng.rotation = Vector3(pitch, e.th - PI / 2.0, clampf(bank[k] + view.surface(e.x, e.y).y, -ROLL_MAX, ROLL_MAX))   # lean, plus the track's banking
+		var climb := slope_pitch(view, e.x, e.y, e.th, maxf(4.0, pitch_half(vh)))   # nose follows the banking's rise and fall
+		var lean := clampf(bank[k] + view.surface(e.x, e.y).y, -ROLL_MAX, ROLL_MAX)   # lean, plus the track's banking
+		if sim.pod.path > 0:   # the shade line: flat, carried onto the twisted road
+			eng.basis = road_attitude(sim, e.x, e.y, climb) * Basis.from_euler(Vector3(pitch, e.th - PI / 2.0, lean))
+		else:
+			eng.rotation = Vector3(pitch + climb, e.th - PI / 2.0, lean)
 		var h: float = e.heat
 		var col := Color(0.25, 0.25, 0.25) if e.flameout else heat_color(h)
 		hot_mats[k].albedo_color = col
@@ -787,8 +793,12 @@ func sync(sim, inp: Dictionary, delta: float) -> void:
 
 	CanopyScript.update(canopy, sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy), sim.hblend, sim.mode, delta)
 	pod.position = view.w3(sim.pod.x, sim.pod.y, sim.pod.z - 0.2 + POD_LIFT)
-	pod.rotation = Vector3(slope_pitch(view, sim.pod.x, sim.pod.y, sim.pod.th, pitch_half(sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy))), sim.pod.th - PI / 2.0,
-		clampf(bank[2] + view.surface(sim.pod.x, sim.pod.y).y, -ROLL_MAX, ROLL_MAX))
+	var pclimb := slope_pitch(view, sim.pod.x, sim.pod.y, sim.pod.th, pitch_half(sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy)))
+	var plean := clampf(bank[2] + view.surface(sim.pod.x, sim.pod.y).y, -ROLL_MAX, ROLL_MAX)
+	if sim.pod.path > 0:
+		pod.basis = road_attitude(sim, sim.pod.x, sim.pod.y, pclimb) * Basis.from_euler(Vector3(0.0, sim.pod.th - PI / 2.0, plean))
+	else:
+		pod.rotation = Vector3(pclimb, sim.pod.th - PI / 2.0, plean)
 	pod_flap_open = move_toward(pod_flap_open, clampf(minf(inp.brkL, inp.brkR), 0.0, 1.0), FLAP_RATE * delta)
 	for i in 2:
 		var s := -1.0 if i == 0 else 1.0
@@ -913,23 +923,88 @@ static func pitch_half(speed: float) -> float:
 
 
 const RIDE_TAU := 0.15   # s: the cockpit's pitch and the bank under it, low-passed
+const ROLL_TAU := 0.05   # s: the corkscrews' roll under it (eased already; a frame's polish, no lag to speak of)
 
 ## The cockpit's ride over the banked track: Vector3(surface height under the pod, pitch, the
 ## track's bank), smoothed in `st` (an empty Dictionary to start). Pitch reads the surface over
 ## pitch_half(speed) and eases with RIDE_TAU, the bank too; the height follows the surface up at
 ## once (never below it: the cockpit can't sink into the road) and eases down over a third of that.
+## st.roll: the corkscrews' roll under the pod (the shade line; 0 on the main road), eased over
+## ROLL_TAU (onto_road carries the cockpit onto the twisted road with it).
 static func ride(v, sim, st: Dictionary, delta: float) -> Vector3:
 	var spd: float = sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy)
 	var s: Vector2 = v.surface(sim.pod.x, sim.pod.y)
 	var p := slope_pitch(v, sim.pod.x, sim.pod.y, sim.pod.th, pitch_half(spd))
+	var rr := pod_roll(sim)
 	if st.is_empty() or delta <= 0.0:
-		st.merge({"h": s.x, "p": p, "b": s.y}, true)
+		st.merge({"h": s.x, "p": p, "b": s.y, "roll": rr}, true)
 	else:
 		var k := 1.0 - exp(-delta / RIDE_TAU)
 		st.h = maxf(lerpf(st.h, s.x, minf(1.0, 3.0 * k)), s.x)
 		st.p = lerpf(st.p, p, k)
 		st.b = lerpf(st.b, s.y, k)
+		st.roll = lerpf(st.get("roll", rr), rr, 1.0 - exp(-delta / ROLL_TAU))
 	return Vector3(st.h, st.p, st.b)
+
+
+## The corkscrews' roll of the road under the pod, radians (0 on the main road).
+static func pod_roll(sim) -> float:
+	if sim.pod.path <= 0:
+		return 0.0
+	sim._nearest_on(sim.pod.path, sim.pod.x, sim.pod.y, sim.pod.hint, 40)
+	return sim.roll_at(sim.pod.path, sim._n_i + sim._n_t)
+
+
+## Where sim (x, y) is on the pod's branch road: [the centreline point there (render axes, against
+## the floating origin at org), its tangent (interpolated between samples, so a turned-over
+## craft's heading doesn't step at the joints: rolled 180 deg, a heading mirrors about the road's),
+## the fractional sample].
+static func _road_at(sim, x: float, y: float, org_x: float, org_y: float) -> Array:
+	var path: int = sim.pod.path
+	var B = sim.branches[path - 1]
+	sim._nearest_on(path, x, y, sim.pod.hint, 40)
+	var i: int = sim._n_i
+	var t: float = sim._n_t
+	var j := mini(i + 1, B.N - 1)
+	var tv := Vector3(lerpf(B.tx[i], B.tx[j], t), 0.0, -lerpf(B.ty[i], B.ty[j], t)).normalized()
+	var c := Vector3(B.px[i] + B.tx[i] * B.len[i] * t - org_x, 0.0, -(B.py[i] + B.ty[i] * B.len[i] * t - org_y))
+	return [c, tv, i + t]
+
+
+## The road's frame at sim (x, y) on the pod's road, for the view (the sim is flat): on a branch
+## (the shade line), the rigid motion that takes the flat road (the sim's plane at height 0, render
+## axes, the floating origin at org) onto the twisted one: a roll about the centreline
+## (sim.roll_at, or `roll`) and the corkscrews' climb (sim.branch_height). A point lat m left of
+## the centreline and up m off the road lands lat along the rolled road's left and up along its
+## up. Identity on the main road.
+static func road_xf(sim, x: float, y: float, org_x: float, org_y: float, roll := NAN) -> Transform3D:
+	if sim.pod.path <= 0:
+		return Transform3D.IDENTITY
+	var at := _road_at(sim, x, y, org_x, org_y)
+	var c: Vector3 = at[0]
+	var r: float = sim.roll_at(sim.pod.path, at[2]) if is_nan(roll) else roll
+	var b := Basis(at[1], -r)
+	return Transform3D(b, c + Vector3.UP * sim.branch_height(sim.pod.path, at[2]) - b * c)
+
+
+## A body's attitude on the pod's road: the road's roll at (x, y), tilted by its climb (rad, nose up).
+## Multiply a flat attitude by it.
+static func road_attitude(sim, x: float, y: float, climb: float) -> Basis:
+	var at := _road_at(sim, x, y, 0.0, 0.0)
+	var tv: Vector3 = at[1]
+	return Basis(tv.cross(Vector3.UP).normalized(), climb) * Basis(tv, -sim.roll_at(sim.pod.path, at[2]))
+
+
+## The VR cockpit on the shade line: its rig worked out flat (xf), carried onto the twisted road.
+## `anchor` (a flat point of the rig: its floor under the pod) lands exactly where the road puts it,
+## so the cockpit rides the road however it's turned; the rig turns with the eased roll (st.roll)
+## and tilts with the eased climb (ride's pitch).
+static func onto_road(sim, xf: Transform3D, anchor: Vector3, roll: float, climb: float, org_x: float, org_y: float) -> Transform3D:
+	var q := road_xf(sim, sim.pod.x, sim.pod.y, org_x, org_y) * anchor
+	var at := _road_at(sim, sim.pod.x, sim.pod.y, org_x, org_y)
+	var tv: Vector3 = at[1]
+	var b := Basis(tv.cross(Vector3.UP).normalized(), climb) * Basis(tv, -roll)
+	return Transform3D(b, q - b * anchor) * xf
 
 
 ## How steeply the (banked) surface rises along heading th at (x, y), radians, + = nose up:

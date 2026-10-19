@@ -33,6 +33,10 @@ const DEFAULTS := {
 	"rideH": 1.5, "hoverOmega": 9.0, "hoverZeta": 0.9,
 	"binderKz": 3.0e6, "binderCz": 60000.0, "towKz": 2.0e5, "towCz": 16000.0,
 	"track": "circuit", "startX": 0.0, "startY": 0.0, "handling": "speed",
+	"job": "",   # the job being flown ("emergency": the emergency run, which opens the shade line)
+	# the dawn (the job's clock): a straight front at 1,000 mph travelling dawnDir (rad), passing
+	# the start line's point dawnT0 s into the job (test_job.gd)
+	"dawnSpeed": 447.04, "dawnDir": 0.0, "dawnT0": 0.0,
 	"sfEngageV": 558.8, "modeBlendT": 1.0,   # live switch: STARFIGHTER engages below 1,250 mph; the handling blends over 1 s
 	"seed": 1337,
 }
@@ -43,7 +47,8 @@ const DEFAULTS := {
 # impacts harder than 25 m/s into the wall do damage, a third as much; lower friction).
 const TRACKS := {
 	"gp": {"wallDmgMin": 25.0, "damagePerMs": 0.004, "wallMu": 0.22},
-	"eridanus": {"wallDmgMin": 25.0, "damagePerMs": 0.004, "wallMu": 0.22},
+	"eridanus": {"wallDmgMin": 25.0, "damagePerMs": 0.004, "wallMu": 0.22,
+		"dawnDir": 2.495821, "dawnT0": 156.7},   # the dawn: written by tools/sync_eridanus.py from tools/tune_dawn.js
 }
 const HANDLING := {
 	"speed": {},
@@ -68,6 +73,8 @@ const BOX_X := RANGE_LEN
 const BOX_HALF := 25.0
 const OVERRUN := 15000.0
 const STOPPED := 0.5
+const PAD_HALF := 40.0   # the job's medical pad: a box +-40 m along and across ...
+const PAD_HOLD := 1.5    # ... held this long stopped
 const CTRL := [[0.0, 0.0], [900.0, -100.0], [1700.0, 150.0], [2300.0, 700.0], [2400.0, 1300.0],
 	[2000.0, 1700.0], [1400.0, 1600.0], [1100.0, 1150.0], [700.0, 1300.0], [300.0, 1800.0],
 	[-400.0, 1700.0], [-900.0, 1100.0], [-800.0, 400.0], [-400.0, 80.0]]
@@ -99,13 +106,20 @@ const ERI_SEGS := [["S", 3390.539, 0.0, "sf"], ["L", 450.0, 90.0, "sf"], ["S", 9
 	["L", 16000.0, 90.0, "sp"], ["S", 36152.417, 0.0, "sp"], ["L", 700.0, 60.0, "sf"], ["S", 900.0, 0.0, "sf"], 
 	["R", 350.0, 80.0, "sf"], ["S", 800.0, 0.0, "sf"], ["L", 300.0, 100.0, "sf"], ["S", 1000.0, 0.0, "sf"], 
 	["R", 500.0, 50.0, "sf"], ["S", 1200.0, 0.0, "sf"], ["L", 900.0, 60.0, "sf"]]
+# <shade> written by tools/sync_eridanus.py: the shade line (a private covered STARFIGHTER line
+# into the start town, tools/design_eridanus.py) and the lake town's medical pad
+const SHADE_SEGS := [["R", 1200.0, 40.0, "sf"], ["S", 500.0, 0.0, "sf"], ["L", 1200.0, 40.0, "sf"], ["S", 1500.0, 0.0, "sf"], ["R", 600.0, 30.0, "sf"], ["S", 3569.081, 0.0, "sf"], ["L", 350.0, 70.0, "sf"], ["S", 700.0, 0.0, "sf"], ["R", 300.0, 40.0, "sf"], ["S", 600.0, 0.0, "sf"], ["L", 500.0, 30.0, "sf"], ["S", 2365.036, 0.0, "sf"], ["R", 450.0, 30.0, "sf"], ["S", 1500.0, 0.0, "sf"], ["L", 1200.0, 40.0, "sf"], ["S", 500.0, 0.0, "sf"], ["R", 1200.0, 40.0, "sf"]]
+const ERI_SHADE := {"name": "shade", "segs": SHADE_SEGS, "from": 14838, "join": 16046, "width": 120.0, "jz": 120, "covered": [237, 1341], "roll": [[182, 292, 0.0, 180.0], [1050, 1160, 180.0, 0.0]], "height": 62.0}
+const ERI_PAD := 6932
+const ERI_RAMPS := [[747, 1283], [6124, 6660], [6995, 7532], [15509, 16045]]   # the covered ramps at each end of each town: [first, last] main samples
+# </shade>
 # The courses: widths per mode (else GP_WIDTH, constant); width_r: the width-easing box (samples);
 # banks: per mode, degrees (else GP_BANK in the corners), each eased by two passes of its own box,
 # bank_r (samples; else GP_BANK_R).
 const COURSES := {
 	"gp": {"segs": GP_SEGS, "checkpoints": 12},
 	"eridanus": {"segs": ERI_SEGS, "checkpoints": 24, "widths": {"sf": 140.0, "sp": 400.0}, "width_r": 40,
-		"banks": {"sf": 10.0, "sp": 3.0}, "bank_r": {"sf": 20, "sp": 100}},
+		"banks": {"sf": 10.0, "sp": 3.0}, "bank_r": {"sf": 20, "sp": 100}, "branches": [ERI_SHADE], "pad": ERI_PAD, "ramps": ERI_RAMPS},
 }
 var track_name := ""   # the course's name ("gp", "eridanus") on a course
 var course := false    # on a course (COURSES): banked corners push
@@ -136,10 +150,37 @@ class Body:
 	var z := 0.0
 	var vz := 0.0
 	var grip := 1.0
+	var path := 0   # the road its hint is on: 0 the main road, k + 1 branch k
 
 	func _init(mass: float, moment: float) -> void:
 		m = mass
 		inertia = moment
+
+
+## A branch road (the shade line, tools/design_eridanus.py), mirroring sim-core.js buildBranch:
+## its segments walked from the main road's sample from_i (that point and heading), sampled as
+## the courses are, one width, unbanked, ending on main's join_i (its last sample's segment runs
+## on along the main road's). Open ended. Locked unless the job opens it.
+class TrackPath:
+	var name := ""
+	var px := PackedFloat64Array()
+	var py := PackedFloat64Array()
+	var tx := PackedFloat64Array()
+	var ty := PackedFloat64Array()
+	var nx := PackedFloat64Array()
+	var ny := PackedFloat64Array()
+	var len := PackedFloat64Array()
+	var w := PackedFloat64Array()
+	var bank := PackedFloat64Array()
+	var N := 0
+	var length := 0.0
+	var from_i := 0
+	var join_i := 0
+	var jz := 0
+	var covered := Vector2i.ZERO   # the canopy's samples, first to last
+	var roll: Array = []   # the corkscrews: [first sample, last sample, deg from, deg to], in order
+	var height := 0.0      # the road's height under the canopy (m), turned over
+	var open := false
 
 
 var P: Dictionary
@@ -163,6 +204,18 @@ var tny := PackedFloat64Array()
 var tlen := PackedFloat64Array()
 var tw := PackedFloat64Array()
 var tb := PackedFloat64Array()   # GP: bank per sample, radians (+ = tilted down to the left, a left-hander)
+var branches: Array[TrackPath] = []   # courses: the branch roads (Eridanus: the shade line)
+var gate: Array = []   # per branch, this pass: null (not at its split), true (admitted), false (shut)
+var pod_path := 0      # the pod's path last step (laps carry on from a branch's join)
+var pad := -1          # courses: the job's medical pad (main sample), -1 for none
+var mouth := -1        # courses: the start town's mouth, where the loop last turns into a town
+var covered_ramps: Array = []   # courses: the covered ramps at each end of each town, [first, last] main samples
+var tcover := PackedByteArray()   # per main sample: 1 under a covered ramp (shelter from the dawn)
+## The job (the emergency run), empty when there's none: stage "out" | "drop" | "home" | "done" |
+## "failed", t (s since its clock started, on the first move), t0 (when, null until then), held
+## (s stopped on the pad), route "open" | "shade", margin (s), reason "" | "dawn" | "crash", prev_d.
+var job: Dictionary = {}
+const CORK_EASE := 0.15   # each corkscrew's roll rate ramps up and down over this share of it
 
 # race and craft state
 var battery := 1.0
@@ -204,6 +257,7 @@ var _n_w := 0.0
 var _n_nx := 0.0
 var _n_ny := 0.0
 var _n_t := 0.0   # how far along sample _n_i's segment the nearest point lies, 0..1
+var _n_off := false   # the nearest point is past an end of a branch (no road there)
 var _pvx := 0.0
 var _pvy := 0.0
 
@@ -243,6 +297,11 @@ func _init(overrides: Dictionary = {}) -> void:
 	eR = Body.new(P.engineMass, e_i)
 	pod = Body.new(P.podMass, p_i)
 	bodies = [eL, eR, pod]
+	# branches open only on the job that authorizes them (the shade line: the emergency run)
+	for B in branches:
+		B.open = P.job == "emergency"
+	if P.job == "emergency" and pad >= 0:
+		job = _new_job()
 	pod.x = float(P.startX) + 30.0   # range spawn point (respawn backs off 30 m)
 	pod.y = float(P.startY)
 	respawn(0)
@@ -438,6 +497,76 @@ func _build_course(name: String) -> void:
 				tb[i] += sm[i]
 	else:
 		tb = _smooth_bank(_smooth_bank(raw))
+	for Bd in C.get("branches", []):
+		branches.append(_build_branch(Bd))
+	pad = C.get("pad", -1)
+	covered_ramps = C.get("ramps", []).duplicate(true)
+	tcover.resize(N)
+	for r in covered_ramps:
+		for i in range(int(r[0]), int(r[1]) + 1):
+			tcover[posmod(i, N)] = 1
+	for i in range(N - 1, 0, -1):
+		if tmode[i] == 0 and tmode[i - 1] == 1:
+			mouth = i
+			break
+
+
+func _build_branch(Bd: Dictionary) -> TrackPath:
+	var B := TrackPath.new()
+	B.name = Bd.name
+	var f: int = Bd.from
+	var x := tpx[f]
+	var y := tpy[f]
+	var h := atan2(tty[f], ttx[f])
+	for sg in Bd.segs:
+		if sg[0] == "S":
+			var n := maxi(1, int(ceil(sg[1] / GP_STEP)))
+			var d: float = sg[1] / n
+			for k in n:
+				B.px.append(x)
+				B.py.append(y)
+				x += d * cos(h)
+				y += d * sin(h)
+		else:
+			var r: float = sg[1]
+			var sn := 1.0 if sg[0] == "L" else -1.0
+			var ang: float = sg[2] * PI / 180.0
+			var n := maxi(1, int(ceil(r * ang / GP_STEP)))
+			var da := ang / n
+			var c := 2.0 * r * sin(da / 2.0)
+			for k in n:
+				B.px.append(x)
+				B.py.append(y)
+				x += c * cos(h + sn * da / 2.0)
+				y += c * sin(h + sn * da / 2.0)
+				h += sn * da
+	B.px.append(x)
+	B.py.append(y)
+	B.N = B.px.size()
+	for a in [B.tx, B.ty, B.nx, B.ny, B.len, B.w, B.bank]:
+		a.resize(B.N)
+	var j: int = Bd.join
+	var s := 0.0
+	for i in B.N:
+		var dx := B.px[i + 1] - B.px[i] if i + 1 < B.N else ttx[j] * tlen[j]
+		var dy := B.py[i + 1] - B.py[i] if i + 1 < B.N else tty[j] * tlen[j]
+		var l := sqrt(dx * dx + dy * dy)
+		B.tx[i] = dx / l
+		B.ty[i] = dy / l
+		B.nx[i] = -B.ty[i]
+		B.ny[i] = B.tx[i]
+		B.len[i] = l
+		s += l
+		B.w[i] = Bd.width
+		B.bank[i] = 0.0
+	B.length = s
+	B.from_i = Bd.from
+	B.join_i = j
+	B.jz = Bd.jz
+	B.covered = Vector2i(Bd.covered[0], Bd.covered[1])
+	B.roll = Bd.roll.duplicate(true)
+	B.height = Bd.height
+	return B
 
 
 ## A centred moving average round the closed loop (box of 2 * r + 1 samples; banks: GP_BANK_R).
@@ -475,6 +604,7 @@ static func _smooth_run(a: PackedFloat64Array, r: int) -> PackedFloat64Array:
 ## Nearest centreline point in a window around hint. Results land in _n_*.
 func _nearest(x: float, y: float, hint: int, win: int) -> void:
 	var bd := INF
+	_n_off = false
 	for k in range(-win, win + 1):
 		var i := posmod(hint + k, N)
 		var t := clampf(((x - tpx[i]) * ttx[i] + (y - tpy[i]) * tty[i]) / tlen[i], 0.0, 1.0)
@@ -489,6 +619,125 @@ func _nearest(x: float, y: float, hint: int, win: int) -> void:
 			_n_nx = tnx[i]
 			_n_ny = tny[i]
 			_n_t = t
+
+
+## The same on an open-ended branch: the window stops at its ends, and a point past either end
+## is off it (_n_off: no road there, however close to the centreline's line).
+func _nearest_branch(B: TrackPath, x: float, y: float, hint: int, win: int) -> void:
+	var bd := INF
+	for i in range(maxi(0, hint - win), mini(B.N - 1, hint + win) + 1):
+		var u := ((x - B.px[i]) * B.tx[i] + (y - B.py[i]) * B.ty[i]) / B.len[i]
+		var t := clampf(u, 0.0, 1.0)
+		var px := B.px[i] + B.tx[i] * B.len[i] * t
+		var py := B.py[i] + B.ty[i] * B.len[i] * t
+		var d := (x - px) * (x - px) + (y - py) * (y - py)
+		if d < bd:
+			bd = d
+			_n_i = i
+			_n_lat = (x - B.px[i]) * B.nx[i] + (y - B.py[i]) * B.ny[i]
+			_n_w = B.w[i]
+			_n_nx = B.nx[i]
+			_n_ny = B.ny[i]
+			_n_t = t
+			_n_off = (i == 0 and u < 0.0) or (i == B.N - 1 and u > 1.0)
+
+
+## Nearest centreline point on a path (0 the main road, k + 1 branch k), into the _n_ fields.
+func _nearest_on(path: int, x: float, y: float, hint: int, win: int) -> void:
+	if path == 0:
+		_nearest(x, y, hint, win)
+	else:
+		_nearest_branch(branches[path - 1], x, y, hint, win)
+
+
+## How deep inside its road the last nearest point is, with radius r (negative inside; INF off a branch's end).
+func _depth(r: float) -> float:
+	return INF if _n_off else absf(_n_lat) + r - _n_w / 2.0
+
+
+## A signed sample gap round the main loop.
+func _cyc(d: int) -> int:
+	if float(d) > N / 2.0:
+		return d - N
+	if float(d) < -N / 2.0:
+		return d + N
+	return d
+
+
+## The other road at a junction, Vector2i(path, hint there), or x = -1 for none. A body on the
+## main road sees a branch within jz samples of its split, and only once its craft has passed the
+## gate; a body on a branch sees the main road within jz samples of either end.
+func _junction_alt(b: Body) -> Vector2i:
+	for k in branches.size():
+		var B: TrackPath = branches[k]
+		if b.path == 0:
+			var d := _cyc(b.hint - B.from_i)
+			if gate[k] == true and absi(d) <= B.jz:
+				return Vector2i(k + 1, clampi(d, 0, B.N - 1))
+		elif b.path == k + 1:
+			if b.hint < B.jz:
+				return Vector2i(0, (B.from_i + b.hint) % N)
+			if b.hint > B.N - 1 - B.jz:
+				return Vector2i(0, posmod(B.join_i - (B.N - 1 - b.hint), N))
+	return Vector2i(-1, 0)
+
+
+## The gates: a branch joins a craft's roads only if the craft reached its split's zone at or below
+## sfEngageV (and the job opened it). Arrive faster and it stays shut for that pass, so the main
+## wall holds. Decided once a pass, on the pod's speed as the first body comes into the zone;
+## cleared once no body is in the zone or on the branch.
+func _update_gates() -> void:
+	for k in branches.size():
+		var B: TrackPath = branches[k]
+		var busy := false
+		for b: Body in bodies:
+			if b.path == k + 1 or (b.path == 0 and absi(_cyc(b.hint - B.from_i)) <= B.jz):
+				busy = true
+		if not busy:
+			gate[k] = null
+		elif gate[k] == null:
+			gate[k] = B.open and sqrt(pod.vx * pod.vx + pod.vy * pod.vy) <= P.sfEngageV
+
+
+## For the view: a branch road's roll at (fractional) sample i, radians: the corkscrews turn it
+## over (0 -> 180 deg) and back, the rate easing up and down over CORK_EASE of each so it peaks at
+## 1 / (1 - CORK_EASE) of the mean (~86 deg/s at 1,200 mph); 0 on the main road.
+func roll_at(path: int, i: float) -> float:
+	if path <= 0:
+		return 0.0
+	var B: TrackPath = branches[path - 1]
+	var deg := 0.0
+	for r in B.roll:
+		if i >= r[1]:
+			deg = r[3]
+		elif i > r[0]:
+			deg = lerpf(r[2], r[3], cork((i - r[0]) / float(r[1] - r[0])))
+			break
+		else:
+			break
+	return deg_to_rad(deg)
+
+
+## For the view: a branch road's centreline height at (fractional) sample i. A road stood on edge
+## is its width tall, so as a corkscrew turns it the centre climbs with the sine of the turn to the
+## canopy's height (half the width and a bit: the low edge never meets the ground) by the time
+## it's on edge, and holds there, turned over; back down the same way. 0 on the main road.
+func branch_height(path: int, i: float) -> float:
+	if path <= 0:
+		return 0.0
+	var r := roll_at(path, i)
+	var h: float = branches[path - 1].height
+	return h * sin(r) if r < PI / 2.0 else h
+
+
+## The corkscrew's share of its turn at u (0..1): its rate ramps up over CORK_EASE, holds, ramps down.
+static func cork(u: float) -> float:
+	var a := CORK_EASE
+	if u < a:
+		return u * u / (2.0 * a) / (1.0 - a)
+	if u > 1.0 - a:
+		return 1.0 - (1.0 - u) * (1.0 - u) / (2.0 * a) / (1.0 - a)
+	return (u - a / 2.0) / (1.0 - a)
 
 
 func _apply_at(b: Body, fx: float, fy: float, px: float, py: float) -> void:
@@ -506,7 +755,12 @@ func _point_vel(b: Body, px: float, py: float) -> void:
 ## Vector2(height above the desert, bank radians + = tilted down to the left). Corners pivot on
 ## their inside edge, so it stays at ground level and the outside climbs (96 m at 30 deg: 55 m);
 ## past the outside wall a 45-degree berm runs back down. (0, 0) everywhere else.
-func surface_at(x: float, y: float, hint: int) -> Vector2:
+## On a branch (path k + 1): its centreline's height (branch_height) and no bank (the turn over is
+## roll_at's).
+func surface_at(x: float, y: float, hint: int, path := 0) -> Vector2:
+	if path > 0:
+		_nearest_on(path, x, y, hint, 40)
+		return Vector2(branch_height(path, _n_i + _n_t), 0.0)
 	if tb.is_empty():
 		return Vector2.ZERO
 	_nearest(x, y, hint, 40)
@@ -546,6 +800,8 @@ func restart() -> void:
 		visited = {0: true}
 		checkpoint = 0
 		respawn(0)
+	if not job.is_empty():
+		job = _new_job()   # the job starts over (its clock on the next first move)
 
 
 func respawn(ci: int = -1, at_idx: int = -1) -> void:   # at_idx: a debug start at that track sample (views only)
@@ -587,6 +843,7 @@ func respawn(ci: int = -1, at_idx: int = -1) -> void:   # at_idx: a debug start 
 		b.w = 0.0
 		b.th = th
 		b.hint = idx
+		b.path = 0
 		b.contact = [false, false]
 		b.z = ground(b.x, b.y) + P.rideH
 		b.vz = 0.0
@@ -602,23 +859,55 @@ func respawn(ci: int = -1, at_idx: int = -1) -> void:   # at_idx: a debug start 
 	_tow_u = -1.0
 	crash_t = 0.0
 	progress_i = idx
+	gate = []
+	gate.resize(branches.size())   # all null: no pass in progress
+	pod_path = 0
 
 
+## At a junction the two roads are one (a union): a body takes the road it's deeper inside, when
+## it's off its own or the other is 10 m deeper, and a wall is wherever it's off both.
 func _collide_walls(b: Body, circles: Array, dt: float) -> void:
-	_nearest(b.x, b.y, b.hint, 40)
+	_nearest_on(b.path, b.x, b.y, b.hint, 40)
 	b.hint = _n_i
+	var alt := _junction_alt(b) if not branches.is_empty() else Vector2i(-1, 0)
+	var alt_path := 0
+	var alt_hint := 0
+	if alt.x >= 0:
+		var d_own := _depth(0.0)
+		var own_i := _n_i
+		_nearest_on(alt.x, b.x, b.y, alt.y, 40)
+		var d_alt := _depth(0.0)
+		if d_alt < d_own and (d_own > 0.0 or d_alt < d_own - 10.0):
+			alt_path = b.path
+			alt_hint = own_i
+			b.path = alt.x
+			b.hint = _n_i
+		else:
+			alt_path = alt.x
+			alt_hint = _n_i
 	for ci in circles.size():
 		var cx: float = circles[ci][0]
 		var cy: float = circles[ci][1]
 		var r: float = circles[ci][2]
-		_nearest(cx, cy, b.hint, 12)
-		var pen := absf(_n_lat) + r - _n_w / 2.0
+		_nearest_on(b.path, cx, cy, b.hint, 12)
+		var pen := _depth(r)
+		var lat := _n_lat
+		var wnx := _n_nx
+		var wny := _n_ny
+		if alt.x >= 0:
+			_nearest_on(alt_path, cx, cy, alt_hint, 12)
+			var pm := _depth(r)
+			if pm < pen:
+				pen = pm
+				lat = _n_lat
+				wnx = _n_nx
+				wny = _n_ny
 		if pen <= 0.0:
 			b.contact[ci] = false
 			continue
-		var sgn := -1.0 if _n_lat > 0.0 else 1.0
-		var nx := _n_nx * sgn
-		var ny := _n_ny * sgn
+		var sgn := -1.0 if lat > 0.0 else 1.0
+		var nx := wnx * sgn
+		var ny := wny * sgn
 		_point_vel(b, cx, cy)
 		var vx := _pvx
 		var vy := _pvy
@@ -685,6 +974,8 @@ func step(inp: Dictionary, dt: float) -> void:
 	var hask: String = inp.get("handling", "")
 	if hask == "speed" or hask == "starfighter":
 		hwant = hask
+	if pod.path > 0:
+		hwant = "starfighter"   # a shade line is a STARFIGHTER line (its corkscrews are paced for it)
 	var htgt := 0.0
 	if hwant == "starfighter":
 		htgt = 1.0 if hblend > 0.0 or sqrt(pod.vx * pod.vx + pod.vy * pod.vy) <= P.sfEngageV else 0.0
@@ -962,16 +1253,18 @@ func step(inp: Dictionary, dt: float) -> void:
 	# corner's centre: gravity's (g tan bank) plus downforce's (bankDown v^2 sin bank).
 	if course:
 		for b: Body in bodies:
-			var bk: float = tb[b.hint]
+			var bk: float = tb[b.hint] if b.path == 0 else branches[b.path - 1].bank[b.hint]
 			if bk == 0.0:
 				continue
 			var v2 := b.vx * b.vx + b.vy * b.vy
 			var fb: float = P.bank * b.m * (G * tan(bk) + P.bankDown * v2 * sin(bk)) * b.grip
-			b.fx += fb * tnx[b.hint]
-			b.fy += fb * tny[b.hint]
+			b.fx += fb * (tnx[b.hint] if b.path == 0 else branches[b.path - 1].nx[b.hint])
+			b.fy += fb * (tny[b.hint] if b.path == 0 else branches[b.path - 1].ny[b.hint])
 	var cl := _engine_circles(L)
 	var cr := _engine_circles(R)
 	var cp := [[Pd.x, Pd.y, 1.6]]
+	if not branches.is_empty():
+		_update_gates()
 	if kind == "circuit":
 		_collide_walls(L, cl, dt)
 		_collide_walls(R, cr, dt)
@@ -1021,21 +1314,137 @@ func step(inp: Dictionary, dt: float) -> void:
 		return
 	if kind != "circuit":
 		return
-	# Laps: count when the pod wraps past the start having visited every checkpoint.
-	var prev := progress_i
-	var cur := Pd.hint
-	var cps := checkpoints
-	var cpi := int(floor(float(cur) * cps / N))
-	if cpi != checkpoint and posmod(cpi - checkpoint + cps, cps) == 1:
-		checkpoint = cpi
-		visited[cpi] = true
-	if lap_start < 0.0 and pv > 2.0:
-		lap_start = time
-	if prev > N * 0.9 and cur < N * 0.1 and visited.size() >= cps - 1 and lap_start >= 0.0:
-		last_lap = time - lap_start
-		best_lap = last_lap if best_lap < 0.0 else minf(best_lap, last_lap)
-		lap += 1
-		lap_start = time
-		visited = {0: true}
-		events.append({"type": "lap", "t": last_lap})
-	progress_i = cur
+	# Laps: count when the pod wraps past the start having visited every checkpoint. On the main
+	# road only: on a branch the pod keeps its progress, and back on the main road it carries on
+	# from that checkpoint (a shortcut visits none of the ones it skipped).
+	if Pd.path != 0:
+		pod_path = Pd.path
+	else:
+		var prev := progress_i
+		var cur := Pd.hint
+		var cps := checkpoints
+		var cpi := int(floor(float(cur) * cps / N))
+		if pod_path != 0:
+			pod_path = 0
+			checkpoint = cpi
+		if cpi != checkpoint and posmod(cpi - checkpoint + cps, cps) == 1:
+			checkpoint = cpi
+			visited[cpi] = true
+		if lap_start < 0.0 and pv > 2.0:
+			lap_start = time
+		if prev > N * 0.9 and cur < N * 0.1 and visited.size() >= cps - 1 and lap_start >= 0.0:
+			last_lap = time - lap_start
+			best_lap = last_lap if best_lap < 0.0 else minf(best_lap, last_lap)
+			lap += 1
+			lap_start = time
+			visited = {0: true}
+			events.append({"type": "lap", "t": last_lap})
+		progress_i = cur
+	if not job.is_empty():
+		_job_step(inp, dt, pv)
+
+
+func _new_job() -> Dictionary:
+	# exposed: out in the open on the way home; safe: back under cover since (the margin taken then)
+	return {"stage": "out", "t": 0.0, "t0": null, "held": 0.0, "route": "open", "margin": 0.0, "reason": "", "prev_d": null,
+		"exposed": false, "safe": false}
+
+
+## For the view: where the job's countdown counts to now, {x, y}: the lake town's pad on the way
+## out; from the drop on, the deadline home: the start town's receiving ramp's entrance on the
+## loop, or the canopy's start once on the shade line short of it. Empty once back under cover
+## (safe) or the job's over.
+func job_deadline() -> Dictionary:
+	if job.is_empty() or job.stage == "out":
+		return {"x": tpx[pad], "y": tpy[pad]} if pad >= 0 else {}
+	if job.safe or job.stage == "done" or job.stage == "failed":
+		return {}
+	if pod.path > 0:
+		var B: TrackPath = branches[pod.path - 1]
+		if pod.hint < B.covered.x:
+			return {"x": B.px[B.covered.x], "y": B.py[B.covered.x]}
+	var d := mouth
+	for r in covered_ramps:
+		if int(r[1]) == mouth - 1:
+			d = int(r[0])
+	return {"x": tpx[d], "y": tpy[d]}
+
+
+## The job's clock (s since its first move; 0 before it).
+func job_time() -> float:
+	return 0.0 if job.is_empty() or job.t0 == null else time - float(job.t0)
+
+
+## When the dawn front reaches (x, y), in the job's seconds.
+func t_lit(x: float, y: float) -> float:
+	return P.dawnT0 + (x * cos(P.dawnDir) + y * sin(P.dawnDir)) / P.dawnSpeed
+
+
+## The job (the emergency run), mirroring sim-core.js jobStep: its clock starts on the first move.
+## Out to the lake town's pad (stopped in its box PAD_HOLD s: the drop), then home to the start
+## town's mouth before the dawn front. The towns are shelter, and so is the shade line past its
+## canopy's start; caught in the open, the job fails. Each route's margin is taken at its own
+## deadline: the open loop's at the mouth, the shade line's as the pod goes under the canopy.
+func _job_step(inp: Dictionary, dt: float, pv: float) -> void:
+	var Pd := pod
+	if job.stage == "done" or job.stage == "failed":
+		return
+	if job.t0 == null:
+		if inp.thrL + inp.thrR <= 0.02:
+			return
+		job.t0 = time
+	var t: float = time - job.t0
+	job.t = t
+	if crash_t > 0.0:   # wrecked this step
+		job.reason = "crash"
+		_job_to("failed")
+		return
+	var lit := t_lit(Pd.x, Pd.y)
+	var covered: bool = Pd.path > 0 and Pd.hint >= branches[Pd.path - 1].covered.x
+	# under the canopy you've made it: coming off the shade line the main road joins under it (the
+	# join's zone, short of the mouth), and the town is shelter from there
+	var merging := false
+	if Pd.path == 0 and job.route == "shade" and not branches.is_empty():
+		var dj := _cyc(Pd.hint - branches[0].join_i)
+		merging = dj >= -branches[0].jz and dj <= 0
+	# shelter: a town, a covered ramp, the shade line's canopy
+	var sheltered: bool = covered or merging or (Pd.path == 0 and (tmode[Pd.hint] == 0 or tcover[Pd.hint] == 1))
+	if not sheltered and t >= lit:
+		job.reason = "dawn"
+		events.append({"type": "dawn"})
+		_job_to("failed")
+		crash_t = 1.6
+		return
+	# home: the deadline is getting back under cover after the open loop (a receiving ramp, or the
+	# shade line's canopy); the margin is taken there
+	if job.stage == "home":
+		if not sheltered:
+			job.exposed = true
+		elif job.exposed and not job.safe:
+			job.safe = true
+			job.route = "shade" if covered else "open"
+			job.margin = lit - t
+	if job.stage == "out" or job.stage == "drop":
+		var dx := Pd.x - tpx[pad]
+		var dy := Pd.y - tpy[pad]
+		var on_pad: bool = Pd.path == 0 and absf(dx * ttx[pad] + dy * tty[pad]) <= PAD_HALF and absf(dx * tnx[pad] + dy * tny[pad]) <= PAD_HALF
+		if job.stage == "out":
+			job.held = job.held + dt if on_pad and pv < STOPPED else 0.0
+			if job.held >= PAD_HOLD - 1e-9:
+				_job_to("drop")
+		elif not on_pad:
+			_job_to("home")
+	elif job.stage == "home":
+		var d = _cyc(Pd.hint - mouth) if Pd.path == 0 else null
+		if d != null and d >= 0 and d < 100 and job.prev_d != null and job.prev_d < 0 and job.prev_d > -100:   # crossed the mouth, coming home
+			if not job.safe:   # never out in the open: the mouth's
+				job.margin = t_lit(tpx[mouth], tpy[mouth]) - t
+			_job_to("done", {"route": job.route, "margin": job.margin})
+		job.prev_d = d
+
+
+func _job_to(stage: String, extra: Dictionary = {}) -> void:
+	job.stage = stage
+	var e := {"type": "job", "stage": stage}
+	e.merge(extra)
+	events.append(e)

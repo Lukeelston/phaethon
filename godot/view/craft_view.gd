@@ -35,6 +35,7 @@ const CraftModelScript := preload("res://view/craft_model.gd")
 const HorizonScript := preload("res://view/horizon.gd")
 const GpWorldScript := preload("res://view/gp_world.gd")
 const CourseWorldScript := preload("res://view/course_world.gd")
+const DawnScript := preload("res://view/dawn.gd")
 const VerdantWorldScript := preload("res://view/verdant_world.gd")
 const DT := 1.0 / 480.0
 const HAZE := Color(0.78, 0.66, 0.52)
@@ -42,6 +43,11 @@ const GROUND_PERIOD := 4096.0             # view/ground.gdshader's PERIOD
 const SUN_ROT := Vector3(-30, 52, 0)       # the primary sun (DirectionalLight3D rotation, degrees)
 const HORIZON := Color(0.86, 0.74, 0.58)   # fog colour = the sky at the horizon, so they meet seamlessly
 const HORIZON_GREEN := Color(0.72, 0.80, 0.86)   # Eridanus: a soft blue-grey haze over the valley
+const TWILIGHT_HORIZON := Color(0.27, 0.27, 0.38)   # the emergency run, before dawn: a dusky violet haze ...
+const TWILIGHT_TOP := Color(0.04, 0.06, 0.15)       # ... under a deep blue sky
+const TWILIGHT_AMBIENT := 1.6                       # the sky's light carries the ground ...
+const TWILIGHT_FILL := 0.45                         # ... with a cool shadowless fill from overhead ...
+const TWILIGHT_EXPOSURE := 1.3                      # ... and the eye opened up a little
 
 var sim
 var levers
@@ -56,6 +62,7 @@ var acc := 0.0
 var sub := 0
 var inp := {"thrL": 0.0, "thrR": 0.0, "brkL": 0.0, "brkR": 0.0, "repair": false, "reignite": false}
 var start_at := -1   # --at=I: start at track sample I (circuits; screenshots of a given corner)
+var branch_at := -1  # --branch-at=J: start on the shade line at its sample J (with --job=emergency; screenshots)
 var cruise := -1.0   # --cruise=T holds both levers at T (demos, screenshots)
 var hold_brake := [0.0, 0.0]
 var cam_offset := Vector3.ZERO   # --cam: debug close-up (forward, left, up)
@@ -63,9 +70,12 @@ var handling_ask := ""             # the live handling switch: "speed" / "starfi
                                    # toggle or Y-hold; keyboard: M), sent with every step
 static var track_override := ""    # an in-game track switch (VR: hold the menu button) wins over --track;
                                    # static, so it survives the scene reload that does the switch
+static var job_override := ""      # the job to fly ("emergency": the emergency run; "none": no job), wins over --job; static too
 var eye := Vector3.INF            # --eye / --look: a fixed debug camera at sim (x, y, h), aimed at another point
 var look := Vector3.ZERO
 var best_saved := -1.0     # sprint best, persisted across launches
+static var best_dir := "user://"   # where the emergency run's best lives; static so tests point it elsewhere before a view's build
+var _job_started := false  # the emergency run's clock has started (the SPEED AUTHORIZED flash)
 var flash_msg := ""        # DNF / new-best message, shown for a few seconds
 var flash_until := -1.0
 var brake_point := -1.0    # metres before the box where this run's hard braking began
@@ -90,6 +100,9 @@ var traffic: Node3D
 var horizon: Node3D
 var gp_world: Node3D
 var course_world: Node3D     # Eridanus: the chunked trackside (view/course_world.gd)
+var dawn: Node3D             # the emergency run: the dawn's front (view/dawn.gd)
+var light_preset := "afternoon"   # "afternoon", or "twilight" on a job (the emergency run: before dawn)
+var burn_rect: ColorRect     # the flat view's burn to white when the dawn catches you
 var verdant_world: Node3D    # ... and the green valley round it (view/verdant_world.gd)
 var dust: Node3D
 
@@ -128,6 +141,8 @@ func _ready() -> void:
 			hold_brake = [float(b[0]), float(b[1])]
 		elif a.begins_with("--at="):
 			start_at = int(a.get_slice("=", 1))
+		elif a.begins_with("--branch-at="):
+			branch_at = int(a.get_slice("=", 1))
 		elif a.begins_with("--cam="):
 			var c := a.get_slice("=", 1).split(",")
 			cam_offset = Vector3(float(c[0]), float(c[1]), float(c[2]))
@@ -141,9 +156,14 @@ func _ready() -> void:
 		opts["track"] = track_override
 		opts.erase("startX")
 		opts.erase("startY")
+	var job := resolve_job(OS.get_cmdline_user_args(), job_override)
+	if job != "":
+		opts["job"] = job
 	sim = CraftSimScript.new(opts)
 	if start_at >= 0 and sim.kind == "circuit":
 		sim.respawn(-1, start_at)
+	if branch_at >= 0 and not sim.branches.is_empty():
+		_place_on_branch(branch_at)
 	if sim.kind != "circuit":
 		replay = []
 	levers = LeverInputScript.new()
@@ -195,6 +215,13 @@ func _on_event(e: Dictionary) -> void:
 		_on_hit(e.who, 1.0)
 	elif e.type == "scrape":
 		_on_hit(e.who, 0.35)
+	if not sim.job.is_empty():   # the emergency run: its best is the run's time, made, never a lap
+		if e.type == "job" and e.stage == "done" and (best_saved < 0.0 or float(sim.job.t) < best_saved):
+			best_saved = sim.job.t
+			var fj := FileAccess.open(_best_path(), FileAccess.WRITE)
+			if fj:
+				fj.store_string(JSON.stringify({"best": best_saved}))
+		return
 	if sim.course and e.type == "lap":
 		if best_saved < 0.0 or e.t < best_saved:
 			best_saved = e.t
@@ -223,6 +250,8 @@ func _on_event(e: Dictionary) -> void:
 
 ## Sprint bests are kept per handling mode (the speed file keeps its original name).
 func _best_path() -> String:
+	if not sim.job.is_empty():
+		return best_dir + "%s_emergency_best.json" % sim.track_name
 	var h: String = sim.P.handling
 	if sim.track_name == "gp":
 		return "user://gp_best_%s.json" % h
@@ -302,6 +331,7 @@ func _respawn() -> void:
 	sim.restart()
 	brake_point = -1.0
 	flash_until = -1.0
+	_job_started = false
 
 
 ## Overridable: fill `inp` for this frame and handle arm/respawn edges.
@@ -322,6 +352,9 @@ func _process(delta: float) -> void:
 		_sim_step()
 		acc -= DT
 	_track_braking()
+	if not sim.job.is_empty() and not _job_started and sim.job.t0 != null:
+		_job_started = true   # the clock's running: you're an emergency
+		_flash("SPEED AUTHORIZED  /  SHADE LINE OPEN")
 	if engine_audio:
 		engine_audio.update(inp, delta)
 	if wind_audio:
@@ -353,20 +386,61 @@ func _track_braking() -> void:
 	was_active = sim.run_active
 
 
+## The job to fly: the override ("none": no job, whatever the command line says), else --job=.
+static func resolve_job(args: PackedStringArray, override: String) -> String:
+	if override == "none":
+		return ""
+	if override != "":
+		return override
+	for a in args:
+		if a.begins_with("--job="):
+			return a.get_slice("=", 1)
+	return ""
+
+
+## Debug start (screenshots): every body on branch 0's sample j, laid out as respawn lays them
+## on the main road, at rest.
+func _place_on_branch(j: int) -> void:
+	var B = sim.branches[0]
+	j = clampi(j, 0, B.N - 1)
+	var f: int = B.from_i
+	sim.respawn(-1, f)
+	var dth: float = atan2(B.ty[j], B.tx[j]) - atan2(sim.tty[f], sim.ttx[f])
+	for b in sim.bodies:
+		var rx: float = b.x - sim.tpx[f]
+		var ry: float = b.y - sim.tpy[f]
+		var al: float = rx * sim.ttx[f] + ry * sim.tty[f]
+		var ac: float = rx * sim.tnx[f] + ry * sim.tny[f]
+		b.x = B.px[j] + al * B.tx[j] + ac * B.nx[j]
+		b.y = B.py[j] + al * B.ty[j] + ac * B.ny[j]
+		b.th += dth
+		b.path = 1
+		b.hint = mini(B.N - 1, j + roundi(al / 12.0))
+
+
 func _follow_origin() -> void:
 	org_x = sim.pod.x
 	org_y = sim.pod.y
 
 
-## Sim point -> render position, relative to the floating origin.
+## Sim point -> render position, relative to the floating origin. On the shade line (the pod on a
+## branch) the point rides its twisted road (CraftModel.road_xf: rolled over, raised).
 func w3(x: float, y: float, h := 0.0) -> Vector3:
+	if sim and sim.pod.path > 0:
+		return road_xf(x, y) * Vector3(x - org_x, h, -(y - org_y))
 	return Vector3(x - org_x, h + surface(x, y).x, -(y - org_y))
 
 
-## The banked GP's surface under (x, y): Vector2(height, bank radians, + = down to the left).
-## Everything placed with w3 rides it; (0, 0) off the GP.
+## The banked GP's surface under (x, y), on the pod's road: Vector2(height, bank radians, + = down
+## to the left). Everything placed with w3 rides it; (0, 0) off the GP. On the shade line: its
+## centreline's height (the corkscrews' climb) and no bank (its roll is road_xf's).
 func surface(x: float, y: float) -> Vector2:
-	return sim.surface_at(x, y, sim.pod.hint) if sim else Vector2.ZERO
+	return sim.surface_at(x, y, sim.pod.hint, sim.pod.path) if sim else Vector2.ZERO
+
+
+## The pod's road's frame at (x, y) (CraftModel.road_xf): identity on the main road.
+func road_xf(x: float, y: float) -> Transform3D:
+	return CraftModelScript.road_xf(sim, x, y, org_x, org_y)
 
 
 ## Sim point -> absolute mesh-space position (for meshes anchored at the sim origin).
@@ -410,7 +484,12 @@ func _build_world() -> void:
 	# Sky: dusty blue overhead, washing out to the haze at the horizon. The fog skips the sky
 	# (it would paint it flat) and meets it at the horizon in the same colour.
 	var green: bool = sim.track_name == "eridanus"
-	var hz := HORIZON_GREEN if green else HORIZON
+	# the emergency run is flown before dawn (Luke: a dim look just for the job; free Eridanus keeps
+	# its afternoon): both suns under the horizon on the dawn's side (view/dawn.gd), the sky's light
+	# carrying the ground so its grain, the asphalt's joints, the dust and the lights still read
+	var tw: bool = not sim.job.is_empty()
+	light_preset = "twilight" if tw else "afternoon"
+	var hz := TWILIGHT_HORIZON if tw else (HORIZON_GREEN if green else HORIZON)
 	var sky_mat := ProceduralSkyMaterial.new()
 	sky_mat.sky_top_color = Color(0.30, 0.50, 0.80) if green else Color(0.40, 0.55, 0.74)
 	sky_mat.sky_horizon_color = hz
@@ -419,6 +498,11 @@ func _build_world() -> void:
 	sky_mat.ground_bottom_color = Color(0.36, 0.44, 0.28) if green else Color(0.62, 0.5, 0.36)
 	sky_mat.sun_angle_max = 1.5
 	sky_mat.sun_curve = 0.05
+	if tw:
+		sky_mat.sky_top_color = TWILIGHT_TOP
+		sky_mat.ground_bottom_color = Color(0.07, 0.09, 0.07)
+		sky_mat.sun_angle_max = 50.0   # the suns' glow under the dawn's horizon spreads up the sky
+		sky_mat.sun_curve = 0.12
 	var sky := Sky.new()
 	sky.sky_material = sky_mat
 	var env := WorldEnvironment.new()
@@ -453,36 +537,51 @@ func _build_world() -> void:
 	en.fog_density = 0.0012 if sim.kind == "circuit" and not sim.course else (0.0002 if green else 0.00035)
 	en.fog_sky_affect = 0.0
 	en.fog_sun_scatter = 0.18   # the haze brightens toward the suns
+	if tw:
+		en.ambient_light_sky_contribution = 1.0
+		en.ambient_light_energy = TWILIGHT_AMBIENT
+		en.tonemap_exposure = TWILIGHT_EXPOSURE
+		en.fog_sun_scatter = 0.0
+		en.glow_intensity = 0.7   # the lamps carry more of the scene
 	add_child(env)
-	# Twin suns, ahead and to the right of the run, late afternoon: a white primary that casts
-	# the shadows (long ones now, so ramps, props and the craft sit on the ground) and a smaller,
-	# warmer companion a few degrees off it.
-	var sun := DirectionalLight3D.new()
-	sun.rotation_degrees = SUN_ROT
-	sun.light_color = Color(1.0, 0.95, 0.86)
-	sun.light_energy = 1.35
-	sun.shadow_enabled = true
-	sun.directional_shadow_max_distance = 450.0
-	sun.directional_shadow_blend_splits = true
-	sun.shadow_blur = 1.5
-	add_child(sun)
-	var sun2 := DirectionalLight3D.new()
-	sun2.rotation_degrees = Vector3(-24, 60, 0)
-	sun2.light_color = Color(1.0, 0.72, 0.45)
-	sun2.light_energy = 0.4
-	sun2.light_angular_distance = 0.6
-	add_child(sun2)
-	# the suns' discs: sky-only lights, so the shadow caster stays a hard-edged (cheap) light
-	sun.sky_mode = DirectionalLight3D.SKY_MODE_LIGHT_ONLY
-	sun2.sky_mode = DirectionalLight3D.SKY_MODE_LIGHT_ONLY
-	for d in [[sun, Color(1.0, 0.98, 0.94), 0.55, 16.0], [sun2, Color(1.0, 0.66, 0.36), 0.35, 7.0]]:
-		var disc := DirectionalLight3D.new()
-		disc.rotation = (d[0] as DirectionalLight3D).rotation
-		disc.light_color = d[1]
-		disc.light_angular_distance = d[2]
-		disc.light_energy = d[3]
-		disc.sky_mode = DirectionalLight3D.SKY_MODE_SKY_ONLY
-		add_child(disc)
+	if tw:
+		# no sun yet: a cool, shadowless light from the high sky stands in for the dome's glow
+		var sky_fill := DirectionalLight3D.new()
+		sky_fill.rotation_degrees = Vector3(-62, 20, 0)
+		sky_fill.light_color = Color(0.62, 0.70, 0.95)
+		sky_fill.light_energy = TWILIGHT_FILL
+		sky_fill.sky_mode = DirectionalLight3D.SKY_MODE_LIGHT_ONLY
+		add_child(sky_fill)
+	else:
+		# Twin suns, ahead and to the right of the run, late afternoon: a white primary that casts
+		# the shadows (long ones now, so ramps, props and the craft sit on the ground) and a smaller,
+		# warmer companion a few degrees off it.
+		var sun := DirectionalLight3D.new()
+		sun.rotation_degrees = SUN_ROT
+		sun.light_color = Color(1.0, 0.95, 0.86)
+		sun.light_energy = 1.35
+		sun.shadow_enabled = true
+		sun.directional_shadow_max_distance = 450.0
+		sun.directional_shadow_blend_splits = true
+		sun.shadow_blur = 1.5
+		add_child(sun)
+		var sun2 := DirectionalLight3D.new()
+		sun2.rotation_degrees = Vector3(-24, 60, 0)
+		sun2.light_color = Color(1.0, 0.72, 0.45)
+		sun2.light_energy = 0.4
+		sun2.light_angular_distance = 0.6
+		add_child(sun2)
+		# the suns' discs: sky-only lights, so the shadow caster stays a hard-edged (cheap) light
+		sun.sky_mode = DirectionalLight3D.SKY_MODE_LIGHT_ONLY
+		sun2.sky_mode = DirectionalLight3D.SKY_MODE_LIGHT_ONLY
+		for d in [[sun, Color(1.0, 0.98, 0.94), 0.55, 16.0], [sun2, Color(1.0, 0.66, 0.36), 0.35, 7.0]]:
+			var disc := DirectionalLight3D.new()
+			disc.rotation = (d[0] as DirectionalLight3D).rotation
+			disc.light_color = d[1]
+			disc.light_angular_distance = d[2]
+			disc.light_energy = d[3]
+			disc.sky_mode = DirectionalLight3D.SKY_MODE_SKY_ONLY
+			add_child(disc)
 
 	# The ground rides along under the pod; its texture offset keeps the sand fixed in the world.
 	# 60 km across so its far edge sits near the true horizon even 100+ m up a jump.
@@ -498,6 +597,10 @@ func _build_world() -> void:
 	ground.material_override = ground_mat
 	ground.position = Vector3(0, -0.05, 0)
 	add_child(ground)
+	if tw:
+		dawn = DawnScript.new()   # the emergency run's dawn (its suns, its wall, the land it lights)
+		add_child(dawn)
+		dawn.build(self)
 
 	if sim.kind == "range":
 		range_world = RangeWorldScript.new()
@@ -607,6 +710,10 @@ func _sync_world() -> void:
 		course_world.sync(org_x, org_y)
 	if verdant_world:
 		verdant_world.sync(org_x, org_y)
+	if dawn:
+		dawn.sync(sim, get_process_delta_time())
+		if burn_rect:
+			burn_rect.color = Color(1.0, 0.97, 0.9, dawn.burn)
 	if landmark:
 		landmark.sync(org_x, org_y, sim.time, cam.global_position)
 
@@ -634,6 +741,13 @@ func _make_view() -> void:
 	minimap_2d = Minimap2DScript.new()
 	minimap_2d.visible = sim.kind == "circuit"
 	layer.add_child(minimap_2d)
+	if light_preset == "twilight":
+		hud.add_theme_color_override("font_color", Color(0.85, 0.88, 0.95))   # light on the dark sky
+	burn_rect = ColorRect.new()   # caught by the dawn: the view burns to white
+	burn_rect.set_anchors_preset(Control.PRESET_FULL_RECT)
+	burn_rect.color = Color(1.0, 0.97, 0.9, 0.0)
+	burn_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	layer.add_child(burn_rect)
 	add_child(layer)
 
 
@@ -663,8 +777,11 @@ func _place_camera(k: float) -> void:
 	cam.look_at(pod_p + fwd * 40.0 + Vector3.UP * 1.0, Vector3.UP)
 
 
-## Second HUD line: lap info on the circuit, mileage and top speed on the range.
+## Second HUD line: lap info on the circuit, mileage and top speed on the range; the job's line on
+## the emergency run.
 func _progress_text() -> String:
+	if not sim.job.is_empty():
+		return _job_text()
 	if sim.kind == "range":
 		var best := "--" if best_saved < 0.0 else "%.2fs" % best_saved
 		var braked := "" if brake_point < 0.0 else "   braked %.2f mi out" % (brake_point / 1609.344)
@@ -686,6 +803,37 @@ func _progress_text() -> String:
 		return "LAP %d  %.2fs   LAST %s   RECORD %s" % [sim.lap + 1, cur, "--" if sim.last_lap < 0.0 else "%.2f" % sim.last_lap, rec]
 	return "LAP %d  %.2fs   LAST %s  BEST %s" % [sim.lap + 1, cur,
 		"--" if sim.last_lap < 0.0 else "%.2f" % sim.last_lap, "--" if sim.best_lap < 0.0 else "%.2f" % sim.best_lap]
+
+
+## The emergency run's line on the dash, readable at a glance: the briefing (the job, where, and
+## when the dawn reaches it), HOLD on the pad counting down, HOME and the dawn's time to the
+## deadline, then the result against the best.
+func _job_text() -> String:
+	var J: Dictionary = sim.job
+	var t: float = sim.job_time()
+	var dl: Dictionary = sim.job_deadline()
+	var dawn := "UNDER COVER" if dl.is_empty() else "DAWN " + _mmss(sim.t_lit(dl.x, dl.y) - t)
+	match J.stage:
+		"done":
+			return "MADE IT  %+.1f s  (%s)\nRUN %s   BEST %s" % [J.margin, "SHADE LINE" if J.route == "shade" else "OPEN", _mmss(J.t, true),
+				"--" if best_saved < 0.0 else _mmss(best_saved, true)]
+		"failed":
+			return ("CAUGHT BY THE DAWN" if J.reason == "dawn" else "WRECKED") + "\nY: GO AGAIN"
+		"out":
+			if J.held > 0.0:
+				return "HOLD  %.1f s" % maxf(0.0, CraftSimScript.PAD_HOLD - float(J.held))
+			if sim.time < flash_until:
+				return flash_msg
+			return "EMERGENCY  LAKE TOWN MINE  %s" % dawn
+	return "HOME  %s" % dawn
+
+
+## Seconds as m:ss (or m:ss.s), never negative.
+static func _mmss(secs: float, tenths := false) -> String:
+	var s := maxf(secs, 0.0)
+	if tenths:
+		return "%d:%04.1f" % [int(s) / 60, fmod(s, 60.0)]
+	return "%d:%02d" % [int(s) / 60, int(s) % 60]
 
 
 func _update_hud() -> void:

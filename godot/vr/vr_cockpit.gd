@@ -413,7 +413,9 @@ func _read_input(delta: float) -> void:
 	_diag(delta, l, r, p)
 
 
-func _track() -> String:   # "range", "gp", "eridanus" (or "circuit")
+func _track() -> String:   # "range", "gp", "eridanus", "emergency" (Eridanus on the job; or "circuit")
+	if sim.course and not sim.job.is_empty():
+		return "emergency"
 	return sim.track_name if sim.course else ("range" if sim.kind == "range" else "circuit")
 
 
@@ -432,18 +434,27 @@ func _menu(down: bool, delta: float) -> String:
 	return "scheme" if tapped else ""
 
 
-## Range -> grand prix -> Eridanus -> range, in the headset: reload the scene on the next track (the OpenXR session
-## carries on; CraftView.track_override survives the reload and wins over --track).
+## Range -> grand prix -> Eridanus -> the emergency run -> range, in the headset: reload the scene on
+## the next track (the OpenXR session carries on; CraftView.track_override and job_override survive
+## the reload and win over --track and --job).
 func switch_track() -> void:
 	var to := next_track(_track())
 	print("TRACK: switching %s -> %s" % [_track(), to])
-	track_override = to
+	var o := overrides_for(to)
+	track_override = o[0]
+	job_override = o[1]   # "none" on the free stops: a -Job emergency launch's --job mustn't follow you round
 	get_tree().call_deferred("reload_current_scene")
 
 
-## The menu hold's cycle: range -> grand prix -> Eridanus -> range (a plain circuit goes to the range).
+## A cycle stop's [track_override, job_override]: the emergency run is Eridanus on the job.
+static func overrides_for(to: String) -> Array:
+	return ["eridanus", "emergency"] if to == "emergency" else [to, "none"]
+
+
+## The menu hold's cycle: range -> grand prix -> Eridanus -> the emergency run (Eridanus on the
+## job) -> range (a plain circuit goes to the range).
 static func next_track(cur: String) -> String:
-	var order := ["range", "gp", "eridanus"]
+	var order := ["range", "gp", "eridanus", "emergency"]
 	return order[(order.find(cur) + 1) % order.size()]
 
 
@@ -454,13 +465,21 @@ func _place_camera(_k: float) -> void:
 	var b_yaw := Basis(Vector3.UP, yaw)
 	# the ride over the banking, smoothed (CraftModel.ride: Luke, "going over hills makes the camera very shaky")
 	var r := CraftModelScript.ride(self, sim, _ride, get_process_delta_time())
-	var roll := clampf(craft.bank[2] + r.z, -CraftModelScript.ROLL_MAX, CraftModelScript.ROLL_MAX)
+	var roll := clampf(craft.bank[2] + r.z, -CraftModelScript.ROLL_MAX, CraftModelScript.ROLL_MAX)   # the cap: the lean only
 	var pitch := r.y   # up and down the banking
-	var b_full := Basis.from_euler(Vector3(pitch, yaw, roll))   # lean + the track's banking (capped), and its slope
-	var base := w3(sim.pod.x, sim.pod.y, sim.pod.z - 0.8 + CraftModelScript.POD_LIFT) + Vector3.UP * (r.x - surface(sim.pod.x, sim.pod.y).x)   # floor 0.8 m below the pod body centre, lifted with the pod
 	var head := origin.position + cam.position
-	rig.basis = b_full
-	rig.position = base + b_yaw * head - b_full * head
+	if sim.pod.path > 0:
+		# the shade line: the cockpit worked out flat, then carried onto the twisted road, where the
+		# corkscrews roll it right over (CraftModel.onto_road: past 90 deg, upside down under the canopy)
+		var b_flat := Basis.from_euler(Vector3(0.0, yaw, roll))
+		var floor_flat := Vector3(sim.pod.x - org_x, sim.pod.z - 0.8 + CraftModelScript.POD_LIFT, -(sim.pod.y - org_y))
+		rig.transform = CraftModelScript.onto_road(sim, Transform3D(b_flat, floor_flat + b_yaw * head - b_flat * head), floor_flat,
+			_ride.roll, pitch, org_x, org_y)
+	else:
+		var b_full := Basis.from_euler(Vector3(pitch, yaw, roll))   # lean + the track's banking (capped), and its slope
+		var base := w3(sim.pod.x, sim.pod.y, sim.pod.z - 0.8 + CraftModelScript.POD_LIFT) + Vector3.UP * (r.x - surface(sim.pod.x, sim.pod.y).x)   # floor 0.8 m below the pod body centre, lifted with the pod
+		rig.basis = b_full
+		rig.position = base + b_yaw * head - b_full * head
 	var thr := [inp.thrL, inp.thrR]
 	for k in 2:
 		lever_pivots[k].rotation.x = deg_to_rad(lerpf(30.0, -30.0, thr[k]))
@@ -482,6 +501,8 @@ func _process(delta: float) -> void:
 	var target := 1.0 if sim.crash_t > 0.0 else 0.0
 	fade_v = move_toward(fade_v, target, delta * 4.0)
 	fade_mat.albedo_color = Color(0, 0, 0, fade_v)
+	if dawn and dawn.burn > 0.0:   # caught by the dawn: burn to white instead
+		fade_mat.albedo_color = Color(1.0, 0.97, 0.9, dawn.burn)
 	frame_ms.append(delta * 1000.0)
 	report_t += delta
 	if report_t >= 10.0:

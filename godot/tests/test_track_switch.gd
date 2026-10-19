@@ -2,7 +2,7 @@
 ## menu button does two things.
 ##   tap         (released before MENU_HOLD) cycles the control scheme, on release, once
 ##   hold 1.5 s  switches track once, and letting go after doesn't also cycle the scheme
-##   cycle       each hold steps range -> grand prix -> Eridanus -> range
+##   cycle       each hold steps range -> grand prix -> Eridanus -> the emergency run -> range
 ##   override    CraftView.track_override (static: it survives the reload that does the switch)
 ##               builds the asked-for track, and wins over --track
 ## The reload itself is exercised end to end by the suite's VR scene run with --switch-track-at.
@@ -44,11 +44,22 @@ func _initialize() -> void:
 	c.free()
 	var seen := []
 	var t := "range"
-	for i in 3:
+	for i in 4:
 		t = Cockpit.next_track(t)
 		seen.append(t)
 	_check("each hold steps to the next track: range -> %s (a plain circuit goes to the %s)" % [" -> ".join(seen), Cockpit.next_track("circuit")],
-		seen == ["gp", "eridanus", "range"] and Cockpit.next_track("circuit") == "range")
+		seen == ["gp", "eridanus", "emergency", "range"] and Cockpit.next_track("circuit") == "range")
+	# launched with --job=emergency (launch_vr.ps1 -Job emergency), the cycle's free Eridanus stop
+	# is still free: the switch's override says "no job", which wins over the command line
+	var args := PackedStringArray(["--track=eridanus", "--job=emergency"])
+	var free_stop: String = ViewScript.resolve_job(args, Cockpit.overrides_for("eridanus")[1])
+	var job_stop: String = ViewScript.resolve_job(args, Cockpit.overrides_for("emergency")[1])
+	_check("launched on the job: the cycle's eridanus stop flies free ('%s'), its emergency stop the job ('%s'); no override leaves --job be ('%s'), none without one ('%s')" % [
+			free_stop, job_stop, ViewScript.resolve_job(args, ""), ViewScript.resolve_job(PackedStringArray(["--track=eridanus"]), "")],
+		free_stop == "" and job_stop == "emergency" and ViewScript.resolve_job(args, "") == "emergency"
+		and ViewScript.resolve_job(PackedStringArray(["--track=eridanus"]), "") == ""
+		and Cockpit.overrides_for("eridanus") == ["eridanus", "none"] and Cockpit.overrides_for("emergency") == ["eridanus", "emergency"]
+		and Cockpit.overrides_for("range") == ["range", "none"])
 	# the override builds the asked-for track, whatever --track says: one view at a time (a view
 	# reads the override in its _ready)
 	_next_view()
@@ -76,7 +87,7 @@ func _process(_d: float) -> bool:
 		return false
 	ViewScript.track_override = ""
 	_check("the override builds the asked-for track over --track=range (asked %s; got %s)" % [asks, got], got == asks)
-	var good := fails == 0 and passed == 4
+	var good := fails == 0 and passed == 5
 	print("TRACK SWITCH ", "PASS" if good else "FAIL (%d failed, %d passed)" % [fails, passed])
 	quit(0 if good else 1)
 	return true

@@ -43,7 +43,7 @@ void fragment() {
 	float ax = dot(normalize(axis), normalize(VIEW));
 	float to_nozzle = along * aspect * mix(1.0, 2.0, layer) / max(abs(ax), 0.05);
 	float thick = min(min(facing / max(1.0 - ax * ax, 0.03), to_nozzle), 2.5);
-	float edge = thick < 1.0 ? pow(thick, mix(1.6, 0.9, layer)) : thick;
+	float edge = thick < 1.0 ? pow(max(thick, 0.0), mix(1.6, 0.9, layer)) : thick;   // max: MSAA edge pixels run `along` off the quad
 	// colour temperature down the plume
 	vec3 nozzle = mix(vec3(0.55, 0.75, 1.0), vec3(0.85, 0.9, 1.0), ramjet);    // blue-white at the exit
 	vec3 mid = mix(vec3(1.0, 0.62, 0.18), vec3(0.75, 0.55, 1.0), ramjet);      // yellow-orange (violet on the ramjet)

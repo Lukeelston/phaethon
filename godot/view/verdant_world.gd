@@ -259,6 +259,15 @@ func _near_track(r: float) -> Dictionary:
 		for dx in range(-span, span + 1):
 			for dy in range(-span, span + 1):
 				cells[Vector2i(cx + dx, cy + dy)] = true
+	for B in sim.branches:   # the shade line too (its canopy's pillars stand 7 m out)
+		for i in range(0, B.N, 2):
+			var reach: float = B.w[i] / 2.0 + r
+			var span := int(ceil(reach / 50.0))
+			var cx := floori(B.px[i] / 50.0)
+			var cy := floori(B.py[i] / 50.0)
+			for dx in range(-span, span + 1):
+				for dy in range(-span, span + 1):
+					cells[Vector2i(cx + dx, cy + dy)] = true
 	return cells
 
 

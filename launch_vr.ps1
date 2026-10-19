@@ -10,9 +10,10 @@
 #   .\launch_vr.ps1 -Handling starfighter   start in the tight ~1,200 mph handling mode
 #   .\launch_vr.ps1 -Track gp              the grand prix: 29 km for STARFIGHTER at ~1,000 mph
 #   .\launch_vr.ps1 -Track eridanus        the dual-purpose course: 199 km, SPEEDCRAFT loop + STARFIGHTER towns
+#   .\launch_vr.ps1 -Job emergency         the emergency run on Eridanus: out to the lake town, home before the dawn
 #   .\launch_vr.ps1 -Track range     the 100-mile test range (jump lane +400 m left, twisty lane right)
 #   .\launch_vr.ps1 -Track range -StartMile 95   start further down the range
-param([switch]$WaitForHeadset, [int]$WaitMinutes = 30, [ValidateSet("circuit", "range", "gp", "eridanus")][string]$Track = "circuit", [double]$StartMile = 0, [ValidateSet("", "speed", "starfighter")][string]$Handling = "")
+param([switch]$WaitForHeadset, [int]$WaitMinutes = 30, [ValidateSet("circuit", "range", "gp", "eridanus")][string]$Track = "circuit", [double]$StartMile = 0, [ValidateSet("", "speed", "starfighter")][string]$Handling = "", [ValidateSet("", "emergency")][string]$Job = "")
 
 function Test-QuestLinked {
     # Meta's service log is the ground truth. A Quest over Link streams through the RemoteHeadset
@@ -45,5 +46,6 @@ Write-Host "Phaethon VR -> log $log"
 $userArgs = @()
 if ($Track -eq "range") { $userArgs = @("--", "--track=range", "--startx=$([int]($StartMile * 1609.344))") }
 if ($Track -eq "gp" -or $Track -eq "eridanus") { $userArgs = @("--", "--track=$Track") }
+if ($Job -eq "emergency") { $userArgs = @("--", "--track=eridanus", "--job=emergency") }   # the job flies Eridanus
 if ($Handling -ne "") { if ($userArgs.Count -eq 0) { $userArgs = @("--") }; $userArgs += "--handling=$Handling" }
 & $godot --path "$PSScriptRoot\godot" --xr-mode on res://vr.tscn @userArgs 2>&1 | Tee-Object -FilePath $log

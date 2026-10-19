@@ -2,7 +2,8 @@
 ## records the Wind bus, and measures each leg. Prints WIND AUDIO PASS when every check passes.
 ## Run: Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_wind_audio.gd
 ## Checks: quiet at rest; louder at every step up the ladder; brighter (zero-crossing rate) from
-## 100 to 4,000 mph; a slide and leaving the ground both add buffet; no clipping; the loops are
+## 100 to 1,200 mph; sealed in at 4,000 (the second engine lights at 1,500: the field's hum comes
+## up, then the wind shuts out, quieter and darker) and open again below 1,300; a slide and leaving the ground both add buffet; no clipping; the loops are
 ## seamless (the jump back to the start is no bigger than an ordinary step); exactly one sonic
 ## boom (the ladder crosses Mach 1 once), loud up front and dying away, on its own bus.
 extends SceneTree
@@ -11,19 +12,26 @@ const CraftSimScript := preload("res://sim/craft_sim.gd")
 const WindAudioScript := preload("res://audio/wind_audio.gd")
 const LEG := 2.5      # seconds per leg
 const SETTLE := 0.8   # skip the start of each leg while the smoothing catches up
+const SEALED_FROM := 1.7   # the sealed leg: the hum ~0.9 s in, the wind shut ~1.3 s, settled by here
 # [label, mph, slip radians, airborne, left brake, right brake]
+# (the open-air legs run at 1,200 mph: from the second engine's 1,500 the craft is sealed in)
 const LEGS := [["rest", 0.0, 0.0, false, 0.0, 0.0], ["100 mph", 100.0, 0.0, false, 0.0, 0.0], ["500 mph", 500.0, 0.0, false, 0.0, 0.0],
-	["1500 mph", 1500.0, 0.0, false, 0.0, 0.0], ["4000 mph", 4000.0, 0.0, false, 0.0, 0.0],
-	["1500 mph sliding", 1500.0, 0.3, false, 0.0, 0.0], ["1500 mph airborne", 1500.0, 0.0, true, 0.0, 0.0],
-	["1500 mph both brakes", 1500.0, 0.0, false, 1.0, 1.0], ["1500 mph left brake", 1500.0, 0.0, false, 1.0, 0.0]]
+	["1200 mph", 1200.0, 0.0, false, 0.0, 0.0], ["4000 mph sealed", 4000.0, 0.0, false, 0.0, 0.0],
+	["1200 mph sliding", 1200.0, 0.3, false, 0.0, 0.0], ["1200 mph airborne", 1200.0, 0.0, true, 0.0, 0.0],
+	["1200 mph both brakes", 1200.0, 0.0, false, 1.0, 1.0], ["1200 mph left brake", 1200.0, 0.0, false, 1.0, 0.0]]
 
 var sim
 var wind
 var rec: AudioEffectRecord
+var rec_field: AudioEffectRecord   # the field hum's own bus
 var clock: AudioStreamPlayer
 var started := false
 var boom_signals := 0
 var shud_max := []     # per leg: [max shudder L, max shudder R, min flapL volume_db, max flapL volume_db]
+var seal_t := [-1.0, -1.0]   # into the sealed leg: when the hum, then the seal, passed half
+var sealed_end := [0.0, 0.0, -80.0]   # at the sealed leg's end: hum, seal, hum volume_db
+var open_end := 1.0          # the seal a leg later, back under the off speed
+var hum_db := [0.0, 0.0]     # the Field bus as captured: open at 1,200 mph, sealed at 4,000
 var t := 0.0
 
 
@@ -38,6 +46,8 @@ func _process(_delta: float) -> bool:
 		wind.setup(sim)
 		wind.boomed.connect(func(): boom_signals += 1)
 		rec = AudioEffectRecord.new()
+		rec_field = AudioEffectRecord.new()
+		AudioServer.add_bus_effect(AudioServer.get_bus_index("Field"), rec_field)
 		AudioServer.add_bus_effect(AudioServer.get_bus_index("Wind"), rec)
 		# time from the audio clock (a silent player), as in test_engine_audio.gd
 		var silence := AudioStreamWAV.new()
@@ -51,6 +61,7 @@ func _process(_delta: float) -> bool:
 		root.add_child(clock)
 		clock.play()
 		rec.set_recording_active(true)
+		rec_field.set_recording_active(true)
 		started = true
 		return false
 	var now := clock.get_playback_position() + AudioServer.get_time_since_last_mix()
@@ -64,6 +75,15 @@ func _process(_delta: float) -> bool:
 	sim.pod.grip = 0.0 if leg[3] else 1.0
 	wind.update({"brkL": leg[4], "brkR": leg[5]}, delta)
 	var li := mini(int(t / LEG), LEGS.size() - 1)
+	if li == 4:
+		var into := t - 4.0 * LEG
+		if seal_t[0] < 0.0 and wind.hum > 0.5:
+			seal_t[0] = into
+		if seal_t[1] < 0.0 and wind.seal > 0.5:
+			seal_t[1] = into
+		sealed_end = [wind.hum, wind.seal, wind.hum_player.volume_db]
+	elif li == 5:
+		open_end = wind.seal
 	while shud_max.size() <= li:
 		shud_max.append([0.0, 0.0, INF, -INF])
 	if fmod(t, LEG) > SETTLE:
@@ -75,6 +95,8 @@ func _process(_delta: float) -> bool:
 	if t < LEGS.size() * LEG:
 		return false
 	rec.set_recording_active(false)
+	rec_field.set_recording_active(false)
+	hum_db = [_rms_db(rec_field.get_recording(), 3.0 * LEG + SETTLE, 4.0 * LEG), _rms_db(rec_field.get_recording(), 4.0 * LEG + SEALED_FROM, 5.0 * LEG)]
 	_report(rec.get_recording())
 	return true
 
@@ -86,7 +108,7 @@ func _report(wav: AudioStreamWAV) -> void:
 	var stats := []
 	var peak := 0
 	for k in LEGS.size():
-		var a := int((k * LEG + SETTLE) * rate)
+		var a := int((k * LEG + (SEALED_FROM if k == 4 else SETTLE)) * rate)   # the sealed leg: once it's shut
 		var b := mini(int((k + 1) * LEG * rate), frames)
 		var sq := 0.0
 		var sq_r := 0.0
@@ -117,9 +139,17 @@ func _report(wav: AudioStreamWAV) -> void:
 	var fails := 0
 	fails += _check("captured %.1f s" % (float(frames) / rate), frames > rate * (LEGS.size() * LEG - 1.0))
 	fails += _check("quiet at rest (%.1f dBFS < -60)" % stats[0][0], stats[0][0] < -60.0)
-	for k in range(2, 5):
+	for k in range(2, 4):   # the open air, up to 1,200 mph (from 1,500 the craft is sealed in)
 		fails += _check("%s louder than %s by >= 3 dB" % [LEGS[k][0], LEGS[k - 1][0]], stats[k][0] >= stats[k - 1][0] + 3.0)
-	fails += _check("brighter at 4000 than 100 mph (%.0f vs %.0f crossings/s)" % [stats[4][1], stats[1][1]], stats[4][1] > stats[1][1] * 1.5)
+	fails += _check("brighter at 1200 than 100 mph (%.0f vs %.0f crossings/s)" % [stats[3][1], stats[1][1]], stats[3][1] > stats[1][1] * 1.5)
+	fails += _check("sealed at 4000 mph: the hum comes up %.2f s in, then the wind shuts %.2f s in (hum %.2f at %.1f dB, seal %.2f)" % [
+		seal_t[0], seal_t[1], sealed_end[0], sealed_end[2], sealed_end[1]],
+		seal_t[0] > 0.5 and seal_t[1] > seal_t[0] + 0.2 and sealed_end[0] > 0.95 and sealed_end[1] > 0.95 and sealed_end[2] > -25.0)
+	fails += _check("... the wind shut out: %.1f dB under the open air at 1200 mph and darker (%.0f vs %.0f crossings/s); open again under 1,300 mph (seal %.2f)" % [
+		stats[3][0] - stats[4][0], stats[4][1], stats[3][1], open_end],
+		stats[4][0] <= stats[3][0] - 8.0 and stats[4][1] < stats[3][1] and open_end < 0.1)
+	fails += _check("the hum is in the mix (its bus as captured): %.1f dBFS sealed, %.1f in the open air" % [hum_db[1], hum_db[0]],
+		hum_db[1] > -30.0 and hum_db[0] < -70.0)
 	fails += _check("sliding adds buffet (low band +%.1f dB)" % (stats[5][2] - stats[3][2]), stats[5][2] > stats[3][2] + 3.0)
 	fails += _check("airborne adds buffet (low band +%.1f dB)" % (stats[6][2] - stats[3][2]), stats[6][2] > stats[3][2] + 2.0)
 	fails += _check("airborne rush darker (%.0f vs %.0f crossings/s)" % [stats[6][1], stats[3][1]], stats[6][1] < stats[3][1])
@@ -218,6 +248,18 @@ func _boom_variety() -> int:
 		wind.boom_streams.size(), sums.size(), "" if all_ok else " (" + worst + ")", seen.size(), repeats],
 		wind.boom_streams.size() >= 4 and sums.size() == wind.boom_streams.size() and all_ok and seen.size() == wind.boom_streams.size() and repeats == 0)
 	return f
+
+
+## RMS (dBFS, left channel) of a capture from t0 to t1 s.
+func _rms_db(wav: AudioStreamWAV, t0: float, t1: float) -> float:
+	var d := wav.data
+	var a := int(t0 * wav.mix_rate)
+	var b := mini(int(t1 * wav.mix_rate), d.size() >> 2)
+	var sq := 0.0
+	for i in range(a, b):
+		var x := d.decode_s16(i * 4)
+		sq += float(x) * x
+	return 20.0 * log(maxf(sqrt(sq / maxf(b - a, 1)), 1e-3) / 32768.0) / log(10.0)
 
 
 ## The air-brake roar must rumble, not hiss or rattle (Luke: the first one "sounds like grass and

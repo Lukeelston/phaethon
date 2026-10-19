@@ -17,6 +17,9 @@ uniform float pod_y = 0.0;          // the pod's sim y (places the playa band)
 uniform float playa = 0.0;          // 1 on the range: a dry lake round the runway
 uniform float playa_half = 320.0;   // the lake's mean half-width (m); the shore wanders +/-240 m
 uniform float verdant = 0.0;        // 1 on Eridanus: meadows, not sand
+uniform float dawn_on = 0.0;        // 1 on the emergency run: the land the dawn has reached warms (view/dawn.gd)
+uniform vec2 dawn_u = vec2(1.0, 0.0);   // the front's travel (render x, z)
+uniform float dawn_f = 0.0;         // the front's line: dot(render xz, dawn_u) == dawn_f (against the floating origin)
 
 varying vec2 lp;   // plane-local render xz
 
@@ -98,6 +101,11 @@ void fragment() {
 		float cd = cracks(p / 2.0, PERIOD / 2.0) * 2.0;   // metres to the nearest crack
 		float crack = aline(cd, 0.03, fw) * detail(0.5, fw) + 0.06 * (1.0 - detail(0.5, fw));
 		col = mix(col, vec3(0.50, 0.44, 0.37), crack * lake);
+	}
+	// the dawn: behind its front the land is lit (a soft edge, a few hundred metres)
+	if (dawn_on > 0.0) {
+		float lit = smoothstep(-200.0, 400.0, dawn_f - dot(lp, dawn_u));
+		col = mix(col, col * vec3(2.3, 1.95, 1.5) + vec3(0.05, 0.035, 0.01), lit * dawn_on);
 	}
 	ALBEDO = srgb(col);
 	ROUGHNESS = 0.95;

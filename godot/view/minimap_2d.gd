@@ -51,9 +51,16 @@ func _draw() -> void:
 		var z: Vector2 = l.zone
 		var zc := SF_COL if int(_f.next.mode) == 0 else SP_COL
 		draw_line(_px(z + Vector2(-15, 0)), _px(z + Vector2(15, 0)), zc.lightened(0.4), 4.0, true)
+	if l.dawn != null:   # the dawn's front, across the map
+		draw_line(_px(l.dawn[0]), _px(l.dawn[1]), Color(MiniMap.DAWN_COL, 0.25), 10.0, true)
+		draw_line(_px(l.dawn[0]), _px(l.dawn[1]), MiniMap.DAWN_COL, 3.0, true)
 	var cr: Vector2 = l.craft
 	draw_colored_polygon(PackedVector2Array([_px(cr + Vector2(0, 12)), _px(cr + Vector2(-8, -8)), _px(cr + Vector2(8, -8))]), Color(1, 1, 1, 0.95))
 	var text := MiniMap.readout(_f)
 	if text != "":
 		var col := (SF_COL if int(_f.next.mode) == 0 else SP_COL).lightened(0.3)
-		draw_string(ThemeDB.fallback_font, Vector2(0, MARGIN + 14.0), text, HORIZONTAL_ALIGNMENT_CENTER, SIDE, 15, col)
+		var lines := text.split("
+")
+		draw_string(ThemeDB.fallback_font, Vector2(0, MARGIN + 14.0), lines[0], HORIZONTAL_ALIGNMENT_CENTER, SIDE, 15, col)
+		if lines.size() > 1:   # the dawn's countdown, under it
+			draw_string(ThemeDB.fallback_font, Vector2(0, SIDE - MARGIN - 4.0), lines[1], HORIZONTAL_ALIGNMENT_CENTER, SIDE, 15, MiniMap.DAWN_COL)

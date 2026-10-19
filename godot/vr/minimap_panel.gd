@@ -93,6 +93,9 @@ func show_frame(f: Dictionary) -> void:
 		var z: Vector2 = l.zone
 		var zc := SF_COL if int(f.next.mode) == 0 else SP_COL
 		_seg(z + Vector2(-0.014, 0), z + Vector2(0.014, 0), 0.0022, Color(zc.lightened(0.4), 1.0))
+	if l.dawn != null:   # the dawn's front, across the map
+		_seg(l.dawn[0], l.dawn[1], LINE * 3.2, Color(MiniMap.DAWN_COL, 0.25))
+		_seg(l.dawn[0], l.dawn[1], LINE * 1.2, Color(MiniMap.DAWN_COL, 1.0))
 	# the craft: a white arrowhead pointing up the map
 	var cr: Vector2 = l.craft
 	_tri(cr + Vector2(0, 0.011), cr + Vector2(-0.0075, -0.007), cr + Vector2(0.0075, -0.007), Color(1, 1, 1, 0.95))

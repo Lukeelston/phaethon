@@ -10,13 +10,16 @@
 ## Plus a one-shot sonic boom on the way through Mach 1 (re-arms below Mach 0.9), on its own
 ## "Boom" bus: a heavy double-crack N-wave, its reflection off the desert floor, a sub thump and
 ## four seconds of rolling thunder, soft-clipped dense. The engines and the wind duck under it,
-## and `boomed` fires so the cockpit can kick the controllers.
+## and `boomed` fires so the cockpit can kick the controllers. From the second engine's lighting
+## speed you're sealed in: the field's hum powers up on its own "Field" bus, then the wind shuts
+## out behind it, quieter and muffled (`_seal`); under its off speed the air comes back.
 ## Silent at rest, ducked with the picture on a crash. Same bus pattern as EngineAudio: the
 ## layers feed a "Wind" bus with a hard limiter, so wind can never clip the mix.
 ##   add_child(wind); wind.setup(sim)    once, inside the tree
 ##   wind.update(inp, delta)             every frame, after the sim steps
 extends Node
 
+const EngineAudio := preload("res://audio/engine_audio.gd")   # the seal follows its second engine
 const RATE := 44100
 const LOOP_S := 2.0     # seamless loops; filtering and gusts hide the repeat
 const XF_S := 0.25      # loop crossfade
@@ -42,6 +45,18 @@ const TUNE := {
 	"flap_shudder": 0.5,                # how hard the open flaps buffet the roar (volume swing, linear)
 	"flap_pan": 0.75, "flap_tau": 0.11,  # pan per side; follows the brake like the flaps move
 	"smooth": 0.08,                     # parameter smoothing, s
+	# The seal (Luke: "an electronic hum then a wind sound dampening at second engine engagement.
+	# Something that seals that you're in a totally different environment"): when the second
+	# engine lights (EngineAudio's second_on_mph, off below second_off_mph), the field powers up
+	# with a hum, then the wind shuts out behind it; under the off speed it all opens again.
+	"seal_catch_s": 0.7,                # the second engine cranks this long before it catches: the hum then
+	"seal_shut_s": 0.45,                # ... and the wind seals this long after the hum
+	"seal_db": -15.0,                   # the wind, sealed
+	"seal_hz": [20000.0, 650.0],        # the Wind bus low-pass, open -> sealed
+	"seal_close": 0.22, "seal_open": 0.3,   # the seal shutting, opening (s)
+	"hum_db": [-20.0, -14.0],           # the field's hum at second_on_mph -> 4,000 mph
+	"hum_attack": 0.35, "hum_release": 0.5,
+	"hum_rise": [0.72, 1.0], "hum_rise_s": 0.9,   # powering up: its pitch climbs over this long
 }
 
 var sim
@@ -65,6 +80,12 @@ var _more_booms: Array[AudioStreamWAV] = []
 var _boom_armed := true
 var duck_db := 0.0      # current duck on the Engines and Wind buses (tests read this)
 var _since_boom := INF
+var sealed := false     # past the second engine's lighting speed (with its hysteresis)
+var seal := 0.0         # the wind's seal, 0 open .. 1 shut (tests read this)
+var hum := 0.0          # the field hum's level, 0..1 (tests read this)
+var hum_player: AudioStreamPlayer
+var _seal_age := 0.0    # since `sealed` last changed, s
+var _seal_fx := 0       # the Wind bus's seal low-pass
 
 
 func setup(craft_sim) -> void:
@@ -76,6 +97,15 @@ func setup(craft_sim) -> void:
 		var lim := AudioEffectHardLimiter.new()
 		lim.ceiling_db = -1.0
 		AudioServer.add_bus_effect(wind_bus, lim)
+	_seal_fx = -1   # the seal's low-pass on the Wind bus, ahead of its limiter (buses outlive scene reloads)
+	for k in AudioServer.get_bus_effect_count(wind_bus):
+		if AudioServer.get_bus_effect(wind_bus, k) is AudioEffectLowPassFilter:
+			_seal_fx = k
+	if _seal_fx < 0:
+		var slp := AudioEffectLowPassFilter.new()
+		slp.cutoff_hz = TUNE.seal_hz[0]
+		AudioServer.add_bus_effect(wind_bus, slp, 0)
+		_seal_fx = 0
 	_rush_bus = _bus("WindRush", "Wind")
 	if AudioServer.get_bus_effect_count(_rush_bus) == 0:
 		AudioServer.add_bus_effect(_rush_bus, AudioEffectLowPassFilter.new())   # index 0: follows speed
@@ -106,6 +136,13 @@ func setup(craft_sim) -> void:
 		add_child(p)
 		p.play(randf() * LOOP_S)
 		players[layer] = p
+	_bus("Field", "Master")   # the hum on its own bus: the seal doesn't muffle it
+	hum_player = AudioStreamPlayer.new()
+	hum_player.stream = make_hum()
+	hum_player.bus = "Field"
+	hum_player.volume_db = -80.0
+	add_child(hum_player)
+	hum_player.play()
 	var boom_bus := _bus("Boom", "Master")
 	if AudioServer.get_bus_effect_count(boom_bus) == 0:
 		var blim := AudioEffectHardLimiter.new()
@@ -264,6 +301,31 @@ static func make_loop(kind: String, seed: int) -> AudioStreamWAV:
 	return w
 
 
+## The field's hum: an electrical 120 Hz buzz with its harmonics, soft-clipped, the two ears half a
+## hertz apart so it beats slowly, a faint high shimmer over it. Every partial fits a whole number
+## of cycles in LOOP_S, so the loop is seamless. All of it above ~100 Hz: the Quest's speakers play it.
+static func make_hum() -> AudioStreamWAV:
+	var n := int(RATE * LOOP_S)
+	var data := PackedByteArray()
+	data.resize(n * 4)
+	for i in n:
+		var t := float(i) / RATE
+		for c in 2:
+			var f := 120.0 + 0.5 * c
+			var x := 0.5 * sin(TAU * f * t) + 0.35 * sin(TAU * 2.0 * f * t + 0.3) + 0.18 * sin(TAU * 3.0 * f * t + 1.1) \
+				+ 0.12 * sin(TAU * 4.0 * f * t + 2.0) + 0.06 * sin(TAU * 5.0 * f * t + 0.7)
+			x = tanh(1.4 * x) + 0.035 * sin(TAU * 1800.0 * t) * (0.5 + 0.5 * sin(TAU * 3.0 * t + c))
+			data.encode_s16(i * 4 + c * 2, int(clampf(x * 0.78, -1.0, 1.0) * 32767.0))
+	var w := AudioStreamWAV.new()
+	w.format = AudioStreamWAV.FORMAT_16_BITS
+	w.stereo = true
+	w.mix_rate = RATE
+	w.data = data
+	w.loop_mode = AudioStreamWAV.LOOP_FORWARD
+	w.loop_end = n
+	return w
+
+
 ## The booms, so it isn't the same one every time (Luke: "add a few variations of the sonic
 ## boom"): each moves the bow-to-tail gap, the N-wave's length, the ground reflection, the sub
 ## thump's pitch, the thunder's size and roll and its crackle; one adds a far echo off the hills.
@@ -405,6 +467,30 @@ func _duck(dt: float) -> void:
 			AudioServer.set_bus_volume_db(i, duck_db)
 
 
+## The seal: the second engine lights -> the hum powers up -> the wind shuts out (TUNE.seal_*).
+func _seal(mph: float, dt: float, duck: float) -> void:
+	var on_mph: float = EngineAudio.TUNE.second_on_mph
+	var off_mph: float = EngineAudio.TUNE.second_off_mph
+	if not sealed and mph >= on_mph:
+		sealed = true
+		_seal_age = 0.0
+	elif sealed and mph < off_mph:
+		sealed = false
+		_seal_age = 0.0
+	_seal_age += dt
+	var hum_on: bool = sealed and _seal_age >= TUNE.seal_catch_s
+	var shut: bool = sealed and _seal_age >= TUNE.seal_catch_s + TUNE.seal_shut_s
+	hum = _follow(hum, 1.0 if hum_on else 0.0, TUNE.hum_attack if hum_on else TUNE.hum_release, dt)
+	seal = _follow(seal, 1.0 if shut else 0.0, TUNE.seal_close if shut else TUNE.seal_open, dt)
+	var lvl: float = hum * duck * db_to_linear(lerpf(TUNE.hum_db[0], TUNE.hum_db[1], smoothstep(on_mph, 4000.0, mph)))
+	hum_player.volume_db = linear_to_db(lvl) if lvl > 1e-4 else -80.0
+	var rise: float = clampf((_seal_age - TUNE.seal_catch_s) / TUNE.hum_rise_s, 0.0, 1.0) if sealed else 1.0
+	hum_player.pitch_scale = lerpf(TUNE.hum_rise[0], TUNE.hum_rise[1], smoothstep(0.0, 1.0, rise)) * (1.0 + 0.04 * smoothstep(on_mph, 4500.0, mph))
+	var lp := AudioServer.get_bus_effect(AudioServer.get_bus_index("Wind"), _seal_fx) as AudioEffectLowPassFilter
+	if lp:
+		lp.cutoff_hz = TUNE.seal_hz[0] * pow(TUNE.seal_hz[1] / TUNE.seal_hz[0], seal)
+
+
 static func _follow(cur: float, target: float, tau: float, dt: float) -> float:
 	return target + (cur - target) * exp(-dt / maxf(tau, 1e-4))
 
@@ -441,6 +527,7 @@ func update(_inp: Dictionary, delta: float) -> void:
 	elif mach < 0.9:
 		_boom_armed = true
 	_duck(dt)
+	_seal(mph, dt, duck)
 	var gust := 0.5 + 0.5 * _noise.get_noise_1d(_t * (0.8 + 2.5 * g))   # gusts quicken with speed
 	var targets := {
 		"rush": db_to_linear(lerpf(TUNE.rush_db[0], TUNE.rush_db[1], pow(g, 0.8))),
@@ -465,6 +552,7 @@ func update(_inp: Dictionary, delta: float) -> void:
 		if layer.begins_with("flap"):
 			var k := 0 if layer == "flapL" else 1
 			lin *= 1.0 + TUNE.flap_shudder * pow(_open[k], 0.8) * buffet_g * shake[k]
+		lin *= db_to_linear(TUNE.seal_db * seal)   # sealed in: the wind shut out
 		players[layer].volume_db = linear_to_db(lin) if lin > 1e-4 else -80.0
 	players.rush.pitch_scale = 0.85 + 0.35 * g
 	players.whistle.pitch_scale = 0.8 + 0.7 * g

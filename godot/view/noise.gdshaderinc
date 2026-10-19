@@ -43,7 +43,7 @@ float detail(float size, float fw) {
 }
 
 vec3 srgb(vec3 c) {
-	return pow(c, vec3(2.2));
+	return pow(max(c, vec3(0.0)), vec3(2.2));   // max: pow() of a negative is NaN
 }
 
 // a line of half-width hw at distance d, antialiased; its average darkening is kept as it

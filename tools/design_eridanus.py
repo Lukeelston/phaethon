@@ -143,9 +143,235 @@ def main():
     ys = [p[1] for p in pts]
     print(f"footprint {(max(xs) - min(xs)) / 1000:.1f} x {(max(ys) - min(ys)) / 1000:.1f} km")
     print("SEGMENTS:", [list(s) for s in segs])
+    ok = check_shade(segs, pts) and ok
+    ok = check_ramps(segs, pts) and ok
     print("DESIGN", "OK" if ok else "NOT OK")
     if len(sys.argv) > 1:
         plot(sys.argv[1], segs, pts, length, lap, sf_t)
+
+
+# --- the shade line and the pad (docs/superpowers/specs/2026-10-19-emergency-run-design.md) ---
+# A privately owned covered STARFIGHTER line: it leaves the Descent ~9 mi before the start town,
+# peels west, corkscrews up under its canopy, winds south upside down, corkscrews back and merges
+# into the start town's mouth. Headings: the Descent runs south; R turns west of it.
+SHADE_FROM_KM = 14.5              # where it leaves: this far up the Descent from the start town's mouth
+SHADE_W = 120.0                   # its width, m (tighter than a town's 140)
+SHADE_JZ = 120                    # junction zones: the samples at each end that share the loop's road
+SHADE_SEGS = [
+    ("R", 1200, 40, "sf"), ("S", 500, 0, "sf"), ("L", 1200, 40, "sf"),   # peel away west: 600 m clear by sample ~112
+    ("S", 1500, 0, "sf"),                                                # the corkscrew in, then the canopy
+    ("R", 600, 30, "sf"), ("S", None, 0, "sf"),                          # the canopy's winding middle: out south-west ...
+    ("L", 350, 70, "sf"), ("S", 700, 0, "sf"),                           # ... an S-bend ...
+    ("R", 300, 40, "sf"), ("S", 600, 0, "sf"),
+    ("L", 500, 30, "sf"), ("S", None, 0, "sf"),                          # ... and back south-east, still west of the loop
+    ("R", 450, 30, "sf"),
+    ("S", 1500, 0, "sf"),                                                # the corkscrew out
+    ("L", 1200, 40, "sf"), ("S", 500, 0, "sf"), ("R", 1200, 40, "sf"),   # merge into the town's mouth
+]
+CORKSCREW = 110                   # samples (1.32 km): 180 deg in >= 2.2 s at 1,200 mph, <= 82 deg/s
+CANOPY_H = SHADE_W / 2 + 2.0      # the canopy's underside above the ground, m (view only): the 120 m road
+                                  # stands 120 m tall on edge mid-corkscrew, so its centre must be up here by then
+# The dawn (the emergency run's clock), from tools/tune_dawn.js: the front's heading (deg, the way
+# it travels) and when it passes the start line's point (s into the job). sync_eridanus.py writes them.
+# The covered ramps (Luke, 2026-10-19: "a 'receiving' and 'outgoing' onramp ... such that the
+# vehicle can reach speed inside of a structure before being exposed to light"): on the loop at
+# each end of each town, RAMP_MI long: SPEEDCRAFT reaches 4,000 mph from 1,200 on full lever in
+# 3.9 mi, and full brakes take it from 4,000 to 1,250 in 4.1 mi (tools: the range, straight).
+RAMP_MI = 4.0
+RAMPS = None   # [[first, last], ...] main samples (design_ramps)
+DAWN_DIR_DEG = 143
+DAWN_T0 = 156.7
+
+
+def wrap(a):
+    return math.atan2(math.sin(a), math.cos(a))
+
+
+def walk_h(segs, x=0.0, y=0.0, h=0.0):
+    """dg.walk from (x, y, h), keeping each sample's tangent heading: [(x, y, h)], end (x, y, h)."""
+    out = []
+    for s in segs:
+        if s[0] == "S":
+            n = max(1, math.ceil(s[1] / STEP))
+            d = s[1] / n
+            for _ in range(n):
+                out.append((x, y, h))
+                x += d * math.cos(h)
+                y += d * math.sin(h)
+        else:
+            sgn = 1.0 if s[0] == "L" else -1.0
+            ang = math.radians(s[2])
+            n = max(1, math.ceil(s[1] * ang / STEP))
+            da = ang / n
+            for _ in range(n):
+                out.append((x, y, h))
+                c = 2 * s[1] * math.sin(da / 2)
+                x += c * math.cos(h + sgn * da / 2)
+                y += c * math.sin(h + sgn * da / 2)
+                h += sgn * da
+    return out, (x, y, h)
+
+
+def main_samples(segs, pts):
+    return walk_h(as_plain(segs))[0]
+
+
+def solve_open(segs, start, end):
+    """Two unknown straights (None) sized so the walk from `start` ends on `end`'s point."""
+    unknown = [i for i, s in enumerate(segs) if s[0] == "S" and s[1] is None]
+    assert len(unknown) == 2
+    trial = [(s[0], 0.0, s[2], s[3]) if s[1] is None else s for s in segs]
+    _, (ex, ey, _) = walk_h(as_plain(trial), *start)
+    h = start[2]
+    heads = {}
+    for i, s in enumerate(trial):
+        if i in unknown:
+            heads[i] = h
+        if s[0] != "S":
+            h += math.radians(s[2]) * (1 if s[0] == "L" else -1)
+    i1, i2 = unknown
+    a1 = (math.cos(heads[i1]), math.sin(heads[i1]))
+    a2 = (math.cos(heads[i2]), math.sin(heads[i2]))
+    dx, dy = end[0] - ex, end[1] - ey
+    det = a1[0] * a2[1] - a1[1] * a2[0]
+    l1 = (dx * a2[1] - dy * a2[0]) / det
+    l2 = (a1[0] * dy - a1[1] * dx) / det
+    assert l1 > 300 and l2 > 300, f"solve_open: straights {l1:.0f}, {l2:.0f} m"
+    out = list(segs)
+    out[i1] = ("S", round(l1, 3), 0, segs[i1][3])
+    out[i2] = ("S", round(l2, 3), 0, segs[i2][3])
+    return out
+
+
+def mouth(segs, pts, which):
+    """The start town's mouth: the last speed-loop -> town step round the lap."""
+    assert which == "start"
+    for i in range(len(pts) - 1, 0, -1):
+        if segs[pts[i][2]][3] == "sf" and segs[pts[i - 1][2]][3] == "sp":
+            return i
+    raise ValueError("no mouth")
+
+
+def design_shade(segs, pts):
+    """SHADE (the branch's spec, sample indices on the main track) and PAD_I."""
+    main = main_samples(segs, pts)
+    join = mouth(segs, pts, "start")
+    frm = join - round(SHADE_FROM_KM * 1000 / STEP)
+    solved = solve_open(SHADE_SEGS, main[frm], main[join])
+    b, _ = walk_h(as_plain(solved), *main[frm])
+    n = len(b)
+    peel = sum(max(1, math.ceil((s[1] * math.radians(s[2]) if s[0] != "S" else s[1]) / STEP)) for s in solved[:3])
+    c_in = (peel, peel + CORKSCREW, 0.0, 180.0)
+    c_out = (n - peel - CORKSCREW, n - peel, 180.0, 0.0)
+    shade = {"name": "shade", "from": frm, "join": join, "segs": [list(s) for s in solved], "width": SHADE_W,
+             "covered": [peel + CORKSCREW // 2, n - 1], "roll": [list(c_in), list(c_out)], "jz": SHADE_JZ}
+    # the pad: the middle of the lake town's last straight, heading out to the loop
+    lake_exit = max(si for si, s in enumerate(segs) if s[3] == "sf" and s[0] == "S" and si < 20)
+    first = next(i for i, p in enumerate(pts) if p[2] == lake_exit)
+    run = sum(1 for p in pts if p[2] == lake_exit)
+    return shade, first + run // 2
+
+
+def walk_branch(shade, main):
+    return walk_h(as_plain([tuple(s) for s in shade["segs"]]), *main[shade["from"]])
+
+
+def min_clearance(bpts, main, main_w):
+    """Wall-to-wall gap (m) between these branch samples and the loop's road (main_w: its widths)."""
+    cell = 1000.0
+    grid = {}
+    for i, p in enumerate(main):
+        grid.setdefault((int(p[0] // cell), int(p[1] // cell)), []).append(i)
+    best = 1e9
+    for p in bpts[::2]:
+        cx, cy = int(p[0] // cell), int(p[1] // cell)
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                for i in grid.get((cx + dx, cy + dy), []):
+                    q = main[i]
+                    d = math.hypot(p[0] - q[0], p[1] - q[1]) - main_w[i] / 2 - SHADE_W / 2
+                    best = min(best, d)
+    return best
+
+
+def self_clearance(bpts, skip=250):
+    """Wall-to-wall gap (m) between non-adjacent parts of the branch."""
+    best = 1e9
+    for i in range(0, len(bpts), 4):
+        for j in range(i + skip, len(bpts), 4):
+            best = min(best, math.hypot(bpts[i][0] - bpts[j][0], bpts[i][1] - bpts[j][1]) - SHADE_W)
+    return best
+
+
+def straight_run_around(segs, pts, i):
+    s = segs[pts[i][2]]
+    return s[1] if s[0] == "S" else 0.0
+
+
+def branch_len(b, end):
+    pts = b + [end]
+    return sum(math.hypot(pts[k + 1][0] - pts[k][0], pts[k + 1][1] - pts[k][1]) for k in range(len(b)))
+
+
+def design_ramps(segs, pts):
+    """The covered ramps: [[first, last]] main samples, RAMP_MI along the loop from each town's
+    exit (outgoing) and up to each town's mouth (receiving), in lap order."""
+    n = len(pts)
+    mode = [segs[p[2]][3] for p in pts]
+    walk = lambda i, j: math.hypot(pts[j % n][0] - pts[i % n][0], pts[j % n][1] - pts[i % n][1])
+    out = []
+    for i in range(n):
+        if mode[i] == mode[i - 1]:
+            continue
+        acc, k = 0.0, 0
+        if mode[i] == "sp":   # an exit: outgoing, from here on
+            while acc < RAMP_MI * 1609.344:
+                acc += walk(i + k, i + k + 1)
+                k += 1
+            out.append([i, i + k - 1])
+        else:                 # a mouth: receiving, up to here
+            while acc < RAMP_MI * 1609.344:
+                k += 1
+                acc += walk(i - k, i - k + 1)
+            out.append([i - k, i - 1])
+    return out
+
+
+def check_ramps(segs, pts):
+    global RAMPS
+    RAMPS = design_ramps(segs, pts)
+    mode = [segs[p[2]][3] for p in pts]
+    assert len(RAMPS) == 4, RAMPS
+    for a, b in RAMPS:
+        assert all(mode[i % len(pts)] == "sp" for i in range(a, b + 1)), "a ramp on the loop only"
+    for (a0, a1), (b0, b1) in zip(RAMPS, RAMPS[1:]):
+        assert a1 < b0, "ramps apart"
+    if SHADE:   # the shade line leaves the loop outside the start town's receiving ramp
+        last = [r for r in RAMPS if r[1] == SHADE["join"] - 1][0]
+        assert SHADE["from"] + SHADE["jz"] < last[0], (SHADE["from"], last)
+    print("RAMPS OK", RAMPS)
+    return True
+
+
+def check_shade(segs, pts):
+    """The shade line and the medical pad (docs/superpowers/specs/2026-10-19-emergency-run-design.md)."""
+    global SHADE, PAD_I
+    SHADE, PAD_I = design_shade(segs, pts)
+    main = main_samples(segs, pts)
+    b, end = walk_branch(SHADE, main)
+    j = main[SHADE["join"]]
+    assert math.hypot(end[0] - j[0], end[1] - j[1]) < 0.01 and abs(wrap(end[2] - j[2])) < 1e-4, "closes onto the join"
+    assert SHADE["join"] == mouth(segs, pts, "start"), "runs into the start town's mouth"
+    clear = min_clearance(b[SHADE["jz"]:-SHADE["jz"]], main, [width(segs[p[2]]) for p in pts])
+    assert clear >= 300.0, f"300 m clear of the loop outside the junctions ({clear:.0f})"
+    own = self_clearance(b)
+    assert own >= 300.0, f"300 m clear of itself between non-adjacent parts ({own:.0f})"
+    assert all(r[1] - r[0] >= 100 for r in SHADE["roll"]), "corkscrews >= 1.2 km: <= 90 deg/s at 1,200 mph"
+    assert SHADE["covered"][1] == len(b) - 1, "covered all the way into the town"
+    assert segs[pts[PAD_I][2]][3] == "sf" and straight_run_around(segs, pts, PAD_I) >= 600.0, "the pad: on a lake-town straight"
+    print("SHADE OK", round(branch_len(b, end) / 1609.344, 1), "mi;",
+          f"clear of the loop by {clear:.0f} m; pad at sample {PAD_I}")
+    return True
 
 
 def plot(path, segs, pts, length, lap, sf_t):

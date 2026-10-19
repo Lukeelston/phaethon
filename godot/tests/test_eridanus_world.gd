@@ -3,17 +3,20 @@
 ##   build       the course builds its own world: chunked trackside, the valley, three mountain
 ##               rings, the green ground and clearer air (no GP dressing); in a few seconds
 ##   chunks      every sample in a chunk; after a sync only the chunks near the pod are shown
-##   zones       a STARFIGHTER zone at each town's mouth and a SPEEDCRAFT one where the loop
-##               starts; braking boards 8 / 6 / 4 / 2 / 1 miles out, lit signs over the track,
+##   zones       a STARFIGHTER zone at each town's mouth and a flashing SPEED AUTHORIZED sign where
+##               the loop starts; braking boards 8 / 6 / 4 / 2 / 1 miles out, lit signs over the track,
 ##               their numbers in front of the face (they once sat inside the board, hidden)
 ##   bridges     the track crosses the river on short bridges, not along it
 ##   scenery     thousands of trees and dozens of houses, none within 25 m of a wall (the town
 ##               poplars stand at 30 m, the rest 120 m and more) or in the water
 ##   beacons     a fog-free glow on every speed-loop mast (240 m apart, 24 m up) and every other
-##               town mast, red left and green right, and a 200 m light column on every other
+##               town mast, lit by the speed guide, and a 200 m light column on every other
 ##               loop mast ("more vertically visible"), shown out to 40 km where the trackside
 ##               chunks stop at 16 (Luke: "make the walls of speedcraft much more visible from
 ##               further away")
+##   ramps       covered halls over the loop's first and last 4 mi at each town (the sim's ramps):
+##               over exactly those samples, their roofs above every board and sign, no light
+##               columns through them (Luke: "reach speed inside of a structure before being exposed")
 ##   mountains   no ridge within 5 km of the track (the rings once cut the course's corners
 ##               and the track ran under the hills there)
 ## Prints ERIDANUS WORLD PASS.
@@ -23,7 +26,7 @@ extends SceneTree
 const ViewScript := preload("res://view/craft_view.gd")
 const CW := preload("res://view/course_world.gd")
 const VW := preload("res://view/verdant_world.gd")
-const CHECKS := 9
+const CHECKS := 10
 const CELL := 400.0
 var fails := 0
 var passed := 0
@@ -58,6 +61,7 @@ func _process(_d: float) -> bool:
 		and build_ms < 20000)
 	_chunks(sim, cw)
 	_zones(sim, cw)
+	_ramps(sim, cw)
 	_bridges(sim, vw)
 	_scenery(sim, vw)
 	_beacons(sim, cw)
@@ -101,8 +105,18 @@ func _zones(sim, cw) -> void:
 			sf += 1
 		else:
 			sp += 1
-	_check("zones: %d STARFIGHTER (a town's mouth), %d SPEEDCRAFT (the loop's start), each on a mode change" % [sf, sp],
-		ok and sf == 2 and sp == 2)
+	var signs := 0
+	var said := 0
+	for node in cw.find_children("*", "MeshInstance3D", true, false):
+		if node.is_in_group("authorized"):
+			signs += 1
+			ok = ok and ((node as MeshInstance3D).material_override as ShaderMaterial).shader.code.contains("TIME")
+	for node in cw.find_children("*", "Label3D", true, false):
+		if cw.shade and cw.shade.is_ancestor_of(node):
+			continue   # the shade line's gate says it too, when the job opens it (test_shade_line.gd)
+		said += 1 if (node as Label3D).text == "SPEED AUTHORIZED" else 0
+	_check("zones: %d STARFIGHTER (a town's mouth), %d SPEEDCRAFT (the loop's start), each on a mode change; %d flashing SPEED AUTHORIZED signs (%d labelled)" % [sf, sp, signs, said],
+		ok and sf == 2 and sp == 2 and signs == sp and said == sp)
 	# each board lit, its miles on a label in front of the lit face (they once sat inside the board)
 	var faces := 0
 	var labels_ok := true
@@ -114,6 +128,20 @@ func _zones(sim, cw) -> void:
 			labels_ok = labels_ok and int(l.text) in CW.BOARDS_MI and not l.double_sided and l.billboard == BaseMaterial3D.BILLBOARD_DISABLED
 	_check("%d braking boards: %s miles before each town, over the track, %d lit faces, their numbers out in front" % [cw.boards, CW.BOARDS_MI, faces],
 		cw.boards == sf * CW.BOARDS_MI.size() and faces == cw.boards and labels_ok)
+
+
+func _ramps(sim, cw) -> void:
+	var want := 0
+	for r in sim.covered_ramps:
+		want += int(r[1]) - int(r[0]) + 1
+	var top := -INF
+	for node in cw.find_children("*", "MeshInstance3D", true, false):
+		if node.is_in_group("board_face") or node.is_in_group("authorized"):
+			var q := (node as MeshInstance3D).mesh as QuadMesh
+			top = maxf(top, (node as Node3D).position.y + q.size.y / 2.0 + 6.0)   # the face's top and its beacons
+	_check("ramps: %d covered, halls over %d samples (the sim's %d), roofs %.0f m up, the highest board or sign %.0f m" % [
+			sim.covered_ramps.size(), cw.hall_samples, want, CW.RAMP_H, top],
+		sim.covered_ramps.size() == 4 and cw.hall_samples == want and top < CW.RAMP_H)
 
 
 func _bridges(sim, vw) -> void:
@@ -171,10 +199,11 @@ func _beacons(sim, cw) -> void:
 	var want := 0
 	var want_cols := 0
 	for i in sim.N:
+		var sides := 2 - (1 if cw._gap[i] & 1 else 0) - (1 if cw._gap[i] & 2 else 0)   # none where the wall opens for the shade line
 		if (sim.tmode[i] == 1 and i % CW.LOOP_MAST_EVERY == 0) or (sim.tmode[i] == 0 and i % 16 == 0):
-			want += 2
-		if sim.tmode[i] == 1 and i % (2 * CW.LOOP_MAST_EVERY) == 0:
-			want_cols += 2
+			want += sides
+		if sim.tmode[i] == 1 and i % (2 * CW.LOOP_MAST_EVERY) == 0 and sim.tcover[i] == 0:   # none through a ramp's roof
+			want_cols += sides
 	var lit := 0
 	var wrong := 0
 	for c in cw.lights:

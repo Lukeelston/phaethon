@@ -4,9 +4,11 @@
 ## current speed (MIN_AHEAD..MAX_AHEAD, eased so the zoom glides rather than jumps) and a little
 ## behind, each point tagged with its mode (0 a STARFIGHTER town, 1 the SPEEDCRAFT loop; tracks
 ## without modes are all 0), plus the next mode change: how far along the track, which mode, and
-## where it is on the map. `layout` fits a frame onto a panel, clipped to its edges.
+## where it is on the map. `layout` fits a frame onto a panel, clipped to its edges. On a job (the
+## emergency run) the dawn's front too: its line across the map and the seconds until it lights the
+## job's next stop (the lake town's pad on the way out, the start town's mouth on the way home).
 ##   var mm := MiniMap.new(); mm.setup(sim)           once
-##   var f := mm.update(heading, delta)               every frame: {pts, modes, ahead, next}
+##   var f := mm.update(heading, delta)               every frame: {pts, modes, ahead, next[, dawn {a, b, eta}]}
 ##   var l := MiniMap.layout(f, w, h, margin, top)    {segs [[a, b, mode]], craft, zone, scale}
 extends RefCounted
 
@@ -17,6 +19,8 @@ const BEHIND := 0.18          # this share of `ahead` shows behind the craft
 const POINTS := 140           # path points per frame
 const EASE_T := 0.8           # s: the zoom's time constant
 const CRAFT_Y := 0.2          # the craft sits this far up the panel (share of its height)
+const DAWN_HALF := 200000.0   # m each way along the dawn's front: its chord always spans the map
+const DAWN_COL := Color(1.0, 0.78, 0.4)
 
 var sim
 var s := PackedFloat64Array()       # distance along the lap at each sample (s[N]: the lap)
@@ -62,26 +66,62 @@ func update(heading: float, delta: float) -> Dictionary:
 	var fwd := roundi(ahead * 1.2 / per)   # past the top edge, so the line runs off it
 	var pts := PackedVector2Array()
 	var modes := PackedByteArray()
-	var i := -back
-	while i <= fwd:
-		var k := posmod(h + i, n)
-		pts.append(_local(k, fx, fy))
-		modes.append(mode_at(k))
-		i += step
 	var nxt := {}
-	var bd := INF
-	for c in changes:
-		var d := fposmod(s[c] - s[h], s[n])
-		if d > 1.0 and d < bd:
-			bd = d
-			nxt = {"dist": d, "mode": mode_at(c), "at": _local(c, fx, fy)}
-	return {"pts": pts, "modes": modes, "ahead": ahead, "next": nxt}
+	var i := -back
+	if sim.pod.path > 0:
+		# on a branch (the shade line): its own samples, the loop's before its split and after its join
+		var B = sim.branches[sim.pod.path - 1]
+		while i <= fwd:
+			var k: int = h + i
+			if k < 0:
+				var m: int = posmod(B.from_i + k, n)
+				pts.append(_local(m, fx, fy))
+				modes.append(mode_at(m))
+			elif k <= B.N - 1:
+				pts.append(_local_xy(B.px[k], B.py[k], fx, fy))
+				modes.append(0)   # a STARFIGHTER line
+			else:
+				var m: int = (B.join_i + k - (B.N - 1)) % n
+				pts.append(_local(m, fx, fy))
+				modes.append(mode_at(m))
+			i += step
+	else:
+		while i <= fwd:
+			var k := posmod(h + i, n)
+			pts.append(_local(k, fx, fy))
+			modes.append(mode_at(k))
+			i += step
+		var bd := INF
+		for c in changes:
+			var d := fposmod(s[c] - s[h], s[n])
+			if d > 1.0 and d < bd:
+				bd = d
+				nxt = {"dist": d, "mode": mode_at(c), "at": _local(c, fx, fy)}
+	var f := {"pts": pts, "modes": modes, "ahead": ahead, "next": nxt}
+	var J: Dictionary = sim.job if "job" in sim else {}
+	if not J.is_empty() and J.stage in ["out", "drop", "home"]:
+		var t: float = 0.0 if J.t0 == null else sim.time - float(J.t0)
+		var u := Vector2(cos(sim.P.dawnDir), sin(sim.P.dawnDir))
+		var d: float = sim.P.dawnSpeed * (t - sim.P.dawnT0)   # the front: points with p.u < d are lit
+		var off: float = sim.pod.x * u.x + sim.pod.y * u.y - d
+		var cx: float = sim.pod.x - u.x * off
+		var cy: float = sim.pod.y - u.y * off
+		var dl: Dictionary = sim.job_deadline()   # the route's own deadline; empty under cover
+		f["dawn"] = {"a": _local_xy(cx - u.y * DAWN_HALF, cy + u.x * DAWN_HALF, fx, fy),
+			"b": _local_xy(cx + u.y * DAWN_HALF, cy - u.x * DAWN_HALF, fx, fy)}
+		if not dl.is_empty():
+			f.dawn["eta"] = sim.t_lit(dl.x, dl.y) - t
+	return f
 
 
 ## Sample k relative to the craft: x to its right, y ahead (64-bit until the subtraction).
 func _local(k: int, fx: float, fy: float) -> Vector2:
-	var dx: float = sim.tpx[k] - sim.pod.x
-	var dy: float = sim.tpy[k] - sim.pod.y
+	return _local_xy(sim.tpx[k], sim.tpy[k], fx, fy)
+
+
+func _local_xy(x: float, y: float, fx: float, fy: float) -> Vector2:
+	var dx: float = x - sim.pod.x
+	var dy: float = y - sim.pod.y
 	return Vector2(dx * fy - dy * fx, dx * fx + dy * fy)
 
 
@@ -106,7 +146,12 @@ static func layout(f: Dictionary, w: float, h: float, margin: float, top: float)
 		var z: Vector2 = craft + (f.next.at as Vector2) * sc
 		if absf(z.x) <= hw and z.y >= y0 and z.y <= y1:
 			zone = z
-	return {"segs": segs, "craft": craft, "zone": zone, "scale": sc}
+	var dawn = null
+	if f.has("dawn"):
+		var cut := clip(craft + (f.dawn.a as Vector2) * sc, craft + (f.dawn.b as Vector2) * sc, hw, y0, y1)
+		if not cut.is_empty():
+			dawn = [cut[0], cut[1]]
+	return {"segs": segs, "craft": craft, "zone": zone, "scale": sc, "dawn": dawn}
 
 
 ## Segment a-b cut to the box |x| <= hw, y0 <= y <= y1 (Liang-Barsky); empty if it misses.
@@ -133,10 +178,16 @@ static func clip(a: Vector2, b: Vector2, hw: float, y0: float, y1: float) -> Pac
 	return PackedVector2Array([a + d * t0, a + d * t1])
 
 
-## The readout: where the next mode change is ("" on tracks without modes).
+## The readout: where the next mode change is ("" on tracks without modes), and on a job how long
+## until the dawn lights its next stop (DAWN m:ss).
 static func readout(f: Dictionary) -> String:
-	if (f.next as Dictionary).is_empty():
-		return ""
-	var mi: float = f.next.dist / 1609.344
-	var far := ("%.1f mi" % mi) if mi >= 0.2 else ("%d ft" % (roundi(mi * 5280.0 / 50.0) * 50))
-	return "%s  %s" % ["STARFIGHTER" if int(f.next.mode) == 0 else "SPEEDCRAFT", far]
+	var out := ""
+	if not (f.next as Dictionary).is_empty():
+		var mi: float = f.next.dist / 1609.344
+		var far := ("%.1f mi" % mi) if mi >= 0.2 else ("%d ft" % (roundi(mi * 5280.0 / 50.0) * 50))
+		out = "%s  %s" % ["STARFIGHTER" if int(f.next.mode) == 0 else "SPEEDCRAFT", far]
+	if f.has("dawn"):
+		var s := maxi(0, int(f.dawn.get("eta", 0.0)))
+		out += ("
+" if out != "" else "") + ("DAWN %d:%02d" % [s / 60, s % 60] if f.dawn.has("eta") else "UNDER COVER")
+	return out
