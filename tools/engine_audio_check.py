@@ -1,8 +1,9 @@
 """EngineAudio gate: does the sound actually follow the levers?
 
-Runs godot/tests/test_engine_audio.gd nine times in parallel: V8, V12 and turbine solo, the
+Runs godot/tests/test_engine_audio.gd ten times in parallel: V8, V12 and turbine solo, the
 same three --flat (every gain held at 1, low-pass open, so only the crossfader can move the
-level), the full mix, and the second engine's own run (--profile=second) solo and mixed.
+level), the full mix, and the second engine's own run (--profile=second) with the second
+engine solo, the bass rotor solo, and everything mixed.
 Each run records the game's master bus.
 Then it measures the recordings against the RPM each run logged:
   pitch     V8/V12 firing pitch (subharmonic summation) and turbine blade-pass line, within 3%
@@ -14,7 +15,12 @@ Then it measures the recordings against the RPM each run logged:
   second    the second engine lights within 150 mph of second_on_mph, right side ~0.3 s after
             the left, coughs ~0.7 s before it catches, is silent before and dead after (below
             second_off_mph), its doublet pitch (rpm / 60, above 1,800 rpm) follows the lever, and it is rumbly
-            at full lever: >= 35% of its energy under 150 Hz, centroid <= 300 Hz
+            at full lever: >= 35% of its energy under 150 Hz, centroid <= 300 Hz. On a steady
+            lever it winds up >= 25% with speed between catching and the hold.
+  rotor     the bass rotor is bassy at low speed (below 300 mph: >= 85% under 200 Hz, centroid
+            <= 160 Hz), winds up
+            with speed (its brightness follows its pitch: correlation >= 0.95, 0.75-1.35 octaves
+            per octave), and steps back >= 6 dB once the second engine runs
   one tone  flat runs, slow rev: brightness doesn't pulse with band position (no more than 50
             cents or than it wanders at unrelated spacings), so a ramp is one rising tone
   steady    flat runs: each channel's 150 ms level stays within 2.5 dB of a smooth curve in RPM
@@ -65,7 +71,7 @@ def godot_exe():
 
 def capture(out_dir):
     procs = {}
-    for run in ["v8", "v12", "turbine", "v8_flat", "v12_flat", "turbine_flat", "all", "second", "second_all"]:
+    for run in ["v8", "v12", "turbine", "v8_flat", "v12_flat", "turbine_flat", "all", "second", "rotor", "second_all"]:
         wav = os.path.join(out_dir, "engine_%s.wav" % run)
         args = [godot_exe(), "--headless", "--path", os.path.join(ROOT, "godot"), "-s",
                 "res://tests/test_engine_audio.gd", "--", "--out=" + wav.replace("\\", "/")]
@@ -73,7 +79,7 @@ def capture(out_dir):
             args.append("--solo=" + run.split("_")[0])
         if run.endswith("_flat"):
             args.append("--flat")
-        if run.startswith("second"):
+        if run.startswith("second") or run == "rotor":
             args.append("--profile=second")
         procs[run] = (subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True), wav)
     fails = 0
@@ -345,19 +351,82 @@ def check_second(wav, tally):
         n += 1
         hits += abs(pitch(seg(mono, sr, tc), sr, fl) / fl - 1) < 0.03
     tally.add("second doublet pitch follows the lever", hits, n)
+    caught = (t > run_r + 0.8) & (t < run_r + 1.2) & (log["thrL"] > 0.86) & (log["thrL"] < 0.88)
+    held = (log["thrL"] > 0.86) & (log["thrL"] < 0.88) & (log["secStL"] == 3) & (t > 9.2)
+    if caught.any() and held.any():
+        lift = np.mean(log["secL"][held]) / np.mean(log["secL"][caught])
+        tally.add("second winds up with speed on a steady lever: x%.2f (%.0f -> %.0f mph)" % (
+            lift, np.mean(log["mph"][caught]), np.mean(log["mph"][held])), int(lift >= 1.25), 1, 1.0)
+    else:
+        tally.add("second winds up with speed (no steady-lever stretch in the log)", 0, 1, 1.0)
     # Rumbly where it matters: the steady full-lever hold (it lights at speed, so that's where it
     # lives). Averaging in the idle under braking flattered an engine that buzzed at full power.
     hold = (log["thrL"] > 0.86) & (log["thrL"] < 0.88) & (log["secStL"] == 3) & (t > 9.2)
     if not hold.any():
         tally.add("second rumbly at full lever (no full-lever hold in the log)", 0, 1, 1.0)
         return
-    a = mono[int((t[hold][0] + 0.2) * sr):int(t[hold][-1] * sr)]
-    X = np.abs(np.fft.rfft(a * np.hanning(len(a)))) ** 2
-    f = np.fft.rfftfreq(len(a), 1 / sr)
-    low = X[(f > 20) & (f < 150)].sum() / X[f > 20].sum()
-    cen = np.sum(f * X) / np.sum(X)
+    # Per channel, as each ear hears it: in a mono sum the two engines' lows partly cancel at
+    # their random relative phase (measured 53% mono vs 68% per channel, same capture).
+    lows, cens = [], []
+    for ch in (x[:, 0], x[:, 1]):
+        a = ch[int((t[hold][0] + 0.2) * sr):int(t[hold][-1] * sr)]
+        X = np.abs(np.fft.rfft(a * np.hanning(len(a)))) ** 2
+        f = np.fft.rfftfreq(len(a), 1 / sr)
+        lows.append(X[(f > 20) & (f < 150)].sum() / X[f > 20].sum())
+        cens.append(np.sum(f * X) / np.sum(X))
+    low, cen = float(np.mean(lows)), float(np.mean(cens))
     tally.add("second rumbly at full lever (%.0f rpm): %.0f%% under 150 Hz, centroid %.0f Hz" % (
         np.mean(log["secL"][hold]), 100 * low, cen), int(low >= 0.35 and cen <= 300), 1, 1.0)
+
+
+def check_rotor(wav, tally):
+    """The bass rotor (solo, second-engine run): bassy at low speed, winding up with speed, and
+    stepping back once the second engine runs. It's a beating, shimmering rumble with no clean
+    line to track at 3%, so its pitch is followed through where its energy sits: the spectral
+    centroid has to move in octaves with the logged rotor pitch."""
+    x, sr, log = load(wav)
+    mono = x.mean(axis=1)
+    t = log["t"]
+    print("[rotor]")
+    crank = np.where(log["secStL"] == 2)[0]
+    run_r = np.where(log["secStR"] == 3)[0]
+    if not len(crank) or not len(run_r):
+        tally.add("rotor: second engine never lit in this run", 0, 1, 1.0)
+        return
+    crank, run_r = t[crank[0]], t[run_r[0]]
+
+    def spec(a):
+        X = np.abs(np.fft.rfft(a * np.hanning(len(a)))) ** 2
+        f = np.fft.rfftfreq(len(a), 1 / sr)
+        return X, f
+    slow = (log["mph"] > 1) & (log["mph"] < 300) & (log["thrL"] > 0.5)
+    # Bassy = the energy sits low: nearly all of it under 200 Hz (the drone's 28-80 Hz stages plus
+    # their partials) and a low centroid. Per channel, as each ear hears it (see check_second).
+    lows, cens = [], []
+    for ch in (x[:, 0], x[:, 1]):
+        X, f = spec(ch[int(t[slow][0] * sr):int(t[slow][-1] * sr)])
+        lows.append(X[(f > 15) & (f < 200)].sum() / X[f > 15].sum())
+        cens.append(np.sum(f * X) / np.sum(X))
+    low, cen = float(np.mean(lows)), float(np.mean(cens))
+    tally.add("rotor bassy below 300 mph: %.0f%% under 200 Hz, centroid %.0f Hz" % (100 * low, cen),
+              int(low >= 0.85 and cen <= 160), 1, 1.0)
+    w = int(0.2 * sr)
+    c, pp = [], []
+    for tc in np.arange(1.1, crank - 0.1, 0.05):
+        X, f = spec(mono[int(tc * sr) - w // 2:int(tc * sr) + w // 2])
+        c.append(np.log2(np.sum(f * X) / np.sum(X)))
+        pp.append(np.log2(np.interp(tc, t, log["rotL"])))
+    c, pp = np.array(c), np.array(pp)
+    r = np.corrcoef(c, pp)[0, 1]
+    slope = np.polyfit(pp, c, 1)[0]
+    tally.add("rotor winds up with speed: brightness follows pitch (r %.3f, %.2f oct/oct over %.1f oct)" % (
+        r, slope, pp.max() - pp.min()), int(r >= 0.95 and 0.75 <= slope <= 1.35), 1, 1.0)
+
+    def lvl(t0, t1):
+        a = mono[int(t0 * sr):int(t1 * sr)]
+        return 10 * np.log10(np.mean(a * a) + 1e-20)
+    drop = lvl(crank - 0.6, crank - 0.1) - lvl(run_r + 1.0, run_r + 2.0)
+    tally.add("rotor steps back for the second engine: %.1f dB" % drop, int(drop >= 6.0), 1, 1.0)
 
 
 def plot(wav, png):
@@ -403,6 +472,7 @@ def main():
     for layer in ("v8", "v12", "turbine"):
         check_layer(layer, wavs[layer], wavs[layer + "_flat"], tally)
     check_second(wavs["second"], tally)
+    check_rotor(wavs["rotor"], tally)
     if args.plot:
         plot(wavs["all"], os.path.join(args.out, "engine_all.png"))
     fails += sum(not ok for ok in tally.rows)

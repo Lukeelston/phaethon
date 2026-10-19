@@ -17,6 +17,9 @@ There are no oscillators here. Every sound starts as a Salamander Grand Piano re
             on the lowest piano key slowed right down, with long pipes, a lumpy cam and heavy
             saturation. EngineAudio gives it a fixed throat (EQ) and a dark muffler.
   bang      One-shot: the second engine catching, and its backfire when it shuts down.
+  rotor     The first engine's bass: a big rotor that winds up with airspeed. At rest, a ~28 Hz
+            drone (A0's sustain, frozen) beating against inharmonic stages 1.37x and 2.13x up,
+            over a gritty cloud of slowed low hammer thumps. EngineAudio pitches it with speed.
 
 Every loop is periodic by construction: grains are placed circularly and filters run to
 steady state. So it loops without a seam, and EngineAudio can pitch-shift it freely.
@@ -339,7 +342,7 @@ SECOND = {
     # Baked near where it runs (it lights at speed, usually on a big lever), so the heavy thud is
     # what you hear at full power. Baked at 600 rpm and pitched 6x up, its body slid to ~500 Hz:
     # buzzy, not rumbly (measured 1% of the energy under 150 Hz at 3,600 rpm).
-    "rate_at": 3000, "grain_speed": 0.5, "p_max": 1.45,
+    "rate_at": 3000, "grain_speed": 0.5, "p_max": 2.8,   # lever rpm x up to 1.7 with speed
     "seam_deg": 200,   # the loop starts mid-way through the long gap between doublets
 }
 
@@ -362,6 +365,29 @@ def bake_bang(piano, roar_bed, rng):
     fade = int(0.05 * SR)
     buf[-fade:] *= np.linspace(1.0, 0.0, fade)
     return buf / np.max(np.abs(buf)) * 10 ** (-3 / 20)
+
+
+ROTOR = {
+    "name": "rotor",
+    # (ratio to base, gain, piano velocity) per rotor stage. Inharmonic on purpose: the stages
+    # beat against each other, which is the rumble. EngineAudio climbs it up to ~16x.
+    "base_hz": 27.5, "stages": [(1.0, 1.0, 12), (1.37, 0.6, 12), (2.13, 0.35, 10)],
+    "p_max": 16.0,
+}
+
+
+def bake_rotor(piano, loop_s, rng):
+    """The rotor at rest. 8 s, so even pitched 16x up its shimmer repeats only every 0.5 s."""
+    n = int(loop_s * SR)
+    out = np.zeros(n)
+    for ratio, gain, vel in ROTOR["stages"]:
+        # long grains: a 28 Hz tone needs several cycles per grain to stay a tone
+        out += gain * freeze(piano, ROTOR["base_hz"] * ratio, vel, n, rng, grain_s=0.25, hop_s=0.0625)
+    thumps = [resample(strike(piano, m, v, 0.3, 0.05, 400), 0.5) for m in (21, 24) for v in (10, 14)]
+    out += 0.5 * cloud(thumps, n, 22, rng, (0.8, 1.25), 0.6)
+    out = soft_clip(out, 2.0)
+    out = circular(lambda v: butter(v, 18, "highpass"), out)
+    return normalize(out)
 
 
 TURBINE = {
@@ -520,6 +546,19 @@ def main():
     # its brightness once per octave of spool (measured 73 cents); one level can't pump.
     fails += write_levels("turbine", "spool", whine, TURBINE["rate_at"], 1.0, {"blade_hz": TURBINE["blade_hz"]},
                           fc=20000.0 / TURBINE["p_max"])
+
+    # The rotor draws from its own stream too, so adding it changed none of the other loops.
+    rotor = bake_rotor(piano, 8.0, np.random.default_rng(args.seed + 3))
+    X = np.abs(np.fft.rfft(rotor)) ** 2
+    f = np.fft.rfftfreq(len(rotor), 1.0 / SR)
+    low = X[(f > 15) & (f < 120)].sum() / X[f > 15].sum()
+    ok = low >= 0.6 and seam_ratio(rotor) < 1
+    fails += 0 if ok else 1
+    print("  %s rotor master   %.0f Hz drone, %.0f%% of its energy under 120 Hz at rest" % (
+        "ok  " if ok else "FAIL", ROTOR["base_hz"], 100 * low))
+    # one level, band-limited to what survives 16x (1.25 kHz at rest: it's the bass)
+    fails += write_levels("rotor", "speed", rotor, 1.0, 1.0, {"base_hz": ROTOR["base_hz"]},
+                          fc=20000.0 / ROTOR["p_max"])
 
     roar_bed = cloud(release_grains(piano, 0.03, 24), int(3.0 * SR), 3000, rng, (0.7, 1.4), 0.4)
     roar = normalize(circular(lambda v: butter(v, 40, "highpass"), roar_bed))

@@ -11,16 +11,21 @@
 ## the right engine pans right, so a lever split or a dead engine is something you hear.
 ## The second engine is a big-bang four that lights once the craft passes second_on_mph: each
 ## side cranks and coughs, catches with a bang (left first, right a beat later), runs on its
-## lever behind a fixed throat EQ, and backfires and winds down below second_off_mph. Sound
+## lever behind a fixed throat EQ, and backfires and winds down below second_off_mph. Its rpm
+## also lifts with speed above that, so it winds up as you accelerate on a steady lever. Sound
 ## only for now: it adds no thrust.
+## Under it all, the bass rotor: the first engine's low end, wound up by airspeed like a big
+## turbine. A ~28 Hz rumble at a standstill climbs three octaves by second_on_mph behind a
+## low-pass that opens with it, swells with each side's lever, and steps back for the second
+## engine once that side is running.
 ##   add_child(audio); audio.setup(sim)    once, inside the tree
 ##   audio.update(inp, delta)              every frame, after the sim steps
 class_name EngineAudio
 extends Node
 
 const DIR := "res://audio/engines/"
-const LAYERS := ["v8", "v12", "turbine", "roar", "burner", "second"]
-const FILTERED := ["v8", "v12", "roar", "second"]   # layers with their own low-pass bus under each engine
+const LAYERS := ["v8", "v12", "turbine", "roar", "burner", "second", "rotor"]
+const FILTERED := ["v8", "v12", "roar", "second", "rotor"]   # layers with their own low-pass bus under each engine
 const SECOND_STATES := ["off", "wait", "crank", "run", "stop"]
 
 ## Everything that shapes the sound. Spool s: -0.33 stopped, 0 idle, 1 full lever; the
@@ -51,6 +56,16 @@ const TUNE := {
 	"second_level_db": [-15.0, -7.0],   # its own level, idle -> full lever: leads the mix by ~6 dB when lit
 	"second_eq_db": [6.0, 8.0, 2.0, -2.0, -8.0, -14.0],   # EQ6 at 32/100/320/1k/3.2k/10k Hz: chest and throat
 	"bang_db": [-2.0, -8.0],         # catching, backfiring on the way down
+	"second_lift": 0.7, "second_lift_mph": 4500.0,   # rpm x (1 + lift) from second_on_mph to this
+	# The bass rotor: pitch 2^(rotor_oct * (speed / second_on_mph)^rotor_curve).
+	"rotor_oct": 3.0,                # octaves it climbs from a standstill to second_on_mph
+	"rotor_curve": 0.8,              # under 1: it climbs quicker off the line
+	"rotor_tau": 0.3,                # follows airspeed with this lag, s
+	"rotor_lever_pitch": 0.06,       # each side's lever lifts its rotor this much more
+	"rotor_lp_hz": [160.0, 3000.0],  # its low-pass, standstill -> second_on_mph: boomy, then singing
+	"rotor_db": [-5.0, -11.0],       # standstill -> second_on_mph: bassiest down low
+	"rotor_lever": [0.4, 1.0],       # level scale, lever 0 -> 1
+	"rotor_handover_db": -10.0,      # once that side's second engine is running
 }
 
 var sim
@@ -110,7 +125,8 @@ func setup(craft_sim) -> void:
 		add_child(bang)
 		var v := {"bus": bus, "subs": subs, "spool": 0.0, "comb": 1.0, "fire": 1.0, "load": 0.5, "burn": 0.0,
 			"was_out": false, "cough_t": 0.0, "cough_k": 1.0, "cough_next": 0.0, "players": {}, "at": {},
-			"bang": bang, "sec": {"state": "off", "t": 0.0, "spool": -0.33, "fire": 0.0, "cough_k": 0.0, "cough_next": 0.0}}
+			"bang": bang, "sec": {"state": "off", "t": 0.0, "spool": -0.33, "fire": 0.0, "cough_k": 0.0, "cough_next": 0.0},
+			"rotor_mph": 0.0, "rotor_p": 1.0, "sec_run": 0.0}
 		for layer in LAYERS:
 			var ps: Array[AudioStreamPlayer] = []
 			var start := randf()   # per engine, so the two engines never phase against each other
@@ -261,16 +277,28 @@ func update(inp: Dictionary, delta: float) -> void:
 		}
 		var sec_gain := _second(v, k, lever + boost, dt, duck)
 		gains["second"] = sec_gain
+		gains["rotor"] = _rotor(v, lever, mph, dt, duck)
 		if flat:
 			gains = {"v8": burning, "v12": burning, "turbine": 1.0, "roar": 1.0, "burner": v.burn * burning,
-				"second": v.sec.fire}
+				"second": v.sec.fire, "rotor": 1.0}
 		var roar_lp := AudioServer.get_bus_effect(v.subs.roar, 0) as AudioEffectLowPassFilter
 		roar_lp.cutoff_hz = TUNE.roar_hz[1] if flat else lerpf(TUNE.roar_hz[0], TUNE.roar_hz[1], n_spool)
+		var lift: float = 1.0 + TUNE.second_lift * clampf((mph - TUNE.second_on_mph)
+			/ (TUNE.second_lift_mph - TUNE.second_on_mph), 0.0, 1.0)
 		for layer in LAYERS:
-			var own: float = level if layer != "second" or flat else 1.0   # the second engine has its own level
+			# the second engine and the rotor carry their own levels
+			var own: float = level if not layer in ["second", "rotor"] or flat else 1.0
 			var g: float = gains[layer] * own if solo == "" or solo == layer else 0.0
-			var at: float = layer_at("second", v.sec.spool) if layer == "second" else (
-				1.0 + 0.1 * maxf(0.0, s - 1.0) if layer == "burner" else layer_at(layer, s))
+			var at: float
+			match layer:
+				"second":
+					at = layer_at("second", v.sec.spool) * lift
+				"rotor":
+					at = v.rotor_p
+				"burner":
+					at = 1.0 + 0.1 * maxf(0.0, s - 1.0)
+				_:
+					at = layer_at(layer, s)
 			v.at[layer] = at
 			_drive(v.players[layer], layer, at, g)
 
@@ -328,6 +356,19 @@ func _second(v: Dictionary, k: int, target_run: float, dt: float, duck: float) -
 	sc.fire = _follow(sc.fire, fire, 0.05 if fire > sc.fire else 0.08, dt)
 	var lvl := db_to_linear(lerpf(TUNE.second_level_db[0], TUNE.second_level_db[1], clampf(sc.spool, 0.0, 1.0)))
 	return sc.fire * lvl * duck
+
+
+## One side's bass rotor: wound up by airspeed, swelled by its lever, stepping back once that
+## side's second engine runs. Sets its pitch and low-pass; returns its gain, level included.
+func _rotor(v: Dictionary, lever: float, mph: float, dt: float, duck: float) -> float:
+	v.rotor_mph = _follow(v.rotor_mph, mph, TUNE.rotor_tau, dt)
+	var frac: float = clampf(v.rotor_mph / TUNE.second_on_mph, 0.0, 1.4)
+	v.rotor_p = pow(2.0, TUNE.rotor_oct * pow(frac, TUNE.rotor_curve)) * (1.0 + TUNE.rotor_lever_pitch * lever)
+	var lp: float = TUNE.rotor_lp_hz[0] * pow(TUNE.rotor_lp_hz[1] / TUNE.rotor_lp_hz[0], clampf(frac, 0.0, 1.0))
+	(AudioServer.get_bus_effect(v.subs.rotor, 0) as AudioEffectLowPassFilter).cutoff_hz = TUNE.rotor_lp_hz[1] if flat else lp
+	v.sec_run = _follow(v.sec_run, 1.0 if v.sec.state == "run" else 0.0, 0.6, dt)
+	var db: float = lerpf(TUNE.rotor_db[0], TUNE.rotor_db[1], clampf(frac, 0.0, 1.0)) + TUNE.rotor_handover_db * v.sec_run
+	return db_to_linear(db) * lerpf(TUNE.rotor_lever[0], TUNE.rotor_lever[1], lever) * duck
 
 
 func _play_bang(v: Dictionary, db: float, duck: float) -> void:
