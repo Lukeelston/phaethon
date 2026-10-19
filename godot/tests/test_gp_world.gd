@@ -48,7 +48,7 @@ func _run() -> void:
 			slow += 1
 	var boards := 0
 	for ch in gp.get_children():
-		if ch is Label3D and (ch.text == "300" or ch.text == "600" or ch.text == "1000"):
+		if ch is Label3D and ch.text in ["1000", "2000", "3000"]:   # feet (they were 300 / 600 / 1000 m)
 			boards += 1
 	_check("%d slow corners, %d braking boards (3 each)" % [slow, boards], slow >= 4 and boards == slow * 3)
 	# tall walls that show where the track goes
@@ -64,7 +64,7 @@ func _run() -> void:
 		gp.FENCE_H >= 5.0 and gp.masts == n_masts)
 	var low := 0
 	for ch in gp.get_children():
-		if ch is Label3D and (ch.text == "300" or ch.text == "600" or ch.text == "1000" or ch.text.begins_with("T")):
+		if ch is Label3D and (ch.text in ["1000", "2000", "3000"] or ch.text.begins_with("T")):
 			if ch.position.y < gp.FENCE_H + gp.STRIP_H + 1.5:
 				low += 1
 	_check("every braking board and turn number stands clear above the tall walls (%d hidden)" % low, low == 0)

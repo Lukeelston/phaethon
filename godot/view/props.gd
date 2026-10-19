@@ -9,7 +9,8 @@ extends RefCounted
 
 const Kit := preload("res://view/mesh_kit.gd")
 const MESHES := ["joshua0", "joshua1", "bush", "boulder", "edge_light", "hangar", "tower", "tank",
-	"radar_base", "radar_dish", "windsock", "floodlight", "pit_building", "truck", "lamp_white", "lamp_green"]
+	"radar_base", "radar_dish", "windsock", "floodlight", "pit_building", "truck", "lamp_white", "lamp_green",
+	"poplar", "oak", "pine", "house0", "house1", "spire"]
 const BARK := Color(0.40, 0.33, 0.25)
 const LEAF := Color(0.36, 0.42, 0.21)
 const DEAD := Color(0.55, 0.49, 0.38)
@@ -39,6 +40,12 @@ static func mesh(name: String) -> Mesh:
 			"floodlight": _cache[name] = _floodlight()
 			"pit_building": _cache[name] = _pit_building()
 			"truck": _cache[name] = _truck()
+			"poplar": _cache[name] = _poplar()
+			"oak": _cache[name] = _oak()
+			"pine": _cache[name] = _pine()
+			"house0": _cache[name] = _house(0)
+			"house1": _cache[name] = _house(1)
+			"spire": _cache[name] = _spire()
 			"lamp_white": _cache[name] = Kit.compound([[Kit.ball(0.13, 8), Kit.at(Vector3(0, 0.58, 0)), Color(1.0, 0.93, 0.78)]])
 			"lamp_green": _cache[name] = Kit.compound([[Kit.ball(0.16, 8), Kit.at(Vector3(0, 0.12, 0)), Color(0.25, 1.0, 0.4)]])
 	return _cache[name]
@@ -285,3 +292,63 @@ static func _pit_building() -> ArrayMesh:
 	for k in 12:
 		parts.append([Kit.box(Vector3(7.5, 5.0, 0.2)), Kit.at(Vector3(-55.0 + k * 10.0, 2.5, -9.05)), Color(0.22, 0.24, 0.27)])
 	return Kit.compound(parts)
+
+
+# --- the verdant world (Eridanus) ----------------------------------------------------------------
+
+## Lombardy poplar, ~22 m: a tall, narrow column of dark green on a short trunk (the Heliades: the
+## sisters on the Eridanus' banks).
+static func _poplar() -> ArrayMesh:
+	var crown := SphereMesh.new()
+	crown.radius = 2.3
+	crown.height = 18.0
+	crown.radial_segments = 8
+	crown.rings = 6
+	return Kit.compound([[Kit.cyl(0.25, 0.35, 4.0, 6), Kit.at(Vector3(0, 2.0, 0)), BARK],
+		[crown, Kit.at(Vector3(0, 12.5, 0)), Color(0.20, 0.33, 0.14)]])
+
+
+## Oak, ~14 m: a stout trunk under a broad crown of three blobs.
+static func _oak() -> ArrayMesh:
+	var parts := [[Kit.cyl(0.45, 0.65, 5.0, 7), Kit.at(Vector3(0, 2.5, 0)), BARK]]
+	for b in [[Vector3(0, 9.0, 0), 5.2, Color(0.27, 0.40, 0.16)], [Vector3(3.2, 8.0, 1.0), 3.6, Color(0.24, 0.37, 0.14)], [Vector3(-2.6, 8.3, -1.6), 3.8, Color(0.30, 0.43, 0.18)]]:
+		var s := SphereMesh.new()
+		s.radius = b[1]
+		s.height = b[1] * 1.6
+		s.radial_segments = 8
+		s.rings = 4
+		parts.append([s, Kit.at(b[0]), b[2]])
+	return Kit.compound(parts)
+
+
+## Pine, ~18 m: stacked cones over a thin trunk.
+static func _pine() -> ArrayMesh:
+	var parts := [[Kit.cyl(0.22, 0.32, 4.0, 6), Kit.at(Vector3(0, 2.0, 0)), BARK]]
+	for k in 4:
+		parts.append([Kit.cyl(0.0, 3.6 - k * 0.7, 5.0, 8), Kit.at(Vector3(0, 5.0 + k * 3.2, 0)), Color(0.13, 0.26, 0.15).lightened(k * 0.03)])
+	return Kit.compound(parts)
+
+
+## A village house, ~9 x 7 m: whitewashed walls under a red-tiled (0) or slate (1) gabled roof.
+static func _house(variant: int) -> ArrayMesh:
+	var wall := Color(0.92, 0.89, 0.82) if variant == 0 else Color(0.82, 0.76, 0.66)
+	var roof := Color(0.66, 0.26, 0.17) if variant == 0 else Color(0.30, 0.31, 0.34)
+	var parts := [[Kit.box(Vector3(9.0, 5.0, 7.0)), Kit.at(Vector3(0, 2.5, 0)), wall],
+		[Kit.box(Vector3(9.6, 0.25, 4.6)), Transform3D(Basis(Vector3.RIGHT, 0.62), Vector3(0, 6.6, -1.75)), roof],
+		[Kit.box(Vector3(9.6, 0.25, 4.6)), Transform3D(Basis(Vector3.RIGHT, -0.62), Vector3(0, 6.6, 1.75)), roof],
+		[Kit.box(Vector3(1.0, 2.2, 0.15)), Kit.at(Vector3(0, 1.1, 3.55)), Color(0.35, 0.22, 0.14)],
+		[Kit.box(Vector3(0.9, 1.2, 1.0)), Kit.at(Vector3(2.8, 8.0, 0)), Color(0.55, 0.3, 0.22)]]
+	for wx in [-2.8, 2.8]:
+		parts.append([Kit.box(Vector3(1.2, 1.0, 0.12)), Kit.at(Vector3(wx, 3.0, 3.53)), Color(0.18, 0.22, 0.26)])
+	return Kit.compound(parts)
+
+
+## The village church: a nave with a tall spire, ~38 m.
+static func _spire() -> ArrayMesh:
+	var stone := Color(0.78, 0.74, 0.66)
+	return Kit.compound([[Kit.box(Vector3(10.0, 9.0, 22.0)), Kit.at(Vector3(0, 4.5, 4.0)), stone],
+		[Kit.box(Vector3(10.6, 0.3, 6.0)), Transform3D(Basis(Vector3.FORWARD, 0.0) * Basis(Vector3.RIGHT, 0.0), Vector3(0, 9.2, 4.0)), Color(0.3, 0.31, 0.34)],
+		[Kit.box(Vector3(6.0, 20.0, 6.0)), Kit.at(Vector3(0, 10.0, -9.0)), stone],
+		[Kit.cyl(0.0, 4.2, 16.0, 8), Kit.at(Vector3(0, 28.0, -9.0)), Color(0.32, 0.36, 0.38)],
+		[Kit.box(Vector3(0.3, 2.4, 0.3)), Kit.at(Vector3(0, 37.2, -9.0)), Color(0.85, 0.7, 0.3)]])
+

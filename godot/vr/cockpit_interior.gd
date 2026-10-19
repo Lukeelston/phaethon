@@ -8,10 +8,11 @@
 ##   consoles  a console down each side: toggle switches, backlit buttons, stencilled placards
 ##   quadrant  a gate plate round each throttle lever, the burner gate marked in orange
 ##   harness   shoulder straps and a lap belt on the seat, a buckle
-##   rim light a strip just under the cockpit rim, coloured by mode (set_mode): cool blue,
-##             amber on the burner, violet on the ramjet
+##   rim light a strip just under the cockpit rim, coloured by mode (set_mode): cool blue in
+##             SPEEDCRAFT, magenta in STARFIGHTER (following the live blend), amber on the
+##             burner, violet on the ramjet
 ##   var inner := CockpitInterior.new(); shell.add_child(inner); inner.build()
-##   inner.set_mode(sim.mode)   # each frame
+##   inner.set_mode(sim.mode, sim.hblend)   # each frame
 class_name CockpitInterior
 extends Node3D
 
@@ -22,6 +23,8 @@ const MODE_LIGHT := {"normal": Color(0.25, 0.6, 1.0), "burner": Color(1.0, 0.55,
 
 var rim_mat: StandardMaterial3D
 var _mode := ""
+var _sf := -1.0
+const SF_LIGHT := Color(1.0, 0.3, 0.75)   # STARFIGHTER's resting colour (ModeSwitch.SF_COL)
 var parts_built := 0   # tests read this
 
 
@@ -135,11 +138,13 @@ func build() -> void:
 
 
 ## The rim light follows the mode: "normal", "burner" or "ramjet".
-func set_mode(mode: String) -> void:
-	if mode == _mode or rim_mat == null:
+func set_mode(mode: String, sf := 0.0) -> void:
+	if (mode == _mode and absf(sf - _sf) < 0.01) or rim_mat == null:
 		return
 	_mode = mode
-	rim_mat.albedo_color = MODE_LIGHT.get(mode, MODE_LIGHT.normal)
+	_sf = sf
+	var rest: Color = MODE_LIGHT.normal.lerp(SF_LIGHT, clampf(sf, 0.0, 1.0))
+	rim_mat.albedo_color = rest if mode == "normal" else MODE_LIGHT.get(mode, rest)
 
 
 func _placard(pos: Vector3, text: String, side: float) -> void:

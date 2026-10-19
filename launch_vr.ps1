@@ -5,13 +5,14 @@
 # the CONSOLE exe so stdout is capturable, and a per-session log in %TEMP%.
 # Controls: four Touch schemes, cycled with the left menu button (trigger throttles, throttle +
 # steer, grab the levers, stick levers); A reignite, B arm ramjet, X repair, Y tap restart,
-# Y hold switches SPEED / STARFIGHTER handling, thumbstick click recenters, menu hold 1.5 s
-# switches track (range <-> grand prix) without relaunching.
+# the MODE switch (or Y hold) flips SPEEDCRAFT / STARFIGHTER live, thumbstick click recenters,
+# menu hold 1.5 s steps track (range -> grand prix -> Eridanus) without relaunching.
 #   .\launch_vr.ps1 -Handling starfighter   start in the tight ~1,200 mph handling mode
 #   .\launch_vr.ps1 -Track gp              the grand prix: 29 km for STARFIGHTER at ~1,000 mph
+#   .\launch_vr.ps1 -Track eridanus        the dual-purpose course: 199 km, SPEEDCRAFT loop + STARFIGHTER towns
 #   .\launch_vr.ps1 -Track range     the 100-mile test range (jump lane +400 m left, twisty lane right)
 #   .\launch_vr.ps1 -Track range -StartMile 95   start further down the range
-param([switch]$WaitForHeadset, [int]$WaitMinutes = 30, [ValidateSet("circuit", "range", "gp")][string]$Track = "circuit", [double]$StartMile = 0, [ValidateSet("", "speed", "starfighter")][string]$Handling = "")
+param([switch]$WaitForHeadset, [int]$WaitMinutes = 30, [ValidateSet("circuit", "range", "gp", "eridanus")][string]$Track = "circuit", [double]$StartMile = 0, [ValidateSet("", "speed", "starfighter")][string]$Handling = "")
 
 function Test-QuestLinked {
     # Meta's service log is the ground truth. A Quest over Link streams through the RemoteHeadset
@@ -43,6 +44,6 @@ $log = "$env:TEMP\phaethon_vr_$stamp.log"
 Write-Host "Phaethon VR -> log $log"
 $userArgs = @()
 if ($Track -eq "range") { $userArgs = @("--", "--track=range", "--startx=$([int]($StartMile * 1609.344))") }
-if ($Track -eq "gp") { $userArgs = @("--", "--track=gp") }
+if ($Track -eq "gp" -or $Track -eq "eridanus") { $userArgs = @("--", "--track=$Track") }
 if ($Handling -ne "") { if ($userArgs.Count -eq 0) { $userArgs = @("--") }; $userArgs += "--handling=$Handling" }
 & $godot --path "$PSScriptRoot\godot" --xr-mode on res://vr.tscn @userArgs 2>&1 | Tee-Object -FilePath $log

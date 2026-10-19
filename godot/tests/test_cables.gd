@@ -48,8 +48,9 @@ func _measure(label: String) -> void:
 	var c = v.craft
 	var bank := rad_to_deg(c.bank[2])
 	var peak := rad_to_deg(c.roll_rate_peak)
-	_check("%s: banked %.0f deg in the turn, never rolling faster than %.1f deg/s (cap 55)" % [label, bank, peak],
-		absf(bank) > 15.0 and peak <= 55.0 + 1e-6 and peak > 20.0)
+	var cap := rad_to_deg(c.get_script().BANK_RATE_OUT)   # the faster cap: rolling back toward level
+	_check("%s: banked %.0f deg in the turn, never rolling faster than %.1f deg/s (cap %.0f)" % [label, bank, peak, cap],
+		absf(bank) > 15.0 and peak <= cap + 1e-6 and peak > 20.0)
 	# energized: in the turn the left engine is off and the right at half: its cable alone glows
 	var gl: float = c.cable_mats[0].emission_energy_multiplier
 	var gr: float = c.cable_mats[1].emission_energy_multiplier
@@ -115,6 +116,8 @@ func _fittings_clear(rig: Node3D) -> void:
 			continue   # the hull itself
 		if vi.find_parent("*") is XROrigin3D or _under(vi, "XROrigin3D"):
 			continue   # hands and the fade sphere ride the player, not the pod
+		if vi.is_in_group("exterior"):
+			continue   # the windscreen sits on the lip and the forcefield wraps the hull by design (tests/test_canopy.gd)
 		var pts := PackedVector3Array()
 		if vi is MeshInstance3D:
 			var mesh: Mesh = (vi as MeshInstance3D).mesh

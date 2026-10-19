@@ -1,5 +1,5 @@
 ## The cockpit's instrument panel: a real panel under the cowl line with the readouts on its
-## face, not text floating in the air. Big speed in the middle (mph, km/h beneath), Mach and
+## face, not text floating in the air. Big speed in the middle (mph), Mach and
 ## seconds per mile, the run line across the top; per engine THR / BRK / HEAT / HP bar gauges
 ## (a tick on THR marks the burner gate; HP is wall damage, which costs thrust and makes the
 ## engine sputter), a battery bar, BURNER / ARMED / RAMJET lamps, FLAMEOUT and DAMAGED warnings
@@ -161,7 +161,7 @@ static func _grouped(n: int) -> String:
 ## ([left, right]); battery (0..1); burner, armed, ramjet (bool); blink (bool: warning phase).
 func show_state(d: Dictionary) -> void:
 	labels.speed.text = _grouped(int(round(d.mph)))
-	labels.units.text = "MPH      %s KM/H" % _grouped(int(round(d.kmh)))
+	labels.units.text = "MPH"   # imperial only (Luke: "make sure everything is in imperial")
 	labels.mach.text = d.mach_line
 	labels.progress.text = d.progress
 	labels.footer.text = d.footer

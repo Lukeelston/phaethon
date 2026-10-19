@@ -23,8 +23,8 @@ func _initialize() -> void:
 	var boards := []
 	for mi in RW.COUNTDOWN_MI:
 		boards.append(Sim.BOX_X - mi * MILE)
-	for m in RW.COUNTDOWN_M:
-		boards.append(Sim.BOX_X - m)
+	for ft in RW.COUNTDOWN_FT:
+		boards.append(Sim.BOX_X - ft * 0.3048)
 	var worst_twist := -INF
 	var worst_sign := INF
 	for o in r.overpass_x:

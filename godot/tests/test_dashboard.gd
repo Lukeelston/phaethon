@@ -22,7 +22,7 @@ func _initialize() -> void:
 		"footer": "SPEED   /   TRIGGER THROTTLES", "thr": [1.0, 0.5], "brk": [0.0, 0.75], "heat": [0.3, 1.1], "health": [1.0, 0.4],
 		"flameout": [false, true], "battery": 0.4, "burner": true, "armed": false, "ramjet": false, "blink": true})
 	_check("speed reads 4,452 (%s)" % d.labels.speed.text, d.labels.speed.text == "4,452")
-	_check("km/h line (%s)" % d.labels.units.text, d.labels.units.text.contains("7,165 KM/H"))
+	_check("units line: mph only, imperial (%s)" % d.labels.units.text, d.labels.units.text == "MPH")
 	_check("Mach line passes through", d.labels.mach.text == "MACH 5.8   MILE / 0.81 s")
 	var thr_l: MeshInstance3D = d.bars.thrL[0]
 	var thr_r: MeshInstance3D = d.bars.thrR[0]
@@ -42,7 +42,7 @@ func _initialize() -> void:
 	_check("a damaged engine is labelled (%s)" % d.labels.headR.text, d.labels.headR.text == "R DAMAGED" and d.labels.headL.text == "L")
 	# the longest things the panel shows, for the clearance pass (labels size to their text)
 	d.show_state({"mph": 5387.0, "kmh": 8669.0, "mach_line": "MACH 7.0   MILE / 0.67 s",
-		"progress": "STOPPED IN BOX  95.46s   2.1 m off   braked 7.20 km out\nBEST 95.46s   (Y: go again)",
+		"progress": "STOPPED IN BOX  95.46s   6.9 ft off   braked 4.47 mi out\nBEST 95.46s   (Y: go again)",
 		"footer": "STARFIGHTER   /   L STICK THROTTLE  R STICK STEER  TRIGGERS BRAKE", "thr": [1.0, 1.0], "brk": [1.0, 1.0],
 		"heat": [1.0, 1.0], "health": [0.1, 0.1], "flameout": [true, true], "battery": 1.0, "burner": true, "armed": true, "ramjet": true, "blink": true})
 

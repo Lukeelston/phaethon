@@ -57,6 +57,11 @@ var _noise := FastNoiseLite.new()
 var _rush_bus := 0
 var boom_player: AudioStreamPlayer
 var booms := 0          # booms fired this session (tests read this)
+var boom_streams: Array[AudioStreamWAV] = []   # one per BOOM_VARIANTS
+var _last_boom := -1
+var _boom_rng := RandomNumberGenerator.new()
+var _boom_task := -1     # the worker making the other variants
+var _more_booms: Array[AudioStreamWAV] = []
 var _boom_armed := true
 var duck_db := 0.0      # current duck on the Engines and Wind buses (tests read this)
 var _since_boom := INF
@@ -106,12 +111,15 @@ func setup(craft_sim) -> void:
 		var blim := AudioEffectHardLimiter.new()
 		blim.ceiling_db = -0.3
 		AudioServer.add_bus_effect(boom_bus, blim)
+	_boom_rng.randomize()
+	boom_streams.append(make_boom(0))
+	_boom_task = WorkerThreadPool.add_task(_make_more_booms)   # the rest off the main thread: ~0.5 s each
 	boom_player = AudioStreamPlayer.new()
-	boom_player.stream = make_boom()
+	boom_player.stream = boom_streams[0]
 	boom_player.bus = "Boom"
 	boom_player.volume_db = BOOM_DB
 	add_child(boom_player)
-	print("AUDIO: WindAudio up, 4 stereo loops + boom synthesized in %d ms" % (Time.get_ticks_msec() - t0))
+	print("AUDIO: WindAudio up, 4 stereo loops + a boom synthesized in %d ms (%d more booms on a worker)" % [Time.get_ticks_msec() - t0, BOOM_VARIANTS.size() - 1])
 
 
 ## Get or create a bus routed into `send` (same helper as EngineAudio).
@@ -256,23 +264,37 @@ static func make_loop(kind: String, seed: int) -> AudioStreamWAV:
 	return w
 
 
-## The sonic boom. Two N-waves (pressure snaps up, ramps down through zero, snaps back: each
-## is a double crack), the bow and tail shocks 0.16 s apart, each with its reflection off the
-## desert a few ms later (a touch different per ear); a sub thump at 32 and 55 Hz under them;
-## then thunder: brown-noise rumble with crackle rolling away over ~4 s. Soft-clipped so the
-## whole thing sits loud and dense instead of one peak and a whisper.
-static func make_boom() -> AudioStreamWAV:
+## The booms, so it isn't the same one every time (Luke: "add a few variations of the sonic
+## boom"): each moves the bow-to-tail gap, the N-wave's length, the ground reflection, the sub
+## thump's pitch, the thunder's size and roll and its crackle; one adds a far echo off the hills.
+##   gap s, N-wave s, reflection s, sub Hz, sub Hz, rumble size, rumble roll s, crackle, echo s
+const BOOM_VARIANTS := [
+	[0.16, 0.13, 0.011, 32.0, 55.0, 1.0, 2.2, 1.0, 0.0],
+	[0.11, 0.10, 0.016, 28.0, 47.0, 1.15, 2.8, 1.4, 0.0],
+	[0.21, 0.15, 0.008, 36.0, 61.0, 0.85, 1.8, 0.7, 0.0],
+	[0.14, 0.12, 0.020, 30.0, 52.0, 1.05, 2.5, 1.2, 0.55],
+	[0.18, 0.14, 0.013, 34.0, 58.0, 1.25, 3.2, 0.9, 0.0],
+]
+
+## A sonic boom (`variant` of BOOM_VARIANTS). Two N-waves (pressure snaps up, ramps down
+## through zero, snaps back: each is a double crack), the bow and tail shocks apart, each with
+## its reflection off the ground a few ms later (a touch different per ear); a sub thump under
+## them; then thunder: brown-noise rumble with crackle rolling away over ~4 s. Soft-clipped so
+## the whole thing sits loud and dense instead of one peak and a whisper.
+static func make_boom(variant := 0) -> AudioStreamWAV:
+	var V: Array = BOOM_VARIANTS[variant]
 	var n := int(RATE * BOOM_S)
 	var rng := RandomNumberGenerator.new()
-	rng.seed = 767
+	rng.seed = 767 + 31 * variant
 	var t0 := 0.01
-	var tn := 0.13          # N-wave length
-	var gap := 0.16         # bow shock to tail shock
+	var tn: float = V[1]    # N-wave length
+	var gap: float = V[0]   # bow shock to tail shock
+	var echo: float = V[8]
 	var chans: Array[PackedFloat32Array] = []
 	for c in 2:
 		var buf := PackedFloat32Array()
 		buf.resize(n)
-		var refl := 0.011 + 0.005 * c
+		var refl: float = V[2] + 0.005 * c
 		var lp := 0.0
 		var lp2 := 0.0
 		var lp3 := 0.0
@@ -280,7 +302,11 @@ static func make_boom() -> AudioStreamWAV:
 		for i in n:
 			var t := float(i) / RATE
 			var x := 0.0
-			for w in [[t0, 1.0], [t0 + refl, 0.65], [t0 + gap, 0.85], [t0 + gap + refl, 0.55]]:
+			var waves := [[t0, 1.0], [t0 + refl, 0.65], [t0 + gap, 0.85], [t0 + gap + refl, 0.55]]
+			if echo > 0.0:
+				waves.append([t0 + echo + 0.004 * c, 0.32])
+				waves.append([t0 + echo + gap + 0.004 * c, 0.26])
+			for w in waves:
 				var u: float = t - w[0]
 				if u >= 0.0 and u < tn:
 					x += w[1] * (1.0 - 2.0 * u / tn)
@@ -291,12 +317,12 @@ static func make_boom() -> AudioStreamWAV:
 			var crackle := 0.0
 			if e > 0.0:
 				var env := minf(1.0, e / 0.003)
-				sub = env * (0.9 * sin(TAU * 32.0 * e) * exp(-e / 0.45) + 0.5 * sin(TAU * 55.0 * e) * exp(-e / 0.25))
+				sub = env * (0.9 * sin(TAU * V[3] * e) * exp(-e / 0.45) + 0.5 * sin(TAU * V[4] * e) * exp(-e / 0.25))
 				brown = (brown + 0.03 * rng.randf_range(-1.0, 1.0)) / 1.03
 				lp2 += 0.03 * (brown - lp2)
-				rumble = 12.0 * lp2 * (0.35 + 0.65 * exp(-e / 1.1)) * exp(-e / 2.2) * minf(1.0, e / 0.04)
+				rumble = 12.0 * V[5] * lp2 * (0.35 + 0.65 * exp(-e / 1.1)) * exp(-e / V[6]) * minf(1.0, e / 0.04)
 				# crackle: sparse sharp ticks thinning out as the thunder rolls away
-				if rng.randf() < 0.004 * exp(-e / 0.9):
+				if rng.randf() < 0.004 * V[7] * exp(-e / 0.9):
 					lp3 = rng.randf_range(-1.0, 1.0) * 0.6
 				lp3 *= 0.93
 				crackle = lp3 * exp(-e / 1.5)
@@ -321,8 +347,42 @@ static func make_boom() -> AudioStreamWAV:
 	return w
 
 
+func _make_more_booms() -> void:
+	var more: Array[AudioStreamWAV] = []
+	for v in range(1, BOOM_VARIANTS.size()):
+		more.append(make_boom(v))
+	_more_booms = more   # handed over whole; collected on the main thread
+
+
+## Take in the variants the worker has made (all at once, once it's done; `wait`: block for them).
+func collect_booms(wait := false) -> void:
+	if _boom_task < 0 or not (wait or WorkerThreadPool.is_task_completed(_boom_task)):
+		return
+	WorkerThreadPool.wait_for_task_completion(_boom_task)
+	_boom_task = -1
+	boom_streams.append_array(_more_booms)
+	_more_booms = []
+
+
+func _exit_tree() -> void:
+	collect_booms(true)   # never leave the worker running into a scene reload
+
+
+## The next boom's variant: any but the last one.
+func pick_boom() -> int:
+	collect_booms()
+	if boom_streams.size() < 2:
+		return 0
+	var k := _boom_rng.randi_range(0, boom_streams.size() - 2)
+	if k >= _last_boom:
+		k += 1
+	_last_boom = k
+	return k
+
+
 func boom() -> void:
 	booms += 1
+	boom_player.stream = boom_streams[pick_boom()]
 	boom_player.play()
 	_since_boom = 0.0
 	boomed.emit()

@@ -374,12 +374,12 @@ func _boards_and_numbers() -> void:
 			continue
 		var s_total := 0.0
 		var q: int = c[0]
-		var marks := [300.0, 600.0, 1000.0]
+		var marks := [1000.0, 2000.0, 3000.0]   # feet (imperial: they were 300 / 600 / 1000 m)
 		var mi := 0
 		while mi < marks.size() and s_total < 1200.0:
 			q = posmod(q - 1, n)
 			s_total += sim.tlen[q]
-			if s_total >= marks[mi]:
+			if s_total >= marks[mi] * 0.3048:
 				var side: float = -c[3]
 				var p := _edge(q, side * (sim.tw[q] / 2.0 + 6.0))
 				var yaw := atan2(sim.tty[q], sim.ttx[q])

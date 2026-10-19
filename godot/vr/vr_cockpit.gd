@@ -4,8 +4,9 @@
 ## the left menu button cycles them, the choice is saved): trigger throttles, throttle + steer,
 ## grab the levers, stick levers. Buttons, every scheme:
 ##   A reignite · B arm ramjet · X repair · thumbstick click recenter (view and seat height)
-##   Y tap: restart · Y hold 1 s: switch SPEED / STARFIGHTER handling (saved) and restart
-##   menu tap: next control scheme · menu hold 1.5 s: switch track, range <-> grand prix
+##   the MODE switch on the right console: push it up for SPEEDCRAFT, down for STARFIGHTER (live,
+##   mid-lap; STARFIGHTER takes below 1,250 mph). Y hold 1 s flips it too. Y tap: restart
+##   menu tap: next control scheme · menu hold 1.5 s: next track (range, grand prix, Eridanus)
 ## Haptics: a kick on the sonic boom; a tick in that hand when a lever crosses the burner gate.
 ## The printed levers / a gamepad win whenever they're moving; the keyboard still works.
 ## Logs OpenXR session events and a frame-timing summary every 10 s; writes a CSV on exit.
@@ -20,12 +21,19 @@ const Y_HOLD := 1.0
 const MENU_HOLD := 1.5   # hold the left menu button this long to switch track
 const DashboardScript := preload("res://vr/dashboard.gd")
 const CockpitInteriorScript := preload("res://vr/cockpit_interior.gd")
+const ModeSwitchScript := preload("res://vr/mode_switch.gd")
+const CanopyScript := preload("res://view/canopy.gd")
+const MinimapPanelScript := preload("res://vr/minimap_panel.gd")
 const Kit := preload("res://view/mesh_kit.gd")
 
 var xr: XRInterface
 var rig: Node3D
 var shell: Node3D   # the cockpit's fittings (hull, seat, levers, panel): shudders, your head doesn't
 var interior   # vr/cockpit_interior.gd
+var mode_switch   # vr/mode_switch.gd: the SPEEDCRAFT / STARFIGHTER toggle on the right console
+var canopy: Node3D   # view/canopy.gd: the windscreen ahead and the forcefield round the nose
+var minimap_panel: Node3D   # vr/minimap_panel.gd
+var _ride := {}   # CraftModel.ride's smoothing state
 var _buzz_hold := {}   # controller -> seconds an event buzz still owns it (the shudder waits)
 const SHAKE_M := 0.004   # cockpit shake per unit of air-brake shudder, metres
 var origin: XROrigin3D
@@ -58,8 +66,9 @@ func _ready() -> void:
 	for a in OS.get_cmdline_user_args():
 		forced = forced or a.begins_with("--handling=")
 	# the saved handling applies to the range; the grand prix is a STARFIGHTER course
-	if not forced and sim.track_name != "gp" and prefs.get("handling", "speed") != sim.P.handling:
+	if not forced and not sim.course and prefs.get("handling", "speed") != sim.P.handling:
 		set_handling(prefs.handling)
+	handling_ask = sim.P.handling
 	_scheme_flash = 6.0
 	if wind_audio:
 		wind_audio.boomed.connect(_on_boom)
@@ -81,7 +90,7 @@ func _load_prefs() -> Dictionary:
 func _save_prefs() -> void:
 	var f := FileAccess.open(PREFS, FileAccess.WRITE)
 	if f:
-		f.store_string(JSON.stringify({"scheme": quest.scheme, "handling": sim.P.handling}))
+		f.store_string(JSON.stringify({"scheme": quest.scheme, "handling": handling_ask if handling_ask != "" else sim.P.handling}))
 
 
 ## Thumbstick click (either stick): sit where you are. Recentres the view AND the height, so
@@ -169,7 +178,7 @@ func _make_view() -> void:
 	origin.position = SEAT
 	rig.add_child(origin)
 	var xr_cam := XRCamera3D.new()
-	xr_cam.far = 80000   # the backdrop peaks sit at 45-57 km
+	xr_cam.far = 120000   # the backdrop peaks sit at 45-57 km; Eridanus' far ranges up to ~100 km away
 	origin.add_child(xr_cam)
 	cam = xr_cam
 	for side in ["left", "right"]:
@@ -297,10 +306,22 @@ func _build_cockpit() -> void:
 	interior = CockpitInteriorScript.new()   # floor, frames, consoles, harness, rim light
 	shell.add_child(interior)
 	interior.build()
+	mode_switch = ModeSwitchScript.new()   # SPEEDCRAFT / STARFIGHTER, on the front of the right console
+	shell.add_child(mode_switch)
+	mode_switch.transform = ModeSwitchScript.mount()
+	mode_switch.build()
+	canopy = CanopyScript.build()
+	canopy.position = Vector3(0, CraftModelScript.POD_FRAME_UP, 0)
+	shell.add_child(canopy)
 	dashboard = DashboardScript.new()
 	shell.add_child(dashboard)
 	dashboard.transform = DashboardScript.mount()
 	dashboard.build()
+	minimap_panel = MinimapPanelScript.new()   # the path ahead, up and left of the instrument panel
+	shell.add_child(minimap_panel)
+	minimap_panel.transform = MinimapPanelScript.mount(SEAT)
+	minimap_panel.build()
+	minimap_panel.visible = sim.kind == "circuit"
 
 
 func _build_fade(xr_cam: XRCamera3D) -> void:
@@ -346,14 +367,14 @@ func _read_input(delta: float) -> void:
 	inp.reignite = p.reignite or r.is_button_pressed("ax_button")
 	if p.arm or _pressed_once("arm", r.is_button_pressed("by_button")):
 		sim.armed = not sim.armed
-	# Y: tap restarts, hold switches handling (and restarts)
+	# Y: tap restarts, hold flips the handling (live, as the MODE switch)
 	if p.respawn:
 		_respawn()
 	if l.is_button_pressed("by_button"):
 		_y_held += delta
 		if _y_held >= Y_HOLD and not _y_fired:
 			_y_fired = true
-			set_handling("starfighter" if sim.P.handling == "speed" else "speed")
+			toggle_handling()
 			_save_prefs()
 			_buzz(l, 0.8, 0.15)
 	else:
@@ -375,13 +396,21 @@ func _read_input(delta: float) -> void:
 	_frames += 1
 	if _switch_at > 0 and _frames == _switch_at and track_override == "":   # once
 		switch_track()
+	# the MODE switch: either hand can throw it
+	if mode_switch:
+		for hand in [l, r]:
+			var flip: String = mode_switch.poke(hand, delta)
+			if flip != "" and ask_handling(flip):   # (refused inside the cooldown: the lever springs back)
+				_save_prefs()
+				_buzz(hand, 0.9, 0.06)
+				print("HANDLING: switch to ", flip)
 	if _pressed_once("recenter", l.is_button_pressed("primary_click") or r.is_button_pressed("primary_click")):
 		recenter()
 	_diag(delta, l, r, p)
 
 
-func _track() -> String:
-	return "gp" if sim.track_name == "gp" else ("range" if sim.kind == "range" else "circuit")
+func _track() -> String:   # "range", "gp", "eridanus" (or "circuit")
+	return sim.track_name if sim.course else ("range" if sim.kind == "range" else "circuit")
 
 
 ## The left menu button: a tap (released before MENU_HOLD) cycles the control scheme; holding it
@@ -399,13 +428,19 @@ func _menu(down: bool, delta: float) -> String:
 	return "scheme" if tapped else ""
 
 
-## Range <-> grand prix, in the headset: reload the scene on the other track (the OpenXR session
+## Range -> grand prix -> Eridanus -> range, in the headset: reload the scene on the next track (the OpenXR session
 ## carries on; CraftView.track_override survives the reload and wins over --track).
 func switch_track() -> void:
-	var to := "range" if sim.track_name == "gp" else "gp"
+	var to := next_track(_track())
 	print("TRACK: switching %s -> %s" % [_track(), to])
 	track_override = to
 	get_tree().call_deferred("reload_current_scene")
+
+
+## The menu hold's cycle: range -> grand prix -> Eridanus -> range (a plain circuit goes to the range).
+static func next_track(cur: String) -> String:
+	var order := ["range", "gp", "eridanus"]
+	return order[(order.find(cur) + 1) % order.size()]
 
 
 func _place_camera(_k: float) -> void:
@@ -413,10 +448,12 @@ func _place_camera(_k: float) -> void:
 	# tilts but your eyes don't swing sideways (a floor pivot moves them ~0.9 m at 60 deg).
 	var yaw: float = sim.pod.th - PI / 2.0
 	var b_yaw := Basis(Vector3.UP, yaw)
-	var roll := clampf(craft.bank[2] + surface(sim.pod.x, sim.pod.y).y, -CraftModelScript.ROLL_MAX, CraftModelScript.ROLL_MAX)
-	var pitch := CraftModelScript.slope_pitch(self, sim.pod.x, sim.pod.y, sim.pod.th, 2.0)   # up and down the banking
+	# the ride over the banking, smoothed (CraftModel.ride: Luke, "going over hills makes the camera very shaky")
+	var r := CraftModelScript.ride(self, sim, _ride, get_process_delta_time())
+	var roll := clampf(craft.bank[2] + r.z, -CraftModelScript.ROLL_MAX, CraftModelScript.ROLL_MAX)
+	var pitch := r.y   # up and down the banking
 	var b_full := Basis.from_euler(Vector3(pitch, yaw, roll))   # lean + the track's banking (capped), and its slope
-	var base := w3(sim.pod.x, sim.pod.y, sim.pod.z - 0.8 + CraftModelScript.POD_LIFT)   # floor 0.8 m below the pod body centre, lifted with the pod
+	var base := w3(sim.pod.x, sim.pod.y, sim.pod.z - 0.8 + CraftModelScript.POD_LIFT) + Vector3.UP * (r.x - surface(sim.pod.x, sim.pod.y).x)   # floor 0.8 m below the pod body centre, lifted with the pod
 	var head := origin.position + cam.position
 	rig.basis = b_full
 	rig.position = base + b_yaw * head - b_full * head
@@ -429,7 +466,14 @@ func _place_camera(_k: float) -> void:
 func _process(delta: float) -> void:
 	super(delta)
 	_apply_shudder(delta)
-	interior.set_mode(sim.mode)
+	interior.set_mode(sim.mode, sim.hblend)
+	# An untracked hand (flat runs, before the first pose) sits at the origin, i.e. on the eye: its
+	# box's far face, 5 cm out on the near plane, z-fought into a dark rectangle mid-view.
+	for side in hands:
+		hands[side].get_child(0).visible = hands[side].get_has_tracking_data()
+	CanopyScript.update(canopy, sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy), sim.hblend, sim.mode, delta)
+	if mode_switch:
+		mode_switch.show_state(handling_ask == "starfighter", sim.hblend, handling_ask == "starfighter" and sim.hblend == 0.0)
 	# Crash: fade to black, respawn happens in the dark, fade back up.
 	var target := 1.0 if sim.crash_t > 0.0 else 0.0
 	fade_v = move_toward(fade_v, target, delta * 4.0)
@@ -462,9 +506,11 @@ func _update_hud() -> void:
 	var kmh := _kmh()
 	_scheme_flash = maxf(0.0, _scheme_flash - get_process_delta_time())
 	var ctl: String = QuestControlsScript.HINTS[quest.scheme] if _scheme_flash > 0.0 else QuestControlsScript.NAMES[quest.scheme]
+	if minimap_panel.visible:
+		minimap_panel.show_frame(minimap.update(sim.pod.th, get_process_delta_time()))
 	dashboard.show_state({
 		"mph": kmh / 1.609344, "kmh": kmh, "mach_line": cues.readout(), "progress": _progress_text(),
-		"footer": "%s   /   %s" % [String(sim.P.handling).to_upper(), ctl],
+		"footer": "%s   /   %s" % [handling_text(), ctl],
 		"thr": [inp.thrL, inp.thrR], "brk": [inp.brkL, inp.brkR], "heat": [sim.eL.heat, sim.eR.heat],
 		"health": [sim.eL.health, sim.eR.health],
 		"flameout": [sim.eL.flameout, sim.eR.flameout], "battery": sim.battery,

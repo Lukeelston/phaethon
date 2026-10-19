@@ -68,6 +68,10 @@ const BRAKE_REF := 134.0    # triggers: the grips (air brakes) magnet like the t
                             # brake's drag grows with speed^2, so one-handed braking at 900 mph spun
                             # you 150 deg in 3 s and flung the pod into the engines (Luke: "if i brake
                             # too hard, the pod flies forward"). Now it slows you and turns you ~40 deg.
+const BRAKE_FLOOR := 0.1         # ... the difference never fades below this ...
+const BRAKE_FLOOR_FAST := 0.2    # ... rising to this from 2,000 to 2,500 mph: a one-hand brake at 4,000 mph
+                                 # turns you ~6 deg in 3 s, not ~3 (Luke: "they need a bit more pull - just
+                                 # a few degrees on this course"); the grand prix (~1,000 mph) is untouched
 const HOLD_FULL_AT := 0.15  # triggers: the hold is at full strength from this much throttle (lever)
 const RAMP_UP := 1.5        # triggers: each engine's lever rises at most this fast, per second (~0.6 s
                             # idle to full); letting off is instant. Stops a finger that lands first
@@ -87,6 +91,7 @@ var _ramp := [0.0, 0.0]     # triggers: each engine's lever as delivered (eased,
 var speed_ref := SPEED_REF  # tunable for the tests (0 = full authority at any speed)
 var hold_k := HOLD_K        # tunable for the tests (0 = off)
 var brake_ref := BRAKE_REF  # tunable for the tests (0 = full grip-difference authority at any speed)
+var brake_floor_fast := BRAKE_FLOOR_FAST   # tunable for the tests
 
 
 func next_scheme() -> String:
@@ -197,7 +202,7 @@ func update(c: Dictionary, delta: float) -> Dictionary:
 			var bm := (bl + br) / 2.0
 			var bd := magnetise(bl - br, magnet_w)
 			if brake_ref > 0.0 and spd > brake_ref:
-				bd *= clampf(pow(brake_ref / spd, 2.0), 0.1, 1.0)
+				bd *= clampf(pow(brake_ref / spd, 2.0), lerpf(BRAKE_FLOOR, brake_floor_fast, smoothstep(894.1, 1117.6, spd)), 1.0)
 			out.brkL = clampf(bm + bd / 2.0, 0.0, 1.0)
 			out.brkR = clampf(bm - bd / 2.0, 0.0, 1.0)
 		"mixed":

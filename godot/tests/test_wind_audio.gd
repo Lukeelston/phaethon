@@ -55,7 +55,7 @@ func _process(_delta: float) -> bool:
 		return false
 	var now := clock.get_playback_position() + AudioServer.get_time_since_last_mix()
 	var delta := maxf(0.0, now - t)
-	t = now
+	t = maxf(t, now)   # the audio clock can step back when the mixer is starved; going back a leg re-armed the boom
 	var leg: Array = LEGS[mini(int(t / LEG), LEGS.size() - 1)]
 	var v: float = leg[1] / 2.236936
 	sim.pod.vx = v
@@ -169,9 +169,55 @@ func _report(wav: AudioStreamWAV) -> void:
 	fails += _check("boom is loud: peak %.1f dBFS, first-second RMS %.1f dBFS (>= -14)" % [
 		20.0 * log(bpeak / 32768.0) / log(10.0), b_rms], bpeak > 30000 and b_rms >= -14.0)
 	fails += _check("engines and wind back up after the duck (%.1f dB)" % wind.duck_db, wind.duck_db == 0.0)
+	fails += _boom_variety()
 	fails += _check("boomed signal fired (%d)" % boom_signals, boom_signals == 1)
 	print("WIND AUDIO ", "PASS" if fails == 0 else "FAIL (%d)" % fails)
 	quit(1 if fails > 0 else 0)
+
+
+## Several booms (Luke: "add a few variations of the sonic boom so that it's not the same one
+## every time"): each different, each as loud up front and dying away as the first, and the
+## player never picks the same one twice running.
+func _boom_variety() -> int:
+	var f := 0
+	wind.collect_booms(true)   # the variants past the first come off a worker
+	var sums := {}
+	var all_ok := true
+	var worst := ""
+	for v in wind.boom_streams.size():
+		var bd: PackedByteArray = wind.boom_streams[v].data
+		var bn := bd.size() >> 2
+		var head := 0.0
+		var tail := 0.0
+		var win := int(0.3 * 44100)
+		for i in win:
+			head += pow(bd.decode_s16(i * 4), 2.0)
+			tail += pow(bd.decode_s16((bn - win + i) * 4), 2.0)
+		var drop := 10.0 * log(maxf(head, 1.0) / maxf(tail, 1.0)) / log(10.0)
+		var bsq := 0.0
+		var bpeak := 0
+		for i in 44100:
+			var x := bd.decode_s16(i * 4)
+			bpeak = maxi(bpeak, absi(x))
+			bsq += float(x) * x
+		var rms := 20.0 * log(sqrt(bsq / 44100.0) / 32768.0) / log(10.0)
+		sums[bd.hex_encode().sha256_text()] = true
+		if drop <= 30.0 or bpeak <= 30000 or rms < -14.0:
+			all_ok = false
+			worst = "variant %d: drop %.0f dB, peak %d, rms %.1f" % [v, drop, bpeak, rms]
+	var repeats := 0
+	var seen := {}
+	var last := -1
+	for i in 60:
+		var k: int = wind.pick_boom()
+		seen[k] = true
+		if k == last:
+			repeats += 1
+		last = k
+	f += _check("%d boom variants, %d different, all loud and dying away%s; 60 picks use %d, %d repeats running" % [
+		wind.boom_streams.size(), sums.size(), "" if all_ok else " (" + worst + ")", seen.size(), repeats],
+		wind.boom_streams.size() >= 4 and sums.size() == wind.boom_streams.size() and all_ok and seen.size() == wind.boom_streams.size() and repeats == 0)
+	return f
 
 
 ## The air-brake roar must rumble, not hiss or rattle (Luke: the first one "sounds like grass and

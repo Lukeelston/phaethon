@@ -14,6 +14,9 @@ const DEFAULTS := {
 	# ~15 g grip cap, speed^2 fins, tow-bar pod. tools/handling_test.js measures it.
 	"thrustMax": 350000.0, "burnerMult": 1.45, "ramjetMult": 1.9, "gate": 0.88,
 	"engineCd": 0.07, "podCd": 0.035, "brakeCd": 0.04, "brakeLin": 0.0, "brakeConst": 60000.0,
+	# front speed brakes (Luke: "front speed brake flaps for braking done at high speed"): flaps ahead
+	# of the intakes open with the air brakes from 1,500 to 2,500 mph, adding 0.05 to the drag coefficient
+	"frontBrakeCd": 0.05, "frontBrakeV0": 670.6, "frontBrakeV1": 1117.6,
 	"engineGrip": 30.0, "podGrip": 10.0, "gripCapG": 15.0, "podCapG": 8.0, "finOffset": 0.2, "finK": 8.0,
 	"yawDamp": 150000.0, "podYawDamp": 50000.0, "podAlignK": 1.0e6, "towK": 1.0e6, "towC": 40000.0,
 	"cableLen": 16.0, "cableK": 600000.0, "cableC": 30000.0, "cableCouple": 0.2, "podAnchorW": 0.15,
@@ -26,9 +29,11 @@ const DEFAULTS := {
 	"towIntF0": 0.05, "towIntF1": 0.3, "towIntMax": 60.0,   # ... shifting onto the swing and spin as their share of the energy grows
 	"heatThrottle": 0.15, "heatBurner": 0.12, "heatRamjet": 0.35, "coolBase": 0.05, "coolSpeed": 0.10,
 	"batteryDrain": 0.08, "batteryCharge": 0.05, "repairRate": 0.12, "damagePerMs": 0.012,
+	"limits": false,   # battery and heat: off (Luke: "turn off battery and heat, let it be crazy"): the burner never runs dry, engines never heat up
 	"rideH": 1.5, "hoverOmega": 9.0, "hoverZeta": 0.9,
 	"binderKz": 3.0e6, "binderCz": 60000.0, "towKz": 2.0e5, "towCz": 16000.0,
 	"track": "circuit", "startX": 0.0, "startY": 0.0, "handling": "speed",
+	"sfEngageV": 558.8, "modeBlendT": 1.0,   # live switch: STARFIGHTER engages below 1,250 mph; the handling blends over 1 s
 	"seed": 1337,
 }
 # Handling modes, mirroring sim-core.js: named overrides on top of DEFAULTS (explicit
@@ -38,6 +43,7 @@ const DEFAULTS := {
 # impacts harder than 25 m/s into the wall do damage, a third as much; lower friction).
 const TRACKS := {
 	"gp": {"wallDmgMin": 25.0, "damagePerMs": 0.004, "wallMu": 0.22},
+	"eridanus": {"wallDmgMin": 25.0, "damagePerMs": 0.004, "wallMu": 0.22},
 }
 const HANDLING := {
 	"speed": {},
@@ -78,7 +84,32 @@ const GP_STEP := 12.0
 const GP_WIDTH := 96.0   # wider, and every corner banked GP_BANK degrees toward its inside (Luke, 2026-10-18),
 const GP_BANK := 15.0    # easing in and out over ~360 m: two passes of a (2 * GP_BANK_R + 1)-sample box (was 30: "50% smaller")
 const GP_BANK_R := 7
-var track_name := ""   # "gp" on the grand prix
+# Eridanus, mirroring sim-core.js: the dual-purpose course (tools/design_eridanus.py), 199 km. Each
+# segment names its mode: "sf" (the towns, STARFIGHTER's) 140 m wide, corners banked 10 deg; "sp"
+# (the speed loop, SPEEDCRAFT's) 400 m wide, sweepers banked 3 deg (Luke: "much wider", "bank the
+# speedcraft corners just slightly to help with sight"); widths ease over ~1 km between, banks over
+# ~1 km in the towns and ~5 km on the loop ("quick elevation changes ... too intense").
+const ERI_SEGS := [["S", 3390.539, 0.0, "sf"], ["L", 450.0, 90.0, "sf"], ["S", 900.0, 0.0, "sf"], 
+	["R", 300.0, 90.0, "sf"], ["S", 700.0, 0.0, "sf"], ["L", 600.0, 60.0, "sf"], ["R", 600.0, 60.0, "sf"], 
+	["S", 1500.0, 0.0, "sf"], ["S", 9000.0, 0.0, "sp"], ["L", 30000.0, 8.0, "sp"], ["R", 30000.0, 8.0, "sp"], 
+	["S", 8000.0, 0.0, "sp"], ["L", 22000.0, 90.0, "sp"], ["S", 11000.0, 0.0, "sp"], ["L", 500.0, 50.0, "sf"], 
+	["S", 600.0, 0.0, "sf"], ["R", 320.0, 70.0, "sf"], ["S", 500.0, 0.0, "sf"], ["L", 400.0, 80.0, "sf"], 
+	["S", 1500.0, 0.0, "sf"], ["S", 4000.0, 0.0, "sp"], ["R", 15000.0, 30.0, "sp"], ["S", 1000.0, 0.0, "sp"], 
+	["L", 15000.0, 30.0, "sp"], ["S", 3000.0, 0.0, "sp"], ["L", 20000.0, 30.0, "sp"], ["S", 13100.0, 0.0, "sp"], 
+	["L", 16000.0, 90.0, "sp"], ["S", 36152.417, 0.0, "sp"], ["L", 700.0, 60.0, "sf"], ["S", 900.0, 0.0, "sf"], 
+	["R", 350.0, 80.0, "sf"], ["S", 800.0, 0.0, "sf"], ["L", 300.0, 100.0, "sf"], ["S", 1000.0, 0.0, "sf"], 
+	["R", 500.0, 50.0, "sf"], ["S", 1200.0, 0.0, "sf"], ["L", 900.0, 60.0, "sf"]]
+# The courses: widths per mode (else GP_WIDTH, constant); width_r: the width-easing box (samples);
+# banks: per mode, degrees (else GP_BANK in the corners), each eased by two passes of its own box,
+# bank_r (samples; else GP_BANK_R).
+const COURSES := {
+	"gp": {"segs": GP_SEGS, "checkpoints": 12},
+	"eridanus": {"segs": ERI_SEGS, "checkpoints": 24, "widths": {"sf": 140.0, "sp": 400.0}, "width_r": 40,
+		"banks": {"sf": 10.0, "sp": 3.0}, "bank_r": {"sf": 20, "sp": 100}},
+}
+var track_name := ""   # the course's name ("gp", "eridanus") on a course
+var course := false    # on a course (COURSES): banked corners push
+var tmode := PackedByteArray()   # courses: per sample, 0 a STARFIGHTER ("sf") section, 1 SPEEDCRAFT ("sp")
 
 
 class Body:
@@ -101,6 +132,7 @@ class Body:
 	var sputter := 1.0
 	var sputter_t := 0.0
 	var thrust := 0.0
+	var front := 0.0   # the front speed brakes' deployment, 0..1 (the view's flaps)
 	var z := 0.0
 	var vz := 0.0
 	var grip := 1.0
@@ -136,6 +168,13 @@ var tb := PackedFloat64Array()   # GP: bank per sample, radians (+ = tilted down
 var battery := 1.0
 var armed := false
 var mode := "normal"
+# Live handling switch, mirroring sim-core.js: inp.handling asks for "speed" or "starfighter";
+# STARFIGHTER only engages below P.sfEngageV, then the handling keys blend over P.modeBlendT s.
+var hwant := "speed"
+var hblend := 0.0
+var _hk: Array = []      # the handling keys that blend (not given explicitly in the overrides)
+var _h0 := {}
+var _h1 := {}
 var binder_broken := false
 var _tow_u := -1.0          # tow bar's stored energy last substep (-1 = none yet), for the energy audit
 var crash_t := 0.0
@@ -176,19 +215,26 @@ func _init(overrides: Dictionary = {}) -> void:
 	_overrides = overrides.duplicate()
 	P = DEFAULTS.duplicate()
 	# the grand prix is a STARFIGHTER track unless a handling is asked for
-	var hname: String = overrides.get("handling", "starfighter" if overrides.get("track", "") == "gp" else DEFAULTS.handling)
+	var hname: String = overrides.get("handling", "starfighter" if COURSES.has(overrides.get("track", "")) else DEFAULTS.handling)
 	P.merge(HANDLING.get(hname, {}), true)
 	P.merge(TRACKS.get(overrides.get("track", ""), {}), true)
 	P.merge(overrides, true)
 	P.handling = hname
+	hwant = hname
+	hblend = 1.0 if hname == "starfighter" else 0.0
+	for k in HANDLING.starfighter:
+		if not overrides.has(k):
+			_hk.append(k)
+			_h0[k] = HANDLING.speed.get(k, DEFAULTS[k])
+			_h1[k] = HANDLING.starfighter[k]
 	_rng = int(P.seed) & 0xFFFFFFFF
 	if _rng == 0:
 		_rng = 1
 	if P.track == "range":
 		kind = "range"
 		_build_range()
-	elif P.track == "gp":
-		_build_gp()
+	elif COURSES.has(P.track):
+		_build_course(P.track)
 	else:
 		_build_track()
 	var e_i: float = P.engineMass * pow(P.engineLen, 2) / 12.0
@@ -212,6 +258,8 @@ func set_handling(name: String) -> void:
 	P.merge(HANDLING.get(name, {}), true)
 	P.merge(TRACKS.get(_overrides.get("track", ""), {}), true)
 	P.merge(_overrides, true)
+	hwant = name
+	hblend = 1.0 if name == "starfighter" else 0.0
 
 
 func _build_range() -> void:
@@ -313,14 +361,19 @@ func _build_track() -> void:
 	track_length = s
 
 
-func _build_gp() -> void:
-	track_name = "gp"
-	checkpoints = 12
+func _build_course(name: String) -> void:
+	track_name = name
+	course = true
+	var C: Dictionary = COURSES[name]
+	checkpoints = C.checkpoints
 	var x := 0.0
 	var y := 0.0
 	var h := 0.0
 	var raw := PackedFloat64Array()
-	for sg in GP_SEGS:
+	var wraw := PackedFloat64Array()
+	for sg in C.segs:
+		var m: String = sg[3] if sg.size() > 3 else "sf"
+		var w: float = C.widths[m] if C.has("widths") else GP_WIDTH
 		if sg[0] == "S":
 			var n := maxi(1, int(ceil(sg[1] / GP_STEP)))
 			var d: float = sg[1] / n
@@ -328,6 +381,8 @@ func _build_gp() -> void:
 				tpx.append(x)
 				tpy.append(y)
 				raw.append(0.0)
+				wraw.append(w)
+				tmode.append(0 if m == "sf" else 1)
 				x += d * cos(h)
 				y += d * sin(h)
 		else:
@@ -340,7 +395,10 @@ func _build_gp() -> void:
 			for k in n:
 				tpx.append(x)
 				tpy.append(y)
-				raw.append(sn * GP_BANK * PI / 180.0)
+				var bdeg: float = C.banks[m] if C.has("banks") else (GP_BANK if m == "sf" else 0.0)
+				raw.append(sn * bdeg * PI / 180.0)
+				wraw.append(w)
+				tmode.append(0 if m == "sf" else 1)
 				x += c * cos(h + sn * da / 2.0)
 				y += c * sin(h + sn * da / 2.0)
 				h += sn * da
@@ -351,6 +409,7 @@ func _build_gp() -> void:
 	tny.resize(N)
 	tlen.resize(N)
 	tw.resize(N)
+	var width: PackedFloat64Array = _smooth_box(wraw, C.width_r) if C.has("widths") else wraw
 	var s := 0.0
 	for i in N:
 		var j := (i + 1) % N
@@ -363,21 +422,53 @@ func _build_gp() -> void:
 		tny[i] = ttx[i]
 		tlen[i] = l
 		s += l
-		tw[i] = GP_WIDTH
+		tw[i] = width[i]
 	track_length = s
-	tb = _smooth_bank(_smooth_bank(raw))
+	if C.has("bank_r"):
+		tb = PackedFloat64Array()
+		tb.resize(N)
+		for m in ["sf", "sp"]:
+			var part := PackedFloat64Array()
+			part.resize(N)
+			for i in N:
+				part[i] = raw[i] if tmode[i] == (0 if m == "sf" else 1) else 0.0
+			var r: int = C.bank_r[m]
+			var sm := _smooth_run(_smooth_run(part, r), r)
+			for i in N:
+				tb[i] += sm[i]
+	else:
+		tb = _smooth_bank(_smooth_bank(raw))
 
 
-## A centred moving average round the closed loop (box of 2 * GP_BANK_R + 1 samples).
-static func _smooth_bank(a: PackedFloat64Array) -> PackedFloat64Array:
+## A centred moving average round the closed loop (box of 2 * r + 1 samples; banks: GP_BANK_R).
+static func _smooth_box(a: PackedFloat64Array, r: int) -> PackedFloat64Array:
 	var n := a.size()
 	var out := PackedFloat64Array()
 	out.resize(n)
 	for i in n:
 		var acc := 0.0
-		for k in range(-GP_BANK_R, GP_BANK_R + 1):
+		for k in range(-r, r + 1):
 			acc += a[posmod(i + k, n)]
-		out[i] = acc / (2 * GP_BANK_R + 1)
+		out[i] = acc / (2 * r + 1)
+	return out
+
+
+static func _smooth_bank(a: PackedFloat64Array) -> PackedFloat64Array:
+	return _smooth_box(a, GP_BANK_R)
+
+
+## The same average as a running sum: O(N) for the wide boxes (a 5 km bank ramp is 400 samples).
+static func _smooth_run(a: PackedFloat64Array, r: int) -> PackedFloat64Array:
+	var n := a.size()
+	var w := 2 * r + 1
+	var out := PackedFloat64Array()
+	out.resize(n)
+	var acc := 0.0
+	for k in range(-r, r + 1):
+		acc += a[posmod(k, n)]
+	for i in n:
+		out[i] = acc / w
+		acc += a[posmod(i + r + 1, n)] - a[posmod(i - r, n)]
 	return out
 
 
@@ -442,7 +533,7 @@ func restart() -> void:
 	result = {}
 	for e in [eL, eR]:
 		e.health = 1.0
-		e.heat = 0.3
+		e.heat = 0.3 if P.limits else 0.0
 	pod.health = 1.0
 	battery = 1.0
 	if kind == "range":
@@ -501,7 +592,7 @@ func respawn(ci: int = -1, at_idx: int = -1) -> void:   # at_idx: a debug start 
 		b.vz = 0.0
 		b.grip = 1.0
 	for e: Body in [eL, eR]:
-		e.heat = minf(e.heat, 0.5)
+		e.heat = minf(e.heat, 0.5) if P.limits else 0.0
 		e.flameout = false
 		e.sputter = 1.0
 		e.sputter_t = 0.0
@@ -591,6 +682,19 @@ func step(inp: Dictionary, dt: float) -> void:
 				result = {}
 			respawn()
 		return
+	var hask: String = inp.get("handling", "")
+	if hask == "speed" or hask == "starfighter":
+		hwant = hask
+	var htgt := 0.0
+	if hwant == "starfighter":
+		htgt = 1.0 if hblend > 0.0 or sqrt(pod.vx * pod.vx + pod.vy * pod.vy) <= P.sfEngageV else 0.0
+	if hblend != htgt:
+		hblend = minf(htgt, hblend + dt / P.modeBlendT) if htgt > hblend else maxf(htgt, hblend - dt / P.modeBlendT)
+		for k in _hk:
+			P[k] = _h1[k] if hblend == 1.0 else (_h0[k] if hblend == 0.0 else _h0[k] + (_h1[k] - _h0[k]) * hblend)
+		P.handling = "starfighter" if hblend >= 0.5 else "speed"
+		if hblend == htgt:
+			events.append({"type": "handling", "mode": P.handling})
 	# Vertical ties: the binder holds both engines at one height and the tow bar lifts the
 	# pod toward their mean, so a one-sided ramp hit lifts the whole craft instead of
 	# flinging one engine skyward. Exactly zero when heights match (flat ground).
@@ -616,7 +720,7 @@ func step(inp: Dictionary, dt: float) -> void:
 	var ramjet := armed and in_gate
 	var burner := not ramjet and in_gate and battery > 0.0
 	mode = "ramjet" if ramjet else ("burner" if burner else "normal")
-	if burner:
+	if burner and P.limits:
 		battery = maxf(0.0, battery - P.batteryDrain * dt)
 	elif not in_gate:
 		battery = minf(1.0, battery + P.batteryCharge * dt)
@@ -629,7 +733,7 @@ func step(inp: Dictionary, dt: float) -> void:
 		var c := cos(e.th)
 		var s := sin(e.th)
 		var gain := 0.0
-		if not e.flameout:
+		if not e.flameout and P.limits:
 			gain = maxf(0.0, thr - 0.6) * P.heatThrottle + (P.heatBurner if burner else 0.0) + (P.heatRamjet if ramjet else 0.0)
 		var cool: float = P.coolBase + P.coolSpeed * minf(1.5, speed / 200.0) + (0.15 if e.flameout else 0.0)
 		e.heat = clampf(e.heat + (gain - cool) * dt, 0.0, 1.25)
@@ -655,7 +759,8 @@ func step(inp: Dictionary, dt: float) -> void:
 		# Air brake = quadratic drag plus a linear term, so the flaps still bite at low speed.
 		var v := sqrt(e.vx * e.vx + e.vy * e.vy)
 		# A constant term keeps the brakes biting across a 100x speed range (smoothed below 2 m/s).
-		var cd: float = P.engineCd + P.brakeCd * brk
+		e.front = brk * smoothstep(P.frontBrakeV0, P.frontBrakeV1, v) if P.frontBrakeCd > 0.0 else 0.0
+		var cd: float = P.engineCd + P.brakeCd * brk + P.frontBrakeCd * e.front
 		var bl: float = P.brakeLin * brk + P.brakeConst * brk / maxf(v, 2.0)
 		e.fx -= cd * v * e.vx + bl * e.vx
 		e.fy -= cd * v * e.vy + bl * e.vy
@@ -855,7 +960,7 @@ func step(inp: Dictionary, dt: float) -> void:
 
 	# Banked corners: the surface tilts toward the inside, so its push has a part toward the
 	# corner's centre: gravity's (g tan bank) plus downforce's (bankDown v^2 sin bank).
-	if track_name == "gp":
+	if course:
 		for b: Body in bodies:
 			var bk: float = tb[b.hint]
 			if bk == 0.0:

@@ -16,6 +16,7 @@ uniform vec2 org = vec2(0.0);       // the pod's (sim x, sim y) mod PERIOD
 uniform float pod_y = 0.0;          // the pod's sim y (places the playa band)
 uniform float playa = 0.0;          // 1 on the range: a dry lake round the runway
 uniform float playa_half = 320.0;   // the lake's mean half-width (m); the shore wanders +/-240 m
+uniform float verdant = 0.0;        // 1 on Eridanus: meadows, not sand
 
 varying vec2 lp;   // plane-local render xz
 
@@ -74,6 +75,21 @@ void fragment() {
 	// their average shade, a little patchy
 	float b = (1.0 - lake) * 0.12 * smoothstep(0.3, 0.7, n1 + 0.3 * n3);
 	col = mix(col, vec3(0.40, 0.38, 0.26), b);
+
+	// the verdant world (Eridanus): meadow greens in big patches, hay-dry fields and darker clover,
+	// wildflowers dotted close by
+	if (verdant > 0.0) {
+		vec3 grass = mix(vec3(0.27, 0.38, 0.15), vec3(0.45, 0.55, 0.24), smoothstep(0.25, 0.75, n1));
+		grass = mix(grass, vec3(0.60, 0.58, 0.30), smoothstep(0.6, 0.85, n2) * 0.7);
+		grass = mix(grass, vec3(0.20, 0.30, 0.13), smoothstep(0.55, 0.9, 1.0 - n2) * 0.5 * smoothstep(0.4, 0.8, n3));
+		grass *= 0.9 + 0.2 * n3;
+		vec2 fc = mod(floor(p), PERIOD);
+		float fl = step(0.965, hash21(fc + vec2(91.0, 3.0)));
+		vec3 fcol = hash21(fc + vec2(7.0, 7.0)) < 0.5 ? vec3(0.95, 0.85, 0.25)
+			: (hash21(fc + vec2(9.0, 1.0)) < 0.5 ? vec3(0.95, 0.95, 0.92) : vec3(0.62, 0.42, 0.85));
+		float flower = fl * (1.0 - smoothstep(0.12, 0.12 + fw, length(fract(p) - 0.5))) * detail(0.4, fw);
+		col = mix(col, mix(grass, fcol, flower), verdant);
+	}
 
 	// near: grain (the speed cue) and the lakebed's mud cracks
 	float g = (pnoise(p / 1.0, PERIOD) - 0.5) * detail(1.0, fw) + (pnoise(p / 0.25, PERIOD * 4.0) - 0.5) * detail(0.25, fw) * 0.7;

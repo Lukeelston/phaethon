@@ -4,6 +4,7 @@
 ## User args after "--":
 ##   --track=range   the 100-mile test range (default: the circuit)
 ##   --track=gp      the grand prix: 29 km for STARFIGHTER at ~1,000 mph
+##   --track=eridanus  the dual-purpose course: 199 km, a SPEEDCRAFT loop and two STARFIGHTER towns
 ##   --startx=M      range only: start M metres down the range
 ##   --starty=M      range only: start on this lane (0 runway, 400 jump lane, -400 twisty lane)
 ##   --replay        circuit only: fly the recorded parity lap instead of live input
@@ -28,14 +29,19 @@ const WindAudioScript := preload("res://audio/wind_audio.gd")
 const SpeedCuesScript := preload("res://view/speed_cues.gd")
 const TrafficScript := preload("res://view/traffic.gd")
 const DustScript := preload("res://view/dust.gd")
+const MiniMapScript := preload("res://view/minimap.gd")
+const Minimap2DScript := preload("res://view/minimap_2d.gd")
 const CraftModelScript := preload("res://view/craft_model.gd")
 const HorizonScript := preload("res://view/horizon.gd")
 const GpWorldScript := preload("res://view/gp_world.gd")
+const CourseWorldScript := preload("res://view/course_world.gd")
+const VerdantWorldScript := preload("res://view/verdant_world.gd")
 const DT := 1.0 / 480.0
 const HAZE := Color(0.78, 0.66, 0.52)
 const GROUND_PERIOD := 4096.0             # view/ground.gdshader's PERIOD
 const SUN_ROT := Vector3(-30, 52, 0)       # the primary sun (DirectionalLight3D rotation, degrees)
 const HORIZON := Color(0.86, 0.74, 0.58)   # fog colour = the sky at the horizon, so they meet seamlessly
+const HORIZON_GREEN := Color(0.72, 0.80, 0.86)   # Eridanus: a soft blue-grey haze over the valley
 
 var sim
 var levers
@@ -53,6 +59,8 @@ var start_at := -1   # --at=I: start at track sample I (circuits; screenshots of
 var cruise := -1.0   # --cruise=T holds both levers at T (demos, screenshots)
 var hold_brake := [0.0, 0.0]
 var cam_offset := Vector3.ZERO   # --cam: debug close-up (forward, left, up)
+var handling_ask := ""             # the live handling switch: "speed" / "starfighter" (VR: the console
+                                   # toggle or Y-hold; keyboard: M), sent with every step
 static var track_override := ""    # an in-game track switch (VR: hold the menu button) wins over --track;
                                    # static, so it survives the scene reload that does the switch
 var eye := Vector3.INF            # --eye / --look: a fixed debug camera at sim (x, y, h), aimed at another point
@@ -75,10 +83,14 @@ var ground_mat: ShaderMaterial
 var circuit_root: Node3D
 var range_world: Node3D
 var landmark: Node3D
+var minimap                  # the path ahead (view/minimap.gd), for the overlays
+var minimap_2d: Control      # the flat view's (the headset has vr/minimap_panel.gd)
 var cues: Node3D
 var traffic: Node3D
 var horizon: Node3D
 var gp_world: Node3D
+var course_world: Node3D     # Eridanus: the chunked trackside (view/course_world.gd)
+var verdant_world: Node3D    # ... and the green valley round it (view/verdant_world.gd)
 var dust: Node3D
 
 
@@ -99,6 +111,8 @@ func _ready() -> void:
 			opts["track"] = "range"
 		elif a == "--track=gp":
 			opts["track"] = "gp"
+		elif a == "--track=eridanus":
+			opts["track"] = "eridanus"
 		elif a.begins_with("--startx="):
 			opts["startX"] = float(a.get_slice("=", 1))
 		elif a.begins_with("--starty="):
@@ -133,6 +147,8 @@ func _ready() -> void:
 	if sim.kind != "circuit":
 		replay = []
 	levers = LeverInputScript.new()
+	minimap = MiniMapScript.new()
+	minimap.setup(sim)
 	_load_best()
 	if cruise >= 0.0:
 		inp = {"thrL": cruise, "thrR": cruise, "brkL": hold_brake[0], "brkR": hold_brake[1], "repair": false, "reignite": true}
@@ -164,6 +180,8 @@ func _sim_step() -> void:
 		inp = {"thrL": u[0], "thrR": u[1], "brkL": u[2], "brkR": u[3], "repair": false, "reignite": true}
 		replay_i += 1
 	sub += 1
+	if handling_ask != "":
+		inp["handling"] = handling_ask
 	sim.step(inp, DT)
 	for e in sim.events:
 		_on_event(e)
@@ -177,7 +195,7 @@ func _on_event(e: Dictionary) -> void:
 		_on_hit(e.who, 1.0)
 	elif e.type == "scrape":
 		_on_hit(e.who, 0.35)
-	if sim.track_name == "gp" and e.type == "lap":
+	if sim.course and e.type == "lap":
 		if best_saved < 0.0 or e.t < best_saved:
 			best_saved = e.t
 			var f := FileAccess.open(_best_path(), FileAccess.WRITE)
@@ -208,12 +226,14 @@ func _best_path() -> String:
 	var h: String = sim.P.handling
 	if sim.track_name == "gp":
 		return "user://gp_best_%s.json" % h
+	if sim.course:
+		return "user://%s_best.json" % sim.track_name   # one record: every lap flies both modes
 	return "user://sprint_best.json" if h == "speed" else "user://sprint_best_%s.json" % h
 
 
 func _load_best() -> void:
 	best_saved = -1.0
-	if (sim.kind == "range" or sim.track_name == "gp") and FileAccess.file_exists(_best_path()):
+	if (sim.kind == "range" or sim.course) and FileAccess.file_exists(_best_path()):
 		var saved = JSON.parse_string(FileAccess.get_file_as_string(_best_path()))
 		if saved is Dictionary and saved.has("best"):
 			best_saved = float(saved.best)
@@ -233,6 +253,42 @@ func set_handling(name: String) -> void:
 ## (the VR cockpit buzzes a controller).
 func _on_hit(_who: String, _strength: float) -> void:
 	pass
+
+
+## The handling as the pilot sees it: SPEEDCRAFT / STARFIGHTER, and STARFIGHTER waiting for the
+## craft to slow below 1,250 mph.
+func handling_text() -> String:
+	if handling_ask == "starfighter" and sim.hblend == 0.0:
+		return "STARFIGHTER AT 1,250"
+	return "STARFIGHTER" if sim.hblend >= 0.5 else "SPEEDCRAFT"
+
+
+const FLIP_COOLDOWN_MS := 1000   # between handling flips, whatever throws them (Luke: "a 1 second cool down between flips")
+var _flip_at := -100000
+
+## Ask for a handling: refused (false) within FLIP_COOLDOWN_MS of the last flip, from the MODE
+## switch, the Y hold or the M key alike.
+func ask_handling(mode: String) -> bool:
+	var now := Time.get_ticks_msec()
+	if now - _flip_at < FLIP_COOLDOWN_MS:
+		return false
+	_flip_at = now
+	handling_ask = mode
+	return true
+
+
+## Flip the live handling switch: SPEEDCRAFT <-> STARFIGHTER (STARFIGHTER waits for 1,250 mph).
+func toggle_handling() -> void:
+	var cur: String = handling_ask if handling_ask != "" else String(sim.hwant)
+	if not ask_handling("speed" if cur == "starfighter" else "starfighter"):
+		return
+	_flash("%s%s" % ["STARFIGHTER" if handling_ask == "starfighter" else "SPEEDCRAFT",
+		"  (below 1,250 mph)" if handling_ask == "starfighter" and sim.hblend == 0.0 else ""])
+
+
+func _unhandled_key_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo and (event as InputEventKey).keycode == KEY_M:
+		toggle_handling()
 
 
 func _flash(msg: String) -> void:
@@ -353,12 +409,14 @@ func _grain(c: Color, tiles: float) -> StandardMaterial3D:
 func _build_world() -> void:
 	# Sky: dusty blue overhead, washing out to the haze at the horizon. The fog skips the sky
 	# (it would paint it flat) and meets it at the horizon in the same colour.
+	var green: bool = sim.track_name == "eridanus"
+	var hz := HORIZON_GREEN if green else HORIZON
 	var sky_mat := ProceduralSkyMaterial.new()
-	sky_mat.sky_top_color = Color(0.40, 0.55, 0.74)
-	sky_mat.sky_horizon_color = HORIZON
+	sky_mat.sky_top_color = Color(0.30, 0.50, 0.80) if green else Color(0.40, 0.55, 0.74)
+	sky_mat.sky_horizon_color = hz
 	sky_mat.sky_curve = 0.09
-	sky_mat.ground_horizon_color = HORIZON
-	sky_mat.ground_bottom_color = Color(0.62, 0.5, 0.36)
+	sky_mat.ground_horizon_color = hz
+	sky_mat.ground_bottom_color = Color(0.36, 0.44, 0.28) if green else Color(0.62, 0.5, 0.36)
 	sky_mat.sun_angle_max = 1.5
 	sky_mat.sun_curve = 0.05
 	var sky := Sky.new()
@@ -390,8 +448,9 @@ func _build_world() -> void:
 	en.adjustment_saturation = 1.08
 	en.adjustment_contrast = 1.04
 	en.fog_enabled = true
-	en.fog_light_color = HORIZON
-	en.fog_density = 0.0012 if sim.kind == "circuit" and sim.track_name != "gp" else 0.00035
+	en.fog_light_color = hz
+	# (the valley's air is clearer than the desert's dust: Eridanus' 12 km boards come up readable)
+	en.fog_density = 0.0012 if sim.kind == "circuit" and not sim.course else (0.0002 if green else 0.00035)
 	en.fog_sky_affect = 0.0
 	en.fog_sun_scatter = 0.18   # the haze brightens toward the suns
 	add_child(env)
@@ -434,6 +493,7 @@ func _build_world() -> void:
 	ground_mat = ShaderMaterial.new()
 	ground_mat.shader = preload("res://view/ground.gdshader")
 	ground_mat.set_shader_parameter("playa", 1.0 if sim.kind == "range" else 0.0)
+	ground_mat.set_shader_parameter("verdant", 1.0 if green else 0.0)
 	ground_mat.set_shader_parameter("playa_half", RangeWorldScript.PLAYA_HALF)   # the runway's dry lake; scrub beyond
 	ground.material_override = ground_mat
 	ground.position = Vector3(0, -0.05, 0)
@@ -452,6 +512,30 @@ func _build_world() -> void:
 		horizon = HorizonScript.new()
 		add_child(horizon)
 		horizon.build(self, HORIZON)
+		return
+
+	if green:
+		course_world = CourseWorldScript.new()
+		add_child(course_world)
+		course_world.build(sim, self)
+		verdant_world = VerdantWorldScript.new()
+		add_child(verdant_world)
+		verdant_world.build(sim, self)
+		var lo := Vector2(INF, INF)
+		var hi := Vector2(-INF, -INF)
+		for i in sim.N:
+			lo = Vector2(minf(lo.x, sim.tpx[i]), minf(lo.y, sim.tpy[i]))
+			hi = Vector2(maxf(hi.x, sim.tpx[i]), maxf(hi.y, sim.tpy[i]))
+		# the bbox's ellipse cuts its corners (the track ran under the hills there): grow it until
+		# every sample is inside, so each ring's front edge stays its full distance off the track
+		var c := (lo + hi) / 2.0
+		var half := (hi - lo) / 2.0
+		var k := 1.0
+		for i in sim.N:
+			k = maxf(k, Vector2((sim.tpx[i] - c.x) / half.x, (sim.tpy[i] - c.y) / half.y).length())
+		horizon = HorizonScript.new()
+		add_child(horizon)
+		horizon.build_course(self, hz, c, half * k, true)
 		return
 
 	if sim.track_name == "gp":
@@ -519,6 +603,10 @@ func _sync_world() -> void:
 		horizon.sync(org_x, org_y)
 	if gp_world:
 		gp_world.sync(org_x, org_y)
+	if course_world:
+		course_world.sync(org_x, org_y)
+	if verdant_world:
+		verdant_world.sync(org_x, org_y)
 	if landmark:
 		landmark.sync(org_x, org_y, sim.time, cam.global_position)
 
@@ -535,7 +623,7 @@ func _build_craft() -> void:
 func _make_view() -> void:
 	cam = Camera3D.new()
 	cam.fov = 70
-	cam.far = 80000   # the backdrop peaks sit at 45-57 km
+	cam.far = 120000   # the backdrop peaks sit at 45-57 km; Eridanus' far ranges up to ~100 km away
 	add_child(cam)
 	var layer := CanvasLayer.new()
 	hud = Label.new()
@@ -543,6 +631,9 @@ func _make_view() -> void:
 	hud.add_theme_font_size_override("font_size", 18)
 	hud.add_theme_color_override("font_color", Color(0.1, 0.08, 0.06))
 	layer.add_child(hud)
+	minimap_2d = Minimap2DScript.new()
+	minimap_2d.visible = sim.kind == "circuit"
+	layer.add_child(minimap_2d)
 	add_child(layer)
 
 
@@ -576,19 +667,19 @@ func _place_camera(k: float) -> void:
 func _progress_text() -> String:
 	if sim.kind == "range":
 		var best := "--" if best_saved < 0.0 else "%.2fs" % best_saved
-		var braked := "" if brake_point < 0.0 else "   braked %.2f km out" % (brake_point / 1000.0)
+		var braked := "" if brake_point < 0.0 else "   braked %.2f mi out" % (brake_point / 1609.344)
 		if sim.time < flash_until:
 			return "%s   BEST %s" % [flash_msg, best]
 		if sim.run_active:
 			var togo: float = sim.BOX_X - sim.pod.x
-			var dist := "%.2f km" % (togo / 1000.0) if absf(togo) >= 1000.0 else "%d m" % int(togo)
+			var dist := "%.2f mi" % (togo / 1609.344) if absf(togo) >= 160.9344 else "%d ft" % int(togo * 3.28084)
 			return "TO BOX %s   RUN %.1fs   BEST %s" % [dist, sim.time - sim.run_start, best]
 		if sim.result.get("type", "") == "finish":
-			return "STOPPED IN BOX  %.2fs   %.1f m off%s\nBEST %s   (Y: go again)" % [
-				sim.result.t, sim.result.err, braked, best]
+			return "STOPPED IN BOX  %.2fs   %.1f ft off%s\nBEST %s   (Y: go again)" % [
+				sim.result.t, sim.result.err * 3.28084, braked, best]
 		return "READY: push the levers   BEST %s" % best
 	var cur: float = 0.0 if sim.lap_start < 0.0 else sim.time - sim.lap_start
-	if sim.track_name == "gp":
+	if sim.course:
 		var rec := "--" if best_saved < 0.0 else "%.2f" % best_saved
 		if sim.time < flash_until:
 			return "%s   RECORD %s" % [flash_msg, rec]
@@ -598,8 +689,10 @@ func _progress_text() -> String:
 
 
 func _update_hud() -> void:
+	if minimap_2d and minimap_2d.visible:
+		minimap_2d.show_frame(minimap.update(cam_th, get_process_delta_time()))
 	var mode_txt: String = {"ramjet": "RAMJET", "burner": "AFTERBURNER"}.get(sim.mode, "RAMJET ARMED" if sim.armed else "")
-	hud.text = "%4d km/h   %s   %s\nTHR %.2f | %.2f   BRK %.2f | %.2f   HEAT %d%% | %d%%   HP %d%% | %d%%   BAT %d%%   %s\n%s" % [
-		_kmh(), cues.readout(), _progress_text(), inp.thrL, inp.thrR, inp.brkL, inp.brkR,
+	hud.text = "%4d mph   %s   %s\nTHR %.2f | %.2f   BRK %.2f | %.2f   HEAT %d%% | %d%%   HP %d%% | %d%%   BAT %d%%   %s\n%s" % [
+		_kmh() / 1.609344, cues.readout(), _progress_text(), inp.thrL, inp.thrR, inp.brkL, inp.brkR,
 		sim.eL.heat * 100, sim.eR.heat * 100, sim.eL.health * 100, sim.eR.health * 100, sim.battery * 100, mode_txt,
-		("Replay: parity lap" if not replay.is_empty() else levers.source) + "   %s handling" % String(sim.P.handling).to_upper()]
+		("Replay: parity lap" if not replay.is_empty() else levers.source) + "   " + handling_text()]

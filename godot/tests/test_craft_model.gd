@@ -37,8 +37,9 @@ func _process(delta: float) -> bool:
 			fails += _check_cage()
 			fails += _check_slab()
 			fails += _check_plume()
-			var good := fails == 0 and passed == LEGS.size() + 3
-			print("CRAFT MODEL ", "PASS" if good else "FAIL (%d failed, %d of %d ran)" % [fails, passed + fails, LEGS.size() + 3])
+			fails += _check_bank()
+			var good := fails == 0 and passed == LEGS.size() + 4
+			print("CRAFT MODEL ", "PASS" if good else "FAIL (%d failed, %d of %d ran)" % [fails, passed + fails, LEGS.size() + 4])
 			quit(0 if good else 1)
 			return true
 	var L: Array = LEGS[leg]
@@ -86,6 +87,20 @@ func _check_slab() -> int:
 	var flat: bool = box.size.x > 2.0 * box.size.y and absf(box.size.x - 2.4) < 0.2
 	var kept: bool = c.rotors[0].size() == 2 and c.flaps[0].size() == 4 and c.hot_mats.size() == 2 		and c.glow_mats.size() == 2 and c.flames.size() == 2
 	var added: bool = c.vanes[0].size() == 3 and c.strobes.size() == 2 and c.binder_mats.size() == 2
+	# the front speed brakes: two petals an engine, out with the sim's e.front, both outward
+	v.sim.eL.front = 1.0
+	v.sim.eR.front = 0.0
+	for i in 30:
+		c.sync(v.sim, {"thrL": 0.0, "thrR": 0.0, "brkL": 1.0, "brkR": 0.0}, 1.0 / 60.0)
+	var fl: Node3D = c.front_flaps[0][0]
+	var fr: Node3D = c.front_flaps[0][1]
+	var tip_l: Vector3 = fl.transform * Vector3(0.0, 0.0, 1.0)
+	var tip_r: Vector3 = fr.transform * Vector3(0.0, 0.0, 1.0)
+	var fronts: bool = c.front_flaps[0].size() == 2 and c.front_flaps[1].size() == 2 and absf(c.front_open[0] - 1.0) < 0.01 and c.front_open[1] < 0.01 \
+		and tip_l.x < fl.position.x - 0.5 and tip_r.x > fr.position.x + 0.5
+	print("  front speed brakes: left engine %.2f open (its petals' tails out to x %.2f / %.2f), right %.2f" % [c.front_open[0], tip_l.x, tip_r.x, c.front_open[1]])
+	v.sim.eL.front = 0.0
+	added = added and fronts
 	# the vanes follow a steering split (left engine harder: a right turn: trailing edges right)
 	v.sim.eL.thrust = 0.9
 	v.sim.eR.thrust = 0.2
@@ -159,3 +174,39 @@ func _check_plume() -> int:
 	return _check("plume: shader on both cones of both engines; dry burner share %.2f, %.1f m long, light %.1f; burner share %.2f, %.1f m long, light %.1f; flamed out: plume %s, light %.1f" % [
 		dry[0], dry[1], dry[2], hot[0], hot[1], hot[2], "shown" if out[3] else "hidden", out[2]],
 		wired and dry[0] < 0.05 and dry[2] == 0.0 and hot[0] > 0.95 and hot[1] > 2.0 * dry[1] and hot[2] > 1.0 and not out[3] and out[2] == 0.0)
+
+
+## The lean into turns (CraftModel.ease_bank), at 72 Hz with a hard 15 g turn held 3 s, then
+## let go. Luke: 55 deg/s both ways felt "artificially slow, especially returning to horizontal";
+## the unrated original felt "sickeningly fast". Rolling in still builds (not a snap), coming back
+## to level is quicker than rolling in, and neither exceeds its cap.
+func _check_bank() -> int:
+	var CM = v.craft.get_script()
+	var dt := 1.0 / 72.0
+	var b := 0.0
+	var l := 0.0
+	var steady: float = CM.BANK_MAX * tanh(15.0 / CM.BANK_G)
+	var t_in := -1.0
+	var pk_in := 0.0
+	for i in int(3.0 / dt):
+		var was := b
+		var e: Array = CM.ease_bank(b, l, 15.0, dt)
+		b = e[0]
+		l = e[1]
+		pk_in = maxf(pk_in, absf(b - was) / dt)
+		if t_in < 0.0 and absf(b) >= 0.9 * absf(steady):
+			t_in = (i + 1) * dt
+	var t_out := -1.0
+	var pk_out := 0.0
+	for i in int(4.0 / dt):
+		var was := b
+		var e: Array = CM.ease_bank(b, l, 0.0, dt)
+		b = e[0]
+		l = e[1]
+		pk_out = maxf(pk_out, absf(b - was) / dt)
+		if t_out < 0.0 and absf(rad_to_deg(b)) < 3.0:
+			t_out = (i + 1) * dt
+	return _check("lean: a 15 g turn rolls in to %.0f deg in %.2f s (peak %.0f deg/s, cap %.0f) and back to level in %.2f s (peak %.0f, cap %.0f)" % [
+		rad_to_deg(steady), t_in, rad_to_deg(pk_in), rad_to_deg(CM.BANK_RATE), t_out, rad_to_deg(pk_out), rad_to_deg(CM.BANK_RATE_OUT)],
+		t_in > 0.5 and t_in < 0.85 and t_out > 0.3 and t_out < 0.75 and t_out < t_in
+		and pk_in <= CM.BANK_RATE + 1e-6 and pk_out <= CM.BANK_RATE_OUT + 1e-6)

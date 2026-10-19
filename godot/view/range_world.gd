@@ -18,9 +18,9 @@ const TWIST_AMP := 180.0
 const TWIST_HALF := 30.0
 const LAMBDA0 := 3000.0   # sweeper wavelength at mile 0 ...
 const LAMBDA1 := 700.0    # ... tightening to this by mile 100
-const RAMP_NAMES := {3.0: "SMALL  3 m", 6.0: "MEDIUM  6 m", 10.0: "LARGE  10 m", 15.0: "HUGE  15 m"}
+const RAMP_NAMES := {3.0: "SMALL  10 FT", 6.0: "MEDIUM  20 FT", 10.0: "LARGE  33 FT", 15.0: "HUGE  49 FT"}   # heights in m, named in feet
 const COUNTDOWN_MI := [20, 15, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1]   # miles to the stop box
-const COUNTDOWN_M := [1000, 500, 250, 100]                      # metres to the stop box
+const COUNTDOWN_FT := [3000, 1500, 750, 300]                    # feet to the stop box
 const POST_Y := RUNWAY_HALF + 4.0   # marker poles both sides of the runway, every 50 m
 const POST_DX := 50.0
 const POLE_Y := -110.0              # telegraph line south of the runway
@@ -240,10 +240,10 @@ func _make_chunk(idx: int) -> Node3D:
 		var bx: float = Sim.BOX_X - mi * MILE - cx
 		if bx >= 0.0 and bx < CHUNK:
 			_board(node, bx, "%d MI" % mi)
-	for metres in COUNTDOWN_M:
-		var bx: float = Sim.BOX_X - metres - cx
+	for ft in COUNTDOWN_FT:
+		var bx: float = Sim.BOX_X - ft * 0.3048 - cx
 		if bx >= 0.0 and bx < CHUNK:
-			_board(node, bx, "%d m" % metres)
+			_board(node, bx, "%d FT" % ft)
 	var box_lx: float = Sim.BOX_X - cx
 	if box_lx >= -Sim.BOX_HALF and box_lx < CHUNK + Sim.BOX_HALF:
 		_stop_box(node, box_lx)
@@ -506,7 +506,7 @@ func _ramp(node: Node3D, rx: float, length: float, h: float) -> void:
 			st.add_vertex(p[k])
 	st.generate_normals()
 	_mesh(node, st, mats.ramp)
-	var label: String = RAMP_NAMES.get(h, "%d m" % h)
+	var label: String = RAMP_NAMES.get(h, "%d FT" % roundi(h * 3.28084))
 	_sign(node, rx - 60.0, Sim.JUMP_Y + 32.0, label, 120)
 
 

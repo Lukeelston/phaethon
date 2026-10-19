@@ -1,4 +1,5 @@
 ## What the podracer looks like. Two engines: intake lip and a fan that spins up with thrust,
+## front speed brakes (a petal on each flank, out with the brakes at high speed),
 ## a nacelle in livery, a hot section that glows with heat (the old whole-engine heat colours,
 ## now where the heat is), fins, and four split air-brake flaps, red inside, around the hot
 ## section. Each engine's flaps follow that engine's own brake. The pod: one smooth lofted
@@ -56,10 +57,16 @@ const NAV_L := Color(1.0, 0.16, 0.12)   # nav lights: red on the left engine, gr
 const NAV_R := Color(0.15, 1.0, 0.35)
 const BINDER_COL := Color(0.45, 0.85, 1.0)
 const FLAP_Z := 1.4                   # hinge station, engine-local (forward is -Z)
+const FRONT_Z := -3.25                # front speed brakes' hinge station, just behind the intake lip
+const FRONT_OPEN := deg_to_rad(70.0)  # their full swing out
 const BANK_MAX := deg_to_rad(62.0)    # the lean eases toward this in the hardest turns
 const BANK_G := 12.0                  # lateral g that gives ~76% of BANK_MAX (tanh knee)
-const BANK_TAU := 0.4                 # lateral-g smoothing, s: the lean eases in ...
-const BANK_RATE := deg_to_rad(55.0)   # ... and never rolls faster than this (Luke: "some sort of ramp to the roll")
+const BANK_TAU := 0.32                # lateral-g smoothing, s: the lean eases in ...
+const BANK_RATE := deg_to_rad(65.0)   # ... and never rolls in faster than this (Luke: "some sort of ramp to
+                                      # the roll"; 55 then felt "artificially slow", so a hair up)
+const BANK_TAU_OUT := 0.18            # unwinding: the lean lets go nearly twice as fast ...
+const BANK_RATE_OUT := deg_to_rad(85.0)    # ... and rolls back toward level faster (Luke: "especially when
+                                           # returning to horizontal")
 const ROLL_MAX := deg_to_rad(70.0)    # lean plus the track's banking never rolls you past this
 
 var view
@@ -80,8 +87,12 @@ var _burn := [0.0, 0.0]              # eased burner and ramjet shares, per engin
 var _ram := [0.0, 0.0]
 var flaps := [[], []]                 # per engine: its four hinge nodes
 var flap_open := [0.0, 0.0]           # per engine: current opening 0..1 (tests read this)
+var front_flaps := [[], []]           # per engine: the front speed brakes' two hinges
+var front_open := [0.0, 0.0]          # per engine: their opening 0..1 (the sim's e.front; tests read this)
 var flames: Array[Node3D] = []
 var pod: MeshInstance3D
+var canopy: Node3D                   # the pod's windscreen and forcefield (view/canopy.gd)
+const CanopyScript := preload("res://view/canopy.gd")
 var pod_flaps: Array[Node3D] = []
 var pod_flap_open := 0.0
 var cables: Array[MeshInstance3D] = []
@@ -186,6 +197,22 @@ func build(v) -> void:
 			fl.material_override = shaded
 			hinge.add_child(fl)
 			flaps[k].append(hinge)
+		# front speed brakes (Luke: "front speed brake flaps for braking done at high speed"): a
+		# petal on each flank just behind the intake lip, hinged at its front edge, swinging out
+		# into the air with the brakes above ~1,500 mph (the sim's e.front); amber inside
+		for side in [-1.0, 1.0]:
+			var fh := Node3D.new()
+			fh.position = Vector3(side * (ENG_W / 2.0 + 0.04), 0.0, FRONT_Z)
+			fh.set_meta("side", side)   # it swings out that way
+			eng.add_child(fh)
+			var fp := MeshInstance3D.new()
+			fp.mesh = Kit.compound([
+				[Kit.rounded_box(Vector3(0.05, 0.72, 1.15), 6.0), Kit.at(Vector3(side * 0.025, 0, 0.575)), STEEL.darkened(0.1)],
+				[Kit.box(Vector3(0.02, 0.64, 1.07)), Kit.at(Vector3(-side * 0.012, 0, 0.575)), Color(1.0, 0.6, 0.1)],   # amber, facing the engine
+			])
+			fp.material_override = shaded
+			fh.add_child(fp)
+			front_flaps[k].append(fh)
 		# thrust-vectoring vanes across the nozzle: they swing with the steering
 		var vane_mesh := Kit.compound([[Kit.rounded_box(Vector3(0.05, 0.62, 0.46), 6.0), Kit.at(Vector3(0, 0, 0.23)), DARK.lightened(0.3)]])
 		for vx in [-0.7, 0.0, 0.7]:
@@ -265,6 +292,8 @@ func build(v) -> void:
 	pod = MeshInstance3D.new()
 	pod.mesh = pod_hull()   # materials live on its surfaces
 	add_child(pod)
+	canopy = CanopyScript.build()   # windscreen and forcefield (view/canopy.gd)
+	pod.add_child(canopy)
 	var flap_mat := Kit.polished(0.85, 0.2)
 	for s in [-1.0, 1.0]:
 		var pflap := Kit.compound([
@@ -656,6 +685,18 @@ static func heat_color(h: float) -> Color:
 
 ## Lean for each body from its lateral acceleration (velocity change across the frame, along
 ## the body's left). A respawn's velocity jump is ignored rather than banked.
+## One step of the lean: (bank rad, smoothed lateral g) after `delta` s of lateral g `lat_g`.
+## The g is smoothed, the lean eases toward BANK_MAX * tanh(g / BANK_G) and its roll rate is
+## capped. Asymmetric: rolling in is gentle (BANK_TAU, BANK_RATE); letting go and rolling back
+## toward level is quicker (BANK_TAU_OUT, BANK_RATE_OUT), so coming out of a turn doesn't drag.
+static func ease_bank(bank_now: float, lat_s: float, lat_g: float, delta: float) -> Array:   # [bank, lat] (64-bit: not a Vector2)
+	var letting_go := absf(lat_g) < absf(lat_s) or signf(lat_g) != signf(lat_s)
+	lat_s = lerpf(lat_s, lat_g, 1.0 - exp(-delta / (BANK_TAU_OUT if letting_go else BANK_TAU)))
+	var target := BANK_MAX * tanh(lat_s / BANK_G)
+	var to_level := bank_now != 0.0 and signf(target - bank_now) != signf(bank_now)
+	return [move_toward(bank_now, target, (BANK_RATE_OUT if to_level else BANK_RATE) * delta), lat_s]
+
+
 func _update_bank(sim, delta: float) -> void:
 	var all := [sim.eL, sim.eR, sim.pod]
 	if _prev_v.is_empty() or delta <= 0.0:
@@ -670,9 +711,10 @@ func _update_bank(sim, delta: float) -> void:
 		if absf(lat_g) > 150.0 or sim.crash_t > 0.0:   # respawn / crash: not a turn
 			lat_g = 0.0
 		lat_g *= b.grip   # airborne: nothing to lean against
-		_lat[k] = lerpf(_lat[k], lat_g, 1.0 - exp(-delta / BANK_TAU))
 		var was: float = bank[k]
-		bank[k] = move_toward(bank[k], BANK_MAX * tanh(_lat[k] / BANK_G), BANK_RATE * delta)
+		var e := ease_bank(bank[k], _lat[k], lat_g, delta)
+		bank[k] = e[0]
+		_lat[k] = e[1]
 		if k == 2:
 			roll_rate_peak = maxf(roll_rate_peak, absf(bank[k] - was) / delta)
 
@@ -687,7 +729,7 @@ func sync(sim, inp: Dictionary, delta: float) -> void:
 		eng.position = view.w3(e.x, e.y, e.z + 0.1)
 		var vh: float = sqrt(e.vx * e.vx + e.vy * e.vy)
 		var pitch: float = atan2(e.vz, maxf(vh, 1.0)) if vh > 5.0 else 0.0
-		pitch += slope_pitch(view, e.x, e.y, e.th, 4.0)   # nose follows the banking's rise and fall
+		pitch += slope_pitch(view, e.x, e.y, e.th, maxf(4.0, pitch_half(vh)))   # nose follows the banking's rise and fall
 		eng.rotation = Vector3(pitch, e.th - PI / 2.0, clampf(bank[k] + view.surface(e.x, e.y).y, -ROLL_MAX, ROLL_MAX))   # lean, plus the track's banking
 		var h: float = e.heat
 		var col := Color(0.25, 0.25, 0.25) if e.flameout else heat_color(h)
@@ -705,6 +747,9 @@ func sync(sim, inp: Dictionary, delta: float) -> void:
 		flap_open[k] = move_toward(flap_open[k], clampf(brakes[k], 0.0, 1.0), FLAP_RATE * delta)
 		for hinge in flaps[k]:
 			(hinge as Node3D).rotation.x = -FLAP_OPEN * flap_open[k]
+		front_open[k] = move_toward(front_open[k], clampf(float(e.front), 0.0, 1.0), FLAP_RATE * delta)
+		for fh in front_flaps[k]:
+			(fh as Node3D).rotation.y = FRONT_OPEN * front_open[k] * float(fh.get_meta("side"))
 		# vectoring vanes: trailing edges swing to the side the craft is turning (a right turn
 		# is the left engine harder), like rudders; both engines' together
 		if k == 0:
@@ -740,8 +785,9 @@ func sync(sim, inp: Dictionary, delta: float) -> void:
 				(fmat as ShaderMaterial).set_shader_parameter("ramjet", _ram[k])
 				(fmat as ShaderMaterial).set_shader_parameter("aspect", flame_len / FLAME_H)
 
+	CanopyScript.update(canopy, sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy), sim.hblend, sim.mode, delta)
 	pod.position = view.w3(sim.pod.x, sim.pod.y, sim.pod.z - 0.2 + POD_LIFT)
-	pod.rotation = Vector3(slope_pitch(view, sim.pod.x, sim.pod.y, sim.pod.th, 2.0), sim.pod.th - PI / 2.0,
+	pod.rotation = Vector3(slope_pitch(view, sim.pod.x, sim.pod.y, sim.pod.th, pitch_half(sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy))), sim.pod.th - PI / 2.0,
 		clampf(bank[2] + view.surface(sim.pod.x, sim.pod.y).y, -ROLL_MAX, ROLL_MAX))
 	pod_flap_open = move_toward(pod_flap_open, clampf(minf(inp.brkL, inp.brkR), 0.0, 1.0), FLAP_RATE * delta)
 	for i in 2:
@@ -764,18 +810,22 @@ func _pod_anchor(sim, k: int) -> Vector3:
 
 const CABLE_COOL := Color(0.25, 0.65, 1.0)    # energized blue at low thrust ...
 const CABLE_HOT := Color(0.85, 0.95, 1.0)     # ... white-hot on the burner
+const CABLE_SF := Color(1.0, 0.3, 0.75)       # STARFIGHTER's energized magenta (ModeSwitch.SF_COL)
 
 
 ## How hard cable k glows for its engine's thrust (0..1 lever, more on the burner): nothing at
 ## idle, rising with thrust, crackling at the top. Follows real thrust, so a damaged engine's
 ## sputter flickers its cable and a flameout goes dark (Luke: "make the cables glow like they're
 ## energized with the amount of throttle").
-static func cable_glow(thrust: float) -> Array:
+## Its colour follows the handling: energized blue in SPEEDCRAFT, magenta in STARFIGHTER (sf: the
+## sim's live blend, 0..1), white-hot on the burner either way.
+static func cable_glow(thrust: float, sf := 0.0) -> Array:
+	var base := CABLE_COOL.lerp(CABLE_SF, clampf(sf, 0.0, 1.0))
 	if thrust < 0.02:
-		return [0.0, CABLE_COOL]
+		return [0.0, base]
 	var g := clampf(thrust, 0.0, 1.6)
 	var energy := 0.4 + 3.2 * pow(minf(g, 1.0), 1.3) + 2.0 * maxf(0.0, g - 1.0)
-	return [energy, CABLE_COOL.lerp(CABLE_HOT, clampf((g - 0.85) / 0.6, 0.0, 1.0))]   # blue until the burner
+	return [energy, base.lerp(CABLE_HOT, clampf((g - 0.85) / 0.6, 0.0, 1.0))]   # the mode's colour until the burner
 
 
 const CABLE_R := 0.035
@@ -854,6 +904,34 @@ static func _beam(im: ImmediateMesh, pts: Array, r: float, col: Color) -> void:
 				im.surface_add_vertex(pv)
 
 
+## How far ahead and behind (m) to read the surface for pitch: 2 m slow, growing with speed to
+## 60 m (from ~3,800 mph). The surface is a 12 m polyline, and at speed a short baseline crosses
+## ~150 of its joints a second, each a centimetre step, so the nose twitched (Luke: "going over
+## hills makes the camera very shaky"; tests/test_ride.gd).
+static func pitch_half(speed: float) -> float:
+	return clampf(speed * 0.035, 2.0, 60.0)
+
+
+const RIDE_TAU := 0.15   # s: the cockpit's pitch and the bank under it, low-passed
+
+## The cockpit's ride over the banked track: Vector3(surface height under the pod, pitch, the
+## track's bank), smoothed in `st` (an empty Dictionary to start). Pitch reads the surface over
+## pitch_half(speed) and eases with RIDE_TAU, the bank too; the height follows the surface up at
+## once (never below it: the cockpit can't sink into the road) and eases down over a third of that.
+static func ride(v, sim, st: Dictionary, delta: float) -> Vector3:
+	var spd: float = sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy)
+	var s: Vector2 = v.surface(sim.pod.x, sim.pod.y)
+	var p := slope_pitch(v, sim.pod.x, sim.pod.y, sim.pod.th, pitch_half(spd))
+	if st.is_empty() or delta <= 0.0:
+		st.merge({"h": s.x, "p": p, "b": s.y}, true)
+	else:
+		var k := 1.0 - exp(-delta / RIDE_TAU)
+		st.h = maxf(lerpf(st.h, s.x, minf(1.0, 3.0 * k)), s.x)
+		st.p = lerpf(st.p, p, k)
+		st.b = lerpf(st.b, s.y, k)
+	return Vector3(st.h, st.p, st.b)
+
+
 ## How steeply the (banked) surface rises along heading th at (x, y), radians, + = nose up:
 ## the height `half` metres ahead against `half` behind. 0 on flat tracks.
 static func slope_pitch(v, x: float, y: float, th: float, half: float) -> float:
@@ -902,7 +980,7 @@ func sync_cables(sim, delta := 1.0 / 72.0) -> void:
 		cable_mats[k].albedo_color = Color(0.4, 0.4, 0.42) if c.slack else Color(0.15, 0.16, 0.18)
 		# colour: its engine's thrust glow, turning amber then red as the tension nears its limit
 		var eng = sim.eL if k == 0 else sim.eR
-		var glow := cable_glow(eng.thrust)
+		var glow := cable_glow(eng.thrust, sim.hblend)
 		cable_strain[k] = f / CABLE_F_MAX
 		var crackle := 1.0 if eng.thrust < 0.8 else randf_range(0.8, 1.15)
 		var energy: float = glow[0] * crackle

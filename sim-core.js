@@ -16,6 +16,10 @@
     // rides a tow bar (<4 deg sway). tools/handling_test.js measures all of it.
     thrustMax: 350000, burnerMult: 1.45, ramjetMult: 1.9, gate: 0.88,
     engineCd: 0.07, podCd: 0.035, brakeCd: 0.04, brakeLin: 0, brakeConst: 60000,
+    // Front speed brakes (Luke, 2026-10-19: "front speed brake flaps for braking done at high
+    // speed"): flaps ahead of the intakes open with the air brakes, phasing in from 1,500 to
+    // 2,500 mph, and add 0.05 to the drag coefficient (the air brakes: 0.04; STARFIGHTER never gets there).
+    frontBrakeCd: 0.05, frontBrakeV0: 670.6, frontBrakeV1: 1117.6,
     engineGrip: 30, podGrip: 10, gripCapG: 15, podCapG: 8, finOffset: 0.2, finK: 8,
     yawDamp: 150000, podYawDamp: 50000, podAlignK: 1e6, towK: 1e6, towC: 40000,
     cableLen: 16, cableK: 600000, cableC: 30000, cableCouple: 0.2, podAnchorW: 0.15,
@@ -28,9 +32,11 @@
     towIntF0: 0.05, towIntF1: 0.3, towIntMax: 60,   // ... shifting onto the swing and spin as their share of the energy grows
     heatThrottle: 0.15, heatBurner: 0.12, heatRamjet: 0.35, coolBase: 0.05, coolSpeed: 0.10,
     batteryDrain: 0.08, batteryCharge: 0.05, repairRate: 0.12, damagePerMs: 0.012,
+    limits: false,   // battery and heat: off (Luke, 2026-10-18: "turn off battery and heat, let it be crazy"): the burner never runs dry, engines never heat up
     rideH: 1.5, hoverOmega: 9, hoverZeta: 0.9,
     binderKz: 3e6, binderCz: 60000, towKz: 2e5, towCz: 16000,
     track: 'circuit', startX: 0, startY: 0, handling: 'speed',
+    sfEngageV: 558.8, modeBlendT: 1.0,   // live switch: STARFIGHTER engages below 1,250 mph; the handling blends over 1 s
     seed: 1337
   };
 
@@ -48,7 +54,8 @@
   // 25 m/s into the wall do damage, a third as much, and lower wall friction lets you slide
   // off: a scrape costs speed, not health.
   const TRACKS = {
-    gp: { wallDmgMin: 25, damagePerMs: 0.004, wallMu: 0.22 }
+    gp: { wallDmgMin: 25, damagePerMs: 0.004, wallMu: 0.22 },
+    eridanus: { wallDmgMin: 25, damagePerMs: 0.004, wallMu: 0.22 }
   };
 
   const HANDLING = {
@@ -95,6 +102,7 @@
 
   const G = 9.81;
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const smooth01 = (x) => { const t = clamp(x, 0, 1); return t * t * (3 - 2 * t); };   // GDScript's smoothstep
   const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
   // as Godot's smoothstep, so the two sims stay bit-identical
   const smoothstep = (a, b, x) => { const s = Math.min(Math.max((x - a) / (b - a), 0), 1); return s * s * (3 - 2 * s); };
@@ -134,43 +142,87 @@
   // 96 m wide, every corner banked to GP_BANK degrees toward its inside (Luke, 2026-10-18: "a
   // wider, more banked track"), easing in and out over ~360 m (two passes of a 15-sample box).
   const GP_STEP = 12, GP_WIDTH = 96, GP_BANK = 15, GP_BANK_R = 7;   // bank was 30: "50% smaller"
-  function buildGP() {
-    const pts = [], raw = [];
+  // Eridanus (2026-10-18, Luke: "a much much larger course where you switch to speedcraft on long
+  // straights and sweeping curves, then brake back down, flip back to starfighter and run the
+  // turns"): 199 km, tools/design_eridanus.py. Each segment names its mode: 'sf' (the two towns,
+  // STARFIGHTER's) 140 m wide, corners banked 10 deg; 'sp' (the speed loop, SPEEDCRAFT's) 400 m
+  // wide, sweepers banked 3 deg so the road ahead tilts into view (Luke, 2026-10-19: "much wider",
+  // "bank the speedcraft corners just slightly to help with sight"). Widths ease over ~1 km where
+  // the two meet; banks ease over ~1 km in the towns and ~5 km on the loop ("quick elevation
+  // changes that are just too intense for the sport").
+  const ERI_SEGS = [['S', 3390.539, 0, 'sf'], ['L', 450, 90, 'sf'], ['S', 900, 0, 'sf'], ['R', 300, 90, 'sf'], 
+    ['S', 700, 0, 'sf'], ['L', 600, 60, 'sf'], ['R', 600, 60, 'sf'], ['S', 1500, 0, 'sf'], ['S', 9000, 0, 'sp'], 
+    ['L', 30000, 8, 'sp'], ['R', 30000, 8, 'sp'], ['S', 8000, 0, 'sp'], ['L', 22000, 90, 'sp'], ['S', 11000, 0, 'sp'], 
+    ['L', 500, 50, 'sf'], ['S', 600, 0, 'sf'], ['R', 320, 70, 'sf'], ['S', 500, 0, 'sf'], ['L', 400, 80, 'sf'], 
+    ['S', 1500, 0, 'sf'], ['S', 4000, 0, 'sp'], ['R', 15000, 30, 'sp'], ['S', 1000, 0, 'sp'], ['L', 15000, 30, 'sp'], 
+    ['S', 3000, 0, 'sp'], ['L', 20000, 30, 'sp'], ['S', 13100, 0, 'sp'], ['L', 16000, 90, 'sp'], 
+    ['S', 36152.417, 0, 'sp'], ['L', 700, 60, 'sf'], ['S', 900, 0, 'sf'], ['R', 350, 80, 'sf'], ['S', 800, 0, 'sf'], 
+    ['L', 300, 100, 'sf'], ['S', 1000, 0, 'sf'], ['R', 500, 50, 'sf'], ['S', 1200, 0, 'sf'], ['L', 900, 60, 'sf']];
+  // The courses: straights and exact arcs, sampled every ~12 m. widths: per mode (else GP_WIDTH,
+  // constant); widthR: the width-easing box (samples); banks: per mode, degrees (else GP_BANK in
+  // the corners), each mode's eased by two passes of its own box, bankR (samples; else GP_BANK_R).
+  const COURSES = {
+    gp: { segs: GP_SEGS, checkpoints: 12 },
+    eridanus: { segs: ERI_SEGS, checkpoints: 24, widths: { sf: 140, sp: 400 }, widthR: 40, banks: { sf: 10, sp: 3 }, bankR: { sf: 20, sp: 100 } }
+  };
+  function buildCourse(name) {
+    const C = COURSES[name];
+    const pts = [], raw = [], wraw = [], modes = [];
     let x = 0, y = 0, h = 0;
-    for (const sg of GP_SEGS) {
+    for (const sg of C.segs) {
+      const m = sg[3] || 'sf';
+      const w = C.widths ? C.widths[m] : GP_WIDTH;
       if (sg[0] === 'S') {
         const n = Math.max(1, Math.ceil(sg[1] / GP_STEP)), d = sg[1] / n;
-        for (let k = 0; k < n; k++) { pts.push({ x, y }); raw.push(0); x += d * Math.cos(h); y += d * Math.sin(h); }
+        for (let k = 0; k < n; k++) { pts.push({ x, y }); raw.push(0); wraw.push(w); modes.push(m); x += d * Math.cos(h); y += d * Math.sin(h); }
       } else {
         const r = sg[1], sn = sg[0] === 'L' ? 1 : -1, ang = sg[2] * Math.PI / 180;
         const n = Math.max(1, Math.ceil(r * ang / GP_STEP)), da = ang / n, c = 2 * r * Math.sin(da / 2);
         for (let k = 0; k < n; k++) {
-          pts.push({ x, y }); raw.push(sn * GP_BANK * Math.PI / 180);
+          pts.push({ x, y }); raw.push(sn * (C.banks ? C.banks[m] : m === 'sf' ? GP_BANK : 0) * Math.PI / 180); wraw.push(w); modes.push(m);
           x += c * Math.cos(h + sn * da / 2); y += c * Math.sin(h + sn * da / 2); h += sn * da;
         }
       }
     }
-    const bank = smoothBank(smoothBank(raw));
-    for (let i = 0; i < pts.length; i++) pts[i].bank = bank[i];
+    let bank = null;
+    if (C.bankR) {
+      bank = new Array(raw.length).fill(0);
+      for (const m of ['sf', 'sp']) {
+        const part = raw.map((b, i) => (modes[i] === m ? b : 0));
+        const sm = smoothRun(smoothRun(part, C.bankR[m]), C.bankR[m]);
+        for (let i = 0; i < bank.length; i++) bank[i] += sm[i];
+      }
+    } else bank = smoothBank(smoothBank(raw));
+    const width = C.widths ? smoothBox(wraw, C.widthR) : wraw;
+    for (let i = 0; i < pts.length; i++) { pts[i].bank = bank[i]; pts[i].mode = modes[i]; }
     const N = pts.length;
     let s = 0;
     for (let i = 0; i < N; i++) {
       const a = pts[i], b = pts[(i + 1) % N];
       const dx = b.x - a.x, dy = b.y - a.y, L = Math.hypot(dx, dy);
       a.tx = dx / L; a.ty = dy / L; a.nx = -a.ty; a.ny = a.tx; a.len = L; a.s = s; s += L;
-      a.w = GP_WIDTH;
+      a.w = width[i];
     }
-    return { kind: 'circuit', name: 'gp', pts, N, length: s, checkpoints: 12 };
+    return { kind: 'circuit', name, course: true, pts, N, length: s, checkpoints: C.checkpoints };
   }
 
-  // A centred moving average round the closed loop (box of 2 * GP_BANK_R + 1 samples).
-  function smoothBank(a) {
+  // A centred moving average round the closed loop (box of 2 * R + 1 samples; banks: GP_BANK_R).
+  function smoothBox(a, R) {
     const N = a.length, out = new Array(N);
     for (let i = 0; i < N; i++) {
       let acc = 0;
-      for (let k = -GP_BANK_R; k <= GP_BANK_R; k++) acc += a[(((i + k) % N) + N) % N];
-      out[i] = acc / (2 * GP_BANK_R + 1);
+      for (let k = -R; k <= R; k++) acc += a[(((i + k) % N) + N) % N];
+      out[i] = acc / (2 * R + 1);
     }
+    return out;
+  }
+  function smoothBank(a) { return smoothBox(a, GP_BANK_R); }
+  // The same average as a running sum: O(N) for the wide boxes (a 5 km bank ramp is 400 samples).
+  function smoothRun(a, R) {
+    const N = a.length, W = 2 * R + 1, out = new Array(N), at = (k) => a[((k % N) + N) % N];
+    let acc = 0;
+    for (let k = -R; k <= R; k++) acc += at(k);
+    for (let i = 0; i < N; i++) { out[i] = acc / W; acc += at(i + R + 1) - at(i - R); }
     return out;
   }
 
@@ -195,13 +247,23 @@
 
   function makeSim(overrides) {
     // the grand prix is a STARFIGHTER track unless a handling is asked for
-    const hname = (overrides && overrides.handling) || ((overrides && overrides.track) === 'gp' ? 'starfighter' : DEFAULTS.handling);
+    const hname = (overrides && overrides.handling) || (COURSES[(overrides && overrides.track) || ''] ? 'starfighter' : DEFAULTS.handling);
     const P = Object.assign({}, DEFAULTS, HANDLING[hname] || {}, TRACKS[(overrides && overrides.track) || ''] || {}, overrides || {}, { handling: hname });
-    const T = P.track === 'range' ? buildRange() : P.track === 'gp' ? buildGP() : buildTrack();
+    const T = P.track === 'range' ? buildRange() : COURSES[P.track] ? buildCourse(P.track) : buildTrack();
     const eI = P.engineMass * P.engineLen ** 2 / 12;
     const pI = P.podMass * (P.podLen ** 2 + P.podWidth ** 2) / 12;
+    // Live handling switch (Luke, 2026-10-18: "flip a switch on the dashboard" between SPEEDCRAFT
+    // and STARFIGHTER mid-lap). inp.handling asks for a mode. STARFIGHTER only engages below
+    // P.sfEngageV (its drag at 4,000 mph would be ~200 g), so a flip made while braking waits,
+    // then takes; SPEEDCRAFT engages at once. Either way the handling keys blend over
+    // P.modeBlendT s, so grip, drag and the tow bar change without a kick. Keys given explicitly
+    // in the overrides stay fixed. Inputs without .handling change nothing (old replays hold).
+    const HK = Object.keys(HANDLING.starfighter).filter((k) => !(overrides && k in overrides));
+    const H0 = {}, H1 = {};
+    for (const k of HK) { H0[k] = k in HANDLING.speed ? HANDLING.speed[k] : DEFAULTS[k]; H1[k] = HANDLING.starfighter[k]; }
     const S = {
       P, T, eL: body(P.engineMass, eI), eR: body(P.engineMass, eI), pod: body(P.podMass, pI),
+      hwant: hname, hblend: hname === 'starfighter' ? 1 : 0,
       battery: 1, armed: false, mode: 'normal', binderBroken: false, crashT: 0, time: 0, towU: -1,
       lap: 0, lapStart: null, lastLap: null, bestLap: null, visited: new Set(), checkpoint: 0,
       progressI: 0, cables: [{ f: 0 }, { f: 0 }], events: [], rand: xorshift32(P.seed),
@@ -229,7 +291,7 @@
         b.vx = b.vy = b.w = 0; b.th = th; b.hint = idx; b.contact = [false, false];
         b.z = ground(T, b.x, b.y) + P.rideH; b.vz = 0; b.grip = 1;
       }
-      for (const e of [S.eL, S.eR]) { e.heat = Math.min(e.heat ?? 0.3, 0.5); e.flameout = false; e.health = e.health ?? 1; e.sputter = 1; e.sputterT = 0; }
+      for (const e of [S.eL, S.eR]) { e.heat = P.limits ? Math.min(e.heat ?? 0.3, 0.5) : 0; e.flameout = false; e.health = e.health ?? 1; e.sputter = 1; e.sputterT = 0; }
       S.pod.health = S.pod.health > 0 ? S.pod.health : 1;
       S.binderBroken = false; S.towU = -1; S.crashT = 0; S.progressI = idx;
     }
@@ -300,6 +362,15 @@
         }
         return;
       }
+      if (inp.handling === 'speed' || inp.handling === 'starfighter') S.hwant = inp.handling;
+      let htgt = 0;
+      if (S.hwant === 'starfighter') htgt = S.hblend > 0 || Math.hypot(S.pod.vx, S.pod.vy) <= P.sfEngageV ? 1 : 0;
+      if (S.hblend !== htgt) {
+        S.hblend = htgt > S.hblend ? Math.min(htgt, S.hblend + dt / P.modeBlendT) : Math.max(htgt, S.hblend - dt / P.modeBlendT);
+        for (const k of HK) P[k] = S.hblend === 1 ? H1[k] : S.hblend === 0 ? H0[k] : H0[k] + (H1[k] - H0[k]) * S.hblend;
+        P.handling = S.hblend >= 0.5 ? 'starfighter' : 'speed';
+        if (S.hblend === htgt) S.events.push({ type: 'handling', mode: P.handling });
+      }
       // Vertical ties: the binder holds both engines at one height and the tow bar lifts the
       // pod toward their mean, so a one-sided ramp hit lifts the whole craft instead of
       // flinging one engine skyward. Exactly zero when heights match (flat ground).
@@ -316,13 +387,13 @@
       const ramjet = S.armed && inGate;
       const burner = !ramjet && inGate && S.battery > 0;
       S.mode = ramjet ? 'ramjet' : burner ? 'burner' : 'normal';
-      if (burner) S.battery = Math.max(0, S.battery - P.batteryDrain * dt);
+      if (burner && P.limits) S.battery = Math.max(0, S.battery - P.batteryDrain * dt);
       else if (!inGate) S.battery = Math.min(1, S.battery + P.batteryCharge * dt);
       const speed = Math.hypot(Pd.vx, Pd.vy);
 
       for (const [e, thr, brk] of [[L, inp.thrL, inp.brkL], [R, inp.thrR, inp.brkR]]) {
         const c = Math.cos(e.th), s = Math.sin(e.th);
-        const gain = e.flameout ? 0 : Math.max(0, thr - 0.6) * P.heatThrottle + (burner ? P.heatBurner : 0) + (ramjet ? P.heatRamjet : 0);
+        const gain = e.flameout || !P.limits ? 0 : Math.max(0, thr - 0.6) * P.heatThrottle + (burner ? P.heatBurner : 0) + (ramjet ? P.heatRamjet : 0);
         const cool = P.coolBase + P.coolSpeed * Math.min(1.5, speed / 200) + (e.flameout ? 0.15 : 0);
         e.heat = clamp(e.heat + (gain - cool) * dt, 0, 1.25);
         if (e.heat >= 1 && !e.flameout) { e.flameout = true; S.events.push({ type: 'flameout', who: e === L ? 'L' : 'R' }); }
@@ -338,7 +409,9 @@
         e.fx += thrust * c; e.fy += thrust * s;
         // Air brake = quadratic drag plus a linear term, so the flaps still bite at low speed.
         // A constant term keeps the brakes biting across a 100x speed range (smoothed below 2 m/s).
-        const v = Math.hypot(e.vx, e.vy), cd = P.engineCd + P.brakeCd * brk;
+        const v = Math.hypot(e.vx, e.vy);
+        e.front = P.frontBrakeCd > 0 ? brk * smooth01((v - P.frontBrakeV0) / (P.frontBrakeV1 - P.frontBrakeV0)) : 0;
+        const cd = P.engineCd + P.brakeCd * brk + P.frontBrakeCd * e.front;
         const bl = P.brakeLin * brk + P.brakeConst * brk / Math.max(v, 2);
         e.fx -= cd * v * e.vx + bl * e.vx; e.fy -= cd * v * e.vy + bl * e.vy;
         const fxp = e.x - c * P.finOffset, fyp = e.y - s * P.finOffset;
@@ -475,7 +548,7 @@
 
       // Banked corners: the surface tilts toward the inside, so its push has a part toward the
       // corner's centre: gravity's (g tan bank) plus downforce's (bankDown v^2 sin bank).
-      if (T.name === 'gp') {
+      if (T.course) {
         for (const b of S.bodies) {
           const a = T.pts[b.hint], bk = a.bank;
           if (bk === 0) continue;
@@ -536,7 +609,7 @@
     // Crashes still respawn through respawn(), keeping the damage.
     function restart() {
       S.crashT = 0; S.finished = false; S.runActive = false; S.runStart = null; S.result = null;
-      for (const e of [S.eL, S.eR]) { e.health = 1; e.heat = 0.3; }
+      for (const e of [S.eL, S.eR]) { e.health = 1; e.heat = P.limits ? 0.3 : 0; }
       S.pod.health = 1; S.battery = 1;
       if (T.kind === 'range') { S.pod.x = 30; S.pod.y = 0; respawn(); }
       else { S.lap = 0; S.lapStart = null; S.visited = new Set([0]); S.checkpoint = 0; respawn(0); }
@@ -549,5 +622,5 @@
       box: { x: BOX_X, half: BOX_HALF, overrun: OVERRUN } };
   }
 
-  window.PhaethonSim = { makeSim, DEFAULTS, HANDLING, TRACKS, xorshift32 };
+  window.PhaethonSim = { makeSim, DEFAULTS, HANDLING, TRACKS, COURSES, xorshift32 };
 })();
