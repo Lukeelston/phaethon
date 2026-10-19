@@ -2,7 +2,7 @@
 ## and logs each layer's RPM, so tools/engine_audio_check.py can confirm the pitch follows
 ## the levers. Real time (the audio thread runs at wall-clock pace), about 31 s.
 ## Run: Godot_v4.7.1-stable_win64_console.exe --headless --audio-output-latency 10 --max-fps 90 --path godot -s res://tests/test_engine_audio.gd
-##        -- --out=C:/path/capture.wav [--solo=v8|v12|turbine|roar|burner|second|rotor] [--flat] [--profile=second]
+##        -- --out=C:/path/capture.wav [--solo=v8|v12|turbine|roar|burner|second|rotor|pops] [--flat] [--profile=second]
 ## --flat holds every gain at 1 and the low-pass open, so only the band crossfades move the level.
 ## --profile=second flies the second engine's run instead: accelerate through second_on_mph, blip,
 ## then brake below second_off_mph (22.5 s).
@@ -26,7 +26,7 @@ var end_t := END
 var t := 0.0
 var acc := 0.0
 var log_t := 0.0
-var rows := PackedStringArray(["t,thrL,thrR,mode,outL,outR,sL,sR,v8L,v8R,v12L,v12R,turbL,turbR,mph,secL,secR,secStL,secStR,rotL,rotR"])
+var rows := PackedStringArray(["t,thrL,thrR,mode,outL,outR,sL,sR,v8L,v8R,v12L,v12R,turbL,turbR,mph,secL,secR,secStL,secStR,rotL,rotR,popsL,popsR,secSpL"])
 var started := false
 var clock: AudioStreamPlayer
 
@@ -123,9 +123,13 @@ func _process(_delta: float) -> bool:
 		rec.set_recording_active(true)
 		started = true
 		return false
+	# position + time since the last mix can tick back a little after a mix burst: never follow
+	# it backwards, or the next frame's delta double-counts (it once kicked the rev spring)
 	var now := clock.get_playback_position() + AudioServer.get_time_since_last_mix()
-	var delta := maxf(0.0, now - t)
-	t = now
+	var delta := 0.0
+	if now > t:
+		delta = now - t
+		t = now
 	var inp := profile_second(t) if prof == "second" else profile(t)
 	if prof == "default" and t >= 21.0 and t - delta < 21.0:
 		sim.eL.heat = 1.1   # force a left flameout
@@ -135,17 +139,17 @@ func _process(_delta: float) -> bool:
 		sim.events.clear()
 		acc -= DT
 	audio.update(inp, delta)
-	if t - log_t >= 0.05:
+	if t > log_t:   # every frame: a ~0.1 s rev flare falls between 50 ms rows
 		log_t = t
 		var vl: Dictionary = audio.voices[0]
 		var vr: Dictionary = audio.voices[1]
 		var mph: float = sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy) * 2.23694
-		rows.append("%.3f,%.3f,%.3f,%s,%d,%d,%.4f,%.4f,%.1f,%.1f,%.1f,%.1f,%.4f,%.4f,%.1f,%.1f,%.1f,%d,%d,%.4f,%.4f" % [t, inp.thrL, inp.thrR,
+		rows.append("%.3f,%.3f,%.3f,%s,%d,%d,%.4f,%.4f,%.1f,%.1f,%.1f,%.1f,%.4f,%.4f,%.1f,%.1f,%.1f,%d,%d,%.4f,%.4f,%d,%d,%.4f" % [t, inp.thrL, inp.thrR,
 			sim.mode, int(sim.eL.flameout), int(sim.eR.flameout), vl.spool, vr.spool,
 			vl.at.v8, vr.at.v8, vl.at.v12, vr.at.v12, vl.at.turbine, vr.at.turbine,
 			mph, vl.at.second, vr.at.second,
 			EngineAudioScript.SECOND_STATES.find(vl.sec.state), EngineAudioScript.SECOND_STATES.find(vr.sec.state),
-			vl.at.rotor, vr.at.rotor])
+			vl.at.rotor, vr.at.rotor, vl.pops_n, vr.pops_n, vl.sec.spool])
 	if t < end_t:
 		return false
 	rec.set_recording_active(false)

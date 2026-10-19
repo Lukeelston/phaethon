@@ -7,7 +7,7 @@ Spec: https://claude.ai/artifact/VeY5CdSPzxcEq568JgkJh8 (source: `phaethon.html`
 |---|---|
 | `phaethon.html`, `sim-core.js`, `feel-lab.js` | Spec page and the browser feel lab (the JS reference flight model). Move into `web/` next. |
 | `godot/` | Godot 4.7 project: `sim/craft_sim.gd` (GDScript port), flat-screen chase view, lever input |
-| `godot/audio/` | `engine_audio.gd`: per-engine V8 + V12 + turbine whine + roar (+ burner) voices driven by the levers, plus a bass rotor wound up by airspeed (a ~28 Hz rumble at rest, three octaves up by 1,500 mph) and the second engine (a rumbly big-bang four that lights above 1,500 mph and winds up with speed; sound only). `engines/`: the baked loops |
+| `godot/audio/` | `engine_audio.gd`: per-engine V8 + V12 + turbine whine + roar (+ burner) voices driven by the levers, plus a bass rotor wound up by airspeed (a ~28 Hz rumble at rest, three octaves up by 1,500 mph) and the second engine (a rumbly big-bang four that lights above 1,500 mph and winds up with speed; sound only). Polish: twin engines that beat slowly, overrun pops on a lift, a rev spring that flares and barks. `engines/`: the baked loops |
 | `tools/engine_bake.py` | Bakes one master per layer from the Salamander Grand Piano: hammer strikes become combustion pulses, sustains become turbine whine, damper noise becomes roar |
 | `tools/engine_audio_check.py` | Audio gate: records Godot's output on a scripted lever profile and measures the pitch against the logged RPM |
 | `cad/` | Parametric OpenSCAD lever v1. `params.scad` holds every dimension. |
@@ -82,6 +82,8 @@ arduino-cli compile --fqbn rp2040:rp2040:rpipico --output-dir firmware/build fir
 - Bake a master near the RPM it's heard at. Pitched 6x up, the second engine's thud slid from chest to ~500 Hz (1% of its energy under 150 Hz at full lever). Baked at 3,000 rpm it measures 80% under 150 Hz there. Measure "rumbly" at full lever: averaging in idle under braking flattered the buzzy version.
 - Give a new layer its own random stream in the bake, or adding it re-rolls every loop baked after it.
 - Lever-driven pitch settles in a third of a second and then sits still while you climb thousands of mph. Speed has to drive pitch too: the rotor rides airspeed and the second engine's rpm lifts with it.
+- Two identical engines at identical pitch sit at a fixed phase: a frozen comb, not a twin. A 0.35% offset (wandering +-0.15%) makes them beat. Turn it off in tests that isolate the crossfader, or every equal-lever stretch reads as a level fault.
+- A spring spool (rising w 16 z 0.65, falling w 7 z 1.0) revs a stab to 90% in 0.14 s with a ~9% flare and lifts with no undershoot. Switching to the falling spring past the target is what sets the flare: the first try flared 18-23%. A ~0.1 s flare falls between 50 ms log rows, so the harness logs every frame.
 - A shimmering, beating rumble (the rotor) has no clean line to pitch-track at 3%: grain phase smears each line by about +-7%. Track it through its spectral centroid against the logged pitch instead (measured r 0.99, ~1 octave per octave).
 - A loop seam test that compares the jump to the loop's step distribution misfires on a nearly pure tone. Compare curvature across the join to its 23 ms surroundings instead.
 - `AudioStreamWAV.data` is a getter that copies the whole buffer. Read it once, not per sample.

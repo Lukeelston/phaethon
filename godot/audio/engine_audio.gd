@@ -18,6 +18,11 @@
 ## turbine. A ~28 Hz rumble at a standstill climbs three octaves by second_on_mph behind a
 ## low-pass that opens with it, swells with each side's lever, and steps back for the second
 ## engine once that side is running.
+## Polish: the right engine runs a hair off the left (wandering), so equal levers beat slowly
+## like twin engines that never quite sync. Lifting off at high revs spits pops and crackle
+## for a moment. The spool is a spring: a lever stab revs up in ~0.15 s, flares ~11% past the
+## lever and barks (+3 dB for a moment); lifting settles clean, with no undershoot.
+## flat (tests) switches all three off: it isolates the crossfader.
 ##   add_child(audio); audio.setup(sim)    once, inside the tree
 ##   audio.update(inp, delta)              every frame, after the sim steps
 class_name EngineAudio
@@ -31,8 +36,12 @@ const SECOND_STATES := ["off", "wait", "crank", "run", "stop"]
 ## Everything that shapes the sound. Spool s: -0.33 stopped, 0 idle, 1 full lever; the
 ## afterburner and ramjet push past 1. Mix curves are [s, gain] knots, piecewise linear.
 const TUNE := {
-	"spool_up": 0.35, "spool_down": 0.55, "windmill": 1.6,   # time constants, s
+	"windmill": 1.6,                 # spool time constant winding down from a flameout, s
 	"relight": 0.8,                  # spool-up time constant while still below idle (reignite)
+	# The spool is a spring: [rising, falling]. Rising is snappy and flares ~11% past the lever
+	# (90% of a stab in 0.14 s); falling is critically damped, so a lift settles clean.
+	"rev_w": [16.0, 7.0], "rev_z": [0.65, 1.0],
+	"bark_db": 3.0, "bark_s": 0.15,  # a quick stab barks: up to +3 dB, gone in 0.15 s
 	"crank": 0.3,                    # pistons bottom out at this fraction of idle RPM
 	"burner_spool": 0.15, "ramjet_spool": 0.3,
 	"v8_rpm": [850.0, 7600.0], "v12_rpm": [1100.0, 11800.0], "turbine_n": [0.25, 1.0],
@@ -52,7 +61,7 @@ const TUNE := {
 	"second_rpm": [600.0, 3800.0],   # low and slow: ~63 Hz doublets at full lever, the lope at half that
 	"second_stagger": 0.3,           # the right side lights this long after the left
 	"second_crank_s": 0.7,           # cranking and coughing before it catches
-	"second_spool_up": 0.6, "second_spool_down": 0.5, "second_wind": 1.2,
+	"second_wind": 1.2,              # winding down once it stops, s (it revs on the same spring)
 	"second_level_db": [-15.0, -7.0],   # its own level, idle -> full lever: leads the mix by ~6 dB when lit
 	"second_eq_db": [6.0, 8.0, 2.0, -2.0, -8.0, -14.0],   # EQ6 at 32/100/320/1k/3.2k/10k Hz: chest and throat
 	"bang_db": [-2.0, -8.0],         # catching, backfiring on the way down
@@ -66,6 +75,14 @@ const TUNE := {
 	"rotor_db": [-5.0, -11.0],       # standstill -> second_on_mph: bassiest down low
 	"rotor_lever": [0.4, 1.0],       # level scale, lever 0 -> 1
 	"rotor_handover_db": -10.0,      # once that side's second engine is running
+	# Twin engines never quite sync: the right one runs this much fast, wandering, so equal
+	# levers beat slowly (pistons, second engine, rotor; the 2.4 kHz whine would just go rough).
+	"twin_detune": 0.0035, "twin_wander": [0.0015, 17.0],   # [amplitude, period s]
+	# Overrun: lifting off from above pop_rpm spool, pop_lift or more over the lever, spits
+	# pops and crackle for pop_s, tapering from pop_rate per second.
+	"pop_rpm": 0.5, "pop_lift": 0.2, "pop_s": 1.2, "pop_rate": 14.0,
+	"pop_db": -9.0,                  # first engine; the randomizer varies each pop by 8 dB
+	"pop2_pitch": 0.65, "pop2_db": -7.0,   # the second engine's pops, deeper, through its throat
 }
 
 var sim
@@ -77,6 +94,8 @@ var _streams := {}   # layer -> Array[AudioStreamWAV]
 var _rho := {}   # layer -> PackedFloat64Array: correlation of level i with level i + 1
 var _rate_at := {}   # layer -> rpm (or spool) the master sounds at on pitch 1, 0 = pitch per band
 var _bang: AudioStreamWAV
+var _pops: AudioStreamRandomizer
+var _t := 0.0   # seconds of update, for the twin wander
 var second_on := false   # craft fast enough for the second engine (with hysteresis)
 
 
@@ -123,10 +142,31 @@ func setup(craft_sim) -> void:
 		bang.stream = _bang
 		bang.bus = "%s_second" % name
 		add_child(bang)
+		# pops skip the load low-pass (which closes on a lift): their own bus, same pan
+		var pop_bus := _bus("%s_pops" % name, "Engines")
+		if AudioServer.get_bus_effect_count(pop_bus) == 0:
+			var pp := AudioEffectPanner.new()
+			pp.pan = -TUNE.pan if k == 0 else TUNE.pan
+			AudioServer.add_bus_effect(pop_bus, pp)
+		var pops := AudioStreamPlayer.new()
+		pops.stream = _pops
+		pops.bus = "%s_pops" % name
+		pops.max_polyphony = 6
+		pops.volume_db = TUNE.pop_db
+		add_child(pops)
+		var pops2 := AudioStreamPlayer.new()
+		pops2.stream = _pops
+		pops2.bus = "%s_second" % name
+		pops2.max_polyphony = 6
+		pops2.pitch_scale = TUNE.pop2_pitch
+		pops2.volume_db = TUNE.pop2_db
+		add_child(pops2)
 		var v := {"bus": bus, "subs": subs, "spool": 0.0, "comb": 1.0, "fire": 1.0, "load": 0.5, "burn": 0.0,
 			"was_out": false, "cough_t": 0.0, "cough_k": 1.0, "cough_next": 0.0, "players": {}, "at": {},
-			"bang": bang, "sec": {"state": "off", "t": 0.0, "spool": -0.33, "fire": 0.0, "cough_k": 0.0, "cough_next": 0.0},
-			"rotor_mph": 0.0, "rotor_p": 1.0, "sec_run": 0.0}
+			"bang": bang, "sec": {"state": "off", "t": 0.0, "spool": -0.33, "vel": 0.0, "fire": 0.0, "cough_k": 0.0, "cough_next": 0.0},
+			"rotor_mph": 0.0, "rotor_p": 1.0, "sec_run": 0.0,
+			"spool_v": 0.0, "lever_prev": 0.0, "bark": 0.0,
+			"pops": pops, "pops2": pops2, "pop_t": 0.0, "pop_k": 0.0, "pop2_t": 0.0, "pop2_k": 0.0, "pops_n": 0}
 		for layer in LAYERS:
 			var ps: Array[AudioStreamPlayer] = []
 			var start := randf()   # per engine, so the two engines never phase against each other
@@ -170,6 +210,14 @@ func _load_streams() -> void:
 		_rate_at[layer] = float(spec.get("rate_at", 0.0)) if spec.get("sync", false) else 0.0
 	_bang = AudioStreamWAV.load_from_file(DIR + manifest.oneshots.bang, {"compress/mode": 0})
 	_bang.loop_mode = AudioStreamWAV.LOOP_DISABLED
+	_pops = AudioStreamRandomizer.new()
+	_pops.playback_mode = AudioStreamRandomizer.PLAYBACK_RANDOM_NO_REPEATS
+	_pops.random_pitch = 1.15            # each pop up to 15% up or down
+	_pops.random_volume_offset_db = 8.0  # and up to 8 dB quieter
+	for f: String in manifest.oneshots.pops:
+		var w := AudioStreamWAV.load_from_file(DIR + f, {"compress/mode": 0})
+		w.loop_mode = AudioStreamWAV.LOOP_DISABLED
+		_pops.add_stream(-1, w)
 
 
 ## Get or create a bus routed into `send`.
@@ -215,6 +263,7 @@ func layer_at(layer: String, s: float) -> float:
 
 func update(inp: Dictionary, delta: float) -> void:
 	var dt := minf(delta, 0.1)
+	_t += dt
 	var gate: float = sim.P.gate
 	var boost: float = {"burner": TUNE.burner_spool, "ramjet": TUNE.ramjet_spool}.get(sim.mode, 0.0)
 	var duck := 0.0 if sim.crash_t > 0.0 else 1.0   # crash: the engines go with the picture
@@ -232,12 +281,16 @@ func update(inp: Dictionary, delta: float) -> void:
 		if inp.get("repair", false):
 			lever = minf(lever, 0.6)
 		var target: float = -0.33 if e.flameout else lever + boost
-		var tau: float = TUNE.spool_down
-		if e.flameout:
-			tau = TUNE.windmill
-		elif target > v.spool:
-			tau = TUNE.relight if v.spool < 0.0 else TUNE.spool_up
-		v.spool = _follow(v.spool, target, tau, dt)
+		if e.flameout or v.spool < 0.0:
+			# winding down from a flameout, or relighting from below idle: no flare
+			v.spool = _follow(v.spool, target, TUNE.windmill if e.flameout else TUNE.relight, dt)
+			v.spool_v = 0.0
+		else:
+			_rev(v, "spool", "spool_v", target, dt)
+		# a quick stab barks; the bark dies away in bark_s
+		var stab: float = clampf((lever - v.lever_prev) / maxf(dt, 1e-4) * 0.12, 0.0, 1.0)
+		v.lever_prev = lever
+		v.bark = maxf(v.bark * exp(-dt / TUNE.bark_s), stab)
 
 		# Combustion: off at a flameout, in fits for a moment after a reignite, and the sim's
 		# own sputter (a damaged engine misfiring) chops it on top.
@@ -265,18 +318,25 @@ func update(inp: Dictionary, delta: float) -> void:
 
 		var s: float = v.spool
 		var level := db_to_linear(TUNE.level_db[1] if flat else lerpf(TUNE.level_db[0], TUNE.level_db[1], clampf(s, 0.0, 1.0))) * duck
+		var bark := 1.0 if flat else db_to_linear(TUNE.bark_db * v.bark)
+		# Overrun: lifting off at high revs spits pops and crackle for a moment.
+		var over: float = v.spool - target
+		if not flat and not e.flameout and v.spool > TUNE.pop_rpm and over > TUNE.pop_lift and v.pop_t <= 0.0:
+			v.pop_t = TUNE.pop_s
+			v.pop_k = clampf(over / 0.5, 0.3, 1.0)
+		_pop(v, "pops", "pop_t", "pop_k", dt, duck)
 		v.burn = _follow(v.burn, 1.0 if boost > 0.0 and not e.flameout else 0.0, TUNE.burner_fade, dt)
 		var n_spool := clampf(layer_at("turbine", s), 0.0, 1.0)
 		var turb := _curve(TUNE.mix_turbine, s)
 		var gains := {
-			"v8": _curve(TUNE.mix_v8, s) * burning,
-			"v12": _curve(TUNE.mix_v12, s) * burning,
+			"v8": _curve(TUNE.mix_v8, s) * burning * bark,
+			"v12": _curve(TUNE.mix_v12, s) * burning * bark,
 			"turbine": turb * (0.55 + 0.45 * burning),
 			"roar": turb * lerpf(TUNE.roar_gain[0], TUNE.roar_gain[1], n_spool) * (0.4 + 0.6 * burning),
 			"burner": TUNE.burner_gain * v.burn * burning,
 		}
 		var sec_gain := _second(v, k, lever + boost, dt, duck)
-		gains["second"] = sec_gain
+		gains["second"] = sec_gain * bark
 		gains["rotor"] = _rotor(v, lever, mph, dt, duck)
 		if flat:
 			gains = {"v8": burning, "v12": burning, "turbine": 1.0, "roar": 1.0, "burner": v.burn * burning,
@@ -285,6 +345,9 @@ func update(inp: Dictionary, delta: float) -> void:
 		roar_lp.cutoff_hz = TUNE.roar_hz[1] if flat else lerpf(TUNE.roar_hz[0], TUNE.roar_hz[1], n_spool)
 		var lift: float = 1.0 + TUNE.second_lift * clampf((mph - TUNE.second_on_mph)
 			/ (TUNE.second_lift_mph - TUNE.second_on_mph), 0.0, 1.0)
+		var twin := 1.0
+		if k == 1 and not flat:
+			twin += TUNE.twin_detune + TUNE.twin_wander[0] * sin(TAU * _t / TUNE.twin_wander[1])
 		for layer in LAYERS:
 			# the second engine and the rotor carry their own levels
 			var own: float = level if not layer in ["second", "rotor"] or flat else 1.0
@@ -292,11 +355,13 @@ func update(inp: Dictionary, delta: float) -> void:
 			var at: float
 			match layer:
 				"second":
-					at = layer_at("second", v.sec.spool) * lift
+					at = layer_at("second", v.sec.spool) * lift * twin
 				"rotor":
-					at = v.rotor_p
+					at = v.rotor_p * twin
 				"burner":
 					at = 1.0 + 0.1 * maxf(0.0, s - 1.0)
+				"v8", "v12":
+					at = layer_at(layer, s) * twin
 				_:
 					at = layer_at(layer, s)
 			v.at[layer] = at
@@ -334,6 +399,9 @@ func _second(v: Dictionary, k: int, target_run: float, dt: float, duck: float) -
 			if not second_on:
 				sc.state = "stop"
 				_play_bang(v, TUNE.bang_db[1], duck)
+			elif not flat and sc.spool > TUNE.pop_rpm and sc.spool - target_run > TUNE.pop_lift and v.pop2_t <= 0.0:
+				v.pop2_t = TUNE.pop_s
+				v.pop2_k = clampf((sc.spool - target_run) / 0.5, 0.3, 1.0)
 		"stop":
 			if second_on:
 				sc.state = "crank"
@@ -350,9 +418,13 @@ func _second(v: Dictionary, k: int, target_run: float, dt: float, duck: float) -
 			fire = sc.cough_k
 		"run":
 			target = target_run
-			tau = TUNE.second_spool_up if target > sc.spool else TUNE.second_spool_down
 			fire = 1.0
-	sc.spool = _follow(sc.spool, target, tau, dt)
+	if sc.state == "run" and sc.spool >= 0.0:
+		_rev(sc, "spool", "vel", target, dt)
+	else:
+		sc.spool = _follow(sc.spool, target, tau, dt)
+		sc.vel = 0.0
+	_pop(v, "pops2", "pop2_t", "pop2_k", dt, duck)
 	sc.fire = _follow(sc.fire, fire, 0.05 if fire > sc.fire else 0.08, dt)
 	var lvl := db_to_linear(lerpf(TUNE.second_level_db[0], TUNE.second_level_db[1], clampf(sc.spool, 0.0, 1.0)))
 	return sc.fire * lvl * duck
@@ -369,6 +441,31 @@ func _rotor(v: Dictionary, lever: float, mph: float, dt: float, duck: float) -> 
 	v.sec_run = _follow(v.sec_run, 1.0 if v.sec.state == "run" else 0.0, 0.6, dt)
 	var db: float = lerpf(TUNE.rotor_db[0], TUNE.rotor_db[1], clampf(frac, 0.0, 1.0)) + TUNE.rotor_handover_db * v.sec_run
 	return db_to_linear(db) * lerpf(TUNE.rotor_lever[0], TUNE.rotor_lever[1], lever) * duck
+
+
+## The spool spring: snappy and flaring a touch past the lever on the way up, settling clean
+## on the way down. Fixed 240 Hz substeps: stepped once per frame, the flare shrank with the
+## frame rate (10% at 144 fps, 5% at 45, none at 20) and one long frame kicked the revs.
+func _rev(d: Dictionary, key: String, vkey: String, target: float, dt: float) -> void:
+	var n := maxi(1, ceili(dt * 240.0))
+	var h := dt / n
+	for i in n:
+		var up: bool = target > d[key]
+		var w: float = TUNE.rev_w[0] if up else TUNE.rev_w[1]
+		var z: float = TUNE.rev_z[0] if up else TUNE.rev_z[1]
+		d[vkey] += (w * w * (target - d[key]) - 2.0 * z * w * d[vkey]) * h
+		d[key] += d[vkey] * h
+
+
+## While an overrun burst is live, fire pops at random, tapering over pop_s.
+func _pop(v: Dictionary, player: String, tkey: String, kkey: String, dt: float, duck: float) -> void:
+	if v[tkey] <= 0.0:
+		return
+	v[tkey] -= dt
+	var rate: float = TUNE.pop_rate * v[kkey] * maxf(v[tkey], 0.0) / TUNE.pop_s
+	if duck > 0.0 and (solo == "" or solo == "pops") and randf() < rate * dt:
+		(v[player] as AudioStreamPlayer).play()
+		v.pops_n += 1
 
 
 func _play_bang(v: Dictionary, db: float, duck: float) -> void:

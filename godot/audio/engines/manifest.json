@@ -135,6 +135,14 @@
   }
  },
  "oneshots": {
-  "bang": "bang.wav"
+  "bang": "bang.wav",
+  "pops": [
+   "pop0.wav",
+   "pop1.wav",
+   "pop2.wav",
+   "pop3.wav",
+   "pop4.wav",
+   "pop5.wav"
+  ]
  }
 }

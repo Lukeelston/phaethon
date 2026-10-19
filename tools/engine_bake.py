@@ -17,6 +17,8 @@ There are no oscillators here. Every sound starts as a Salamander Grand Piano re
             on the lowest piano key slowed right down, with long pipes, a lumpy cam and heavy
             saturation. EngineAudio gives it a fixed throat (EQ) and a dark muffler.
   bang      One-shot: the second engine catching, and its backfire when it shuts down.
+  pop0-5    One-shots for overrun (lifting off at high revs): three crackles, bursts of tiny
+            damper ticks from high keys, and three pops, short hard low strikes with a click.
   rotor     The first engine's bass: a big rotor that winds up with airspeed. At rest, a ~28 Hz
             drone (A0's sustain, frozen) beating against inharmonic stages 1.37x and 2.13x up,
             over a gritty cloud of slowed low hammer thumps. EngineAudio pitches it with speed.
@@ -222,7 +224,8 @@ N_CYC = 48
 # Anti-alias levels sit an octave of pitch apart; level j plays alone at pitch 2^j.
 MIP = 2.0
 # Gate: neighbouring levels are copies of one master, so they must correlate at least this well,
-# or a crossfade between them would be a timbre change again.
+# or a crossfade between them would be a timbre change again. This is the precise guard against
+# the old "stepping through selected tones": independent per-RPM bands measured 0.14-0.73 here.
 MIN_MIP_RHO = 0.9
 # Gate: blended with EngineAudio's crossfade law, rendered at the pitch they play, every level
 # crossfade holds the level within this many dB at 25, 50 and 75% of the way across.
@@ -388,6 +391,39 @@ def bake_rotor(piano, loop_s, rng):
     out = soft_clip(out, 2.0)
     out = circular(lambda v: butter(v, 18, "highpass"), out)
     return normalize(out)
+
+
+def bake_pops(piano, rng):
+    """Overrun one-shots, each peaking at -3 dBFS. EngineAudio picks one at random with random
+    pitch and level for every pop, so a burst never repeats itself."""
+    ticks = [damper(piano, m, 0.004) for m in range(60, 100, 6)]   # high keys: bright ticks
+    out = []
+    for _ in range(3):   # crackle: 3-7 ticks, 6-25 ms apart
+        n = int(0.16 * SR)
+        buf = np.zeros(n)
+        t = 0.0
+        for _ in range(int(rng.integers(3, 8))):
+            g = ticks[rng.integers(len(ticks))]
+            i = int(t * SR)
+            if i + len(g) >= n:
+                break
+            buf[i:i + len(g)] += g * rng.uniform(0.4, 1.0)
+            t += rng.uniform(0.006, 0.025)
+        out.append(butter(buf, 600, "highpass"))
+    for m in (21, 24, 27):   # pop: a short hard low strike with a tick on top, driven
+        n = int(0.3 * SR)
+        g = resample(strike(piano, m, 16, 0.3, 0.010, 1800), rng.uniform(0.8, 1.2))[:n]
+        buf = np.zeros(n)
+        buf[:len(g)] += g
+        c = ticks[rng.integers(len(ticks))]
+        buf[:len(c)] += 0.6 * c
+        buf = np.tanh(2.5 * buf / np.max(np.abs(buf)))
+        out.append(butter(buf, 40, "highpass"))
+    fade = int(0.005 * SR)
+    for i, b in enumerate(out):
+        b[-fade:] *= np.linspace(1.0, 0.0, fade)
+        out[i] = b / np.max(np.abs(b)) * 10 ** (-3 / 20)
+    return out
 
 
 TURBINE = {
@@ -578,12 +614,20 @@ def main():
     bang = bake_bang(piano, roar_bed, rng_second)
     write("bang.wav", bang)
     print("  ok   bang.wav       one-shot %.2f s, peak %.1f dBFS" % (len(bang) / SR, 20 * np.log10(np.max(np.abs(bang)))))
-    manifest["oneshots"] = {"bang": "bang.wav"}
+    pops = bake_pops(piano, np.random.default_rng(args.seed + 4))   # own stream: nothing else moves
+    names = []
+    for i, x in enumerate(pops):
+        write("pop%d.wav" % i, x)
+        names.append("pop%d.wav" % i)
+    print("  ok   pop0-5.wav     overrun one-shots: 3 crackles, 3 pops, %.2f-%.2f s" % (
+        min(len(x) for x in pops) / SR, max(len(x) for x in pops) / SR))
+    manifest["oneshots"] = {"bang": "bang.wav", "pops": names}
 
     with open(os.path.join(args.out, "manifest.json"), "w") as f:
         json.dump(manifest, f, indent=1)
     used = {b["file"] for layer in manifest["layers"].values() for b in layer["bands"]}
-    used |= set(manifest.get("oneshots", {}).values())
+    for v in manifest.get("oneshots", {}).values():
+        used |= set(v) if isinstance(v, list) else {v}
     for name in os.listdir(args.out):   # loops from an older layout of this tool's own output
         if name.endswith(".wav") and name not in used:
             os.remove(os.path.join(args.out, name))
