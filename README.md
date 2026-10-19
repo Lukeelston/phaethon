@@ -36,6 +36,72 @@ engine's four air-brake flaps follow that engine's own brake.
 
 Along the way are eight road overpasses, at miles 8.5, 18.5, 28.1, 38.5, 58.5, 68.4, 78.6 and 88.6. Each has a 11.8 m deck to fly under, ramps down to the desert, cars crossing at 60 mph, and a green sign giving the mile and the miles to go. There's a landmark roughly every ten miles: water tower (4), wind farm (13), starship wreck (23), radio dishes (33), sandstone arch (43), HALFWAY gantry (50), moisture vaporators (57), the Needle (66), sandcrawler (75), spaceport (84). Placement is rule-based (`view/route_features.gd`) and gated (`tests/test_route.gd`): every lane, corridor, sign and footprint is kept clear, and so is every rock and spire. All of it is visual only, with no collision.
 
+## The world
+
+**Light.** Late afternoon under twin suns, ahead and to the right of the run: a white primary
+that casts the shadows (long ones, so the craft, ramps and props sit on the ground) and a
+smaller amber companion. Both show as crisp discs in the sky. The discs are sky-only lights, so
+the shadow caster stays a cheap, hard-edged light. ACES tonemapping keeps the bright desert from
+clipping, the sky's own colours fill the shadows (`AMBIENT_SOURCE_SKY`), and a soft bloom makes
+the flames, nav strips, cables and lamps glow. The haze brightens toward the suns.
+
+**Mountains** (`view/horizon.gd`). Three ranges deep down both sides, plus a ring of peaks all
+round at 45 km, so the far end of the valley has mountains too:
+
+| Distance | Range |
+|---|---|
+| 9 km | red-sandstone mesas and buttes, terraced and banded |
+| 16 km | a ridged grey-brown sierra |
+| 26 km | a 2–3.7 km high range with snow on the summits |
+
+Each is a heightfield strip that tiles seamlessly. Its lighting is baked from the real sun
+direction, one colour per face, so sunlit slopes are warm and the rest sit in blue sky-shadow.
+The haze thins with height: the feet are exactly the fog's colour, so they melt into the hazy
+desert, while the summits stand clear.
+
+**Ground** (`view/ground.gdshader`). The 60 km desert plane is a world-anchored shader
+(precise at mile 100):
+- sand in big pale and dark patches, gravel mottling, and fine grain (the speed cue);
+- on the range, a dry lake round the runway: a pale playa cracked into mud polygons, out to a
+  wandering shore about 320 m out.
+
+**Asphalt** (`view/asphalt.gdshader`, on the range runway, the highway, the airfield apron as
+concrete, and the GP):
+- 4 cm aggregate and sun-bleached patches;
+- rubber streaks down the lanes;
+- a sealed transverse joint every 25 m (a rate cue at speed), and paving seams;
+- black tar-sealed cracks and fresh repair patches.
+
+Every procedural detail fades to its average once it's finer than a couple of pixels, so
+nothing shimmers in the headset.
+
+**Props** (`view/props.gd`, one mesh each, instanced):
+- **Desert:** Joshua trees, creosote scrub and boulders from the shore outward, built in 500 m
+  blocks that each cull by distance. They're queued a couple of blocks a frame, so streaming
+  never hitches.
+- **Runway:** edge lights every 60 m and a green threshold bar.
+- **Airfield,** behind the start line beside the runway:
+  - a concrete apron;
+  - three hangars with their doors to the runway;
+  - a control tower and fuel tanks;
+  - a spinning radar, a windsock and fuel bowsers.
+- **GP:** about 13,500 plants and boulders kept 150 m clear of the track, floodlight towers
+  round it (on the inside of banked corners), and a pit building on the main straight.
+
+`tests/test_scenery.gd` gates all of it. It checks:
+- the mountains: seams, heights, snow, and fog-matched feet;
+- the light setup;
+- the shore;
+- that faces point up;
+- asphalt seams;
+- plant placement;
+- the airfield;
+- the GP props;
+- the streaming budget.
+
+The range's flat quads used to be wound face-down. With culling off, Godot lit them from below
+with only the brown ground bounce, which is why the old runway looked so dark.
+
 ## Grand prix (STARFIGHTER)
 
 A 29.3 km circuit built for STARFIGHTER at about 1,000 mph: `-Track gp` on the launcher, or `--track=gp` on the flat view. It uses STARFIGHTER handling unless you switch.
@@ -48,7 +114,18 @@ The lap starts with a 2.8 km main straight into the T1-T2 braking drop (~510 mph
 - the T12 hairpin (~360 mph) and the T13 right (~780 mph);
 - the long T14 sweeper back onto the main straight.
 
-**Hard braking.** The pod keeps its place behind the engines. Brake hard, or spin the pair, and the cables go slack, so a stand-off pushes back if the pod closes in past its taut-cable spot. It acts along the engines' centreline, compression only, equal and opposite, so it can't twist them or create energy. The grips magnet like the triggers, so nearly-even hands brake exactly evenly. Above 300 mph the difference between your grips fades as (300 mph / speed)²: a one-hand brake at 900 mph slows you and turns you about 40°, where it used to spin you 150° and fling the pod into the engines (`tests/test_brakes.gd`). The cables flex: they sag with their slack and sway and twang when their tension jumps. Their glow follows their engine's thrust and turns amber, then pulsing red, as their tension nears its limit. **Banked corners.** Every GP corner banks up to 15° toward its inside (it was 30°), easing in and out over about 360 m. The corners pivot on the inside edge, so that edge stays at ground level and the outside climbs up to 26 m on an earth berm. The banking is real physics in both sims: the surface pushes you toward the corner's centre with g·tan(bank), plus a downforce term that grows with speed squared (`bankDown`). In the big sweepers at 1,000 mph that's about 4–5 g of help; in the hairpins it's under 1 g. The craft and cockpit ride up the banking, roll with it on top of the lean (capped at 70° in total), and pitch with its rise and fall. Trackside: 96 m of asphalt, kerbs on every apex, and tall walls where the sim's walls are, so you can read where the track goes. Each wall is concrete topped with panels to 5.5 m, with a lit strip along the top: red on the left wall and green on the right, like navigation lights. Yellow chevrons on the outside wall of every corner start 120 m before it and point the way it turns. A lit mast every 96 m shows the line over the inside wall. There are braking boards 1000/600/300 before the slow corners (raised above the walls), turn numbers, a start gantry and grandstands. The pod's nose is an open tube cage from the footwell forward, so you can see the track coming through it. Inside the cockpit there's a grated deck plate, a footrest bar and pedals out over the cage, frame ribs and coloured hoses along the walls, and a switch console down each side with toggles, backlit buttons and placards. A gate plate sits round each throttle lever, with the burner gate in orange, and there's a harness on the seat. A light strip runs just under the rim, coloured by mode: blue, amber on the burner, violet on the ramjet (`vr/cockpit_interior.gd`). The pod rides 0.4 m higher than the sim's body, which is a visual change only, and in VR you sit down in it with your eyes about level with the cockpit rim. The tow cables glow with their own engine's real thrust. They're dark at idle, energized blue as thrust rises, and white-hot and crackling on the burner. A damaged engine's sputter flickers its cable, and a flameout goes dark. The lap record is saved per handling.
+**The engines** are flat rounded slabs, 2.4 m wide (the sim's collision footprint) and about 1 m tall. They keep everything the old cylinders had, reshaped:
+
+- twin spinning intake fans in a wide lip;
+- livery band and pinstripe;
+- a heat-coloured hot section and slot-nozzle glow;
+- an exhaust plume shader (`godot/view/flame.gdshader`) shaped to the slot nozzle. On dry thrust it's a short, faint core, which is about what a real jet looks like in daylight. On the burner it runs long and translucent: blue-white at the nozzle, then yellow-orange, fading to red, with shock diamonds as bright knots and dimmer gaps. It flickers and ripples, and a flickering nozzle light spills onto the track. It brightens when you look down it from the cockpit, as a real plume does, instead of vanishing. The ramjet runs it hotter and violet, and 30% longer;
+- dorsal fin, outboard stabiliser, and the cable lug and eye;
+- the four air brakes, now two on top and two underneath.
+
+New: thrust-vectoring vanes in the nozzle that swing with your steering, side intake louvres, top exhaust ports, coolant louvres, raised access covers with rivets, lights (red and green nav lights, a double-flash fin strobe, tail and landing lights, cyan repulsor underglow), and an upgraded energy binder: ring emitters on the inner faces, with a core beam and three crackling strands that shift toward violet as the binder strains. They bank and pitch with the turns and the track.
+
+**Hard braking.** The pod keeps its place behind the engines. Brake hard, or spin the pair, and the cables go slack, so a stand-off pushes back if the pod closes in past its taut-cable spot. It acts along the engines' centreline, compression only, equal and opposite, so it can't twist them or create energy. The grips magnet like the triggers, so nearly-even hands brake exactly evenly. Above 300 mph the difference between your grips fades as (300 mph / speed)²: a one-hand brake at 900 mph slows you and turns you about 40°, where it used to spin you 150° and fling the pod into the engines (`tests/test_brakes.gd`). The cables flex: they sag with their slack and sway and twang when their tension jumps. Their glow follows their engine's thrust and turns amber, then pulsing red, as their tension nears its limit. **Banked corners.** Every GP corner banks up to 15° toward its inside (it was 30°), easing in and out over about 360 m. The corners pivot on the inside edge, so that edge stays at ground level and the outside climbs up to 26 m on an earth berm. The banking is real physics in both sims: the surface pushes you toward the corner's centre with g·tan(bank), plus a downforce term that grows with speed squared (`bankDown`). In the big sweepers at 1,000 mph that's about 4–5 g of help; in the hairpins it's under 1 g. The craft and cockpit ride up the banking, roll with it on top of the lean (capped at 70° in total), and pitch with its rise and fall. Trackside: 96 m of asphalt, kerbs on every apex, and tall walls where the sim's walls are, so you can read where the track goes. Each wall is concrete topped with panels to 5.5 m, with a lit strip along the top: red on the left wall and green on the right, like navigation lights. Yellow chevrons on the outside wall of every corner start 120 m before it and point the way it turns. A lit mast every 96 m shows the line over the inside wall. There are braking boards 1000/600/300 before the slow corners (raised above the walls), turn numbers, a start gantry and grandstands. The pod's nose is an open tube cage from the footwell forward, so you can see the track coming through it. Inside the cockpit there's a grated deck plate, a footrest bar and pedals out over the cage, frame ribs and coloured hoses along the walls, and a switch console down each side with toggles, backlit buttons and placards. A gate plate sits round each throttle lever, with the burner gate in orange, and there's a harness on the seat. A light strip runs just under the rim, coloured by mode: blue, amber on the burner, violet on the ramjet (`vr/cockpit_interior.gd`). The pod rides 0.4 m higher than the sim's body, which is a visual change only, and in VR you sit in it with your eyes a little above the cockpit rim (raised 12 cm: "view higher by default"). The tow cables glow with their own engine's real thrust. They're dark at idle, energized blue as thrust rises, and white-hot and crackling on the burner. A damaged engine's sputter flickers its cable, and a flameout goes dark. The lap record is saved per handling.
 
 `tools/design_gp.py` designed the layout. It solves two straights so the loop closes, keeps the track 184 m clear of itself, and plots the result. The scripted pilot laps it clean in 81.2 s (top 991 mph on the lever alone, 806 mph average). The GP parity gate replays that lap in Godot exactly.
 
@@ -74,7 +151,7 @@ are kept per mode.
 
 ## Quest controls
 
-The left menu button cycles four schemes (saved):
+A tap on the left menu button cycles four schemes (saved). **Hold the menu button 1.5 s to switch track**, range to grand prix and back. The scene reloads on the other track and the headset session carries on (`tests/test_track_switch.gd`).
 
 - **Trigger throttles:** the triggers are crossed, so each hand steers its own way. The right trigger throttles the left engine: squeeze right harder to go right. Together the triggers are the throttle, on a softened curve: about 25% less lever per bit of pull on average, most at the bottom, still full at a full pull. The triggers *magnet* to each other: fingers that are nearly together act exactly together. At the 0.07 mismatch measured from a real session they steer 14% as hard, while a real split still turns 78% as hard. The magnet is smooth, with no dead zone to snap out of. Each engine's lever rises over about 0.6 s at most, so a finger that lands first can't spin you off the line. Letting off is instant, and letting go of both triggers is idle at once. Steering authority grows with speed, because the same split yaws you about five times harder at 240 mph than at 750. Authority is full from 500 mph, so every GP corner has all of it, and never drops below 15%. Below 500 mph the stronger engine is eased toward the weaker, never the weaker raised, so a trigger you've let go of keeps its engine off at any speed. Each engine follows its own trigger: it rises on the ramp, eases down over about 0.08 s, and never moves because the other trigger did. (An earlier version shaped one shared throttle plus a smoothed split, so a quick one-sided squeeze briefly raised both engines and drove you straight on instead of turning.) With the triggers together the craft holds itself straight, fly-by-wire style: it cancels its own yaw, so a correction stops instead of overshooting. The hold fades out as the triggers part, so it never fights a turn. It only shares out throttle you're already giving, so it does nothing at idle, and it stands aside while either air brake is in and on the burner. It never fires an engine you didn't ask for. An earlier version did that while you braked one side. The remaining difference steers gentler near the middle, smoothed over ~0.08 s. `tests/test_controls_flyable.gd` checks an ideal pilot on the GP and a jittery-fingered straight hold (32 m of drift in 8 s at ~1,000 mph, against 120 m before). It also checks six mashed launches (0.2° of heading swing on average, against 13.9° before). And it checks a stroke pilot that corrects the way a real session log showed, with a 0.3 squeeze whenever it's 1.5° off: accelerating from the line, its heading swing drops from 34° unassisted to about 8°. (A squared curve with a 1.25 s ramp was tried once and made the craft unflyable. That test guards against it too.) Both spring back. The last few percent of pull is the burner detent. Grips are the air brakes, same side, so the left grip turns you left.
 - **Throttle + steer:** the left stick sets one throttle for both engines, and it holds. The right stick steers and springs back, by easing the inside engine (on the burner, by feathering its air brake). Triggers brake.
@@ -116,10 +193,12 @@ Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/tes
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_cables.gd -- --track=range --mute   # cables on their hardpoints
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_dashboard.gd           # instrument panel
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_route.gd -- --track=range --mute   # overpasses + landmarks placement
+Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_scenery.gd -- --track=range --mute   # mountains, light, ground, asphalt, props, streaming budget
+Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_track_switch.gd -- --track=range --mute   # menu tap = scheme, hold = switch track
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_gp_parity.gd                  # grand prix lap parity
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_gp_world.gd -- --track=gp --mute   # GP trackside matches the track
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_engine_damage.gd -- --track=gp --mute   # wall damage, repair, restart
-Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_craft_model.gd -- --mute   # per-engine air-brake flaps
+Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_craft_model.gd -- --mute   # per-engine air brakes, the nose cage, the slab engines' detail, vanes and strobes
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_wind_audio.gd             # wind + sonic boom
 
 # Re-record every reference after changing the JS model
@@ -156,6 +235,8 @@ arduino-cli compile --fqbn rp2040:rp2040:rpipico --output-dir firmware/build fir
 - Cables anchored on the pod's front corners go unstable near 715 km/h: the pod hangs off one cable. Converge both cables on a nose ring (`podAnchorW` 0.15).
 - Per-engine cable tension is a trailer-sway feedback loop (a 16°/s spiral). Route about 80% of it through a bridle on the binder (`cableCouple` 0.2).
 - GDScript `float` is 64-bit; `Vector2` is 32-bit. Keep the sim in scalars or parity breaks.
+- Godot fronts are clockwise. A flat quad wound the other way faces down; with culling off it renders, but lit from below. Check `(p1 - p0).cross(p2 - p0)` points into the surface (`tests/test_scenery.gd`).
+- A `Color` passed to a plain `vec3` shader uniform arrives linearised. Pass a `Vector3` if the shader converts sRGB itself. A mesh without vertex colours gives the shader `COLOR` = 0, not 1.
 - The tow bar is one-way on purpose: the pod follows the engines but doesn't yaw them back, because that feedback made the pair sway. A one-way force creates energy, though. The pod whirled round a pivoting pair, or swung by one spinning after wall hits, gains speed from nothing, and the craft pinballs: a pod went 159 to 495 km/h coasting with no thrust. A real reaction, even 20% of one, makes the 22 m-long pod outweigh the pair in yaw. That cut steering 4x at 490 mph and wrecked the GP. Instead a per-substep energy audit (`towAudit`) takes out whatever the tow bar puts in beyond what its springs gave up. It drains the craft's speed when the craft is travelling, gently (`towAuditG`, 3 g at most). As the swing and spin take a bigger share of the energy, the drain shifts onto them (`towIntF0`/`towIntF1`). Draining the swing in normal flight deadens the steering, because every yaw step swings the pod. Draining only the speed pins a slowly spinning craft. Steering, coast-down and the GP autopilot lap are unchanged (`tests/test_energy.gd`).
 
 ## Engine audio findings

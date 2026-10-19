@@ -35,8 +35,10 @@ func _process(delta: float) -> bool:
 		leg = k
 		if leg >= LEGS.size():
 			fails += _check_cage()
-			var good := fails == 0 and passed == LEGS.size() + 1
-			print("CRAFT MODEL ", "PASS" if good else "FAIL (%d failed, %d of %d ran)" % [fails, passed + fails, LEGS.size()])
+			fails += _check_slab()
+			fails += _check_plume()
+			var good := fails == 0 and passed == LEGS.size() + 3
+			print("CRAFT MODEL ", "PASS" if good else "FAIL (%d failed, %d of %d ran)" % [fails, passed + fails, LEGS.size() + 3])
 			quit(0 if good else 1)
 			return true
 	var L: Array = LEGS[leg]
@@ -49,7 +51,8 @@ func _check_leg(L: Array) -> void:
 	var ok_l := absf(c.flap_open[0] - L[3]) < 0.02
 	var ok_r := absf(c.flap_open[1] - L[4]) < 0.02
 	var ok_p := absf(c.pod_flap_open - L[5]) < 0.02
-	# geometry: an open flap's trailing edge stands off the engine axis; a shut one lies flat
+	# geometry: an open flap's trailing edge lifts off the slab's top (or bottom) skin; a shut one
+	# lies flat on it
 	var spread := []
 	for e in 2:
 		var eng: Node3D = c.engines[e]
@@ -57,12 +60,45 @@ func _check_leg(L: Array) -> void:
 		for hinge in c.flaps[e]:
 			var tip: Vector3 = (hinge as Node3D).global_transform * Vector3(0, 0, 1.3)
 			var local := eng.global_transform.affine_inverse() * tip
-			far = maxf(far, Vector2(local.x, local.y).length())
+			far = maxf(far, absf(local.y))
 		spread.append(far)
-	var want := [0.83 + 1.2 * sin(deg_to_rad(68.0) * L[3]), 0.83 + 1.2 * sin(deg_to_rad(68.0) * L[4])]
+	var skin: float = c.ENG_H / 2.0 + 0.01
+	var want := [skin + 1.3 * sin(deg_to_rad(68.0) * L[3]), skin + 1.3 * sin(deg_to_rad(68.0) * L[4])]
 	var ok_g := absf(spread[0] - want[0]) < 0.12 and absf(spread[1] - want[1]) < 0.12
 	fails += _check("%-13s L flaps %.2f (want %.1f)  R flaps %.2f (want %.1f)  pod %.2f (want %.1f)  tip radius L %.2f R %.2f m" % [
 		L[0], c.flap_open[0], L[3], c.flap_open[1], L[4], c.pod_flap_open, L[5], spread[0], spread[1]], ok_l and ok_r and ok_p and ok_g)
+
+
+## The engines are flat rounded slabs that keep every detail of the old cylinders and add
+## vectoring vanes, lights, a strobe, twin fans and a ring-emitter binder.
+func _check_slab() -> int:
+	var c = v.craft
+	var eng: Node3D = c.engines[0]
+	var body: MeshInstance3D = eng.get_child(0)
+	# a slice through the nacelle, clear of the fin and stabiliser: how wide and how tall
+	var lo := Vector2(INF, INF)
+	var hi := Vector2(-INF, -INF)
+	for vtx in (body.mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX] as PackedVector3Array):
+		if vtx.z > -1.9 and vtx.z < -1.7:
+			lo = Vector2(minf(lo.x, vtx.x), minf(lo.y, vtx.y))
+			hi = Vector2(maxf(hi.x, vtx.x), maxf(hi.y, vtx.y))
+	var box := AABB(Vector3(lo.x, lo.y, 0), Vector3(hi.x - lo.x, hi.y - lo.y, 0))
+	var flat: bool = box.size.x > 2.0 * box.size.y and absf(box.size.x - 2.4) < 0.2
+	var kept: bool = c.rotors[0].size() == 2 and c.flaps[0].size() == 4 and c.hot_mats.size() == 2 		and c.glow_mats.size() == 2 and c.flames.size() == 2
+	var added: bool = c.vanes[0].size() == 3 and c.strobes.size() == 2 and c.binder_mats.size() == 2
+	# the vanes follow a steering split (left engine harder: a right turn: trailing edges right)
+	v.sim.eL.thrust = 0.9
+	v.sim.eR.thrust = 0.2
+	for i in 60:
+		c.sync(v.sim, {"thrL": 0.9, "thrR": 0.2, "brkL": 0.0, "brkR": 0.0}, 1.0 / 60.0)
+	var swing: float = c.vane_angle
+	var flashes := 0
+	for i in 150:   # 1.25 s of strobe
+		c.sync(v.sim, {"thrL": 0.3, "thrR": 0.3, "brkL": 0.0, "brkR": 0.0}, 1.0 / 120.0)
+		OS.delay_msec(8)
+		flashes += int(c.strobes[0].visible)
+	return _check("engines are flat slabs (%.2f wide x %.2f tall through the nacelle), all the old detail kept, plus 3 vectoring vanes (%.2f rad on a right turn), strobes (%d lit frames in 1.25 s), ring-emitter binder" % [
+		box.size.x, box.size.y, swing, flashes], flat and kept and added and swing > 0.2 and flashes > 0 and flashes < 60)
 
 
 func _check_cage() -> int:
@@ -92,3 +128,34 @@ func _check(label: String, ok: bool) -> int:
 	print(("  ok   " if ok else "  FAIL ") + label)
 	passed += 1 if ok else 0
 	return 0 if ok else 1
+
+
+## The exhaust plume (view/flame.gdshader on two cones per engine, plus a nozzle light): on dry
+## thrust a short faint plume and no light; on the burner the shader's burner share eases up,
+## the plume stretches long and the nozzle light comes on; a flamed-out engine shows nothing.
+func _check_plume() -> int:
+	var c = v.craft
+	var sim = v.sim
+	var wired := true
+	for k in 2:
+		wired = wired and c.flame_mats[k].size() == 2 and c.nozzle_lights.size() == 2
+		for m in c.flame_mats[k]:
+			wired = wired and m is ShaderMaterial and (m as ShaderMaterial).shader.resource_path == "res://view/flame.gdshader"
+	var probe := func(mode: String) -> Array:
+		sim.mode = mode
+		sim.eL.thrust = 0.8
+		sim.eR.thrust = 0.8
+		for i in 90:   # 1.5 s: the burner share eases over ~0.2 s
+			c.sync(sim, {"thrL": 0.8, "thrR": 0.8, "brkL": 0.0, "brkR": 0.0}, 1.0 / 60.0)
+		var cones: Node3D = c.flames[0].get_node("cones")
+		return [float((c.flame_mats[0][0] as ShaderMaterial).get_shader_parameter("burner")), cones.transform.basis.get_scale().y,
+			(c.nozzle_lights[0] as OmniLight3D).light_energy, c.flames[0].visible]
+	var dry: Array = probe.call("normal")
+	var hot: Array = probe.call("burner")
+	sim.eL.flameout = true
+	var out: Array = probe.call("normal")
+	sim.eL.flameout = false
+	sim.mode = "normal"
+	return _check("plume: shader on both cones of both engines; dry burner share %.2f, %.1f m long, light %.1f; burner share %.2f, %.1f m long, light %.1f; flamed out: plume %s, light %.1f" % [
+		dry[0], dry[1], dry[2], hot[0], hot[1], hot[2], "shown" if out[3] else "hidden", out[2]],
+		wired and dry[0] < 0.05 and dry[2] == 0.0 and hot[0] > 0.95 and hot[1] > 2.0 * dry[1] and hot[2] > 1.0 and not out[3] and out[2] == 0.0)

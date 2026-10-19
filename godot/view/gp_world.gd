@@ -18,6 +18,7 @@
 extends Node3D
 
 const Kit := preload("res://view/mesh_kit.gd")
+const Props := preload("res://view/props.gd")
 const WALL_H := 1.6           # concrete
 const FENCE_H := 5.5          # the tall panels above it
 const STRIP_H := 0.4          # lit strip along the top
@@ -39,6 +40,8 @@ var corners: Array = []       # [start i, apex i, end i, sign (+1 left), radius,
 var chevrons := 0             # how many chevrons were built (the test reads these)
 var berm_samples := 0
 var masts := 0
+var floodlights := 0          # floodlight towers built (the test reads these)
+var plants := 0               # scattered plants and boulders
 
 
 func build(s, v) -> void:
@@ -48,6 +51,9 @@ func build(s, v) -> void:
 	var mat := Kit.vertex_colors()
 	var surf := SurfaceTool.new()
 	surf.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var asph := SurfaceTool.new()   # the racing surface: view/asphalt.gdshader, UV (m along, m across)
+	asph.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var along := 0.0
 	var deco := SurfaceTool.new()
 	deco.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var glow := SurfaceTool.new()   # lit: unshaded, so it reads at distance and in shadow
@@ -59,9 +65,9 @@ func build(s, v) -> void:
 		var j := (i + 1) % n
 		var hw: float = sim.tw[i] / 2.0
 		var hw2: float = sim.tw[j] / 2.0
-		# asphalt, a touch lighter every 50 m so the surface reads at speed
-		var tone := 0.17 + 0.025 * ((i / 4) % 2)
-		_strip(surf, i, j, -hw, hw, -hw2, hw2, 0.02, Color(tone, tone, tone + 0.01))
+		# asphalt: aggregate, rubber, joints every 25 m (they read at speed), cracks and patches
+		_asphalt(asph, i, j, hw, hw2, along, along + sim.tlen[i])
+		along += sim.tlen[i]
 		# edge lines
 		for sgn in [-1.0, 1.0]:
 			_strip(deco, i, j, sgn * (hw - 1.5 - LINE_W), sgn * (hw - 1.5), sgn * (hw2 - 1.5 - LINE_W), sgn * (hw2 - 1.5), 0.04, Color(0.92, 0.92, 0.9))
@@ -102,6 +108,16 @@ func build(s, v) -> void:
 			var c := Color.WHITE if (k + r) % 2 == 0 else Color(0.05, 0.05, 0.05)
 			var w0: float = -sim.tw[0] / 2.0 + k * sim.tw[0] / 16.0
 			_patch(deco, 0, w0, w0 + sim.tw[0] / 16.0, r * 2.0, r * 2.0 + 2.0, 0.07, c)
+	var m0 := MeshInstance3D.new()
+	m0.mesh = asph.commit()
+	var am := ShaderMaterial.new()
+	am.shader = preload("res://view/asphalt.gdshader")
+	am.set_shader_parameter("period", 1.0e6)
+	am.set_shader_parameter("base", Vector3(0.25, 0.245, 0.245))   # sRGB (a Color would arrive linearised)
+	am.set_shader_parameter("lane_half", 34.0)
+	m0.material_override = am
+	m0.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(m0)
 	var m1 := MeshInstance3D.new()
 	surf.generate_normals()
 	m1.mesh = surf.commit()
@@ -122,6 +138,7 @@ func build(s, v) -> void:
 	_grandstands()
 	_boards_and_numbers()
 	_scenery()
+	_props()
 
 
 ## Corners: runs of samples turning faster than a 2 km radius, merged across short gaps.
@@ -231,6 +248,21 @@ func _strip(st: SurfaceTool, i: int, j: int, o0: float, o1: float, p0: float, p1
 		st.set_color(c)
 		st.set_normal(Vector3.UP)
 		st.add_vertex(p)
+
+
+## The track surface between samples i and j, with UVs (metres along the lap, metres across).
+func _asphalt(st: SurfaceTool, i: int, j: int, hw: float, hw2: float, s0: float, s1: float) -> void:
+	var a := _edge(i, -hw) + Vector3.UP * 0.02
+	var b := _edge(i, hw) + Vector3.UP * 0.02
+	var cc := _edge(j, hw2) + Vector3.UP * 0.02
+	var d := _edge(j, -hw2) + Vector3.UP * 0.02
+	var nrm := (b - a).cross(d - a).normalized()
+	if nrm.y < 0.0:
+		nrm = -nrm
+	for v in [[a, Vector2(s0, -hw)], [b, Vector2(s0, hw)], [cc, Vector2(s1, hw2)], [a, Vector2(s0, -hw)], [cc, Vector2(s1, hw2)], [d, Vector2(s1, -hw2)]]:
+		st.set_normal(nrm)
+		st.set_uv(v[1])
+		st.add_vertex(v[0])
 
 
 ## A small patch on sample i's segment: lateral w0..w1, along s0..s1 metres from the sample.
@@ -399,6 +431,84 @@ func _scenery() -> void:
 	mi.material_override = Kit.vertex_colors()
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(mi)
+
+
+## Props round the circuit (view/props.gd): Joshua trees, scrub and boulders out in the desert,
+## none within 150 m of any part of the track; floodlight towers just outside the walls every
+## ~480 m, on the inside of banked corners (the outside is berm); and the pit building on the
+## main straight, opposite the grandstands, its garages facing the track.
+func _props() -> void:
+	var near := _near_track(150.0)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 1357
+	var xs := [[], [], [], []]   # joshua0, joshua1, bush, boulder
+	for k in 16000:
+		# thickest just past the walls, where you see it, thinning out over ~1.5 km
+		var i := rng.randi_range(0, sim.N - 1)
+		var d := 150.0 + 1500.0 * pow(rng.randf(), 1.7)
+		var sd := 1.0 if rng.randf() < 0.5 else -1.0
+		var x: float = sim.tpx[i] + sim.tnx[i] * d * sd + rng.randf_range(-6.0, 6.0)
+		var y: float = sim.tpy[i] + sim.tny[i] * d * sd + rng.randf_range(-6.0, 6.0)
+		if near.has(Vector2i(floori(x / 50.0), floori(y / 50.0))):
+			continue
+		var r := rng.randf()
+		var pos := Vector3(x, 0.0, -y)
+		if r < 0.09:
+			xs[0 if r < 0.045 else 1].append(Props.scatter_xf(rng, pos, 0.8, 1.35))
+		elif r < 0.85:
+			xs[2].append(Props.scatter_xf(rng, pos, 0.8, 2.0, 0.0))
+		else:
+			var sz := rng.randf_range(0.8, 4.0)
+			xs[3].append(Transform3D(Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(sz, sz * rng.randf_range(0.5, 1.0), sz * rng.randf_range(0.7, 1.3))), pos + Vector3(0, sz * 0.15, 0)))
+	plants = xs[0].size() + xs[1].size() + xs[2].size() + xs[3].size()
+	Props.binned(self, "joshua0", xs[0], 1000.0, 6000.0)
+	Props.binned(self, "joshua1", xs[1], 1000.0, 6000.0)
+	Props.binned(self, "bush", xs[2], 1000.0, 1800.0)
+	Props.binned(self, "boulder", xs[3], 1000.0, 3000.0)
+	# floodlights
+	var side := 1.0
+	for i in range(0, sim.N, 40):
+		var s2: float = signf(sim.tb[i]) if sim.tb[i] != 0.0 else side
+		side = -side
+		var off: float = s2 * (sim.tw[i] / 2.0 + 18.0)
+		var p := _edge(i, off)
+		if _other_track_near(i, p, sim.tw[i] / 2.0 + 14.0):
+			continue
+		var to_track := _edge(i, 0.0) - p
+		to_track.y = 0.0
+		Props.place(self, "floodlight", Transform3D(Basis.looking_at(to_track.normalized(), Vector3.UP), Vector3(p.x, 0.0, p.z)))
+		floodlights += 1
+	# the pit building, left of the main straight (the grandstands are on the right)
+	for i in [22, 33]:
+		var hw: float = sim.tw[i] / 2.0
+		var p := _edge(i, hw + 32.0)
+		var t := Vector3(sim.ttx[i], 0.0, -sim.tty[i])
+		var n := Vector3(sim.tnx[i], 0.0, -sim.tny[i])
+		Props.place(self, "pit_building", Transform3D(Basis(-t, Vector3.UP, n), Vector3(p.x, 0.0, p.z)))
+
+
+## 50 m cells (sim x, y) within r of the centreline.
+func _near_track(r: float) -> Dictionary:
+	var cells := {}
+	var span := int(ceil(r / 50.0))
+	for i in sim.N:
+		var cx := floori(sim.tpx[i] / 50.0)
+		var cy := floori(sim.tpy[i] / 50.0)
+		for dx in range(-span, span + 1):
+			for dy in range(-span, span + 1):
+				cells[Vector2i(cx + dx, cy + dy)] = true
+	return cells
+
+
+## Whether some other part of the track (not within 30 samples of i) passes within r of p.
+func _other_track_near(i: int, p: Vector3, r: float) -> bool:
+	for j in range(0, sim.N, 2):
+		var d := absi(j - i)
+		if mini(d, sim.N - d) <= 30:
+			continue
+		if Vector2(p.x - sim.tpx[j], -p.z - sim.tpy[j]).length() < r:
+			return true
+	return false
 
 
 func _track_dist(x: float, y: float) -> float:

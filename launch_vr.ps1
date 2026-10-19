@@ -5,7 +5,8 @@
 # the CONSOLE exe so stdout is capturable, and a per-session log in %TEMP%.
 # Controls: four Touch schemes, cycled with the left menu button (trigger throttles, throttle +
 # steer, grab the levers, stick levers); A reignite, B arm ramjet, X repair, Y tap restart,
-# Y hold switches SPEED / STARFIGHTER handling, thumbstick click recenters.
+# Y hold switches SPEED / STARFIGHTER handling, thumbstick click recenters, menu hold 1.5 s
+# switches track (range <-> grand prix) without relaunching.
 #   .\launch_vr.ps1 -Handling starfighter   start in the tight ~1,200 mph handling mode
 #   .\launch_vr.ps1 -Track gp              the grand prix: 29 km for STARFIGHTER at ~1,000 mph
 #   .\launch_vr.ps1 -Track range     the 100-mile test range (jump lane +400 m left, twisty lane right)

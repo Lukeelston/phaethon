@@ -16,6 +16,7 @@
 ##   --at=I          circuits: start at track sample I (screenshots of a given corner)
 ##   --cam=F,L,U     camera at this offset from the pod (metres forward, left, up), looking at
 ##                   the engines: close-ups for screenshots
+##   --eye=X,Y,H --look=X,Y,H   a fixed camera at that sim point, aimed at the other (scenery shots)
 extends Node3D
 
 const CraftSimScript := preload("res://sim/craft_sim.gd")
@@ -32,6 +33,8 @@ const HorizonScript := preload("res://view/horizon.gd")
 const GpWorldScript := preload("res://view/gp_world.gd")
 const DT := 1.0 / 480.0
 const HAZE := Color(0.78, 0.66, 0.52)
+const GROUND_PERIOD := 4096.0             # view/ground.gdshader's PERIOD
+const SUN_ROT := Vector3(-30, 52, 0)       # the primary sun (DirectionalLight3D rotation, degrees)
 const HORIZON := Color(0.86, 0.74, 0.58)   # fog colour = the sky at the horizon, so they meet seamlessly
 
 var sim
@@ -50,6 +53,10 @@ var start_at := -1   # --at=I: start at track sample I (circuits; screenshots of
 var cruise := -1.0   # --cruise=T holds both levers at T (demos, screenshots)
 var hold_brake := [0.0, 0.0]
 var cam_offset := Vector3.ZERO   # --cam: debug close-up (forward, left, up)
+static var track_override := ""    # an in-game track switch (VR: hold the menu button) wins over --track;
+                                   # static, so it survives the scene reload that does the switch
+var eye := Vector3.INF            # --eye / --look: a fixed debug camera at sim (x, y, h), aimed at another point
+var look := Vector3.ZERO
 var best_saved := -1.0     # sprint best, persisted across launches
 var flash_msg := ""        # DNF / new-best message, shown for a few seconds
 var flash_until := -1.0
@@ -64,7 +71,7 @@ var pod_mesh: MeshInstance3D
 var cam: Camera3D
 var hud: Label
 var ground: MeshInstance3D
-var ground_mat: StandardMaterial3D
+var ground_mat: ShaderMaterial
 var circuit_root: Node3D
 var range_world: Node3D
 var landmark: Node3D
@@ -110,6 +117,16 @@ func _ready() -> void:
 		elif a.begins_with("--cam="):
 			var c := a.get_slice("=", 1).split(",")
 			cam_offset = Vector3(float(c[0]), float(c[1]), float(c[2]))
+		elif a.begins_with("--eye="):
+			var c := a.get_slice("=", 1).split(",")
+			eye = Vector3(float(c[0]), float(c[1]), float(c[2]))
+		elif a.begins_with("--look="):
+			var c := a.get_slice("=", 1).split(",")
+			look = Vector3(float(c[0]), float(c[1]), float(c[2]))
+	if track_override != "":
+		opts["track"] = track_override
+		opts.erase("startX")
+		opts.erase("startY")
 	sim = CraftSimScript.new(opts)
 	if start_at >= 0 and sim.kind == "circuit":
 		sim.respawn(-1, start_at)
@@ -342,36 +359,71 @@ func _build_world() -> void:
 	sky_mat.sky_curve = 0.09
 	sky_mat.ground_horizon_color = HORIZON
 	sky_mat.ground_bottom_color = Color(0.62, 0.5, 0.36)
-	sky_mat.sun_angle_max = 12.0
-	sky_mat.sun_curve = 0.08
+	sky_mat.sun_angle_max = 1.5
+	sky_mat.sun_curve = 0.05
 	var sky := Sky.new()
 	sky.sky_material = sky_mat
 	var env := WorldEnvironment.new()
-	env.environment = Environment.new()
-	env.environment.background_mode = Environment.BG_SKY
-	env.environment.sky = sky
-	env.environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.environment.ambient_light_color = Color(0.85, 0.78, 0.7)
-	env.environment.ambient_light_energy = 0.6
-	env.environment.fog_enabled = true
-	env.environment.fog_light_color = HORIZON
-	env.environment.fog_density = 0.0012 if sim.kind == "circuit" and sim.track_name != "gp" else 0.00035
-	env.environment.fog_sky_affect = 0.0
+	var en := Environment.new()
+	env.environment = en
+	en.background_mode = Environment.BG_SKY
+	en.sky = sky
+	# light: the sky's own colours fill the shadows (blue from above, warm bounce from the
+	# sand), filmic tonemapping keeps the bright desert from clipping, and a soft bloom lets
+	# the flames, nav strips, cables and lamps glow
+	en.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
+	en.ambient_light_sky_contribution = 0.75
+	en.ambient_light_color = Color(0.85, 0.78, 0.7)
+	en.ambient_light_energy = 0.75
+	en.tonemap_mode = Environment.TONE_MAPPER_ACES
+	en.tonemap_exposure = 1.05
+	en.tonemap_white = 6.0
+	en.glow_enabled = true
+	en.glow_intensity = 0.55
+	en.glow_strength = 0.9
+	en.glow_bloom = 0.02
+	en.glow_hdr_threshold = 0.95
+	en.glow_blend_mode = Environment.GLOW_BLEND_MODE_SOFTLIGHT
+	for lv in 7:
+		en.set_glow_level(lv, 1.0 if lv in [1, 2, 3, 4] else 0.0)
+	en.adjustment_enabled = true
+	en.adjustment_saturation = 1.08
+	en.adjustment_contrast = 1.04
+	en.fog_enabled = true
+	en.fog_light_color = HORIZON
+	en.fog_density = 0.0012 if sim.kind == "circuit" and sim.track_name != "gp" else 0.00035
+	en.fog_sky_affect = 0.0
+	en.fog_sun_scatter = 0.18   # the haze brightens toward the suns
 	add_child(env)
-	# Twin suns, ahead and to the right of the run: a white primary that casts the shadows and
-	# a smaller, warmer companion a few degrees off it.
+	# Twin suns, ahead and to the right of the run, late afternoon: a white primary that casts
+	# the shadows (long ones now, so ramps, props and the craft sit on the ground) and a smaller,
+	# warmer companion a few degrees off it.
 	var sun := DirectionalLight3D.new()
-	sun.rotation_degrees = Vector3(-38, 52, 0)
-	sun.light_energy = 1.15
+	sun.rotation_degrees = SUN_ROT
+	sun.light_color = Color(1.0, 0.95, 0.86)
+	sun.light_energy = 1.35
 	sun.shadow_enabled = true
-	sun.directional_shadow_max_distance = 400.0
+	sun.directional_shadow_max_distance = 450.0
+	sun.directional_shadow_blend_splits = true
+	sun.shadow_blur = 1.5
 	add_child(sun)
 	var sun2 := DirectionalLight3D.new()
-	sun2.rotation_degrees = Vector3(-30, 60, 0)
+	sun2.rotation_degrees = Vector3(-24, 60, 0)
 	sun2.light_color = Color(1.0, 0.72, 0.45)
 	sun2.light_energy = 0.4
 	sun2.light_angular_distance = 0.6
 	add_child(sun2)
+	# the suns' discs: sky-only lights, so the shadow caster stays a hard-edged (cheap) light
+	sun.sky_mode = DirectionalLight3D.SKY_MODE_LIGHT_ONLY
+	sun2.sky_mode = DirectionalLight3D.SKY_MODE_LIGHT_ONLY
+	for d in [[sun, Color(1.0, 0.98, 0.94), 0.55, 16.0], [sun2, Color(1.0, 0.66, 0.36), 0.35, 7.0]]:
+		var disc := DirectionalLight3D.new()
+		disc.rotation = (d[0] as DirectionalLight3D).rotation
+		disc.light_color = d[1]
+		disc.light_angular_distance = d[2]
+		disc.light_energy = d[3]
+		disc.sky_mode = DirectionalLight3D.SKY_MODE_SKY_ONLY
+		add_child(disc)
 
 	# The ground rides along under the pod; its texture offset keeps the sand fixed in the world.
 	# 60 km across so its far edge sits near the true horizon even 100+ m up a jump.
@@ -379,7 +431,10 @@ func _build_world() -> void:
 	var plane := PlaneMesh.new()
 	plane.size = Vector2(60000, 60000)
 	ground.mesh = plane
-	ground_mat = _grain(Color(0.79, 0.64, 0.42), 10000.0)
+	ground_mat = ShaderMaterial.new()
+	ground_mat.shader = preload("res://view/ground.gdshader")
+	ground_mat.set_shader_parameter("playa", 1.0 if sim.kind == "range" else 0.0)
+	ground_mat.set_shader_parameter("playa_half", RangeWorldScript.PLAYA_HALF)   # the runway's dry lake; scrub beyond
 	ground.material_override = ground_mat
 	ground.position = Vector3(0, -0.05, 0)
 	add_child(ground)
@@ -452,7 +507,8 @@ func _edge(i: int, side: float) -> Vector3:
 
 func _sync_world() -> void:
 	# 6 m per sand tile; only the fractional offset matters, which keeps it precise.
-	ground_mat.uv1_offset = Vector3(fposmod(org_x / 6.0, 1.0), fposmod(-org_y / 6.0, 1.0), 0)
+	ground_mat.set_shader_parameter("org", Vector2(fposmod(org_x, GROUND_PERIOD), fposmod(org_y, GROUND_PERIOD)))
+	ground_mat.set_shader_parameter("pod_y", org_y)
 	if circuit_root:
 		circuit_root.position = w3(0.0, 0.0)
 	if range_world:
@@ -479,7 +535,7 @@ func _build_craft() -> void:
 func _make_view() -> void:
 	cam = Camera3D.new()
 	cam.fov = 70
-	cam.far = 30000
+	cam.far = 80000   # the backdrop peaks sit at 45-57 km
 	add_child(cam)
 	var layer := CanvasLayer.new()
 	hud = Label.new()
@@ -502,6 +558,10 @@ func _place_camera(k: float) -> void:
 	cam_th = sim.pair_th if k >= 1.0 else cam_th + CraftSimScript.wrap_angle(sim.pair_th - cam_th) * k
 	var fwd := Vector3(cos(cam_th), 0, -sin(cam_th))
 	var pod_p := w3(sim.pod.x, sim.pod.y, sim.pod.z)
+	if eye != Vector3.INF:
+		cam.position = w3(eye.x, eye.y, eye.z)
+		cam.look_at(w3(look.x, look.y, look.z), Vector3.UP)
+		return
 	if cam_offset != Vector3.ZERO:
 		var left := Vector3(-sin(cam_th), 0, -cos(cam_th))
 		var mid := w3((sim.eL.x + sim.eR.x) / 2.0, (sim.eL.y + sim.eR.y) / 2.0, (sim.eL.z + sim.eR.z) / 2.0)

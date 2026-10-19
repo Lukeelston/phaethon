@@ -6,6 +6,7 @@ extends Node3D
 const Sim := preload("res://sim/craft_sim.gd")
 const Kit := preload("res://view/mesh_kit.gd")
 const RouteScript := preload("res://view/route_features.gd")
+const Props := preload("res://view/props.gd")
 
 const CHUNK := 2000.0
 const AHEAD := 14000.0
@@ -27,19 +28,29 @@ const POLE_DX := 50.0
 const WIRE_Z := [-1.1, 0.0, 1.1]    # three wires across the crossarm
 const HWY_Y := -950.0               # traffic corridors (TrafficView drives on them)
 const RAIL_Y := 700.0
+const ASPHALT_PERIOD := 64000.0     # asphalt UVs wrap here: a whole number of chunks
+const EDGE_LIGHT_DX := 60.0         # runway edge lights, both sides
+const EDGE_LIGHT_Y := RUNWAY_HALF + 1.5
+const AIRFIELD := Rect2(-560.0, 90.0, 900.0, 270.0)   # chunk 0: the start's airfield (sim x, y), between the runway and the jump lane
+const PLAYA_HALF := 320.0           # the dry lake round the runway: mean half-width (see shore())
+const GROUND_PERIOD := 4096.0       # view/ground.gdshader's PERIOD (the shore curve repeats on it)
+const VEG_BLOCK := 500.0            # plants are built in blocks this long, each culled on its own
+const BUSHES := 650                 # per block and side: scrub from the shore out ~1.1 km
+const TREES := 60                   # per block and side: Joshua trees out ~2.5 km
 
 var sim
 var view
 var chunks := {}
 var mats := {}
 var route   # overpasses and landmarks (view/route_features.gd)
+var veg_queue := []   # [chunk node, idx, cx, bx0, bx1, side]: vegetation blocks still to build
 
 
 func build(s, v) -> void:
 	sim = s
 	view = v
 	route = RouteScript.new()
-	mats.runway = v._grain(Color(0.66, 0.55, 0.40), 0.0)   # grain under you: the nearest speed cue
+	mats.runway = _asphalt(Color(0.31, 0.30, 0.29), 20.0)   # aggregate, joints and rubber: the nearest speed cue
 	mats.line = v._mat(Color(0.96, 0.94, 0.88))
 	mats.jump = v._mat(Color(0.95, 0.55, 0.15))
 	mats.ramp = v._mat(Color(0.40, 0.37, 0.35))
@@ -51,10 +62,21 @@ func build(s, v) -> void:
 	mats.reflect = v._mat(Color(1.0, 0.55, 0.1), true)
 	mats.wood = v._mat(Color(0.33, 0.24, 0.17))
 	mats.wire = v._mat(Color(0.08, 0.08, 0.09), true)
-	mats.asphalt = v._mat(Color(0.24, 0.23, 0.22))
+	mats.asphalt = _asphalt(Color(0.25, 0.245, 0.24), 6.0)
 	mats.ballast = v._mat(Color(0.45, 0.41, 0.37))
 	mats.rail = v._mat(Color(0.5, 0.5, 0.52))
 	mats.strata = Kit.vertex_colors()
+
+
+## Asphalt (view/asphalt.gdshader): base colour, and how far either side of the centreline the
+## rubber is laid. Its UVs are (metres along mod ASPHALT_PERIOD, metres across): see _quad_uv.
+func _asphalt(base: Color, lane_half: float) -> ShaderMaterial:
+	var m := ShaderMaterial.new()
+	m.shader = preload("res://view/asphalt.gdshader")
+	m.set_shader_parameter("period", ASPHALT_PERIOD)
+	m.set_shader_parameter("base", Vector3(base.r, base.g, base.b))   # sRGB as-is (a Color would arrive linearised)
+	m.set_shader_parameter("lane_half", lane_half)
+	return m
 
 
 ## Centreline of the twisty lane: sweepers whose wavelength shrinks linearly with distance.
@@ -66,6 +88,9 @@ static func twist_y(x: float) -> float:
 
 func sync(ox: float, oy: float, t := 0.0) -> void:
 	route.animate(t)
+	for idx in chunks:
+		for dish in chunks[idx].get_meta("spin", []):
+			(dish as Node3D).rotation.y = t * 1.3
 	var last := int(ceil((Sim.RANGE_LEN + Sim.OVERRUN) / CHUNK))   # runway runs on through the overrun zone
 	var lo := maxi(-1, int(floor((ox - BEHIND) / CHUNK)))
 	var hi := mini(last, int(floor((ox + AHEAD) / CHUNK)))
@@ -75,9 +100,13 @@ func sync(ox: float, oy: float, t := 0.0) -> void:
 			chunks.erase(idx)
 	var built := 0
 	for idx in range(lo, hi + 1):
-		if not chunks.has(idx) and built < 2:   # at most two per frame: no hitch when streaming
+		if not chunks.has(idx) and built < 1:   # one per frame (~3 ms), plants queued: no hitch when streaming
 			chunks[idx] = _make_chunk(idx)
 			built += 1
+	for k in (2 if built == 0 else 0):   # never on a frame that built a chunk
+		if veg_queue.is_empty():
+			break
+		_build_veg(veg_queue.pop_front())
 	for idx in chunks:
 		chunks[idx].position = Vector3(idx * CHUNK - ox, 0.0, oy)
 
@@ -87,9 +116,19 @@ func _quad(st: SurfaceTool, x0: float, x1: float, y0: float, y1: float, h := 0.0
 	var b := Vector3(x1, h, -y0)
 	var c := Vector3(x1, h, -y1)
 	var d := Vector3(x0, h, -y1)
-	for v in [a, b, c, a, c, d]:
+	for v in [a, c, b, a, d, c]:   # clockwise seen from above: Godot's front face, so the sun lights it
 		st.set_normal(Vector3.UP)
 		st.add_vertex(v)
+
+
+## A flat quad with asphalt UVs: u = metres along (the chunk's start mod ASPHALT_PERIOD, plus
+## chunk-local x), v = metres across from `centre`.
+func _quad_uv(st: SurfaceTool, cx: float, x0: float, x1: float, y0: float, y1: float, centre: float, h := 0.02) -> void:
+	var u0 := fposmod(cx, ASPHALT_PERIOD)
+	for c in [[x0, y0], [x1, y1], [x1, y0], [x0, y0], [x0, y1], [x1, y1]]:   # clockwise from above
+		st.set_normal(Vector3.UP)
+		st.set_uv(Vector2(u0 + c[0], c[1] - centre))
+		st.add_vertex(Vector3(c[0], h, -c[1]))
 
 
 func _mesh(parent: Node3D, st: SurfaceTool, mat: Material) -> void:
@@ -112,7 +151,7 @@ func _make_chunk(idx: int) -> Node3D:
 	# runway: compacted strip, edge lines, centre dashes
 	var strip := SurfaceTool.new()
 	strip.begin(Mesh.PRIMITIVE_TRIANGLES)
-	_quad(strip, x0, x1, -RUNWAY_HALF, RUNWAY_HALF, 0.01)
+	_quad_uv(strip, cx, x0, x1, -RUNWAY_HALF, RUNWAY_HALF, 0.0, 0.01)
 	_mesh(node, strip, mats.runway)
 	var paint := SurfaceTool.new()
 	paint.begin(Mesh.PRIMITIVE_TRIANGLES)
@@ -165,7 +204,7 @@ func _make_chunk(idx: int) -> Node3D:
 	# the highway and the railway the traffic runs on
 	var road := SurfaceTool.new()
 	road.begin(Mesh.PRIMITIVE_TRIANGLES)
-	_quad(road, x0, x1, HWY_Y - 7.5, HWY_Y + 7.5, 0.02)
+	_quad_uv(road, cx, x0, x1, HWY_Y - 7.5, HWY_Y + 7.5, HWY_Y, 0.02)
 	_mesh(node, road, mats.asphalt)
 	var bed := SurfaceTool.new()
 	bed.begin(Mesh.PRIMITIVE_TRIANGLES)
@@ -212,20 +251,121 @@ func _make_chunk(idx: int) -> Node3D:
 	_spires(node, idx, cx, x0, x1)
 	route.build_chunk(node, cx, x0, x1)
 
-	# rocks: a speed cue off the lanes, deterministic per chunk
-	var placed := rock_xforms(idx, cx, x0, x1)
-	var rocks := MultiMesh.new()
-	rocks.transform_format = MultiMesh.TRANSFORM_3D
-	rocks.mesh = BoxMesh.new()
-	rocks.instance_count = placed.size()
-	for i in placed.size():
-		rocks.set_instance_transform(i, placed[i])
-	var rmi := MultiMeshInstance3D.new()
-	rmi.multimesh = rocks
-	rmi.material_override = mats.rock
-	rmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	node.add_child(rmi)
+	# boulders: a speed cue off the lanes, deterministic per chunk
+	Props.multi(node, "boulder", rock_xforms(idx, cx, x0, x1), 3000.0)
+	# the desert past the dry lake: scrub and Joshua trees, in blocks so each culls on its own;
+	# queued, a couple of blocks a frame (chunks stream in 14 km ahead, long before you see them)
+	var bx := x0
+	while bx < x1 - 1.0:
+		var bx1 := minf(bx + VEG_BLOCK, x1)
+		for side in [1.0, -1.0]:
+			veg_queue.append([node, idx, cx, bx, bx1, side])
+		bx = bx1
+	_edge_lights(node, cx, x0, x1)
+	if idx == 0:
+		_airfield(node)
 	return node
+
+
+## The dry lake's shore on one side (side +1 left, -1 right) at sim x: the same curve as
+## view/ground.gdshader's (without its small-scale wobble), so the scrub starts where the
+## lakebed ends.
+static func shore(x: float, side: float) -> float:
+	var ph := 1.7 if side < 0.0 else 0.0
+	var u := TAU * fposmod(x, GROUND_PERIOD) / GROUND_PERIOD
+	return PLAYA_HALF + 120.0 * sin(3.0 * u + 1.0 + ph) + 70.0 * sin(11.0 * u + 2.0 + ph) + 35.0 * sin(29.0 * u + ph)
+
+
+## Build one queued vegetation block (its chunk may have been freed since).
+func _build_veg(task: Array) -> void:
+	var node = task[0]   # untyped: a freed chunk must not trip a typed assignment
+	if not is_instance_valid(node):
+		return
+	var veg := veg_xforms(task[1], task[2], task[3], task[4], task[5])
+	var blk := Node3D.new()
+	blk.position = Vector3((task[3] + task[4]) / 2.0, 0.0, -task[5] * (PLAYA_HALF + 700.0))
+	node.add_child(blk)
+	var back := Transform3D(Basis(), -blk.position)
+	Props.multi(blk, "bush", veg[2].map(func(t): return back * t), 1600.0)
+	Props.multi(blk, "joshua0", veg[0].map(func(t): return back * t), 6000.0)
+	Props.multi(blk, "joshua1", veg[1].map(func(t): return back * t), 6000.0)
+
+
+## Plant placements in chunk idx between chunk-local bx0..bx1 on one side (+1 left, -1 right):
+## [joshua0 xforms, joshua1 xforms, bush xforms]. Scrub thickest just past the shore, in clumps;
+## Joshua trees further out. Clear of every lane, corridor and route feature.
+func veg_xforms(idx: int, cx: float, bx0: float, bx1: float, side: float) -> Array:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 7700 + idx * 64 + int(bx0 / 100.0) * 2 + (0 if side > 0.0 else 1)
+	var out := [[], [], []]
+	var n := int(BUSHES * (bx1 - bx0) / VEG_BLOCK)
+	for i in n + int(TREES * (bx1 - bx0) / VEG_BLOCK):
+		var tree := i >= n
+		var lx := rng.randf_range(bx0, bx1)
+		var x := cx + lx
+		var d := 40.0 + (2500.0 if tree else 1100.0) * pow(rng.randf(), 1.5 if tree else 1.8)
+		var y := side * (shore(x, side) + d)
+		# clumps: thin out where a slow wave says so
+		if not tree and sin(x * 0.021 + y * 0.017) + sin(x * 0.0073 - y * 0.011) < -0.6:
+			continue
+		if not _clear(x, y, 6.0):
+			continue
+		if tree:
+			out[0 if rng.randf() < 0.5 else 1].append(Props.scatter_xf(rng, Vector3(lx, 0.0, -y), 0.8, 1.35))
+		else:
+			out[2].append(Props.scatter_xf(rng, Vector3(lx, 0.0, -y), 0.8, 2.0, 0.0))
+	return out
+
+
+## Whether (sim x, y) is clear of the lanes, the corridors, the route's features and the airfield.
+func _clear(x: float, y: float, margin: float) -> bool:
+	return not (absf(y) < RUNWAY_HALF + 20.0 or absf(y - Sim.JUMP_Y) < 50.0 or absf(y - twist_y(x)) < 60.0
+		or absf(y - POLE_Y) < 8.0 or absf(y - HWY_Y) < 25.0 or absf(y - RAIL_Y) < 15.0
+		or route.blocked(x, y, margin) or AIRFIELD.grow(margin).has_point(Vector2(x, y)))
+
+
+## Runway edge lights every EDGE_LIGHT_DX both sides (posts and glowing lamps), and at the start a
+## green threshold bar across the runway.
+func _edge_lights(node: Node3D, cx: float, x0: float, x1: float) -> void:
+	var posts: Array[Transform3D] = []
+	var x := ceilf((cx + x0) / EDGE_LIGHT_DX) * EDGE_LIGHT_DX - cx + EDGE_LIGHT_DX / 2.0
+	while x < x1:
+		for sy in [-EDGE_LIGHT_Y, EDGE_LIGHT_Y]:
+			posts.append(Transform3D(Basis(), Vector3(x, 0.0, -sy)))
+		x += EDGE_LIGHT_DX
+	Props.multi(node, "edge_light", posts, 4000.0)
+	Props.multi(node, "lamp_white", posts, 4000.0, true)
+	if cx <= 0.0 and cx + CHUNK > 0.0:
+		var bar: Array[Transform3D] = []
+		var yy := -RUNWAY_HALF + 3.0
+		while yy < RUNWAY_HALF:
+			bar.append(Transform3D(Basis(), Vector3(-cx - 6.0, 0.0, -yy)))
+			yy += 4.0
+		Props.multi(node, "lamp_green", bar, 4000.0, true)
+
+
+## The start's airfield, beside the runway behind the start line (chunk 0, sim coordinates): a
+## concrete apron, three hangars with their doors to the runway, a control tower, fuel tanks, a
+## spinning radar, a windsock and a couple of bowsers.
+func _airfield(node: Node3D) -> void:
+	var apron := SurfaceTool.new()
+	apron.begin(Mesh.PRIMITIVE_TRIANGLES)
+	_quad_uv(apron, 0.0, AIRFIELD.position.x, AIRFIELD.end.x, AIRFIELD.position.y, AIRFIELD.end.y, 0.0, 0.03)
+	var concrete := _asphalt(Color(0.62, 0.6, 0.57), 0.0)
+	concrete.set_shader_parameter("joint_every", 7.5)
+	_mesh(node, apron, concrete)
+	var door_to_runway := Basis(Vector3.UP, PI)   # doors face render +z: toward the runway (smaller sim y)
+	for k in 3:
+		Props.place(node, "hangar", Transform3D(door_to_runway, Vector3(-500.0 + k * 52.0, 0.0, -300.0)))
+	Props.place(node, "tower", Transform3D(door_to_runway, Vector3(-290.0, 0.0, -230.0)))
+	for k in 2:
+		Props.place(node, "tank", Transform3D(Basis(), Vector3(-200.0 + k * 16.0, 0.0, -320.0)))
+	Props.place(node, "radar_base", Transform3D(Basis(), Vector3(-110.0, 0.0, -300.0)))
+	var dish := Props.place(node, "radar_dish", Transform3D(Basis(), Vector3(-110.0, 9.0, -300.0)))
+	node.set_meta("spin", [dish])
+	Props.place(node, "windsock", Transform3D(Basis(), Vector3(140.0, 0.0, -82.0)))
+	Props.place(node, "truck", Transform3D(Basis(Vector3.UP, 0.3), Vector3(-380.0, 0.03, -190.0)))
+	Props.place(node, "truck", Transform3D(Basis(Vector3.UP, -1.2), Vector3(-230.0, 0.03, -160.0)))
 
 
 ## Rock placements for chunk idx (chunk-local), clear of every lane, corridor and route
@@ -237,7 +377,7 @@ func rock_xforms(idx: int, cx: float, x0: float, x1: float) -> Array[Transform3D
 	while placed.size() < 160:
 		var lx := rng.randf_range(x0, x1)
 		var y := rng.randf_range(-1800.0, 1800.0)
-		if absf(y) < RUNWAY_HALF + 20.0 or absf(y - Sim.JUMP_Y) < 50.0 or absf(y - twist_y(cx + lx)) < 60.0 				or absf(y - POLE_Y) < 8.0 or absf(y - HWY_Y) < 25.0 or absf(y - RAIL_Y) < 15.0 				or route.blocked(cx + lx, y, 8.0):
+		if not _clear(cx + lx, y, 8.0):
 			continue
 		var sz := rng.randf_range(0.6, 4.0)
 		var b := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(sz, sz * rng.randf_range(0.4, 1.2), sz * rng.randf_range(0.6, 1.4)))

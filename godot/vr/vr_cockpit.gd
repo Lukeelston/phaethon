@@ -1,21 +1,23 @@
 ## M2 VR seat: seated OpenXR cockpit riding the pod. The pod is your frame of reference;
 ## the engines, binder and cables run out ahead of you, and the cockpit lists with the pod.
-## Touch controllers stand in for the printed levers, in four schemes (QuestControls; the left
-## menu button cycles them, the choice is saved): trigger throttles, throttle + steer, grab
-## the levers, stick levers. Buttons, every scheme:
+## Touch controllers stand in for the printed levers, in four schemes (QuestControls; a tap on
+## the left menu button cycles them, the choice is saved): trigger throttles, throttle + steer,
+## grab the levers, stick levers. Buttons, every scheme:
 ##   A reignite · B arm ramjet · X repair · thumbstick click recenter (view and seat height)
 ##   Y tap: restart · Y hold 1 s: switch SPEED / STARFIGHTER handling (saved) and restart
+##   menu tap: next control scheme · menu hold 1.5 s: switch track, range <-> grand prix
 ## Haptics: a kick on the sonic boom; a tick in that hand when a lever crosses the burner gate.
 ## The printed levers / a gamepad win whenever they're moving; the keyboard still works.
 ## Logs OpenXR session events and a frame-timing summary every 10 s; writes a CSV on exit.
 extends "res://view/craft_view.gd"
 
-const SEAT := Vector3(0.0, 0.6, 0.6)   # eye point in pod space (pod forward = -Z): about level with
-                                        # the cockpit rim, sitting down in it (Luke: "sit a bit lower")
+const SEAT := Vector3(0.0, 0.72, 0.6)  # eye point in pod space (pod forward = -Z): a little above the
+                                        # cockpit rim (Luke: "sit a bit lower", then "view higher by default")
 const FLOOR_H := 0.7                    # pod floor above the ground
 const QuestControlsScript := preload("res://input/quest_controls.gd")
 const PREFS := "user://vr_prefs.json"
 const Y_HOLD := 1.0
+const MENU_HOLD := 1.5   # hold the left menu button this long to switch track
 const DashboardScript := preload("res://vr/dashboard.gd")
 const CockpitInteriorScript := preload("res://vr/cockpit_interior.gd")
 const Kit := preload("res://view/mesh_kit.gd")
@@ -38,6 +40,10 @@ var frame_ms := PackedFloat32Array()
 var report_t := 0.0
 var quest
 var _y_held := 0.0
+var _menu_held := 0.0
+var _menu_fired := false
+var _switch_at := -1     # --switch-track-at=FRAMES: switch track by itself (tests the reload path)
+var _frames := 0
 var _y_fired := false
 var _scheme_flash := 0.0
 
@@ -58,6 +64,10 @@ func _ready() -> void:
 	if wind_audio:
 		wind_audio.boomed.connect(_on_boom)
 	print("CONTROLS: %s, %s handling" % [quest.scheme, sim.P.handling])
+	print("TRACK: %s" % _track())
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--switch-track-at="):
+			_switch_at = int(a.get_slice("=", 1))
 
 
 func _load_prefs() -> Dictionary:
@@ -159,7 +169,7 @@ func _make_view() -> void:
 	origin.position = SEAT
 	rig.add_child(origin)
 	var xr_cam := XRCamera3D.new()
-	xr_cam.far = 30000
+	xr_cam.far = 80000   # the backdrop peaks sit at 45-57 km
 	origin.add_child(xr_cam)
 	cam = xr_cam
 	for side in ["left", "right"]:
@@ -351,15 +361,51 @@ func _read_input(delta: float) -> void:
 			_respawn()
 		_y_held = 0.0
 		_y_fired = false
-	if _pressed_once("menu", l.is_button_pressed("menu_button")):
-		quest.next_scheme()
-		_save_prefs()
-		_scheme_flash = 4.0
-		_buzz(l, 0.5, 0.08)
-		print("CONTROLS: ", quest.scheme)
+	match _menu(l.is_button_pressed("menu_button"), delta):
+		"scheme":
+			quest.next_scheme()
+			_save_prefs()
+			_scheme_flash = 4.0
+			_buzz(l, 0.5, 0.08)
+			print("CONTROLS: ", quest.scheme)
+		"track":
+			_buzz(l, 0.9, 0.2)
+			_buzz(r, 0.9, 0.2)
+			switch_track()
+	_frames += 1
+	if _switch_at > 0 and _frames == _switch_at and track_override == "":   # once
+		switch_track()
 	if _pressed_once("recenter", l.is_button_pressed("primary_click") or r.is_button_pressed("primary_click")):
 		recenter()
 	_diag(delta, l, r, p)
+
+
+func _track() -> String:
+	return "gp" if sim.track_name == "gp" else ("range" if sim.kind == "range" else "circuit")
+
+
+## The left menu button: a tap (released before MENU_HOLD) cycles the control scheme; holding it
+## MENU_HOLD switches track. Returns "scheme", "track" or "".
+func _menu(down: bool, delta: float) -> String:
+	if down:
+		_menu_held += delta
+		if _menu_held >= MENU_HOLD and not _menu_fired:
+			_menu_fired = true
+			return "track"
+		return ""
+	var tapped := _menu_held > 0.0 and not _menu_fired
+	_menu_held = 0.0
+	_menu_fired = false
+	return "scheme" if tapped else ""
+
+
+## Range <-> grand prix, in the headset: reload the scene on the other track (the OpenXR session
+## carries on; CraftView.track_override survives the reload and wins over --track).
+func switch_track() -> void:
+	var to := "range" if sim.track_name == "gp" else "gp"
+	print("TRACK: switching %s -> %s" % [_track(), to])
+	track_override = to
+	get_tree().call_deferred("reload_current_scene")
 
 
 func _place_camera(_k: float) -> void:

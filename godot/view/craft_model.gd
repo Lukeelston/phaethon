@@ -13,7 +13,7 @@
 ## Steel cables run from an eye under each engine's tail to two hardpoint eyes on the pod's
 ## nose, exactly where the sim anchors them (the nose ring, either side of centre); the binder
 ## arc crackles between the engines. In VR the pod is hidden (you sit in it), so the view hands
-## over its cockpit frame (pod_frame), which carries its own nose and eyes. Flames get a white core and, on afterburner or ramjet, shock diamonds.
+## over its cockpit frame (pod_frame), which carries its own nose and eyes. Exhaust plumes are additive shader cones (view/flame.gdshader): faint on dry thrust, long with shock diamonds and a nozzle light on the burner.
 ##   add_child(model); model.build(view)          once
 ##   model.sync(sim, inp, delta)                  every frame, after the floating origin moves
 extends Node3D
@@ -45,7 +45,16 @@ const CAGE_R := 0.02         # hoop radius: covers the skin's cut edges (> SKIN 
 static var _hull_cache: ArrayMesh
 const FLAP_OPEN := deg_to_rad(68.0)   # full brake
 const FLAP_RATE := 9.0                # flap travel, full range per second (~0.11 s open or shut)
-const FLAP_ANGLES := [PI / 4.0, 3.0 * PI / 4.0, 5.0 * PI / 4.0, 7.0 * PI / 4.0]   # an X: clear of the fins
+# The engines are flat rounded slabs (Luke: "horizontally flat, rounded rectangular prisms"),
+# 2.4 m wide (the sim's 1.2 m collision radius) by 0.96 m tall. Air brakes: two flaps on top, two
+# underneath, [x, top (+1) or bottom (-1)], hinged at the front edge on the skin.
+const ENG_W := 2.4
+const ENG_H := 0.96
+const FLAPS_AT := [[-0.58, 1.0], [0.58, 1.0], [-0.58, -1.0], [0.58, -1.0]]
+const VANE_MAX := 0.45               # vectoring vanes' full deflection, radians
+const NAV_L := Color(1.0, 0.16, 0.12)   # nav lights: red on the left engine, green on the right (as the walls)
+const NAV_R := Color(0.15, 1.0, 0.35)
+const BINDER_COL := Color(0.45, 0.85, 1.0)
 const FLAP_Z := 1.4                   # hinge station, engine-local (forward is -Z)
 const BANK_MAX := deg_to_rad(62.0)    # the lean eases toward this in the hardest turns
 const BANK_G := 12.0                  # lateral g that gives ~76% of BANK_MAX (tanh knee)
@@ -57,11 +66,21 @@ var view
 var engines: Array[Node3D] = []
 var hot_mats: Array[StandardMaterial3D] = []
 var glow_mats: Array[StandardMaterial3D] = []
-var fans: Array[Node3D] = []
+var fans: Array[Node3D] = []         # per engine: holds its twin intake rotors
+var rotors := [[], []]               # per engine: the two fan rotors (spin about their own Z)
+var vanes := [[], []]                # per engine: the thrust-vectoring vanes in the nozzle (swing with steering)
+var vane_angle := 0.0                # their current deflection, radians (+ = trailing edges right, a right turn)
+var strobes: Array[Node3D] = []      # the fin-tip strobes (double flash)
+var binder_mats: Array[StandardMaterial3D] = []   # the binder emitters' glowing cores
+const FlameShader := preload("res://view/flame.gdshader")
+const FLAME_H := 0.62                # the plume's height at the nozzle (2 x 0.62 x scale 0.5)
+var flame_mats := [[], []]           # per engine: [outer plume, inner core] ShaderMaterials (view/flame.gdshader)
+var nozzle_lights: Array[OmniLight3D] = []   # light the track behind a burning engine
+var _burn := [0.0, 0.0]              # eased burner and ramjet shares, per engine
+var _ram := [0.0, 0.0]
 var flaps := [[], []]                 # per engine: its four hinge nodes
 var flap_open := [0.0, 0.0]           # per engine: current opening 0..1 (tests read this)
 var flames: Array[Node3D] = []
-var diamonds := [[], []]
 var pod: MeshInstance3D
 var pod_flaps: Array[Node3D] = []
 var pod_flap_open := 0.0
@@ -91,6 +110,8 @@ func build(v) -> void:
 	view = v
 	var sim = v.sim
 	var shaded := Kit.vertex_colors()
+	var finish := Kit.polished(0.55, 0.38)   # the slabs: satin metal, tinted by vertex colour
+	var lit_mat := Kit.vertex_colors(true)
 	for k in 2:
 		var out := -1.0 if k == 0 else 1.0   # outboard side, engine-local X (eL rides on the left)
 		var eng := Node3D.new()
@@ -98,13 +119,17 @@ func build(v) -> void:
 		engines.append(eng)
 		var body := MeshInstance3D.new()
 		body.mesh = _engine_body(out)
-		body.material_override = shaded
+		body.material_override = finish
 		eng.add_child(body)
+		var lights := MeshInstance3D.new()   # nav, tail, landing lights and the repulsor underglow
+		lights.mesh = _engine_lights(out)
+		lights.material_override = lit_mat
+		lights.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		eng.add_child(lights)
 		# hot section: its own material, coloured by heat
 		var hot := MeshInstance3D.new()
-		hot.mesh = Kit.cyl(0.6, 0.8, 2.5, 20)
-		hot.rotation.x = PI / 2.0   # +Y (narrow end) to the back
-		hot.position.z = 2.75
+		hot.mesh = Kit.rounded_box(Vector3(ENG_W - 0.2, ENG_H - 0.16, 2.2), 5.0)
+		hot.position.z = 2.9
 		var hm := StandardMaterial3D.new()
 		hm.albedo_color = STEEL
 		hm.emission_enabled = true
@@ -112,86 +137,130 @@ func build(v) -> void:
 		hot.material_override = hm
 		eng.add_child(hot)
 		hot_mats.append(hm)
-		var glow := MeshInstance3D.new()
-		glow.mesh = Kit.cyl(0.5, 0.5, 0.04, 20)
-		glow.rotation.x = PI / 2.0
-		glow.position.z = 4.0
+		var glow := MeshInstance3D.new()   # the slot nozzle's glow
+		glow.mesh = Kit.box(Vector3(ENG_W - 0.5, 0.5, 0.04))
+		glow.position.z = 4.02
 		var gm := StandardMaterial3D.new()
 		gm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		gm.albedo_color = DARK
 		glow.material_override = gm
 		eng.add_child(glow)
 		glow_mats.append(gm)
-		# intake fan: spinner and eight blades, one painted so the spin reads
+		# twin intake fans: spinners and eight blades each, one painted so the spin reads
 		var fan := Node3D.new()
-		fan.position.z = -3.55
+		fan.position.z = -3.86
 		eng.add_child(fan)
 		fans.append(fan)
-		var parts := [[Kit.cyl(0.04, 0.26, 0.4, 12), Kit.at(Vector3(0, 0, -0.15), Vector3(-PI / 2.0, 0, 0)), Color(0.85, 0.85, 0.82)]]
-		for b in 8:
-			var a := TAU * b / 8.0
-			var radial := Vector3(sin(a), cos(a), 0.0)
-			parts.append([Kit.box(Vector3(0.16, 0.56, 0.03)),
-				Transform3D(Basis(Vector3.BACK, -a) * Basis(Vector3.UP, 0.55), radial * 0.5),
-				LIVERY if b == 0 else Color(0.72, 0.74, 0.77)])
-		var fm := MeshInstance3D.new()
-		fm.mesh = Kit.compound(parts)
-		fm.material_override = shaded
-		fan.add_child(fm)
-		# split air brakes: hinge at the front edge, trailing edge swings out into the airflow
+		for fx in [-0.55, 0.55]:
+			var rotor := Node3D.new()
+			rotor.position.x = fx
+			fan.add_child(rotor)
+			rotors[k].append(rotor)
+			var parts := [[Kit.cyl(0.03, 0.15, 0.24, 12), Kit.at(Vector3(0, 0, -0.08), Vector3(-PI / 2.0, 0, 0)), Color(0.85, 0.85, 0.82)]]
+			for b in 8:
+				var a := TAU * b / 8.0
+				var radial := Vector3(sin(a), cos(a), 0.0)
+				parts.append([Kit.box(Vector3(0.1, 0.3, 0.02)),
+					Transform3D(Basis(Vector3.BACK, -a) * Basis(Vector3.UP, 0.55), radial * 0.2),
+					LIVERY if b == 0 else Color(0.72, 0.74, 0.77)])
+			var fm := MeshInstance3D.new()
+			fm.mesh = Kit.compound(parts)
+			fm.material_override = shaded
+			rotor.add_child(fm)
+		# split air brakes, two on top and two underneath: hinged at the front edge, the trailing
+		# edge swings up (or down) into the airflow
 		var flap_mesh := Kit.compound([
-			[Kit.box(Vector3(0.62, 0.05, 1.3)), Kit.at(Vector3(0, 0.025, 0.65)), STEEL.darkened(0.1)],
-			[Kit.box(Vector3(0.56, 0.02, 1.22)), Kit.at(Vector3(0, -0.012, 0.65)), Color(0.85, 0.08, 0.05)],
+			[Kit.rounded_box(Vector3(1.0, 0.05, 1.3), 8.0), Kit.at(Vector3(0, 0.025, 0.65)), STEEL.darkened(0.1)],
+			[Kit.box(Vector3(0.92, 0.02, 1.22)), Kit.at(Vector3(0, -0.012, 0.65)), Color(0.85, 0.08, 0.05)],
 		])
-		for a in FLAP_ANGLES:
+		for fa in FLAPS_AT:
 			var ring := Node3D.new()
-			ring.position.z = FLAP_Z
-			ring.rotation.z = a
+			ring.position = Vector3(fa[0], 0.0, FLAP_Z)
+			ring.rotation.z = 0.0 if fa[1] > 0.0 else PI
 			eng.add_child(ring)
 			var hinge := Node3D.new()
-			hinge.position.y = 0.83
+			hinge.position.y = ENG_H / 2.0 + 0.01
 			ring.add_child(hinge)
 			var fl := MeshInstance3D.new()
 			fl.mesh = flap_mesh
 			fl.material_override = shaded
 			hinge.add_child(fl)
 			flaps[k].append(hinge)
-		# flame: alpha outer cone over a white core; shock diamonds for the burner
+		# thrust-vectoring vanes across the nozzle: they swing with the steering
+		var vane_mesh := Kit.compound([[Kit.rounded_box(Vector3(0.05, 0.62, 0.46), 6.0), Kit.at(Vector3(0, 0, 0.23)), DARK.lightened(0.3)]])
+		for vx in [-0.7, 0.0, 0.7]:
+			var vp := Node3D.new()
+			vp.position = Vector3(vx, 0.0, 4.02)
+			eng.add_child(vp)
+			var vm := MeshInstance3D.new()
+			vm.mesh = vane_mesh
+			vm.material_override = shaded
+			vp.add_child(vm)
+			vanes[k].append(vp)
+		# the fin-tip strobe
+		var strobe := MeshInstance3D.new()
+		strobe.mesh = Kit.ball(0.08, 10)
+		strobe.material_override = view._mat(Color(1.0, 1.0, 1.0), true)
+		strobe.position = Vector3(0, 1.5, 1.05)
+		strobe.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		eng.add_child(strobe)
+		strobes.append(strobe)
+		# the upgraded binder emitter on the inboard face: a ring round a glowing core, facing across
+		var em := Node3D.new()
+		em.position = Vector3(-out * (ENG_W / 2.0 + 0.04), 0.0, -2.9)
+		em.rotation.z = PI / 2.0   # cylinders' axis (Y) across the gap
+		eng.add_child(em)
+		var ring_m := MeshInstance3D.new()
+		ring_m.mesh = Kit.compound([
+			[Kit.cyl(0.34, 0.34, 0.08, 24), Kit.at(Vector3.ZERO), DARK.lightened(0.35)],
+			[Kit.cyl(0.38, 0.38, 0.03, 24), Kit.at(Vector3(0, -out * 0.03, 0)), LIVERY],
+		])
+		ring_m.material_override = finish
+		em.add_child(ring_m)
+		var core_m := MeshInstance3D.new()
+		core_m.mesh = Kit.cyl(0.24, 0.24, 0.1, 20)
+		core_m.position.y = -out * 0.02
+		var cmat := StandardMaterial3D.new()
+		cmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		cmat.albedo_color = BINDER_COL
+		core_m.material_override = cmat
+		core_m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		em.add_child(core_m)
+		binder_mats.append(cmat)
+		# exhaust plume: two additive shader layers (a wide soft plume over a bright core),
+		# flattened to the slot nozzle; dry thrust nearly invisible, the burner long with shock
+		# diamonds (view/flame.gdshader); a flickering light for the burner
 		var flame := Node3D.new()
 		flame.position.z = sim.P.engineLen / 2.0
+		flame.scale = Vector3(1.55, 0.5, 1.0)   # the outer cone's mouth fills the 1.9 x 0.6 m slot
 		eng.add_child(flame)
 		flames.append(flame)
-		var outer := MeshInstance3D.new()
-		outer.mesh = Kit.cyl(0.55, 0.0, 1.0, 16)
-		outer.position.y = -0.5
-		var om := StandardMaterial3D.new()
-		om.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		om.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		om.albedo_color = Color(HOT.r, HOT.g, HOT.b, 0.72)
-		outer.material_override = om
-		outer.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		var core := MeshInstance3D.new()
-		core.mesh = Kit.cyl(0.32, 0.0, 0.6, 12)
-		core.position.y = -0.3
-		core.material_override = view._mat(Color(1.0, 0.93, 0.72), true)
-		core.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		var cone_root := Node3D.new()   # cones hang along -Y; sync turns that to +Z (back) and stretches it
 		cone_root.name = "cones"
-		cone_root.add_child(outer)
-		cone_root.add_child(core)
 		flame.add_child(cone_root)
-		for d in 4:
-			var dm := MeshInstance3D.new()
-			var sp := SphereMesh.new()
-			sp.radius = 0.2
-			sp.height = 0.4
-			sp.radial_segments = 10
-			sp.rings = 5
-			dm.mesh = sp
-			dm.material_override = view._mat(Color(1.0, 0.86, 0.78), true)
-			dm.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-			flame.add_child(dm)
-			diamonds[k].append(dm)
+		for layer in 2:
+			var cone := MeshInstance3D.new()
+			var cm: CylinderMesh = Kit.cyl(0.62, 0.06, 1.0, 24) if layer == 0 else Kit.cyl(0.3, 0.0, 0.75, 16)
+			cm.cap_top = false
+			cm.cap_bottom = false
+			cone.mesh = cm
+			cone.position.y = -0.5 if layer == 0 else -0.375
+			var fmat := ShaderMaterial.new()
+			fmat.shader = FlameShader
+			fmat.set_shader_parameter("layer", float(layer))
+			fmat.set_shader_parameter("seed", float(k) * 3.7)
+			cone.material_override = fmat
+			cone.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			cone_root.add_child(cone)
+			flame_mats[k].append(fmat)
+		var lamp := OmniLight3D.new()
+		lamp.position = Vector3(0, -0.2, sim.P.engineLen / 2.0 + 1.2)
+		lamp.light_color = Color(1.0, 0.58, 0.25)
+		lamp.omni_range = 10.0
+		lamp.light_energy = 0.0
+		lamp.shadow_enabled = false
+		eng.add_child(lamp)
+		nozzle_lights.append(lamp)
 
 	pod = MeshInstance3D.new()
 	pod.mesh = pod_hull()   # materials live on its surfaces
@@ -232,21 +301,66 @@ func build(v) -> void:
 	add_child(ami)
 
 
-## Engine shell, forward -Z, 8 m: intake lip and face, nacelle, livery band, fins, mounts.
+## Engine shell, forward -Z, 8 m, a flat rounded slab: intake lip and twin-intake face, nacelle,
+## livery band and pinstripe, dorsal fin, outboard stabiliser, binder housing, cable lug and eye;
+## plus access covers with rivets, side intake louvres, top exhaust ports, coolant louvres and the
+## nozzle's upper and lower lips.
 static func _engine_body(out: float) -> ArrayMesh:
-	var along := Vector3(PI / 2.0, 0, 0)   # cylinder +Y to the back
+	var top := ENG_H / 2.0
+	var side := ENG_W / 2.0
+	var parts := [
+		[Kit.rounded_box(Vector3(ENG_W, ENG_H, 6.0), 5.0), Kit.at(Vector3(0, 0, -0.55)), STEEL],                  # nacelle
+		[Kit.rounded_box(Vector3(ENG_W + 0.1, ENG_H + 0.1, 0.45), 6.0), Kit.at(Vector3(0, 0, -3.6)), DARK.lightened(0.15)],   # intake lip
+		[Kit.box(Vector3(ENG_W - 0.3, ENG_H - 0.22, 0.04)), Kit.at(Vector3(0, 0, -3.84)), Color(0.05, 0.05, 0.06)],   # intake throat
+		[Kit.box(Vector3(0.08, ENG_H - 0.22, 0.06)), Kit.at(Vector3(0, 0, -3.85)), DARK.lightened(0.3)],         # splitter between the twin intakes
+		[Kit.rounded_box(Vector3(ENG_W + 0.06, ENG_H + 0.06, 0.6), 6.0), Kit.at(Vector3(0, 0, -2.5)), LIVERY],    # band
+		[Kit.rounded_box(Vector3(ENG_W + 0.04, ENG_H + 0.04, 0.25), 6.0), Kit.at(Vector3(0, 0, 0.6)), LIVERY],    # pinstripe
+		[Kit.box(Vector3(0.09, 1.05, 1.7)), Kit.at(Vector3(0, top + 0.47, 0.2), Vector3(-0.35, 0, 0)), STEEL],    # dorsal fin
+		[Kit.box(Vector3(0.06, 0.2, 1.5)), Kit.at(Vector3(0, top + 0.92, 0.42), Vector3(-0.35, 0, 0)), LIVERY],
+		[Kit.rounded_box(Vector3(1.1, 0.07, 1.3), 6.0), Kit.at(Vector3(out * (side + 0.5), -0.1, 0.5), Vector3(0, 0, -out * 0.12)), STEEL],   # outboard stabiliser
+		[Kit.rounded_box(Vector3(0.18, 0.72, 1.1), 5.0), Kit.at(Vector3(-out * (side - 0.02), 0.0, -2.9)), DARK.lightened(0.25)],   # binder housing
+		[Kit.box(Vector3(0.3, 0.5, 0.7)), Kit.at(Vector3(0, -0.66, 3.0)), DARK.lightened(0.25)],                  # cable lug pylon
+		[Kit.cyl(0.11, 0.11, 0.08, 10), Kit.at(Vector3(0, -0.95, 3.4), Vector3(0, 0, PI / 2.0)), Color(0.75, 0.77, 0.8)],   # cable eye
+		[Kit.box(Vector3(ENG_W - 0.2, 0.06, 0.4)), Kit.at(Vector3(0, 0.36, 4.0)), DARK.lightened(0.2)],          # nozzle lips
+		[Kit.box(Vector3(ENG_W - 0.2, 0.06, 0.4)), Kit.at(Vector3(0, -0.36, 4.0)), DARK.lightened(0.2)],
+	]
+	# access covers: raised panels on top and both sides, a dark seam round each, rivets at the corners
+	var cover := DARK.lightened(0.42)
+	var seam := Color(0.08, 0.08, 0.09)
+	for cx in [-0.6, 0.6]:
+		parts.append([Kit.box(Vector3(0.84, 0.012, 1.24)), Kit.at(Vector3(cx, top + 0.004, -1.2)), seam])
+		parts.append([Kit.rounded_box(Vector3(0.78, 0.022, 1.18), 8.0), Kit.at(Vector3(cx, top + 0.014, -1.2)), cover])
+		for rz in [-0.54, 0.54]:
+			for rx in [-0.34, 0.34]:
+				parts.append([Kit.ball(0.02, 6), Kit.at(Vector3(cx + rx, top + 0.03, -1.2 + rz)), SILVER])
+	parts.append([Kit.box(Vector3(0.22, 0.03, 0.05)), Kit.at(Vector3(0.6, top + 0.035, -0.75)), SILVER])   # a hatch handle
+	for sx in [-1.0, 1.0]:
+		parts.append([Kit.box(Vector3(0.012, 0.6, 1.04)), Kit.at(Vector3(sx * (side + 0.004), 0.0, -0.4)), seam])
+		parts.append([Kit.rounded_box(Vector3(0.022, 0.54, 0.98), 8.0), Kit.at(Vector3(sx * (side + 0.012), 0.0, -0.4)), cover])
+		# side intakes: a dark scoop with three louvres
+		parts.append([Kit.rounded_box(Vector3(0.06, 0.3, 0.62), 6.0), Kit.at(Vector3(sx * (side + 0.02), -0.12, -1.9)), Color(0.06, 0.06, 0.07)])
+		for li in 3:
+			parts.append([Kit.box(Vector3(0.05, 0.03, 0.56)), Kit.at(Vector3(sx * (side + 0.05), -0.2 + li * 0.08, -1.9)), STEEL.darkened(0.2)])
+	# top exhaust ports and coolant louvres toward the back
+	for px in [-0.55, 0.55]:
+		parts.append([Kit.cyl(0.14, 0.14, 0.03, 16), Kit.at(Vector3(px, top + 0.01, 1.75)), DARK.lightened(0.3)])
+		parts.append([Kit.cyl(0.1, 0.1, 0.035, 16), Kit.at(Vector3(px, top + 0.015, 1.75)), Color(0.04, 0.04, 0.05)])
+	for li in 6:
+		parts.append([Kit.box(Vector3(1.5, 0.02, 0.07)), Kit.at(Vector3(0, top + 0.02, 2.0 + li * 0.08), Vector3(-0.5, 0, 0)), DARK.lightened(0.1)])
+	return Kit.compound(parts)
+
+
+## The engine's lights (unshaded, so they read at any distance): a nav light at the stabiliser's
+## tip (red on the left engine, green on the right), a red tail light, two landing lights under
+## the intake lip, and a cyan repulsor underglow along the belly.
+static func _engine_lights(out: float) -> ArrayMesh:
+	var nav := NAV_L if out < 0.0 else NAV_R
 	return Kit.compound([
-		[Kit.cyl(0.93, 0.93, 0.45, 24), Kit.at(Vector3(0, 0, -3.72), along), DARK.lightened(0.15)],   # intake lip
-		[Kit.cyl(0.8, 0.88, 5.0, 24), Kit.at(Vector3(0, 0, -1.0), along), STEEL],                       # nacelle
-		[Kit.cyl(0.9, 0.9, 0.6, 24), Kit.at(Vector3(0, 0, -2.5), along), LIVERY],                        # band
-		[Kit.cyl(0.83, 0.86, 0.25, 24), Kit.at(Vector3(0, 0, 0.6), along), LIVERY],                      # pinstripe
-		[Kit.cyl(0.74, 0.74, 0.1, 24), Kit.at(Vector3(0, 0, -3.5), along), Color(0.05, 0.05, 0.06)],     # intake throat
-		[Kit.box(Vector3(0.09, 1.05, 1.7)), Kit.at(Vector3(0, 1.25, 0.2), Vector3(-0.35, 0, 0)), STEEL], # dorsal fin
-		[Kit.box(Vector3(0.06, 0.2, 1.5)), Kit.at(Vector3(0, 1.7, 0.42), Vector3(-0.35, 0, 0)), LIVERY],
-		[Kit.box(Vector3(1.1, 0.07, 1.3)), Kit.at(Vector3(out * 1.3, -0.1, 0.5), Vector3(0, 0, -out * 0.12)), STEEL], # outboard stabiliser
-		[Kit.box(Vector3(0.55, 0.35, 0.8)), Kit.at(Vector3(-out * 0.95, 0.35, -3.0)), DARK.lightened(0.25)],  # binder emitter
-		[Kit.box(Vector3(0.3, 0.3, 0.7)), Kit.at(Vector3(0, -0.92, 3.0)), DARK.lightened(0.25)],         # cable lug
-		[Kit.cyl(0.11, 0.11, 0.08, 10), Kit.at(Vector3(0, -0.95, 3.4), Vector3(0, 0, PI / 2.0)), Color(0.75, 0.77, 0.8)],  # cable eye
+		[Kit.ball(0.1, 10), Kit.at(Vector3(out * (ENG_W / 2.0 + 1.06), -0.04, 0.5)), nav],
+		[Kit.box(Vector3(0.5, 0.06, 0.05)), Kit.at(Vector3(0, ENG_H / 2.0 - 0.08, 4.0)), Color(1.0, 0.1, 0.08)],
+		[Kit.box(Vector3(0.22, 0.08, 0.03)), Kit.at(Vector3(-0.8, -0.38, -3.84)), Color(1.0, 0.97, 0.88)],
+		[Kit.box(Vector3(0.22, 0.08, 0.03)), Kit.at(Vector3(0.8, -0.38, -3.84)), Color(1.0, 0.97, 0.88)],
+		[Kit.box(Vector3(ENG_W - 0.6, 0.02, 4.6)), Kit.at(Vector3(0, -ENG_H / 2.0 - 0.012, -0.4)), Color(0.2, 0.75, 1.0)],
 	])
 
 
@@ -584,25 +698,47 @@ func sync(sim, inp: Dictionary, delta: float) -> void:
 		# fan: spins up with thrust, winds down on a flameout; capped below where it would strobe
 		var w_target := 0.0 if e.flameout else 3.0 + 16.0 * t
 		_fan_w[k] = lerpf(_fan_w[k], w_target, 1.0 - exp(-delta * 2.0))
-		fans[k].rotation.z = fposmod(fans[k].rotation.z + _fan_w[k] * delta, TAU)
+		for r in 2:   # the twin rotors counter-rotate
+			var rotor: Node3D = rotors[k][r]
+			rotor.rotation.z = fposmod(rotor.rotation.z + _fan_w[k] * delta * (1.0 if r == 0 else -1.0), TAU)
 		# air brakes
 		flap_open[k] = move_toward(flap_open[k], clampf(brakes[k], 0.0, 1.0), FLAP_RATE * delta)
 		for hinge in flaps[k]:
-			(hinge as Node3D).rotation.x = 0.06 - FLAP_OPEN * flap_open[k]
+			(hinge as Node3D).rotation.x = -FLAP_OPEN * flap_open[k]
+		# vectoring vanes: trailing edges swing to the side the craft is turning (a right turn
+		# is the left engine harder), like rudders; both engines' together
+		if k == 0:
+			var split: float = clampf(sim.eL.thrust - sim.eR.thrust, -1.0, 1.0)
+			vane_angle = lerpf(vane_angle, clampf(split * 1.2, -1.0, 1.0) * VANE_MAX, 1.0 - exp(-delta * 8.0))
+		for vp in vanes[k]:
+			(vp as Node3D).rotation.y = vane_angle
+		# the fin strobe: a double flash every 1.2 s, the two engines a beat apart
+		var ph := fposmod(Time.get_ticks_msec() / 1000.0 + 0.6 * k, 1.2)
+		strobes[k].visible = ph < 0.05 or (ph > 0.14 and ph < 0.19)
+		# binder emitters: a living glow, hotter and toward violet as the binder strains
+		var strain := clampf(absf(sim.binder_stretch) / maxf(sim.P.binderBreak, 0.01), 0.0, 1.0)
+		var pulse := 0.75 + 0.25 * sin(Time.get_ticks_msec() * 0.012 + k)
+		binder_mats[k].albedo_color = BINDER_COL.lerp(Color(0.8, 0.45, 1.0), strain) * (0.7 + 0.5 * pulse)
 		# flame
 		var flame := flames[k]
 		var burning: bool = not e.flameout and e.thrust > 0.02
 		flame.visible = burning
+		var fade := 1.0 - exp(-delta * 6.0)   # the burner lights and dies over ~0.2 s, not in a frame
+		_burn[k] = lerpf(_burn[k], 1.0 if burning and sim.mode != "normal" else 0.0, fade)
+		_ram[k] = lerpf(_ram[k], 1.0 if burning and sim.mode == "ramjet" else 0.0, fade)
+		var lamp: OmniLight3D = nozzle_lights[k]
+		lamp.light_energy = _burn[k] * (2.2 + 0.8 * sin(Time.get_ticks_msec() * 0.031 + k * 2.0)) * minf(e.thrust, 1.2) if burning else 0.0
 		if burning:
-			var hot_mode: bool = sim.mode != "normal"
-			var flame_len: float = 0.2 + e.thrust * (8.0 if hot_mode else 4.0)
+			# the plume's length: a short cone on dry thrust (the shader shows only its near part),
+			# a long one on the burner, longer still on the ramjet
+			var flame_len: float = lerpf(1.5 + 2.0 * e.thrust, 4.0 + 8.0 * e.thrust, _burn[k]) * (1.0 + 0.3 * _ram[k])
 			var cones: Node3D = flame.get_node("cones")
 			cones.transform = Transform3D(Basis(Vector3.RIGHT, -PI / 2.0) * Basis.from_scale(Vector3(1, flame_len, 1)), Vector3.ZERO)
-			for d in 4:
-				var dm: MeshInstance3D = diamonds[k][d]
-				dm.visible = hot_mode
-				dm.position = Vector3(0, 0, flame_len * (0.16 + 0.17 * d))
-				dm.scale = Vector3.ONE * (1.0 - 0.18 * d)
+			for fmat in flame_mats[k]:
+				(fmat as ShaderMaterial).set_shader_parameter("thrust", e.thrust)
+				(fmat as ShaderMaterial).set_shader_parameter("burner", _burn[k])
+				(fmat as ShaderMaterial).set_shader_parameter("ramjet", _ram[k])
+				(fmat as ShaderMaterial).set_shader_parameter("aspect", flame_len / FLAME_H)
 
 	pod.position = view.w3(sim.pod.x, sim.pod.y, sim.pod.z - 0.2 + POD_LIFT)
 	pod.rotation = Vector3(slope_pitch(view, sim.pod.x, sim.pod.y, sim.pod.th, 2.0), sim.pod.th - PI / 2.0,
@@ -701,6 +837,23 @@ static func strain_color(glow: Color, strain: float) -> Color:
 	return STRAIN_AMBER.lerp(STRAIN_RED, clampf((strain - 0.85) / 0.25, 0.0, 1.0))
 
 
+## A thin square-section tube along a polyline into an ImmediateMesh already begun (TRIANGLES),
+## coloured by vertex: the binder's beam and strands.
+static func _beam(im: ImmediateMesh, pts: Array, r: float, col: Color) -> void:
+	for i in pts.size() - 1:
+		var a: Vector3 = pts[i]
+		var b: Vector3 = pts[i + 1]
+		var d := (b - a).normalized()
+		var n1 := d.cross(Vector3.UP if absf(d.y) < 0.9 else Vector3.RIGHT).normalized() * r
+		var n2 := d.cross(n1).normalized() * r
+		for q in [[n1, n2], [n2, -n1], [-n1, -n2], [-n2, n1]]:
+			var u: Vector3 = q[0]
+			var v: Vector3 = q[1]
+			for pv in [a + u, b + u, b + v, a + u, b + v, a + v]:
+				im.surface_set_color(col)
+				im.surface_add_vertex(pv)
+
+
 ## How steeply the (banked) surface rises along heading th at (x, y), radians, + = nose up:
 ## the height `half` metres ahead against `half` behind. 0 on flat tracks.
 static func slope_pitch(v, x: float, y: float, th: float, half: float) -> float:
@@ -763,14 +916,25 @@ func sync_cables(sim, delta := 1.0 / 72.0) -> void:
 	arc.clear_surfaces()
 	if sim.binder_broken:
 		return
-	arc.surface_begin(Mesh.PRIMITIVE_LINES)
-	var p0: Vector3 = engines[0].transform * Vector3(0.95, 0.35, -3.0)
-	var p1: Vector3 = engines[1].transform * Vector3(-0.95, 0.35, -3.0)
-	var prev := p0
-	for s in range(1, 9):
-		var p := p0.lerp(p1, s / 8.0) + (Vector3(0, randf_range(-0.35, 0.35), randf_range(-0.2, 0.2)) if s < 8 else Vector3.ZERO)
-		for q in [prev, p]:
-			arc.surface_set_color(Color(0.55, 0.88, 1.0))
-			arc.surface_add_vertex(q)
-		prev = p
+	# the upgraded binder: a bright core beam between the emitters and three crackling strands
+	# round it, drawn as thin tubes; toward violet as the binder strains
+	var p0: Vector3 = engines[0].transform * Vector3(ENG_W / 2.0 + 0.1, 0.0, -2.9)
+	var p1: Vector3 = engines[1].transform * Vector3(-ENG_W / 2.0 - 0.1, 0.0, -2.9)
+	var strain := clampf(absf(sim.binder_stretch) / maxf(sim.P.binderBreak, 0.01), 0.0, 1.0)
+	var hue := BINDER_COL.lerp(Color(0.8, 0.45, 1.0), strain)
+	arc.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
+	_beam(arc, [p0, p1], 0.045, Color(0.85, 0.97, 1.0))
+	var axis := (p1 - p0).normalized()
+	var up := axis.cross(Vector3.FORWARD).normalized()
+	if up.length() < 0.1:
+		up = Vector3.UP
+	var side := axis.cross(up)
+	for strand in 3:
+		var pts := [p0]
+		for sgm in range(1, 10):
+			var t := sgm / 10.0
+			var amp := sin(t * PI) * 0.35
+			pts.append(p0.lerp(p1, t) + up * randf_range(-amp, amp) + side * randf_range(-amp, amp))
+		pts.append(p1)
+		_beam(arc, pts, 0.018, hue.lerp(Color.WHITE, 0.25 * strand))
 	arc.surface_end()
