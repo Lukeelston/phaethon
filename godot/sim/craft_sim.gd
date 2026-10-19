@@ -14,17 +14,49 @@ const DEFAULTS := {
 	# ~15 g grip cap, speed^2 fins, tow-bar pod. tools/handling_test.js measures it.
 	"thrustMax": 350000.0, "burnerMult": 1.45, "ramjetMult": 1.9, "gate": 0.88,
 	"engineCd": 0.07, "podCd": 0.035, "brakeCd": 0.04, "brakeLin": 0.0, "brakeConst": 60000.0,
+	# front speed brakes (Luke: "front speed brake flaps for braking done at high speed"): flaps ahead
+	# of the intakes open with the air brakes from 1,500 to 2,500 mph, adding 0.05 to the drag coefficient
+	"frontBrakeCd": 0.05, "frontBrakeV0": 670.6, "frontBrakeV1": 1117.6,
 	"engineGrip": 30.0, "podGrip": 10.0, "gripCapG": 15.0, "podCapG": 8.0, "finOffset": 0.2, "finK": 8.0,
 	"yawDamp": 150000.0, "podYawDamp": 50000.0, "podAlignK": 1.0e6, "towK": 1.0e6, "towC": 40000.0,
 	"cableLen": 16.0, "cableK": 600000.0, "cableC": 30000.0, "cableCouple": 0.2, "podAnchorW": 0.15,
 	"binderK": 3.0e6, "binderC": 70000.0, "alignK": 2.0e7, "alignC": 6.0e5, "binderBreak": 3.0,
-	"wallK": 6.0e6, "wallC": 1.5e5, "wallMu": 0.35,
+	"wallK": 6.0e6, "wallC": 1.5e5, "wallMu": 0.35, "wallDmgMin": 6.0,
+	"damage": false,   # wall hits cost health (and can wreck you) only when this is on
+	"towLongK": 2.0e6, "towLongC": 8.0e4, "towLongSlack": 0.3,   # pod stand-off: never closer to the engines than its taut-cable spot
+	"bank": 1.0, "bankDown": 3.9e-4,   # banked corners: downforce per (m/s)^2, as g, presses you into the bank (~8 g at 1,000 mph)
+	"towAudit": true, "towAuditG": 3.0,   # tow-bar energy audit: drag on the speed, never harder than this (g) ...
+	"towIntF0": 0.05, "towIntF1": 0.3, "towIntMax": 60.0,   # ... shifting onto the swing and spin as their share of the energy grows
 	"heatThrottle": 0.15, "heatBurner": 0.12, "heatRamjet": 0.35, "coolBase": 0.05, "coolSpeed": 0.10,
 	"batteryDrain": 0.08, "batteryCharge": 0.05, "repairRate": 0.12, "damagePerMs": 0.012,
+	"limits": false,   # battery and heat: off (Luke: "turn off battery and heat, let it be crazy"): the burner never runs dry, engines never heat up
 	"rideH": 1.5, "hoverOmega": 9.0, "hoverZeta": 0.9,
 	"binderKz": 3.0e6, "binderCz": 60000.0, "towKz": 2.0e5, "towCz": 16000.0,
-	"track": "circuit", "startX": 0.0, "startY": 0.0,
+	"track": "circuit", "startX": 0.0, "startY": 0.0, "handling": "speed",
+	"job": "",   # the job being flown ("emergency": the emergency run, which opens the shade line)
+	# the dawn (the job's clock): a straight front at 1,000 mph travelling dawnDir (rad), passing
+	# the start line's point dawnT0 s into the job (test_job.gd)
+	"dawnSpeed": 447.04, "dawnDir": 0.0, "dawnT0": 0.0,
+	"sfEngageV": 558.8, "modeBlendT": 1.0,   # live switch: STARFIGHTER engages below 1,250 mph; the handling blends over 1 s
 	"seed": 1337,
+}
+# Handling modes, mirroring sim-core.js: named overrides on top of DEFAULTS (explicit
+# overrides still win). speed = the v3 sprint model; starfighter = ~990 mph lever / 1,200
+# burner, 50 g grip, ~56 deg/s at 320 mph, stiff tow bar.
+# Track settings, mirroring sim-core.js TRACKS: the GP's walls deflect rather than wreck (only
+# impacts harder than 25 m/s into the wall do damage, a third as much; lower friction).
+const TRACKS := {
+	"gp": {"wallDmgMin": 25.0, "damagePerMs": 0.004, "wallMu": 0.22},
+	"eridanus": {"wallDmgMin": 25.0, "damagePerMs": 0.004, "wallMu": 0.22,
+		"dawnDir": 2.495821, "dawnT0": 156.7},   # the dawn: written by tools/sync_eridanus.py from tools/tune_dawn.js
+}
+const HANDLING := {
+	"speed": {},
+	"starfighter": {
+		"thrustMax": 180000.0, "engineCd": 0.725, "podCd": 0.3625,
+		"gripCapG": 50.0, "engineGrip": 90.0, "podGrip": 30.0, "podCapG": 30.0, "finK": 3.0, "yawDamp": 20000.0,
+		"podAlignK": 6.0e6, "podYawDamp": 250000.0, "towK": 5.0e6, "towC": 200000.0,
+	},
 }
 # The range: 100 miles of open desert. Speed runway along y = 0, a jump lane at y = +400
 # with a kicker every 1.5 km, and a twisty lane at y = -400 that only the view draws.
@@ -41,9 +73,57 @@ const BOX_X := RANGE_LEN
 const BOX_HALF := 25.0
 const OVERRUN := 15000.0
 const STOPPED := 0.5
+const PAD_HALF := 40.0   # the job's medical pad: a box +-40 m along and across ...
+const PAD_HOLD := 1.5    # ... held this long stopped
 const CTRL := [[0.0, 0.0], [900.0, -100.0], [1700.0, 150.0], [2300.0, 700.0], [2400.0, 1300.0],
 	[2000.0, 1700.0], [1400.0, 1600.0], [1100.0, 1150.0], [700.0, 1300.0], [300.0, 1800.0],
 	[-400.0, 1700.0], [-900.0, 1100.0], [-800.0, 400.0], [-400.0, 80.0]]
+
+
+# The grand prix, mirroring sim-core.js: a 29.3 km circuit for STARFIGHTER at ~1,000 mph,
+# straights and exact arcs (tools/design_gp.py closed it), sampled every ~12 m, 64 m wide.
+const GP_SEGS := [["S", 2798.158], ["R", 230.0, 90.0], ["S", 450.0], ["L", 230.0, 90.0], ["S", 1500.0], ["L", 1100.0, 70.0],
+	["S", 700.0], ["R", 600.0, 40.0], ["S", 900.0], ["L", 380.0, 150.0], ["S", 1100.0], ["R", 260.0, 120.0],
+	["S", 700.0], ["L", 900.0, 30.0], ["S", 1278.727], ["L", 500.0, 90.0], ["S", 5200.0], ["R", 420.0, 40.0],
+	["L", 420.0, 80.0], ["R", 420.0, 40.0], ["S", 1400.0], ["L", 160.0, 180.0], ["S", 500.0], ["R", 350.0, 90.0],
+	["S", 3200.0], ["L", 1300.0, 90.0]]
+const GP_STEP := 12.0
+const GP_WIDTH := 96.0   # wider, and every corner banked GP_BANK degrees toward its inside (Luke, 2026-10-18),
+const GP_BANK := 15.0    # easing in and out over ~360 m: two passes of a (2 * GP_BANK_R + 1)-sample box (was 30: "50% smaller")
+const GP_BANK_R := 7
+# Eridanus, mirroring sim-core.js: the dual-purpose course (tools/design_eridanus.py), 199 km. Each
+# segment names its mode: "sf" (the towns, STARFIGHTER's) 140 m wide, corners banked 10 deg; "sp"
+# (the speed loop, SPEEDCRAFT's) 400 m wide, sweepers banked 3 deg (Luke: "much wider", "bank the
+# speedcraft corners just slightly to help with sight"); widths ease over ~1 km between, banks over
+# ~1 km in the towns and ~5 km on the loop ("quick elevation changes ... too intense").
+const ERI_SEGS := [["S", 3390.539, 0.0, "sf"], ["L", 450.0, 90.0, "sf"], ["S", 900.0, 0.0, "sf"], 
+	["R", 300.0, 90.0, "sf"], ["S", 700.0, 0.0, "sf"], ["L", 600.0, 60.0, "sf"], ["R", 600.0, 60.0, "sf"], 
+	["S", 1500.0, 0.0, "sf"], ["S", 9000.0, 0.0, "sp"], ["L", 30000.0, 8.0, "sp"], ["R", 30000.0, 8.0, "sp"], 
+	["S", 8000.0, 0.0, "sp"], ["L", 22000.0, 90.0, "sp"], ["S", 11000.0, 0.0, "sp"], ["L", 500.0, 50.0, "sf"], 
+	["S", 600.0, 0.0, "sf"], ["R", 320.0, 70.0, "sf"], ["S", 500.0, 0.0, "sf"], ["L", 400.0, 80.0, "sf"], 
+	["S", 1500.0, 0.0, "sf"], ["S", 4000.0, 0.0, "sp"], ["R", 15000.0, 30.0, "sp"], ["S", 1000.0, 0.0, "sp"], 
+	["L", 15000.0, 30.0, "sp"], ["S", 3000.0, 0.0, "sp"], ["L", 20000.0, 30.0, "sp"], ["S", 13100.0, 0.0, "sp"], 
+	["L", 16000.0, 90.0, "sp"], ["S", 36152.417, 0.0, "sp"], ["L", 700.0, 60.0, "sf"], ["S", 900.0, 0.0, "sf"], 
+	["R", 350.0, 80.0, "sf"], ["S", 800.0, 0.0, "sf"], ["L", 300.0, 100.0, "sf"], ["S", 1000.0, 0.0, "sf"], 
+	["R", 500.0, 50.0, "sf"], ["S", 1200.0, 0.0, "sf"], ["L", 900.0, 60.0, "sf"]]
+# <shade> written by tools/sync_eridanus.py: the shade line (a private covered STARFIGHTER line
+# into the start town, tools/design_eridanus.py) and the lake town's medical pad
+const SHADE_SEGS := [["R", 1200.0, 40.0, "sf"], ["S", 500.0, 0.0, "sf"], ["L", 1200.0, 40.0, "sf"], ["S", 1500.0, 0.0, "sf"], ["R", 600.0, 30.0, "sf"], ["S", 3569.081, 0.0, "sf"], ["L", 350.0, 70.0, "sf"], ["S", 700.0, 0.0, "sf"], ["R", 300.0, 40.0, "sf"], ["S", 600.0, 0.0, "sf"], ["L", 500.0, 30.0, "sf"], ["S", 2365.036, 0.0, "sf"], ["R", 450.0, 30.0, "sf"], ["S", 1500.0, 0.0, "sf"], ["L", 1200.0, 40.0, "sf"], ["S", 500.0, 0.0, "sf"], ["R", 1200.0, 40.0, "sf"]]
+const ERI_SHADE := {"name": "shade", "segs": SHADE_SEGS, "from": 14838, "join": 16046, "width": 120.0, "jz": 120, "covered": [237, 1341], "roll": [[182, 292, 0.0, 180.0], [1050, 1160, 180.0, 0.0]], "height": 62.0}
+const ERI_PAD := 6932
+const ERI_RAMPS := [[747, 1283], [6124, 6660], [6995, 7532], [15509, 16045]]   # the covered ramps at each end of each town: [first, last] main samples
+# </shade>
+# The courses: widths per mode (else GP_WIDTH, constant); width_r: the width-easing box (samples);
+# banks: per mode, degrees (else GP_BANK in the corners), each eased by two passes of its own box,
+# bank_r (samples; else GP_BANK_R).
+const COURSES := {
+	"gp": {"segs": GP_SEGS, "checkpoints": 12},
+	"eridanus": {"segs": ERI_SEGS, "checkpoints": 24, "widths": {"sf": 140.0, "sp": 400.0}, "width_r": 40,
+		"banks": {"sf": 10.0, "sp": 3.0}, "bank_r": {"sf": 20, "sp": 100}, "branches": [ERI_SHADE], "pad": ERI_PAD, "ramps": ERI_RAMPS},
+}
+var track_name := ""   # the course's name ("gp", "eridanus") on a course
+var course := false    # on a course (COURSES): banked corners push
+var tmode := PackedByteArray()   # courses: per sample, 0 a STARFIGHTER ("sf") section, 1 SPEEDCRAFT ("sp")
 
 
 class Body:
@@ -66,13 +146,41 @@ class Body:
 	var sputter := 1.0
 	var sputter_t := 0.0
 	var thrust := 0.0
+	var front := 0.0   # the front speed brakes' deployment, 0..1 (the view's flaps)
 	var z := 0.0
 	var vz := 0.0
 	var grip := 1.0
+	var path := 0   # the road its hint is on: 0 the main road, k + 1 branch k
 
 	func _init(mass: float, moment: float) -> void:
 		m = mass
 		inertia = moment
+
+
+## A branch road (the shade line, tools/design_eridanus.py), mirroring sim-core.js buildBranch:
+## its segments walked from the main road's sample from_i (that point and heading), sampled as
+## the courses are, one width, unbanked, ending on main's join_i (its last sample's segment runs
+## on along the main road's). Open ended. Locked unless the job opens it.
+class TrackPath:
+	var name := ""
+	var px := PackedFloat64Array()
+	var py := PackedFloat64Array()
+	var tx := PackedFloat64Array()
+	var ty := PackedFloat64Array()
+	var nx := PackedFloat64Array()
+	var ny := PackedFloat64Array()
+	var len := PackedFloat64Array()
+	var w := PackedFloat64Array()
+	var bank := PackedFloat64Array()
+	var N := 0
+	var length := 0.0
+	var from_i := 0
+	var join_i := 0
+	var jz := 0
+	var covered := Vector2i.ZERO   # the canopy's samples, first to last
+	var roll: Array = []   # the corkscrews: [first sample, last sample, deg from, deg to], in order
+	var height := 0.0      # the road's height under the canopy (m), turned over
+	var open := false
 
 
 var P: Dictionary
@@ -95,12 +203,33 @@ var tnx := PackedFloat64Array()
 var tny := PackedFloat64Array()
 var tlen := PackedFloat64Array()
 var tw := PackedFloat64Array()
+var tb := PackedFloat64Array()   # GP: bank per sample, radians (+ = tilted down to the left, a left-hander)
+var branches: Array[TrackPath] = []   # courses: the branch roads (Eridanus: the shade line)
+var gate: Array = []   # per branch, this pass: null (not at its split), true (admitted), false (shut)
+var pod_path := 0      # the pod's path last step (laps carry on from a branch's join)
+var pad := -1          # courses: the job's medical pad (main sample), -1 for none
+var mouth := -1        # courses: the start town's mouth, where the loop last turns into a town
+var covered_ramps: Array = []   # courses: the covered ramps at each end of each town, [first, last] main samples
+var tcover := PackedByteArray()   # per main sample: 1 under a covered ramp (shelter from the dawn)
+## The job (the emergency run), empty when there's none: stage "out" | "drop" | "home" | "done" |
+## "failed", t (s since its clock started, on the first move), t0 (when, null until then), held
+## (s stopped on the pad), route "open" | "shade", margin (s), reason "" | "dawn" | "crash", prev_d.
+var job: Dictionary = {}
+const CORK_EASE := 0.15   # each corkscrew's roll rate ramps up and down over this share of it
 
 # race and craft state
 var battery := 1.0
 var armed := false
 var mode := "normal"
+# Live handling switch, mirroring sim-core.js: inp.handling asks for "speed" or "starfighter";
+# STARFIGHTER only engages below P.sfEngageV, then the handling keys blend over P.modeBlendT s.
+var hwant := "speed"
+var hblend := 0.0
+var _hk: Array = []      # the handling keys that blend (not given explicitly in the overrides)
+var _h0 := {}
+var _h1 := {}
 var binder_broken := false
+var _tow_u := -1.0          # tow bar's stored energy last substep (-1 = none yet), for the energy audit
 var crash_t := 0.0
 var time := 0.0
 var lap := 0
@@ -127,19 +256,39 @@ var _n_lat := 0.0
 var _n_w := 0.0
 var _n_nx := 0.0
 var _n_ny := 0.0
+var _n_t := 0.0   # how far along sample _n_i's segment the nearest point lies, 0..1
+var _n_off := false   # the nearest point is past an end of a branch (no road there)
 var _pvx := 0.0
 var _pvy := 0.0
 
 
+var _overrides := {}
+
+
 func _init(overrides: Dictionary = {}) -> void:
+	_overrides = overrides.duplicate()
 	P = DEFAULTS.duplicate()
+	# the grand prix is a STARFIGHTER track unless a handling is asked for
+	var hname: String = overrides.get("handling", "starfighter" if COURSES.has(overrides.get("track", "")) else DEFAULTS.handling)
+	P.merge(HANDLING.get(hname, {}), true)
+	P.merge(TRACKS.get(overrides.get("track", ""), {}), true)
 	P.merge(overrides, true)
+	P.handling = hname
+	hwant = hname
+	hblend = 1.0 if hname == "starfighter" else 0.0
+	for k in HANDLING.starfighter:
+		if not overrides.has(k):
+			_hk.append(k)
+			_h0[k] = HANDLING.speed.get(k, DEFAULTS[k])
+			_h1[k] = HANDLING.starfighter[k]
 	_rng = int(P.seed) & 0xFFFFFFFF
 	if _rng == 0:
 		_rng = 1
 	if P.track == "range":
 		kind = "range"
 		_build_range()
+	elif COURSES.has(P.track):
+		_build_course(P.track)
 	else:
 		_build_track()
 	var e_i: float = P.engineMass * pow(P.engineLen, 2) / 12.0
@@ -148,10 +297,28 @@ func _init(overrides: Dictionary = {}) -> void:
 	eR = Body.new(P.engineMass, e_i)
 	pod = Body.new(P.podMass, p_i)
 	bodies = [eL, eR, pod]
+	# branches open only on the job that authorizes them (the shade line: the emergency run)
+	for B in branches:
+		B.open = P.job == "emergency"
+	if P.job == "emergency" and pad >= 0:
+		job = _new_job()
 	pod.x = float(P.startX) + 30.0   # range spawn point (respawn backs off 30 m)
 	pod.y = float(P.startY)
 	respawn(0)
 	visited[0] = true
+
+
+## Switch handling mode in place (Godot only: the game's in-cockpit toggle; not part of the
+## JS parity surface). Presets only change per-step tuning, never masses or the track, so
+## nothing built in _init goes stale. Restart or respawn afterwards.
+func set_handling(name: String) -> void:
+	_overrides["handling"] = name
+	P = DEFAULTS.duplicate()
+	P.merge(HANDLING.get(name, {}), true)
+	P.merge(TRACKS.get(_overrides.get("track", ""), {}), true)
+	P.merge(_overrides, true)
+	hwant = name
+	hblend = 1.0 if name == "starfighter" else 0.0
 
 
 func _build_range() -> void:
@@ -253,9 +420,191 @@ func _build_track() -> void:
 	track_length = s
 
 
+func _build_course(name: String) -> void:
+	track_name = name
+	course = true
+	var C: Dictionary = COURSES[name]
+	checkpoints = C.checkpoints
+	var x := 0.0
+	var y := 0.0
+	var h := 0.0
+	var raw := PackedFloat64Array()
+	var wraw := PackedFloat64Array()
+	for sg in C.segs:
+		var m: String = sg[3] if sg.size() > 3 else "sf"
+		var w: float = C.widths[m] if C.has("widths") else GP_WIDTH
+		if sg[0] == "S":
+			var n := maxi(1, int(ceil(sg[1] / GP_STEP)))
+			var d: float = sg[1] / n
+			for k in n:
+				tpx.append(x)
+				tpy.append(y)
+				raw.append(0.0)
+				wraw.append(w)
+				tmode.append(0 if m == "sf" else 1)
+				x += d * cos(h)
+				y += d * sin(h)
+		else:
+			var r: float = sg[1]
+			var sn := 1.0 if sg[0] == "L" else -1.0
+			var ang: float = sg[2] * PI / 180.0
+			var n := maxi(1, int(ceil(r * ang / GP_STEP)))
+			var da := ang / n
+			var c := 2.0 * r * sin(da / 2.0)
+			for k in n:
+				tpx.append(x)
+				tpy.append(y)
+				var bdeg: float = C.banks[m] if C.has("banks") else (GP_BANK if m == "sf" else 0.0)
+				raw.append(sn * bdeg * PI / 180.0)
+				wraw.append(w)
+				tmode.append(0 if m == "sf" else 1)
+				x += c * cos(h + sn * da / 2.0)
+				y += c * sin(h + sn * da / 2.0)
+				h += sn * da
+	N = tpx.size()
+	ttx.resize(N)
+	tty.resize(N)
+	tnx.resize(N)
+	tny.resize(N)
+	tlen.resize(N)
+	tw.resize(N)
+	var width: PackedFloat64Array = _smooth_box(wraw, C.width_r) if C.has("widths") else wraw
+	var s := 0.0
+	for i in N:
+		var j := (i + 1) % N
+		var dx := tpx[j] - tpx[i]
+		var dy := tpy[j] - tpy[i]
+		var l := sqrt(dx * dx + dy * dy)
+		ttx[i] = dx / l
+		tty[i] = dy / l
+		tnx[i] = -tty[i]
+		tny[i] = ttx[i]
+		tlen[i] = l
+		s += l
+		tw[i] = width[i]
+	track_length = s
+	if C.has("bank_r"):
+		tb = PackedFloat64Array()
+		tb.resize(N)
+		for m in ["sf", "sp"]:
+			var part := PackedFloat64Array()
+			part.resize(N)
+			for i in N:
+				part[i] = raw[i] if tmode[i] == (0 if m == "sf" else 1) else 0.0
+			var r: int = C.bank_r[m]
+			var sm := _smooth_run(_smooth_run(part, r), r)
+			for i in N:
+				tb[i] += sm[i]
+	else:
+		tb = _smooth_bank(_smooth_bank(raw))
+	for Bd in C.get("branches", []):
+		branches.append(_build_branch(Bd))
+	pad = C.get("pad", -1)
+	covered_ramps = C.get("ramps", []).duplicate(true)
+	tcover.resize(N)
+	for r in covered_ramps:
+		for i in range(int(r[0]), int(r[1]) + 1):
+			tcover[posmod(i, N)] = 1
+	for i in range(N - 1, 0, -1):
+		if tmode[i] == 0 and tmode[i - 1] == 1:
+			mouth = i
+			break
+
+
+func _build_branch(Bd: Dictionary) -> TrackPath:
+	var B := TrackPath.new()
+	B.name = Bd.name
+	var f: int = Bd.from
+	var x := tpx[f]
+	var y := tpy[f]
+	var h := atan2(tty[f], ttx[f])
+	for sg in Bd.segs:
+		if sg[0] == "S":
+			var n := maxi(1, int(ceil(sg[1] / GP_STEP)))
+			var d: float = sg[1] / n
+			for k in n:
+				B.px.append(x)
+				B.py.append(y)
+				x += d * cos(h)
+				y += d * sin(h)
+		else:
+			var r: float = sg[1]
+			var sn := 1.0 if sg[0] == "L" else -1.0
+			var ang: float = sg[2] * PI / 180.0
+			var n := maxi(1, int(ceil(r * ang / GP_STEP)))
+			var da := ang / n
+			var c := 2.0 * r * sin(da / 2.0)
+			for k in n:
+				B.px.append(x)
+				B.py.append(y)
+				x += c * cos(h + sn * da / 2.0)
+				y += c * sin(h + sn * da / 2.0)
+				h += sn * da
+	B.px.append(x)
+	B.py.append(y)
+	B.N = B.px.size()
+	for a in [B.tx, B.ty, B.nx, B.ny, B.len, B.w, B.bank]:
+		a.resize(B.N)
+	var j: int = Bd.join
+	var s := 0.0
+	for i in B.N:
+		var dx := B.px[i + 1] - B.px[i] if i + 1 < B.N else ttx[j] * tlen[j]
+		var dy := B.py[i + 1] - B.py[i] if i + 1 < B.N else tty[j] * tlen[j]
+		var l := sqrt(dx * dx + dy * dy)
+		B.tx[i] = dx / l
+		B.ty[i] = dy / l
+		B.nx[i] = -B.ty[i]
+		B.ny[i] = B.tx[i]
+		B.len[i] = l
+		s += l
+		B.w[i] = Bd.width
+		B.bank[i] = 0.0
+	B.length = s
+	B.from_i = Bd.from
+	B.join_i = j
+	B.jz = Bd.jz
+	B.covered = Vector2i(Bd.covered[0], Bd.covered[1])
+	B.roll = Bd.roll.duplicate(true)
+	B.height = Bd.height
+	return B
+
+
+## A centred moving average round the closed loop (box of 2 * r + 1 samples; banks: GP_BANK_R).
+static func _smooth_box(a: PackedFloat64Array, r: int) -> PackedFloat64Array:
+	var n := a.size()
+	var out := PackedFloat64Array()
+	out.resize(n)
+	for i in n:
+		var acc := 0.0
+		for k in range(-r, r + 1):
+			acc += a[posmod(i + k, n)]
+		out[i] = acc / (2 * r + 1)
+	return out
+
+
+static func _smooth_bank(a: PackedFloat64Array) -> PackedFloat64Array:
+	return _smooth_box(a, GP_BANK_R)
+
+
+## The same average as a running sum: O(N) for the wide boxes (a 5 km bank ramp is 400 samples).
+static func _smooth_run(a: PackedFloat64Array, r: int) -> PackedFloat64Array:
+	var n := a.size()
+	var w := 2 * r + 1
+	var out := PackedFloat64Array()
+	out.resize(n)
+	var acc := 0.0
+	for k in range(-r, r + 1):
+		acc += a[posmod(k, n)]
+	for i in n:
+		out[i] = acc / w
+		acc += a[posmod(i + r + 1, n)] - a[posmod(i - r, n)]
+	return out
+
+
 ## Nearest centreline point in a window around hint. Results land in _n_*.
 func _nearest(x: float, y: float, hint: int, win: int) -> void:
 	var bd := INF
+	_n_off = false
 	for k in range(-win, win + 1):
 		var i := posmod(hint + k, N)
 		var t := clampf(((x - tpx[i]) * ttx[i] + (y - tpy[i]) * tty[i]) / tlen[i], 0.0, 1.0)
@@ -269,6 +618,126 @@ func _nearest(x: float, y: float, hint: int, win: int) -> void:
 			_n_w = tw[i]
 			_n_nx = tnx[i]
 			_n_ny = tny[i]
+			_n_t = t
+
+
+## The same on an open-ended branch: the window stops at its ends, and a point past either end
+## is off it (_n_off: no road there, however close to the centreline's line).
+func _nearest_branch(B: TrackPath, x: float, y: float, hint: int, win: int) -> void:
+	var bd := INF
+	for i in range(maxi(0, hint - win), mini(B.N - 1, hint + win) + 1):
+		var u := ((x - B.px[i]) * B.tx[i] + (y - B.py[i]) * B.ty[i]) / B.len[i]
+		var t := clampf(u, 0.0, 1.0)
+		var px := B.px[i] + B.tx[i] * B.len[i] * t
+		var py := B.py[i] + B.ty[i] * B.len[i] * t
+		var d := (x - px) * (x - px) + (y - py) * (y - py)
+		if d < bd:
+			bd = d
+			_n_i = i
+			_n_lat = (x - B.px[i]) * B.nx[i] + (y - B.py[i]) * B.ny[i]
+			_n_w = B.w[i]
+			_n_nx = B.nx[i]
+			_n_ny = B.ny[i]
+			_n_t = t
+			_n_off = (i == 0 and u < 0.0) or (i == B.N - 1 and u > 1.0)
+
+
+## Nearest centreline point on a path (0 the main road, k + 1 branch k), into the _n_ fields.
+func _nearest_on(path: int, x: float, y: float, hint: int, win: int) -> void:
+	if path == 0:
+		_nearest(x, y, hint, win)
+	else:
+		_nearest_branch(branches[path - 1], x, y, hint, win)
+
+
+## How deep inside its road the last nearest point is, with radius r (negative inside; INF off a branch's end).
+func _depth(r: float) -> float:
+	return INF if _n_off else absf(_n_lat) + r - _n_w / 2.0
+
+
+## A signed sample gap round the main loop.
+func _cyc(d: int) -> int:
+	if float(d) > N / 2.0:
+		return d - N
+	if float(d) < -N / 2.0:
+		return d + N
+	return d
+
+
+## The other road at a junction, Vector2i(path, hint there), or x = -1 for none. A body on the
+## main road sees a branch within jz samples of its split, and only once its craft has passed the
+## gate; a body on a branch sees the main road within jz samples of either end.
+func _junction_alt(b: Body) -> Vector2i:
+	for k in branches.size():
+		var B: TrackPath = branches[k]
+		if b.path == 0:
+			var d := _cyc(b.hint - B.from_i)
+			if gate[k] == true and absi(d) <= B.jz:
+				return Vector2i(k + 1, clampi(d, 0, B.N - 1))
+		elif b.path == k + 1:
+			if b.hint < B.jz:
+				return Vector2i(0, (B.from_i + b.hint) % N)
+			if b.hint > B.N - 1 - B.jz:
+				return Vector2i(0, posmod(B.join_i - (B.N - 1 - b.hint), N))
+	return Vector2i(-1, 0)
+
+
+## The gates: a branch joins a craft's roads only if the craft reached its split's zone at or below
+## sfEngageV (and the job opened it). Arrive faster and it stays shut for that pass, so the main
+## wall holds. Decided once a pass, on the pod's speed as the first body comes into the zone;
+## cleared once no body is in the zone or on the branch.
+func _update_gates() -> void:
+	for k in branches.size():
+		var B: TrackPath = branches[k]
+		var busy := false
+		for b: Body in bodies:
+			if b.path == k + 1 or (b.path == 0 and absi(_cyc(b.hint - B.from_i)) <= B.jz):
+				busy = true
+		if not busy:
+			gate[k] = null
+		elif gate[k] == null:
+			gate[k] = B.open and sqrt(pod.vx * pod.vx + pod.vy * pod.vy) <= P.sfEngageV
+
+
+## For the view: a branch road's roll at (fractional) sample i, radians: the corkscrews turn it
+## over (0 -> 180 deg) and back, the rate easing up and down over CORK_EASE of each so it peaks at
+## 1 / (1 - CORK_EASE) of the mean (~86 deg/s at 1,200 mph); 0 on the main road.
+func roll_at(path: int, i: float) -> float:
+	if path <= 0:
+		return 0.0
+	var B: TrackPath = branches[path - 1]
+	var deg := 0.0
+	for r in B.roll:
+		if i >= r[1]:
+			deg = r[3]
+		elif i > r[0]:
+			deg = lerpf(r[2], r[3], cork((i - r[0]) / float(r[1] - r[0])))
+			break
+		else:
+			break
+	return deg_to_rad(deg)
+
+
+## For the view: a branch road's centreline height at (fractional) sample i. A road stood on edge
+## is its width tall, so as a corkscrew turns it the centre climbs with the sine of the turn to the
+## canopy's height (half the width and a bit: the low edge never meets the ground) by the time
+## it's on edge, and holds there, turned over; back down the same way. 0 on the main road.
+func branch_height(path: int, i: float) -> float:
+	if path <= 0:
+		return 0.0
+	var r := roll_at(path, i)
+	var h: float = branches[path - 1].height
+	return h * sin(r) if r < PI / 2.0 else h
+
+
+## The corkscrew's share of its turn at u (0..1): its rate ramps up over CORK_EASE, holds, ramps down.
+static func cork(u: float) -> float:
+	var a := CORK_EASE
+	if u < a:
+		return u * u / (2.0 * a) / (1.0 - a)
+	if u > 1.0 - a:
+		return 1.0 - (1.0 - u) * (1.0 - u) / (2.0 * a) / (1.0 - a)
+	return (u - a / 2.0) / (1.0 - a)
 
 
 func _apply_at(b: Body, fx: float, fy: float, px: float, py: float) -> void:
@@ -282,19 +751,60 @@ func _point_vel(b: Body, px: float, py: float) -> void:
 	_pvy = b.vy + b.w * (px - b.x)
 
 
+## For the view (not the physics): the banked GP's surface at (x, y), near sample `hint`:
+## Vector2(height above the desert, bank radians + = tilted down to the left). Corners pivot on
+## their inside edge, so it stays at ground level and the outside climbs (96 m at 30 deg: 55 m);
+## past the outside wall a 45-degree berm runs back down. (0, 0) everywhere else.
+## On a branch (path k + 1): its centreline's height (branch_height) and no bank (the turn over is
+## roll_at's).
+func surface_at(x: float, y: float, hint: int, path := 0) -> Vector2:
+	if path > 0:
+		_nearest_on(path, x, y, hint, 40)
+		return Vector2(branch_height(path, _n_i + _n_t), 0.0)
+	if tb.is_empty():
+		return Vector2.ZERO
+	_nearest(x, y, hint, 40)
+	var bk: float = lerpf(tb[_n_i], tb[(_n_i + 1) % N], _n_t)
+	return Vector2(bank_height(_n_w / 2.0, _n_lat, bk), bk)
+
+
+## Height of the banked surface `off` metres left of the centreline, half-width hw, bank bk.
+static func bank_height(hw: float, off: float, bk: float) -> float:
+	var t := tan(bk)
+	var base := hw * absf(t) - clampf(off, -hw, hw) * t
+	return maxf(0.0, base - maxf(0.0, absf(off) - hw))   # the berm outside: down at 45 deg
+
+
 ## Range: back to the start line, run cleared (the Y button).
+## A fresh start (the player's restart), mirroring sim-core.js: whole engines and pod, full
+## battery, cool engines; the range goes back to its start line, a circuit to its grid with the
+## lap count reset. Crashes still respawn through respawn(), keeping the damage.
 func restart() -> void:
-	pod.x = 30.0
-	pod.y = 0.0
 	crash_t = 0.0
 	finished = false
 	run_active = false
 	run_start = -1.0
 	result = {}
-	respawn()
+	for e in [eL, eR]:
+		e.health = 1.0
+		e.heat = 0.3 if P.limits else 0.0
+	pod.health = 1.0
+	battery = 1.0
+	if kind == "range":
+		pod.x = 30.0
+		pod.y = 0.0
+		respawn()
+	else:
+		lap = 0
+		lap_start = -1.0
+		visited = {0: true}
+		checkpoint = 0
+		respawn(0)
+	if not job.is_empty():
+		job = _new_job()   # the job starts over (its clock on the next first move)
 
 
-func respawn(ci: int = -1) -> void:
+func respawn(ci: int = -1, at_idx: int = -1) -> void:   # at_idx: a debug start at that track sample (views only)
 	# engines placed so each cable is exactly at length: a stretched spawn makes the stiff
 	# cables yank the pod forward on the first step
 	var lat: float = P.engineGap / 2.0 - P.podAnchorW * P.podWidth / 2.0
@@ -313,6 +823,8 @@ func respawn(ci: int = -1) -> void:
 	else:
 		var c := checkpoint if ci < 0 else ci
 		idx = int(round(float(c) * N / checkpoints)) % N
+		if at_idx >= 0:
+			idx = at_idx % N
 		ax = tpx[idx]
 		ay = tpy[idx]
 		atx = ttx[idx]
@@ -331,50 +843,87 @@ func respawn(ci: int = -1) -> void:
 		b.w = 0.0
 		b.th = th
 		b.hint = idx
+		b.path = 0
 		b.contact = [false, false]
 		b.z = ground(b.x, b.y) + P.rideH
 		b.vz = 0.0
 		b.grip = 1.0
 	for e: Body in [eL, eR]:
-		e.heat = minf(e.heat, 0.5)
+		e.heat = minf(e.heat, 0.5) if P.limits else 0.0
 		e.flameout = false
 		e.sputter = 1.0
 		e.sputter_t = 0.0
 	if pod.health <= 0.0:
 		pod.health = 1.0
 	binder_broken = false
+	_tow_u = -1.0
 	crash_t = 0.0
 	progress_i = idx
+	gate = []
+	gate.resize(branches.size())   # all null: no pass in progress
+	pod_path = 0
 
 
+## At a junction the two roads are one (a union): a body takes the road it's deeper inside, when
+## it's off its own or the other is 10 m deeper, and a wall is wherever it's off both.
 func _collide_walls(b: Body, circles: Array, dt: float) -> void:
-	_nearest(b.x, b.y, b.hint, 40)
+	_nearest_on(b.path, b.x, b.y, b.hint, 40)
 	b.hint = _n_i
+	var alt := _junction_alt(b) if not branches.is_empty() else Vector2i(-1, 0)
+	var alt_path := 0
+	var alt_hint := 0
+	if alt.x >= 0:
+		var d_own := _depth(0.0)
+		var own_i := _n_i
+		_nearest_on(alt.x, b.x, b.y, alt.y, 40)
+		var d_alt := _depth(0.0)
+		if d_alt < d_own and (d_own > 0.0 or d_alt < d_own - 10.0):
+			alt_path = b.path
+			alt_hint = own_i
+			b.path = alt.x
+			b.hint = _n_i
+		else:
+			alt_path = alt.x
+			alt_hint = _n_i
 	for ci in circles.size():
 		var cx: float = circles[ci][0]
 		var cy: float = circles[ci][1]
 		var r: float = circles[ci][2]
-		_nearest(cx, cy, b.hint, 12)
-		var pen := absf(_n_lat) + r - _n_w / 2.0
+		_nearest_on(b.path, cx, cy, b.hint, 12)
+		var pen := _depth(r)
+		var lat := _n_lat
+		var wnx := _n_nx
+		var wny := _n_ny
+		if alt.x >= 0:
+			_nearest_on(alt_path, cx, cy, alt_hint, 12)
+			var pm := _depth(r)
+			if pm < pen:
+				pen = pm
+				lat = _n_lat
+				wnx = _n_nx
+				wny = _n_ny
 		if pen <= 0.0:
 			b.contact[ci] = false
 			continue
-		var sgn := -1.0 if _n_lat > 0.0 else 1.0
-		var nx := _n_nx * sgn
-		var ny := _n_ny * sgn
+		var sgn := -1.0 if lat > 0.0 else 1.0
+		var nx := wnx * sgn
+		var ny := wny * sgn
 		_point_vel(b, cx, cy)
 		var vx := _pvx
 		var vy := _pvy
 		var vn := vx * nx + vy * ny
 		if not b.contact[ci]:
-			var dmg: float = P.damagePerMs * maxf(0.0, -vn - 6.0)
-			if b == pod:
-				pod.health -= dmg
-			else:
-				b.health = maxf(0.0, b.health - dmg)
+			var dmg: float = P.damagePerMs * maxf(0.0, -vn - P.wallDmgMin)
+			if P.damage:   # off by default (Luke): a hit still registers (and buzzes), it just costs nothing
+				if b == pod:
+					pod.health -= dmg
+				else:
+					b.health = maxf(0.0, b.health - dmg)
+			var who := "pod" if b == pod else ("L" if b == eL else "R")
 			if dmg > 0.05:
-				var who := "pod" if b == pod else ("L" if b == eL else "R")
 				events.append({"type": "hit", "who": who, "dmg": dmg})
+			else:
+				events.append({"type": "scrape", "who": who})   # contact without (much) damage
 			b.contact[ci] = true
 		var fn: float = P.wallK * pen - (P.wallC * vn if vn < 0.0 else 0.0)
 		var tx := -ny
@@ -422,6 +971,21 @@ func step(inp: Dictionary, dt: float) -> void:
 				result = {}
 			respawn()
 		return
+	var hask: String = inp.get("handling", "")
+	if hask == "speed" or hask == "starfighter":
+		hwant = hask
+	if pod.path > 0:
+		hwant = "starfighter"   # a shade line is a STARFIGHTER line (its corkscrews are paced for it)
+	var htgt := 0.0
+	if hwant == "starfighter":
+		htgt = 1.0 if hblend > 0.0 or sqrt(pod.vx * pod.vx + pod.vy * pod.vy) <= P.sfEngageV else 0.0
+	if hblend != htgt:
+		hblend = minf(htgt, hblend + dt / P.modeBlendT) if htgt > hblend else maxf(htgt, hblend - dt / P.modeBlendT)
+		for k in _hk:
+			P[k] = _h1[k] if hblend == 1.0 else (_h0[k] if hblend == 0.0 else _h0[k] + (_h1[k] - _h0[k]) * hblend)
+		P.handling = "starfighter" if hblend >= 0.5 else "speed"
+		if hblend == htgt:
+			events.append({"type": "handling", "mode": P.handling})
 	# Vertical ties: the binder holds both engines at one height and the tow bar lifts the
 	# pod toward their mean, so a one-sided ramp hit lifts the whole craft instead of
 	# flinging one engine skyward. Exactly zero when heights match (flat ground).
@@ -447,7 +1011,7 @@ func step(inp: Dictionary, dt: float) -> void:
 	var ramjet := armed and in_gate
 	var burner := not ramjet and in_gate and battery > 0.0
 	mode = "ramjet" if ramjet else ("burner" if burner else "normal")
-	if burner:
+	if burner and P.limits:
 		battery = maxf(0.0, battery - P.batteryDrain * dt)
 	elif not in_gate:
 		battery = minf(1.0, battery + P.batteryCharge * dt)
@@ -460,7 +1024,7 @@ func step(inp: Dictionary, dt: float) -> void:
 		var c := cos(e.th)
 		var s := sin(e.th)
 		var gain := 0.0
-		if not e.flameout:
+		if not e.flameout and P.limits:
 			gain = maxf(0.0, thr - 0.6) * P.heatThrottle + (P.heatBurner if burner else 0.0) + (P.heatRamjet if ramjet else 0.0)
 		var cool: float = P.coolBase + P.coolSpeed * minf(1.5, speed / 200.0) + (0.15 if e.flameout else 0.0)
 		e.heat = clampf(e.heat + (gain - cool) * dt, 0.0, 1.25)
@@ -486,7 +1050,8 @@ func step(inp: Dictionary, dt: float) -> void:
 		# Air brake = quadratic drag plus a linear term, so the flaps still bite at low speed.
 		var v := sqrt(e.vx * e.vx + e.vy * e.vy)
 		# A constant term keeps the brakes biting across a 100x speed range (smoothed below 2 m/s).
-		var cd: float = P.engineCd + P.brakeCd * brk
+		e.front = brk * smoothstep(P.frontBrakeV0, P.frontBrakeV1, v) if P.frontBrakeCd > 0.0 else 0.0
+		var cd: float = P.engineCd + P.brakeCd * brk + P.frontBrakeCd * e.front
 		var bl: float = P.brakeLin * brk + P.brakeConst * brk / maxf(v, 2.0)
 		e.fx -= cd * v * e.vx + bl * e.vx
 		e.fy -= cd * v * e.vy + bl * e.vy
@@ -613,11 +1178,93 @@ func step(inp: Dictionary, dt: float) -> void:
 		L.fy -= ft * ly / 2.0
 		R.fx -= ft * lx / 2.0
 		R.fy -= ft * ly / 2.0
-		Pd.t -= P.podAlignK * wrap_angle(Pd.th - pair_th) + P.podYawDamp * (Pd.w - wpair)
+		# Stand-off: the pod never closes on the engines past its taut-cable spot. Brake hard (or
+		# spin the pair) and the cables go slack: without this the pod flew on into the engines
+		# and knocked them about (Luke: "the pod flies forward and throws the engines off
+		# balance"). Compression only (the cables already pull), along the pair's axis through
+		# its centre, equal and opposite on the engines: it can't twist them or make energy.
+		# (its spot: where the diagonal cables are just taut, as respawn() lays them out, plus a
+		# little slack, so it only ever meets a real overrun and never fights the cables)
+		var lat_c: float = P.engineGap / 2.0 - P.podAnchorW * P.podWidth / 2.0
+		var rest: float = sqrt(P.cableLen * P.cableLen - lat_c * lat_c) + P.podLen / 2.0 + P.engineLen / 2.0
+		var el: float = (Pd.x - tx) * pf + (Pd.y - ty) * ps2 - (back - rest) - P.towLongSlack
+		if el > 0.0 and P.towLongK > 0.0:
+			var elv := (Pd.vx - (L.vx + R.vx) / 2.0) * pf + (Pd.vy - (L.vy + R.vy) / 2.0) * ps2
+			var fl: float = minf(0.0, -P.towLongK * el - P.towLongC * elv)
+			Pd.fx += fl * pf
+			Pd.fy += fl * ps2
+			L.fx -= fl * pf / 2.0
+			L.fy -= fl * ps2 / 2.0
+			R.fx -= fl * pf / 2.0
+			R.fy -= fl * ps2 / 2.0
+		var pod_tw: float = P.podAlignK * wrap_angle(Pd.th - pair_th) + P.podYawDamp * (Pd.w - wpair)
+		Pd.t -= pod_tw
+		# Energy audit. The tow bar is one-way on purpose (the pod follows the engines without
+		# yawing them back: that trailer feedback made the pair sway), so its pull and the pod's
+		# twist have no equal and opposite, and that let it create energy: the pod whirled round a
+		# pivoting pair, or swung by a spinning one after wall hits, gained speed from nothing and
+		# the craft pinballed (pod 159 -> 495 km/h coasting with no thrust). So each substep,
+		# whatever power these forces put in beyond what their springs gave up is taken back out.
+		# Normal flight is untouched (yaw response, coast-down and the GP lap identical), and it
+		# can never add energy (tests/test_energy.gd).
+		if P.towAudit:
+			var mvx := (L.vx + R.vx) / 2.0
+			var mvy := (L.vy + R.vy) / 2.0
+			var p_in: float = ft * ((Pd.vx - mvx) * lx + (Pd.vy - mvy) * ly) - pod_tw * Pd.w
+			var dth := wrap_angle(Pd.th - pair_th)
+			var u: float = 0.5 * P.towK * te * te + 0.5 * P.podAlignK * dth * dth
+			if _tow_u >= 0.0:
+				var created: float = p_in + (u - _tow_u) / dt
+				if created > 0.0:
+					# Where it comes out depends on where the craft's energy is. Travelling (nearly
+					# all of it is speed down the track), it comes out of the speed, gently (never
+					# past towAuditG); taking it out of the swing there would deaden the steering,
+					# since every yaw step swings the pod. Whirling (much of it is swing and spin
+					# about the centre of mass: the pod whirled round a pivoting pair, or pinballing
+					# off walls), it comes out of the swing and spin, where it was made.
+					var msum: float = Pd.m + L.m + R.m
+					var cvx: float = (Pd.m * Pd.vx + L.m * L.vx + R.m * R.vx) / msum
+					var cvy: float = (Pd.m * Pd.vy + L.m * L.vy + R.m * R.vy) / msum
+					var ke := 0.0    # speed
+					var rot := 0.0   # spin
+					var kin := 0.0   # swing and spin about the centre of mass
+					for b: Body in [Pd, L, R]:
+						ke += 0.5 * b.m * (b.vx * b.vx + b.vy * b.vy)
+						rot += 0.5 * b.inertia * b.w * b.w
+						kin += 0.5 * b.m * ((b.vx - cvx) * (b.vx - cvx) + (b.vy - cvy) * (b.vy - cvy))
+					kin += rot
+					var c_int: float = created * smoothstep(P.towIntF0, P.towIntF1, kin / maxf(ke + rot, 1.0))
+					var c_lin: float = created - c_int
+					if c_int > 0.0 and kin > 1.0:
+						var gi: float = minf(c_int / (2.0 * kin), P.towIntMax)
+						for b: Body in [Pd, L, R]:
+							b.fx -= gi * b.m * (b.vx - cvx)
+							b.fy -= gi * b.m * (b.vy - cvy)
+							b.t -= gi * b.inertia * b.w
+					if c_lin > 0.0 and ke > 1.0:
+						var vrms: float = sqrt(2.0 * ke / msum)
+						var gam: float = minf(c_lin / (2.0 * ke), P.towAuditG * G / maxf(vrms, 1.0))
+						for b: Body in [Pd, L, R]:
+							b.fx -= gam * b.m * b.vx
+							b.fy -= gam * b.m * b.vy
+			_tow_u = u
 
+	# Banked corners: the surface tilts toward the inside, so its push has a part toward the
+	# corner's centre: gravity's (g tan bank) plus downforce's (bankDown v^2 sin bank).
+	if course:
+		for b: Body in bodies:
+			var bk: float = tb[b.hint] if b.path == 0 else branches[b.path - 1].bank[b.hint]
+			if bk == 0.0:
+				continue
+			var v2 := b.vx * b.vx + b.vy * b.vy
+			var fb: float = P.bank * b.m * (G * tan(bk) + P.bankDown * v2 * sin(bk)) * b.grip
+			b.fx += fb * (tnx[b.hint] if b.path == 0 else branches[b.path - 1].nx[b.hint])
+			b.fy += fb * (tny[b.hint] if b.path == 0 else branches[b.path - 1].ny[b.hint])
 	var cl := _engine_circles(L)
 	var cr := _engine_circles(R)
 	var cp := [[Pd.x, Pd.y, 1.6]]
+	if not branches.is_empty():
+		_update_gates()
 	if kind == "circuit":
 		_collide_walls(L, cl, dt)
 		_collide_walls(R, cr, dt)
@@ -667,21 +1314,137 @@ func step(inp: Dictionary, dt: float) -> void:
 		return
 	if kind != "circuit":
 		return
-	# Laps: count when the pod wraps past the start having visited every checkpoint.
-	var prev := progress_i
-	var cur := Pd.hint
-	var cps := checkpoints
-	var cpi := int(floor(float(cur) * cps / N))
-	if cpi != checkpoint and posmod(cpi - checkpoint + cps, cps) == 1:
-		checkpoint = cpi
-		visited[cpi] = true
-	if lap_start < 0.0 and pv > 2.0:
-		lap_start = time
-	if prev > N * 0.9 and cur < N * 0.1 and visited.size() >= cps - 1 and lap_start >= 0.0:
-		last_lap = time - lap_start
-		best_lap = last_lap if best_lap < 0.0 else minf(best_lap, last_lap)
-		lap += 1
-		lap_start = time
-		visited = {0: true}
-		events.append({"type": "lap", "t": last_lap})
-	progress_i = cur
+	# Laps: count when the pod wraps past the start having visited every checkpoint. On the main
+	# road only: on a branch the pod keeps its progress, and back on the main road it carries on
+	# from that checkpoint (a shortcut visits none of the ones it skipped).
+	if Pd.path != 0:
+		pod_path = Pd.path
+	else:
+		var prev := progress_i
+		var cur := Pd.hint
+		var cps := checkpoints
+		var cpi := int(floor(float(cur) * cps / N))
+		if pod_path != 0:
+			pod_path = 0
+			checkpoint = cpi
+		if cpi != checkpoint and posmod(cpi - checkpoint + cps, cps) == 1:
+			checkpoint = cpi
+			visited[cpi] = true
+		if lap_start < 0.0 and pv > 2.0:
+			lap_start = time
+		if prev > N * 0.9 and cur < N * 0.1 and visited.size() >= cps - 1 and lap_start >= 0.0:
+			last_lap = time - lap_start
+			best_lap = last_lap if best_lap < 0.0 else minf(best_lap, last_lap)
+			lap += 1
+			lap_start = time
+			visited = {0: true}
+			events.append({"type": "lap", "t": last_lap})
+		progress_i = cur
+	if not job.is_empty():
+		_job_step(inp, dt, pv)
+
+
+func _new_job() -> Dictionary:
+	# exposed: out in the open on the way home; safe: back under cover since (the margin taken then)
+	return {"stage": "out", "t": 0.0, "t0": null, "held": 0.0, "route": "open", "margin": 0.0, "reason": "", "prev_d": null,
+		"exposed": false, "safe": false}
+
+
+## For the view: where the job's countdown counts to now, {x, y}: the lake town's pad on the way
+## out; from the drop on, the deadline home: the start town's receiving ramp's entrance on the
+## loop, or the canopy's start once on the shade line short of it. Empty once back under cover
+## (safe) or the job's over.
+func job_deadline() -> Dictionary:
+	if job.is_empty() or job.stage == "out":
+		return {"x": tpx[pad], "y": tpy[pad]} if pad >= 0 else {}
+	if job.safe or job.stage == "done" or job.stage == "failed":
+		return {}
+	if pod.path > 0:
+		var B: TrackPath = branches[pod.path - 1]
+		if pod.hint < B.covered.x:
+			return {"x": B.px[B.covered.x], "y": B.py[B.covered.x]}
+	var d := mouth
+	for r in covered_ramps:
+		if int(r[1]) == mouth - 1:
+			d = int(r[0])
+	return {"x": tpx[d], "y": tpy[d]}
+
+
+## The job's clock (s since its first move; 0 before it).
+func job_time() -> float:
+	return 0.0 if job.is_empty() or job.t0 == null else time - float(job.t0)
+
+
+## When the dawn front reaches (x, y), in the job's seconds.
+func t_lit(x: float, y: float) -> float:
+	return P.dawnT0 + (x * cos(P.dawnDir) + y * sin(P.dawnDir)) / P.dawnSpeed
+
+
+## The job (the emergency run), mirroring sim-core.js jobStep: its clock starts on the first move.
+## Out to the lake town's pad (stopped in its box PAD_HOLD s: the drop), then home to the start
+## town's mouth before the dawn front. The towns are shelter, and so is the shade line past its
+## canopy's start; caught in the open, the job fails. Each route's margin is taken at its own
+## deadline: the open loop's at the mouth, the shade line's as the pod goes under the canopy.
+func _job_step(inp: Dictionary, dt: float, pv: float) -> void:
+	var Pd := pod
+	if job.stage == "done" or job.stage == "failed":
+		return
+	if job.t0 == null:
+		if inp.thrL + inp.thrR <= 0.02:
+			return
+		job.t0 = time
+	var t: float = time - job.t0
+	job.t = t
+	if crash_t > 0.0:   # wrecked this step
+		job.reason = "crash"
+		_job_to("failed")
+		return
+	var lit := t_lit(Pd.x, Pd.y)
+	var covered: bool = Pd.path > 0 and Pd.hint >= branches[Pd.path - 1].covered.x
+	# under the canopy you've made it: coming off the shade line the main road joins under it (the
+	# join's zone, short of the mouth), and the town is shelter from there
+	var merging := false
+	if Pd.path == 0 and job.route == "shade" and not branches.is_empty():
+		var dj := _cyc(Pd.hint - branches[0].join_i)
+		merging = dj >= -branches[0].jz and dj <= 0
+	# shelter: a town, a covered ramp, the shade line's canopy
+	var sheltered: bool = covered or merging or (Pd.path == 0 and (tmode[Pd.hint] == 0 or tcover[Pd.hint] == 1))
+	if not sheltered and t >= lit:
+		job.reason = "dawn"
+		events.append({"type": "dawn"})
+		_job_to("failed")
+		crash_t = 1.6
+		return
+	# home: the deadline is getting back under cover after the open loop (a receiving ramp, or the
+	# shade line's canopy); the margin is taken there
+	if job.stage == "home":
+		if not sheltered:
+			job.exposed = true
+		elif job.exposed and not job.safe:
+			job.safe = true
+			job.route = "shade" if covered else "open"
+			job.margin = lit - t
+	if job.stage == "out" or job.stage == "drop":
+		var dx := Pd.x - tpx[pad]
+		var dy := Pd.y - tpy[pad]
+		var on_pad: bool = Pd.path == 0 and absf(dx * ttx[pad] + dy * tty[pad]) <= PAD_HALF and absf(dx * tnx[pad] + dy * tny[pad]) <= PAD_HALF
+		if job.stage == "out":
+			job.held = job.held + dt if on_pad and pv < STOPPED else 0.0
+			if job.held >= PAD_HOLD - 1e-9:
+				_job_to("drop")
+		elif not on_pad:
+			_job_to("home")
+	elif job.stage == "home":
+		var d = _cyc(Pd.hint - mouth) if Pd.path == 0 else null
+		if d != null and d >= 0 and d < 100 and job.prev_d != null and job.prev_d < 0 and job.prev_d > -100:   # crossed the mouth, coming home
+			if not job.safe:   # never out in the open: the mouth's
+				job.margin = t_lit(tpx[mouth], tpy[mouth]) - t
+			_job_to("done", {"route": job.route, "margin": job.margin})
+		job.prev_d = d
+
+
+func _job_to(stage: String, extra: Dictionary = {}) -> void:
+	job.stage = stage
+	var e := {"type": "job", "stage": stage}
+	e.merge(extra)
+	events.append(e)
