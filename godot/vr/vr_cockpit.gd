@@ -155,6 +155,10 @@ func _make_view() -> void:
 	var live := xr != null and xr.is_initialized()
 	if live:
 		get_viewport().use_xr = true
+		# MSAA, not TAA/FSR2: temporal AA smears at these speeds and differs eye to eye. 4x costs
+		# ~0.6 ms on the 5080 at Quest 3 resolution (1.66 -> 2.23 ms GPU, both eyes, Eridanus start).
+		# Shaders must survive it: edge samples see UVs off the quad (view/pylon.gdshader).
+		get_viewport().msaa_3d = Viewport.MSAA_4X
 		# OpenXR paces frames; desktop vsync caps at 60 Hz and judders (Firefly Catcher, 2026-07-27).
 		DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
 		for sig in ["session_begun", "session_visible", "session_focussed", "session_stopping", "pose_recentered"]:
@@ -168,7 +172,7 @@ func _make_view() -> void:
 				AudioServer.output_device = dev
 				print("AUDIO: output -> ", dev)
 				break
-		print("OPENXR: initialized")
+		print("OPENXR: initialized, MSAA 4x")
 	else:
 		print("OPENXR: NOT initialized, running flat (is the Quest on and in Link mode?)")
 
@@ -492,14 +496,26 @@ func _report() -> void:
 	var recent := frame_ms.slice(maxi(0, n - 900))
 	var sorted := recent.duplicate()
 	sorted.sort()
+	# The budget is the rate the headset really runs at: Link refuses the 90 Hz ask above and paces
+	# at the Link app's setting (72 Hz on 2026-10-19), and a fixed 90 Hz line counted every paced
+	# frame as a miss. 4% over the frame time is a miss, as 11.6 ms was at 90 Hz.
+	var hz := 0.0
+	if xr != null and xr.is_initialized() and "display_refresh_rate" in xr:
+		hz = float(xr.get("display_refresh_rate"))
+	var hz_src := "headset"
+	if hz <= 0.0:
+		hz = 90.0
+		hz_src = "assumed"
+	var budget := 1044.0 / hz
 	var total := 0.0
 	var slow := 0
 	for v in recent:
 		total += v
-		if v > 11.6:
+		if v > budget:
 			slow += 1
-	print("FRAMES: %.1f fps avg, p95 %.2f ms, %.1f%% over 11.6 ms (90 Hz budget), %d frames total" % [
-		1000.0 * recent.size() / total, sorted[int(sorted.size() * 0.95)], 100.0 * slow / recent.size(), n])
+	print("FRAMES: %.1f fps avg, p95 %.2f ms, %.1f%% over %.1f ms (%.0f Hz budget, %s), %d frames total" % [
+		1000.0 * recent.size() / total, sorted[int(sorted.size() * 0.95)], 100.0 * slow / recent.size(),
+		budget, hz, hz_src, n])
 
 
 func _update_hud() -> void:

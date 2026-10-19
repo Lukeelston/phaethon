@@ -24,8 +24,10 @@ void vertex() {
 }
 
 void fragment() {
-	float across = 1.0 - abs(UV.x);
-	float a = across * across * pow(1.0 - UV.y, 1.4);
+	// clamped: MSAA shades an edge pixel at its centre even when that lies off the quad, so UV runs
+	// past -1..1 / 0..1 there, and pow() of a negative is NaN: a black dash on every column's head
+	float across = clamp(1.0 - abs(UV.x), 0.0, 1.0);
+	float a = across * across * pow(clamp(1.0 - UV.y, 0.0, 1.0), 1.4);
 	vec3 col = pow(COLOR.rgb, vec3(2.2));   // vertex colours are authored sRGB
 	float k = mix(1.0, far_dim, smoothstep(2000.0, 30000.0, dist));
 	ALBEDO = col * energy * a * k;
