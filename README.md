@@ -7,7 +7,7 @@ Spec: https://claude.ai/artifact/VeY5CdSPzxcEq568JgkJh8 (source: `phaethon.html`
 |---|---|
 | `phaethon.html`, `sim-core.js`, `feel-lab.js` | Spec page and the browser feel lab (the JS reference flight model). Move into `web/` next. |
 | `godot/` | Godot 4.7 project: `sim/craft_sim.gd` (GDScript port), flat-screen chase view, lever input |
-| `godot/audio/` | `engine_audio.gd`: per-engine V8 + V12 + turbine whine + roar (+ burner) voices driven by the levers, plus the second engine (a rumbly big-bang four that lights above 1,500 mph; sound only). `engines/`: the baked loops |
+| `godot/audio/` | `engine_audio.gd`: per-engine V8 + V12 + turbine whine + roar (+ burner) voices driven by the levers, plus a bass rotor wound up by airspeed (a ~28 Hz rumble at rest, three octaves up by 1,500 mph) and the second engine (a rumbly big-bang four that lights above 1,500 mph and winds up with speed; sound only). `engines/`: the baked loops |
 | `tools/engine_bake.py` | Bakes one master per layer from the Salamander Grand Piano: hammer strikes become combustion pulses, sustains become turbine whine, damper noise becomes roar |
 | `tools/engine_audio_check.py` | Audio gate: records Godot's output on a scripted lever profile and measures the pitch against the logged RPM |
 | `cad/` | Parametric OpenSCAD lever v1. `params.scad` holds every dimension. |
@@ -81,6 +81,8 @@ arduino-cli compile --fqbn rp2040:rp2040:rpipico --output-dir firmware/build fir
 - Headless Godot mixes through the Dummy driver in ~93 ms bursts, ~1% slow of the wall clock. Pitch can only change between bursts, so a headless capture of a sweep records as a staircase of tones that the game doesn't have: never judge a sweep by ear from one. `--audio-output-latency` doesn't reach the Dummy driver. Movie Maker mode (`--write-movie x.avi --fixed-fps 96`, needs a window) mixes once per frame. Clock audio tests off a silent player's `get_playback_position()`, not frame deltas.
 - Bake a master near the RPM it's heard at. Pitched 6x up, the second engine's thud slid from chest to ~500 Hz (1% of its energy under 150 Hz at full lever). Baked at 3,000 rpm it measures 80% under 150 Hz there. Measure "rumbly" at full lever: averaging in idle under braking flattered the buzzy version.
 - Give a new layer its own random stream in the bake, or adding it re-rolls every loop baked after it.
+- Lever-driven pitch settles in a third of a second and then sits still while you climb thousands of mph. Speed has to drive pitch too: the rotor rides airspeed and the second engine's rpm lifts with it.
+- A shimmering, beating rumble (the rotor) has no clean line to pitch-track at 3%: grain phase smears each line by about +-7%. Track it through its spectral centroid against the logged pitch instead (measured r 0.99, ~1 octave per octave).
 - A loop seam test that compares the jump to the loop's step distribution misfires on a nearly pure tone. Compare curvature across the join to its 23 ms surroundings instead.
 - `AudioStreamWAV.data` is a getter that copies the whole buffer. Read it once, not per sample.
 - The loops load raw with `AudioStreamWAV.load_from_file`, so an exported build needs `audio/engines/*` in the export's non-resource include filter.

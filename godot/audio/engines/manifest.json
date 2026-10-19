@@ -80,7 +80,12 @@
     },
     {
      "file": "second_mip1.wav",
-     "at": 6000.0
+     "at": 6000.0,
+     "rho_next": 1.0
+    },
+    {
+     "file": "second_mip2.wav",
+     "at": 12000.0
     }
    ],
    "cyl": 4,
@@ -97,6 +102,18 @@
     }
    ],
    "blade_hz": 2400.0
+  },
+  "rotor": {
+   "unit": "speed",
+   "sync": true,
+   "rate_at": 1.0,
+   "bands": [
+    {
+     "file": "rotor_mip0.wav",
+     "at": 1.0
+    }
+   ],
+   "base_hz": 27.5
   },
   "roar": {
    "unit": "spool",
