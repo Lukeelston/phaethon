@@ -20,13 +20,14 @@
 - No paid tools, advertisements, fees or purchase transaction authorized.
 
 ## Work and verification
-- [ ] Baseline: import isolated snapshot, run existing simulation/input smoke checks; establish current errors before edits.
-- [ ] Release UI: add release/menu.gd, release/menu.tscn, release/pause_overlay.gd and bounded behavior test. Verify menu options, scene routing, pause and return without altering simulation.
-- [ ] Distribution: matching export template, export preset, required notices/player README; export Windows binary and PCK. Check raw audio and template version.
-- [ ] Packaged verification: extract ZIP into fresh directory; rendered launch from there, actual gameplay movement, pause/restart/menu flow; capture honest screenshots, inspect logs, validate package inventory.
-- [ ] Independent review of release changes and license/package omissions; fix material findings and rerun relevant checks.
-- [ ] Storefront: create concrete page, upload tested ZIP and authentic screenshots, set $3 experimental/in-development classification and visible known limits; publish if account supports paid purchases.
-- [ ] Verify public page, price and download availability; do not claim a customer sale or successful payment without one. Cleanup all launched game/test processes.
+- [x] Baseline: import isolated snapshot, run existing simulation/input smoke checks; establish current errors before edits.
+- [x] Release UI: add release/menu.gd, release/menu.tscn, release/pause_overlay.gd and bounded behavior test. Verify menu options, scene routing, pause and return without altering simulation.
+- [x] Distribution: matching export template, export preset, required notices/player README; export Windows binary and PCK. Check audio imports and template version.
+- [x] Packaged verification: extract ZIP into fresh directory; rendered launch from there, actual gameplay movement, pause/restart/menu flow; capture honest screenshots, inspect logs, validate package inventory.
+- [x] Independent review of release changes and license/package omissions; fix material findings and rerun relevant checks.
+- [x] Storefront: create concrete page, upload tested ZIP and authentic screenshots, set $3 experimental classification and visible known limits; publish.
+- [x] Verify public page, price and hosted download hash; do not claim a customer sale or successful payment without one. Cleanup all launched game/test processes.
+- [ ] Buyer checkout: Chrome's reCAPTCHA service fails in this session; phone check requested. No payment transaction attempted.
 
 ## Review focus
 No installed editor required; raw resource availability after export; cold-start imports and shaders; pause state after returning to menu; controllers plugged in at idle; first-run controls; private paths in package; truthful screenshots and requirements.

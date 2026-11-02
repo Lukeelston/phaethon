@@ -39,6 +39,11 @@ Audio verified by captured output; physical speaker listening not performed.
 One diagnostic run showed existing ObjectDB cleanup warnings at exit; fresh
 extracted run completed cleanly. No persistent test processes remained.
 No paid transaction or customer sale was made; publication does not prove one.
+The public page shows the correct title, USD 3 total, gameplay image and copy.
+This Chrome session's payment form reports a reCAPTCHA connection error and
+Currently Unavailable, also observed on existing store products. A phone check
+has been requested to distinguish browser failure from buyer-facing outage.
+Paid checkout remains unverified pending that check; no test charge attempted.
 
 REPRODUCTION
 Godot 4.7.1 stable, matching official Windows x64 release template.
