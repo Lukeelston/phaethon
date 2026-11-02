@@ -1,0 +1,7 @@
+godot/.godot/
+godot/shots/
+.tools/
+build/
+evidence/
+*.log
+__pycache__/

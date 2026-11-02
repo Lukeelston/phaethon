@@ -1,0 +1,18 @@
+License sources verified and retrieved 2026-11-02
+
+GODOT_LICENSE.txt
+https://raw.githubusercontent.com/godotengine/godot/4.7.1-stable/LICENSE.txt
+
+GODOT_COPYRIGHT.txt
+https://raw.githubusercontent.com/godotengine/godot/4.7.1-stable/COPYRIGHT.txt
+
+CC-BY-3.0.txt
+https://creativecommons.org/licenses/by/3.0/legalcode.txt
+
+SALAMANDER_SOURCE_README.txt
+Copied unmodified from the installed SalamanderGrandPiano-SFZ+FLAC-V3+20200602
+source package's readme.txt. Its licensing statement was checked against:
+https://freepats.zenvoid.org/Piano/acoustic-grand-piano.html
+
+The original package and the FreePats page both identify Alexander Holm as
+the recordings' author and Creative Commons Attribution 3.0 as their license.

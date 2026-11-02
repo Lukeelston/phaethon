@@ -1,0 +1,53 @@
+PHAETHON 0.1.0 EXPERIMENTAL - RELEASE RECORD
+2026-11-02
+
+Public product: https://stan.store/ElstonWorks/p/phaethon--experimental-desktop-racer
+Price: USD 3, one-time Windows download
+Store: ElstonWorks (existing Stan account)
+Stan product ID: 5600204
+Tagline: Two engines. One cockpit. We know it's a little fucky.
+
+ARCHIVE
+build/Phaethon-Experimental-0.1.0-Windows.zip
+Bytes: 53722639
+SHA256: 574126451de99bd436c363f4bd9eca8b88e0c79c9b249170e280741ecc16e582
+33 files: Windows executable and PCK, player README, third-party notices,
+five license/source documents, 24 separately licensed adapted audio WAVs.
+Downloaded back from Stan's uploaded-file control; hash matched exactly.
+
+VERIFIED
+- Exported Windows player: rendered 54 checks, 0 failures.
+- Same ZIP extracted into fresh directory: rendered 54 checks, 0 failures.
+- All three course buttons, keyboard movement and throttle cut, Escape pause
+  and resume, restart, menu return, audio initialization and signal capture.
+- Menu/pause and three gameplay screenshots visually inspected at 1280x720.
+- Release UI regression: 38/38. Input regression: 9/9.
+- Engine audio: 17/17 PCM16 loops, 30.5 seconds captured, no clipping.
+- Sprint finish parity: 143.148 seconds, correct finish and stopping position.
+- Independent review found no important release-code/package issues.
+- 297 original source files still match pre-release snapshot hashes.
+- No Phaethon/Godot processes left after tests.
+
+Evidence logs and screenshot PNGs are in evidence/ (not customer ZIP).
+Exact package inventory and per-file hashes: evidence/package-inventory.json.
+
+KNOWN LIMITS
+Windows x64 flat-screen, keyboard first. Physical controllers unverified.
+Minimum hardware and other-platform performance not established.
+Rendered tests used Vulkan on NVIDIA GeForce RTX 5080.
+Audio verified by captured output; physical speaker listening not performed.
+One diagnostic run showed existing ObjectDB cleanup warnings at exit; fresh
+extracted run completed cleanly. No persistent test processes remained.
+No paid transaction or customer sale was made; publication does not prove one.
+
+REPRODUCTION
+Godot 4.7.1 stable, matching official Windows x64 release template.
+tools/run_godot.py wraps bounded import/export/editor checks.
+tools/package_release.py assembles the explicit distribution allowlist.
+tools/run_export.py wraps bounded actual-player runs.
+Player user arguments: --verify-release --evidence=<absolute directory>
+Use engine flags --audio-driver Dummy --max-fps 60 before the separating --.
+The diagnostic is opt-in; ordinary launch opens the player menu.
+
+Source lives in this isolated release repository. Original development tree
+C:/Users/Luke/Projects/phaethon was preserved and is still independent.
