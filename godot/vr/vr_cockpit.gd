@@ -33,6 +33,8 @@ const ModeSwitchScript := preload("res://vr/mode_switch.gd")
 const CanopyScript := preload("res://view/canopy.gd")
 const MinimapPanelScript := preload("res://vr/minimap_panel.gd")
 const Kit := preload("res://view/mesh_kit.gd")
+const BrakeDiagnosticsScript := preload("res://vr/brake_diagnostics.gd")
+var _brake_trace: RefCounted
 static var require_neutral_on_entry := false
 var _await_neutral_controls := false
 
@@ -107,6 +109,15 @@ func _ready() -> void:
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--switch-track-at="):
 			_switch_at = int(a.get_slice("=", 1))
+		if a.begins_with("--brake-trace="):
+			_brake_trace = BrakeDiagnosticsScript.new()
+			_brake_trace.open(a.trim_prefix("--brake-trace="), _track())
+
+
+func _sim_step() -> void:
+	super()
+	if _brake_trace:
+		_brake_trace.observe_step(sim)
 
 
 func _load_prefs() -> Dictionary:
@@ -796,6 +807,8 @@ func _process(delta: float) -> void:
 	super(delta)
 	if menu.open:
 		return   # OpenXR still updates the tracked camera and controllers while flight waits.
+	if _brake_trace:
+		_brake_trace.capture(self, delta)
 	_apply_shudder(delta)
 	interior.set_mode(sim.mode, sim.hblend)
 	# An untracked hand (flat runs, before the first pose) sits at the origin, i.e. on the eye: its
@@ -949,6 +962,8 @@ func _update_hud() -> void:
 
 
 func _exit_tree() -> void:
+	if _brake_trace:
+		_brake_trace.close()
 	super()
 	_report()
 	if wag_all.t > 0.0:
