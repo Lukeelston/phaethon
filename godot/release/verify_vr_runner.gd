@@ -103,8 +103,11 @@ func _run() -> void:
 		check(stop + " starts at the VR menu", menu.scene_file_path == "res://release/vr_menu.tscn")
 		menu.set_process(false) # Explicitly XR-off diagnostic supplies controller samples below.
 		var collisions := index % 2 == 1
+		var partner_enabled := index % 2 == 0
 		menu.collision_checkbox.button_pressed = collisions
+		menu.partner_checkbox.button_pressed = partner_enabled
 		check(stop + " obstacle checkbox persists", Settings.obstacle_collisions_enabled() == collisions)
+		check(stop + " partner checkbox persists", Settings.driving_partner_enabled() == partner_enabled)
 		menu.choose_course(stop)
 		check(stop + " selection keeps menu open", get_tree().current_scene == menu and menu.selected_course == stop)
 		menu.focus_row(menu.start_index)
@@ -120,6 +123,7 @@ func _run() -> void:
 		check(stop + " native track selection is correct", view._track() == stop)
 		check(stop + " job selection is correct", not view.sim.job.is_empty() if stop == "emergency" else view.sim.job.is_empty())
 		check(stop + " launch respects obstacle checkbox", view.sim.P.obstacleCollisions == collisions)
+		check(stop + " launch builds the selected partner state", view.partner_on == partner_enabled and (view.partner != null) == partner_enabled)
 		check(stop + " has XR origin and camera", view.origin is XROrigin3D and view.cam is XRCamera3D)
 		check(stop + " has both controller nodes", view.hands.get("left") is XRController3D and view.hands.get("right") is XRController3D)
 		check(stop + " controller trackers are assigned", view.hands.left.tracker == &"left_hand" and view.hands.right.tracker == &"right_hand")
@@ -150,6 +154,27 @@ func _run() -> void:
 		await frames(2)
 		key(KEY_X, false)
 		check(stop + " throttle cut works", view.inp.thrL == 0.0 and view.inp.thrR == 0.0)
+		var was_muted := AudioServer.is_bus_mute(0)
+		view.menu_open(true)
+		check(stop + " quick-menu panel is visible", view.menu.open and view.menu_panel.visible and (view.menu_panel.get_node("words") as Label3D).text.contains("DRIVING PARTNER"))
+		var hold_time: float = view.sim.time
+		var partner_position := Vector3.ZERO if view.partner == null else Vector3(view.partner.x, view.partner.y, view.partner.z)
+		var traffic_tick: int = view.traffic_net._tick if view.traffic_net != null else 0
+		await frames(3)
+		check(stop + " quick menu freezes simulation", view.sim.time == hold_time)
+		check(stop + " quick menu freezes partner", view.partner == null or Vector3(view.partner.x, view.partner.y, view.partner.z) == partner_position)
+		check(stop + " quick menu freezes traffic", view.traffic_net == null or view.traffic_net._tick == traffic_tick)
+		check(stop + " quick menu mutes output", AudioServer.is_bus_mute(0))
+		view.menu.at = 0
+		view.menu_choose()
+		check(stop + " quick menu toggles partner immediately", view.partner_on != partner_enabled and (view.partner != null) != partner_enabled)
+		view.menu_choose()
+		if index == 0:
+			await shot("quick-menu")
+		view.menu_open(false)
+		check(stop + " quick-menu close restores audio and input guard", not view.menu.open and not view.menu_panel.visible and AudioServer.is_bus_mute(0) == was_muted and view._await_neutral_controls)
+		await frames(3)
+		check(stop + " quick-menu resume advances simulation", view.sim.time > hold_time)
 		key(KEY_ESCAPE, true)
 		key(KEY_ESCAPE, false)
 		overlay.set_paused(true)
@@ -161,6 +186,7 @@ func _run() -> void:
 			await shot(stop)
 		view._respawn()
 		check(stop + " restart keeps obstacle checkbox", view.sim.P.obstacleCollisions == collisions)
+		check(stop + " restart keeps partner", view.partner_on == partner_enabled and (view.partner != null) == partner_enabled)
 		if stop == "network":
 			check("VR traffic follows obstacle checkbox", view.traffic_net.collide == collisions)
 			for city in view.sim.cities:
@@ -170,6 +196,7 @@ func _run() -> void:
 			await get_tree().scene_changed
 			view = get_tree().current_scene
 			check("VR city GP keeps obstacle checkbox", view.sim.track_name == "gp_dunes" and view.sim.P.obstacleCollisions == collisions)
+			check("VR city GP keeps partner", view.partner_on == partner_enabled and (view.partner != null) == partner_enabled)
 		var old: WeakRef = weakref(view)
 		view.return_to_menu()
 		await get_tree().scene_changed
@@ -177,6 +204,7 @@ func _run() -> void:
 		check(stop + " returns to VR menu and unloads flight", get_tree().current_scene.scene_file_path == "res://release/vr_menu.tscn" and old.get_ref() == null)
 		check(stop + " menu remembers selection", get_tree().current_scene.selected_course == stop)
 		check(stop + " menu restores obstacle checkbox", get_tree().current_scene.collision_checkbox.button_pressed == collisions)
+		check(stop + " menu restores partner checkbox", get_tree().current_scene.partner_checkbox.button_pressed == partner_enabled)
 	await frames(3)
 	_finish()
 

@@ -1,5 +1,5 @@
 PHAETHON - EXPERIMENTAL PC VR EDITION
-Windows x64 / OpenXR - v0.1.6 - ElstonWorks
+Windows x64 / OpenXR - v0.1.7 - ElstonWorks
 
 Two engines. One cockpit. We know it's a little fucky.
 
@@ -41,7 +41,7 @@ X                   Hold to repair
 Y tap               Restart
 Y hold 1 second     Switch Speedcraft / Starfighter handling
 Either stick click  Recenter view and seat height
-Left menu tap       Cycle control schemes
+Left menu tap       Quick menu: partner, control schemes, map selection, resume
 Left menu hold 1.5s  Return to main menu / map selection (ends this run)
 
 Starfighter has one gear covering its full normal speed range. Switching into
@@ -71,8 +71,8 @@ Opening your headset's system menu neutralizes controller inputs; it is not
 the desktop edition's pause menu and does not guarantee the craft stops.
 
 FOUR CONTROL SCHEMES
-Menu taps cycle Trigger Throttles, Throttle + Steer, Grab the Levers, and
-Stick Levers. Your choice is saved. Begin with Trigger Throttles.
+Tap Menu, then select Controls to cycle Trigger Throttles, Throttle + Steer,
+Grab the Levers, and Stick Levers. Your choice is saved. Begin with Trigger Throttles.
 Throttle + Steer: left stick sets shared throttle; right stick steers;
 triggers brake.
 Grab the Levers: hold a grip and move that hand forward/back; release to leave
@@ -96,10 +96,19 @@ to close the game. The menu stays still; stick-click brings it in front of you.
   eligible city's Starfighter zone to enter its Grand Prix.
 
 NETWORK JUMPS AND OBSTACLES
-Nine ascent ramps have different heights and minimum launch speeds from
+Twenty interchange ascent ramps have different heights and minimum launch speeds from
 2,000 to 4,000 mph. Follow the ramp signs and approach display. The marked
 minimum applies at the launch lip; keep enough throttle through the climb.
 If you miss the catch deck, look for a recovery on-ramp or restart.
+Twelve side roads add corners; vertical shafts turn you over and back onto
+the same highway at its ends. Arrow boards identify the jump spur at each fork.
+
+DRIVING PARTNER
+Enable Driving partner in the startup menu or left-Menu quick menu for a teal
+craft that follows your speed and heading. It has no collision. Your choice
+is saved. The quick menu pauses gameplay; select Resume or press B to close,
+then release controls once before flying again. Choose map ends the run and
+returns to the startup menu, as does holding left Menu for 1.5 seconds.
 
 Obstacle collisions is a checkbox on the main menu. It controls bridge
 pillars and traffic and defaults off. Your choice is saved. Guardrails
@@ -123,4 +132,4 @@ copyright. Third-party components and the CC BY engine audio retain their
 own licenses and permissions. See THIRD_PARTY_NOTICES.txt and licenses/.
 Adapted engine audio is supplied separately in audio/engines/.
 
-Build: 0.1.6-experimental | 2026-11-02
+Build: 0.1.7-experimental | 2026-11-02

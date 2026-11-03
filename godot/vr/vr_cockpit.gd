@@ -1,7 +1,7 @@
 ## M2 VR seat: seated OpenXR cockpit riding the pod. The pod is your frame of reference;
 ## the engines, binder and cables run out ahead of you, and the cockpit lists with the pod.
-## Touch controllers stand in for the printed levers, in four schemes (QuestControls; a tap on
-## the left menu button cycles them, the choice is saved): trigger throttles, throttle + steer,
+## Touch controllers stand in for the printed levers, in four schemes (QuestControls;
+## the quick menu selects them, the choice is saved): trigger throttles, throttle + steer,
 ## grab the levers, stick levers. Buttons, every scheme:
 ##   A reignite · B arm ramjet · X repair · thumbstick click recenter (view and seat height)
 ##   trigger throttles: right stick flick up / down shifts gear; left stick flick up lights the
@@ -9,7 +9,7 @@
 ##   away from the triggers")
 ##   the MODE switch on the right console: push it up for SPEEDCRAFT, down for STARFIGHTER (live,
 ##   mid-lap; STARFIGHTER takes below 1,250 mph). Y hold 1 s flips it too. Y tap: restart
-##   menu tap: next control scheme · menu hold 1.5 s: main menu / map selection
+##   menu tap: quick menu · menu hold 1.5 s: main menu / map selection
 ## Haptics: a kick on the sonic boom; a tick in that hand when a lever crosses the burner gate (the
 ## stick schemes); a thump in the left hand as the burner lights, a softer one as it goes out, a
 ## double tap when it can't (below top gear).
@@ -43,6 +43,7 @@ var interior   # vr/cockpit_interior.gd
 var mode_switch   # vr/mode_switch.gd: the SPEEDCRAFT / STARFIGHTER toggle on the right console
 var canopy: Node3D   # view/canopy.gd: the windscreen ahead and the forcefield round the nose
 var minimap_panel: Node3D   # vr/minimap_panel.gd
+var menu_panel: Node3D      # the main menu's panel (view/main_menu.gd)
 var _ride := {}   # CraftModel.ride's smoothing state
 var _buzz_hold := {}   # controller -> seconds an event buzz still owns it (the shudder waits)
 const SHAKE_M := 0.004   # cockpit shake per unit of air-brake shudder, metres
@@ -304,6 +305,8 @@ func _set_hands(on: bool) -> void:
 		_y_held = 0.0
 		_menu_held = 0.0
 		_a_held = 0.0
+	elif menu.open:
+		_seed_menu_edges()
 
 
 ## A controller's trigger / grip, stick and button, or let go while the session isn't focused.
@@ -451,6 +454,33 @@ func _build_cockpit() -> void:
 	minimap_panel.transform = MinimapPanelScript.mount(SEAT)
 	minimap_panel.build()
 	minimap_panel.visible = sim.kind == "circuit" or sim.kind == "network"
+	menu_panel = Node3D.new()   # the main menu: a dark panel and its words, a metre out, never behind anything
+	menu_panel.name = "main_menu"
+	menu_panel.position = SEAT + Vector3(0.0, 0.02, -1.1)
+	menu_panel.visible = false
+	shell.add_child(menu_panel)
+	var back := MeshInstance3D.new()
+	var bq := QuadMesh.new()
+	bq.size = Vector2(1.05, 0.6)
+	back.mesh = bq
+	var bm := StandardMaterial3D.new()
+	bm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	bm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	bm.albedo_color = Color(0.03, 0.05, 0.09, 0.98)
+	bm.no_depth_test = true
+	bm.render_priority = 120   # above minimap (40) and world destination markers (100)
+	back.material_override = bm
+	menu_panel.add_child(back)
+	var words := Label3D.new()
+	words.name = "words"
+	words.font_size = 40
+	words.pixel_size = 0.0011
+	words.no_depth_test = true
+	words.render_priority = 121   # below the comfort fade (127)
+	words.outline_size = 0
+	words.position = Vector3(-0.47, 0.0, 0.01)
+	words.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	menu_panel.add_child(words)
 
 
 func _build_fade(xr_cam: XRCamera3D) -> void:
@@ -483,9 +513,22 @@ func _pressed_once(key: String, down: bool) -> bool:
 
 func _read_input(delta: float) -> void:
 	_release_menu_controls()
-	var p: Dictionary = levers.poll(delta)
 	var l: XRController3D = hands.left
 	var r: XRController3D = hands.right
+	match _menu(_button(l, "menu_button"), delta):
+		"quick":
+			menu_open(not menu.open)
+			_buzz(l, 0.5, 0.08)
+			return
+		"menu":
+			_buzz(l, 0.9, 0.2)
+			_buzz(r, 0.9, 0.2)
+			return_to_menu()
+			return
+	if menu.open:
+		_menu_hands(l, r)
+		return
+	var p: Dictionary = levers.poll(delta)
 	var c := {"lt": _axis(l, "trigger"), "rt": _axis(r, "trigger"), "lg": _axis(l, "grip"), "rg": _axis(r, "grip"),
 		"ls": _stick(l, "primary"), "rs": _stick(r, "primary"), "lz": l.position.z, "rz": r.position.z,
 		"speed": sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy), "yaw": (sim.eL.w + sim.eR.w) / 2.0,
@@ -552,22 +595,11 @@ func _read_input(delta: float) -> void:
 			_respawn()
 		_y_held = 0.0
 		_y_fired = false
-	match _menu(_button(l, "menu_button"), delta):
-		"scheme":
-			quest.next_scheme()
-			_save_prefs()
-			_scheme_flash = 4.0
-			_buzz(l, 0.5, 0.08)
-			print("CONTROLS: ", quest.scheme)
-		"menu":
-			_buzz(l, 0.9, 0.2)
-			_buzz(r, 0.9, 0.2)
-			return_to_menu()
 	_frames += 1
 	if _switch_at > 0 and _frames == _switch_at and track_override == "":   # once
 		switch_track()
 	# the MODE switch: either hand can throw it
-	if mode_switch and hands_live:
+	if mode_switch and hands_live and not _await_neutral_controls:
 		for hand in [l, r]:
 			var flip: String = mode_switch.poke(hand, delta)
 			if flip != "" and ask_handling(flip):   # (refused inside the cooldown: the lever springs back)
@@ -587,8 +619,8 @@ func _track() -> String:   # "range", "gp", "eridanus", "emergency" (Eridanus on
 	return sim.track_name if sim.course else ("range" if sim.kind == "range" else "circuit")
 
 
-## The left menu button: a tap (released before MENU_HOLD) cycles the control scheme; holding it
-## MENU_HOLD returns to map selection. Returns "scheme", "menu" or "".
+## A tap opens/closes the quick menu. A 1.5 second hold returns to map selection.
+## Returns "quick", "menu" or ""; releasing after a hold cannot also open the quick menu.
 func _menu(down: bool, delta: float) -> String:
 	if down:
 		_menu_held += delta
@@ -599,11 +631,105 @@ func _menu(down: bool, delta: float) -> String:
 	var tapped := _menu_held > 0.0 and not _menu_fired
 	_menu_held = 0.0
 	_menu_fired = false
-	return "scheme" if tapped else ""
+	return "quick" if tapped else ""
+
+
+## Menu inputs belong to the menu until released; held A/stick must never become flight input.
+func menu_open(on: bool) -> void:
+	if on == menu.open:
+		return
+	_a_held = 0.0
+	_a_fired = false
+	_y_held = 0.0
+	_y_fired = false
+	if on:
+		_seed_menu_edges()
+	elif not on:
+		_await_neutral_controls = true
+		quest.thr_l = 0.0
+		quest.thr_r = 0.0
+		quest.collective = 0.0
+		quest.burner = false
+		quest._ramp = [0.0, 0.0]
+		quest._brake = [0.0, 0.0]
+		quest._grab = [{}, {}]
+		quest._dif = 0.0
+		quest.split = 0.0
+		quest._was = [0.0, 0.0]
+		quest._flick = true
+		quest._flick_l = true
+		edges.clear()
+		_menu_held = 0.0
+		_menu_fired = false
+		inp = {"thrL": 0.0, "thrR": 0.0, "brkL": 0.0, "brkR": 0.0, "repair": false, "reignite": false}
+	super(on)
+
+
+func _seed_menu_edges() -> void:
+	if not hands.has("right"):
+		return
+	var r: XRController3D = hands.right
+	var y: float = _stick(r, "primary").y
+	edges["menu_up"] = y > 0.7
+	edges["menu_down"] = y < -0.7
+	edges["menu_a"] = _button(r, "ax_button")
+	edges["menu_b"] = _button(r, "by_button")
+
+
+## The main menu in the headset: the right stick steps, A changes, B closes.
+func _menu_hands(_l: XRController3D, r: XRController3D) -> void:
+	var y: float = _stick(r, "primary").y
+	if _pressed_once("menu_up", y > 0.7):
+		menu.move(-1)
+		_buzz(r, 0.3, 0.03)
+		_menu_show()
+	if _pressed_once("menu_down", y < -0.7):
+		menu.move(1)
+		_buzz(r, 0.3, 0.03)
+		_menu_show()
+	if _pressed_once("menu_a", _button(r, "ax_button")):
+		_buzz(r, 0.6, 0.05)
+		menu_choose()
+	if menu.open and _pressed_once("menu_b", _button(r, "by_button")):
+		menu_open(false)
+
+
+func _menu_items() -> Array:
+	return [{"key": "partner", "label": "DRIVING PARTNER", "value": "ON" if partner_on else "OFF"},
+		{"key": "scheme", "label": "CONTROLS", "value": String(quest.scheme).to_upper()},
+		{"key": "maps", "label": "CHOOSE MAP"},
+		{"key": "resume", "label": "RESUME"}]
+
+
+func menu_choose() -> bool:
+	match menu.key():
+		"scheme":
+			quest.next_scheme()
+			_save_prefs()
+			_scheme_flash = 4.0
+			print("CONTROLS: ", quest.scheme)
+			var at: int = menu.at
+			menu.items = _menu_items()
+			menu.at = at
+			_menu_show()
+			return true
+		"maps":
+			return_to_menu()
+			return false
+	return super()
+
+
+## The panel in the cockpit: over the dash, in the middle of the view.
+func _menu_show() -> void:
+	if menu_panel == null:
+		return
+	menu_panel.visible = menu.open
+	(menu_panel.get_node("words") as Label3D).text = menu.text() + "\n\nStick: select   A: change   B: resume"
 
 
 ## End flight and return to the headset menu; keep the nearest selectable destination.
 func return_to_menu() -> void:
+	menu_open(false)
 	var menu_script = load("res://release/vr_menu.gd")
 	menu_script.remembered_course = "network" if GP_BIOME.has(_track()) else _track()
 	_save_prefs()
@@ -651,10 +777,11 @@ func _place_camera(_k: float) -> void:
 		rig.transform = CraftModelScript.onto_road(sim, Transform3D(b_flat, floor_flat + b_yaw * head - b_flat * head), floor_flat,
 			_ride.roll, pitch, org_x, org_y)
 	else:
-		var b_full := Basis.from_euler(Vector3(pitch, yaw, roll))   # lean + the track's banking (capped), and its slope
-		var base := wz(sim.pod.x, sim.pod.y, sim.pod.z - 0.8 + CraftModelScript.POD_LIFT) + Vector3.UP * (r.x - surface(sim.pod.x, sim.pod.y).x)   # floor 0.8 m below the pod body centre, lifted with the pod
+		var Q := shaft_carry_at(sim.pod.x, sim.pod.y)   # (identity but up a shaft: there the world turns over round you)
+		var b_full: Basis = Q * Basis.from_euler(Vector3(pitch, yaw, roll))   # lean + the track's banking (capped), and its slope
+		var base := wz(sim.pod.x, sim.pod.y, sim.pod.z - 0.8 + CraftModelScript.POD_LIFT) + Q * Vector3.UP * (r.x - surface(sim.pod.x, sim.pod.y).x)   # floor 0.8 m below the pod body centre, lifted with the pod
 		rig.basis = b_full
-		rig.position = base + b_yaw * head - b_full * head
+		rig.position = base + Q * (b_yaw * head) - b_full * head
 	var thr := [inp.thrL, inp.thrR]
 	for k in 2:
 		lever_pivots[k].rotation.x = deg_to_rad(lerpf(30.0, -30.0, thr[k]))
@@ -664,6 +791,8 @@ func _place_camera(_k: float) -> void:
 func _process(delta: float) -> void:
 	var t_in := Time.get_ticks_usec()
 	super(delta)
+	if menu.open:
+		return   # OpenXR still updates the tracked camera and controllers while flight waits.
 	_apply_shudder(delta)
 	interior.set_mode(sim.mode, sim.hblend)
 	# An untracked hand (flat runs, before the first pose) sits at the origin, i.e. on the eye: its
@@ -812,6 +941,7 @@ func _update_hud() -> void:
 
 
 func _exit_tree() -> void:
+	super()
 	_report()
 	if wag_all.t > 0.0:
 		print(wag_all.report().replace("WAG:", "WAG (the whole flight):"))

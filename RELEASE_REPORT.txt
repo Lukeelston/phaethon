@@ -631,3 +631,116 @@ verified v0.1.6 executable path. Its log records the Oculus OpenXR runtime,
 xr_ready=true, startup menu and menu ready. The existing stereo object-picking
 warning remains; explicit XR menu controls are used. Only this intentional
 interactive player is left running. Evidence: v016-headset.log.
+
+LOCAL 0.1.7 CLAUDE NETWORK INTEGRATION - 2026-11-02
+Luke requested all of Claude's new work in the tested release. Integration uses
+Claude tip f6b30415157fb35c31340006ff986f3aca5b4bb4, with content base 86b1bb5,
+and release parent 6893fe1. The separate histories are recorded as both parents
+of the merge; source contents were merged against the verified common snapshot.
+Original project and Claude worktree were read-only. Existing resource UIDs
+were retained. Preflight: evidence/claude-merge-preflight.json, 48 incoming files.
+
+The Network now has 116 roads, 175 junctions, 20 interchange jumps, 12 side
+roads and 12 vertical highway-end shafts. E2, N2 and E3 are straight end to
+end. Shafts climb about 41,280 feet, turn over and roll upright onto the same
+highway in the opposite direction. Jump profiles retain the release's varied
+2,000-4,000 mph minimums and different heights. Animated arrows and borders
+surround steady, fitted text; rear faces retain readable approach warnings.
+The approach readout now follows highway -> exit ramp -> straight jump fork.
+Corner boards use the release's four Speedcraft gear numbers.
+
+The teal driving partner is optional in both startup menus and desktop pause.
+In VR, a Menu tap opens flight hold: partner, control scheme, maps and resume.
+Holding Menu 1.5 seconds still returns to map selection. The quick menu freezes
+simulation, traffic, partner and sound, while native XR tracking continues.
+Closing it clears stored controller input and waits for neutral controls.
+Partner settings use the same preference file as obstacle collisions; launch
+flags can override the partner for a flight without writing that choice.
+
+The accepted one-Starfighter/four-Speedcraft gearing, unlimited last gear and
+audio rise, airspeed shield, high-speed brakes, 3% toe/30 ms onset, smooth brake
+rumble, obstacle checkbox, guardrails and clear junction meshes are retained.
+
+Integration fixes established by failing cases:
+- Nearby-road queries returned duplicate candidates at cell boundaries. Both
+  sims now keep the nearest candidate per road without widening search bounds.
+- Crossing an elevated catch deck could hit its side forcefield from the wrong
+  direction. Elevated catch decks share the directional catch rule; ordinary
+  and ground-level guardrails retain their collision forces.
+- Long straight highways need more traffic braking lookahead. A traced car
+  also spawned beside the Eridanus exit at 4,399 mph despite a 1,994 mph cap.
+  Spawn now chooses its route before setting speed. The original traffic gate
+  passes all 12 checks, 2,083 city-zone samples <=1,150 mph, and 1.68 ms average
+  for 217 vehicles against its unchanged 2.5 ms budget (v017-traffic-fixed.log).
+- Streaming keeps its catch-up budget until the pending chunk queue is empty.
+  The original 40-frame gate passes with no missing chunks and 5.7 ms worst
+  build time against 8 ms (v017-network-world-green.log).
+- Shaft traffic rendering and obstacle heights now use carried coordinates;
+  its render bounds extend above the 12 km apex. Ground pillars are not drawn
+  under the shaft. Rendered GL test: 237 checks, zero failures.
+
+Source verification completed:
+- All 60 low/minimum/high jump traversals pass in JS and Godot; minimum cases
+  span more than 900 m of height. Godot matrix: 132 seconds, zero failures.
+- Network parity passes completed intercity travel, jumps, burner, road ends,
+  and forward/reverse shaft climbs plus an unpowered stall. Shaft positions
+  and velocities agree with JS within 0.001 m and 0.001 m/s respectively.
+- 160 boundary queries and two ground-wall cases pass in Godot; JS compares
+  480 nearest-road results with exhaustive reference queries. Query benchmark
+  is +0.82 microseconds per query versus the prior implementation.
+- Partner/menu 75 checks, placement 8, desktop menu 58, VR menu 61, collision
+  menu 101, track switching and shaft integration 12 checks all pass. Partner
+  remains within 63 m of the craft through the tested shaft climb.
+- Jump approach regression: 120 checks pass after reproducing 40 failures on
+  the old highway/fork readout. Sign rendering: 12,044 checks; animated pixels,
+  fitted text and nonmirrored rear faces verified. New fork/corner front and
+  rear examples and the shaft contact sheet were visually inspected.
+- Junction checks: 46,376 projection offsets, 5,221 triangles, 153 body
+  placements; zero obstructing junction meshes. Obstacle suite: 17 checks.
+- All 15 preservation suites pass with exit 0 and no logged errors: Quest
+  controls, brake feathering, brakes, speed brakes and parity, gears, mode
+  gears, gear audio, overdrive audio, overdrive, energy, obstacle collisions,
+  flyable controls, XR focus and shudder. Evidence: v017-preserved-regressions.json.
+  Final JS Network routing/traffic/walls/jumps/ground suite also passes.
+- The imported shaft diagnostic initially cycled the saved source control
+  scheme. Restored the recorded trigger-throttle preference and added exact
+  VR-preference backup/restore. The final shaft run passes all 12 behavioral
+  checks and byte-exact preference restoration (v017-shaft-final.log).
+- Exported screenshot review caught world destination markers drawing over
+  the VR quick menu. Its backing/text now draw above markers and the minimap,
+  below the comfort fade. A darker backing keeps bright world details from
+  competing with the text. The rendered marker regression reproduced the
+  obstruction and now passes (v017-quick-menu-marker-final.log); the final
+  menu screenshot was inspected for all labels and footer visibility.
+
+Physical acceptance of the new shafts, partner and VR quick menu remains
+unverified - needs user confirmation. The prior v0.1.6 gentle braking and
+two-sided signs were user-confirmed. Physical obstacle testing is still pending
+as Luke requested. This local integration does not update the live store.
+
+LOCAL 0.1.7 ARCHIVES AND PLAYER VERIFICATION - 2026-11-03
+Editor import and both exports exited 0 with no logged errors. Both ZIPs
+contain 42 allowlisted files; archive integrity and fresh-extraction hashes
+passed. Final packages:
+Phaethon-Experimental-0.1.7-Windows.zip
+Bytes: 61319251
+SHA256: bac1259febb1f0004c5fc4dd9c3173505fd7227190e0eef1b846bf6ae2024f22
+Phaethon-Experimental-0.1.7-Windows-PCVR.zip
+Bytes: 61399311
+SHA256: 18c5b7da1100afe956f7628ab99c26feaa7c2385107f5b74664104e9a43679d8
+Fresh extracted desktop: 168 checks, zero failures; PC VR with XR explicitly
+off: 284 checks, zero failures. Both exited 0 without logged errors. Saved
+preferences were restored. Desktop menu/pause, VR startup panel and final
+quick-menu screenshots were inspected. These short flat diagnostics do
+not establish headset frame rate, stereo rendering or comfort.
+Final original-source check: all 297 snapshot files unchanged. Claude
+worktree remains clean at f6b3041. No test or export helper is retained.
+
+The extracted v0.1.7 PC VR executable was launched with Network preselected,
+PID 82808. Its window responds and its executable path matches the verified
+fresh extraction. Only that intentional playtest remains running; all Godot,
+Python test and export helpers have exited. The launch log remains empty, so
+this launch has not independently established OpenXR session readiness.
+Headset confirmation of the partner and readable quick-menu/resume behavior
+has been requested. Physical acceptance remains unverified - needs user
+confirmation.

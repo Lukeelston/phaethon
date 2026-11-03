@@ -2,7 +2,9 @@
 ## Luke: "taking a massive interchange and using it as a ramp to jump 2 miles and 1500' up to the
 ## entrance of the next ramp"; "Missing a jump drops the pod to the ground, where it will look for a
 ## city for an onramp or just reset"):
-##   board      each launch spur's exit has its board on the highway: "JUMP", its window ("3,000+ MPH")
+##   boards     each jump has three boards on the highway before its exit and one over the fork off the
+##              ramp and two along the spur: ascent ID, its own minimum speed, and each faces the way the spur is taken (the
+##              big arrow: view/arrow_board.gdshader, arrow up and right on the highway, straight on at the fork)
 ##   airborne   off the lip at 4,000 mph the dash reads "AIRBORNE  x.x s  y FT"
 ##   caught     caught by the deck: the dash flashes "CAUGHT  x.x s IN THE AIR  y MPH"; on the deck
 ##              (~3,500 ft up) the craft is drawn at the pod's own height (the roads' heights are the
@@ -65,17 +67,30 @@ func _process(_d: float) -> bool:
 	var sim = v.sim
 	# the boards
 	var boards := []
+	var forks := []
+	var facing_right := 0
 	for key in v.network_world._signs:
 		for spec in v.network_world._signs[key]:
-			if spec[2] == "jump":
-				boards.append(spec[3])
-	var correct_boards: bool = boards.size() == sim.jumps.size() * 5
+			if spec[2] == "jump" or spec[2] == "fork":
+				(boards if spec[2] == "jump" else forks).append(spec[3])
+	var correct_boards: bool = boards.size() == sim.jumps.size() * 3 and forks.size() == sim.jumps.size() * 3
 	for jp in sim.jumps:
-		var name: String = "ASCENT " + sim.roads[int(jp[0])].name
+		var L = sim.roads[int(jp[0])]
+		var title: String = "ASCENT " + L.name
 		var mph := int(jp[2])
 		var minimum := "MIN %d,%03d MPH AT LIP" % [mph / 1000, mph % 1000]
-		correct_boards = correct_boards and boards.filter(func(b): return b[0] == name and b[1] == minimum).size() == 5
-	_check("board: %d jump boards, five correct minimums for each of nine ascents" % boards.size(), correct_boards)
+		correct_boards = correct_boards and boards.filter(func(b): return b[0] == title and b[1] == minimum).size() == 3
+		correct_boards = correct_boards and forks.filter(func(b): return b[0] == title and b[1] == minimum).size() == 3
+		var direction_ok := true
+		for key in v.network_world._signs:
+			for spec in v.network_world._signs[key]:
+				if spec[2] != "jump" or spec[3][0] != title:
+					continue
+				var R = sim.roads[key.x]
+				var i := int(spec[0])
+				direction_ok = direction_ok and R.name in ["E1", "E2", "E3", "N1", "N2", "N3"] and (R.tx[i] * spec[1] * L.tx[0] + R.ty[i] * spec[1] * L.ty[0]) > 0.9
+		facing_right += int(direction_ok)
+	_check("boards: %d highway, %d fork/spur, correct varied minimums and approach direction for %d/%d ascents" % [boards.size(), forks.size(), facing_right, sim.jumps.size()], correct_boards and facing_right == sim.jumps.size())
 	_line_up(0, 2500.0)
 	var slow: String = v._progress_text()
 	_check("approach below minimum: " + slow, slow.contains("TOO SLOW") and slow.contains("3,000 MPH AT LIP") and slow.contains("TOP") and slow.contains("LIP"))

@@ -13,7 +13,7 @@ import design_network as dn
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-roads, J, cities, H, ok, jumps, onramps = dn.main()
+roads, J, cities, H, ok, jumps, onramps, shafts = dn.main()
 assert ok, "the design isn't OK: fix it before syncing"
 
 
@@ -49,6 +49,8 @@ def js_block():
     out.append("  const NET_JUMPS = [" + ", ".join("[%d, %d, %s]" % (j[0], j[1], num(j[2])) for j in jumps) + "];")
     out.append("  // [city, road]: the on-ramps from the open ground (their start is open)")
     out.append("  const NET_ONRAMPS = [" + ", ".join("[%d, %d]" % (o[0], o[1]) for o in onramps) + "];")
+    out.append("  // [road, pull-up sample, landing sample, R, V]: the shafts (their bulb carries you round; view/network_shaft.gd)")
+    out.append("  const NET_SHAFTS = [" + ", ".join("[%d, %d, %d, %s, %s]" % (j[0], j[1], j[2], num(j[3]), num(j[4])) for j in shafts) + "];")
     out.append("  // </network>")
     return "\n".join(out)
 
@@ -81,6 +83,8 @@ def gd_block():
     out.append("const NET_JUMPS := [" + ", ".join("[%d, %d, %s]" % (j[0], j[1], num(j[2])) for j in jumps) + "]")
     out.append("# [city, road]: the on-ramps from the open ground (their start is open)")
     out.append("const NET_ONRAMPS := [" + ", ".join("[%d, %d]" % (o[0], o[1]) for o in onramps) + "]")
+    out.append("# [road, pull-up sample, landing sample, R, V]: the shafts (their bulb carries you round; view/network_shaft.gd)")
+    out.append("const NET_SHAFTS := [" + ", ".join("[%d, %d, %d, %s, %s]" % (j[0], j[1], j[2], num(j[3]), num(j[4])) for j in shafts) + "]")
     out.append("# </network>")
     return "\n".join(out)
 
@@ -104,4 +108,4 @@ p = os.path.join(ROOT, 'godot', 'sim', 'craft_sim.gd')
 s = open(p, encoding='utf-8').read()
 s = put_block(s, gd_block(), '# <network>', '# </network>', '# The courses: widths per mode')
 open(p, 'w', encoding='utf-8').write(s)
-print(f"synced {len(roads)} roads, {len(J)} junctions, {len(cities)} cities, {len(H)} height profiles, {len(jumps)} jumps, {len(onramps)} on-ramps")
+print(f"synced {len(roads)} roads, {len(J)} junctions, {len(cities)} cities, {len(H)} height profiles, {len(jumps)} jumps, {len(onramps)} on-ramps, {len(shafts)} shafts")

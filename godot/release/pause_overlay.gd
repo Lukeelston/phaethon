@@ -8,6 +8,7 @@ var _was_muted := false
 var _mouse_mode := Input.MOUSE_MODE_VISIBLE
 var _screen: Control
 var _resume: Button
+var partner_checkbox: CheckBox
 
 func _ready() -> void:
 	if OS.has_feature("pcvr"):
@@ -39,6 +40,9 @@ func _ready() -> void:
 	actions.add_child(UI.label("Even bad ideas need a breather.", 20, UI.MUTED))
 	_resume = UI.button("Resume flight  ·  Esc", resume_game)
 	actions.add_child(_resume)
+	partner_checkbox = UI.partner_checkbox()
+	partner_checkbox.toggled.connect(_set_partner)
+	actions.add_child(partner_checkbox)
 	actions.add_child(UI.button("Restart this course", restart_game))
 	actions.add_child(UI.button("Return to course menu", return_to_menu))
 	actions.add_child(UI.button("Quit to desktop", quit_game))
@@ -75,7 +79,12 @@ func set_paused(value: bool) -> void:
 	get_tree().paused = value
 	_screen.visible = value
 	if value:
+		partner_checkbox.set_pressed_no_signal(get_tree().current_scene.partner_on)
 		_resume.grab_focus()
+
+func _set_partner(enabled: bool) -> void:
+	if _desktop_gameplay():
+		get_tree().current_scene.set_partner(enabled)
 
 func resume_game() -> void:
 	set_paused(false)

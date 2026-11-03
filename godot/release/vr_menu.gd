@@ -18,6 +18,7 @@ var title: Label
 var description: Label
 var start_button: Button
 var collision_checkbox: CheckBox
+var partner_checkbox: CheckBox
 var start_index := 0
 var _confirm_down := true
 var _stick_down := true
@@ -114,10 +115,14 @@ func _build_screen() -> void:
 	details.add_child(collision_checkbox)
 	buttons.append(collision_checkbox)
 	details.add_child(UI.label("Pillars and traffic. Guardrails stay on.", 22, UI.MUTED))
+	partner_checkbox = UI.partner_checkbox(28)
+	partner_checkbox.custom_minimum_size.y = 56
+	details.add_child(partner_checkbox)
+	buttons.append(partner_checkbox)
 	var spacer := Control.new()
 	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	details.add_child(spacer)
-	details.add_child(UI.label("Release controls after Start.\nHold left Menu to choose a map.\nThis ends the current run.", 22, UI.MUTED))
+	details.add_child(UI.label("Release controls after Start.\nTap Menu: partner / controls.\nHold Menu: choose a map; ends run.", 22, UI.MUTED))
 	start_button = UI.button("Start flight", start_selected, 72)
 	start_button.add_theme_font_size_override("font_size", 30)
 	layout.add_child(start_button)

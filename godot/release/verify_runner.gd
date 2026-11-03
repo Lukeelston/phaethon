@@ -86,9 +86,12 @@ func _run() -> void:
 	for course in COURSES:
 		var menu = get_tree().current_scene
 		var collisions := case_index % 2 == 1
+		var partner_enabled := case_index % 2 == 0
 		case_index += 1
 		menu.collision_checkbox.button_pressed = collisions
+		menu.partner_checkbox.button_pressed = partner_enabled
 		check(course + " collision checkbox persists", Settings.obstacle_collisions_enabled() == collisions)
+		check(course + " partner checkbox persists", Settings.driving_partner_enabled() == partner_enabled)
 		if case_index <= 2:
 			await shot("menu-obstacles-" + ("on" if collisions else "off"))
 		var buttons := menu.find_children("*", "Button", true, false)
@@ -105,6 +108,7 @@ func _run() -> void:
 		check(course + " scene loaded", view.sim.kind == course if course in ["range", "network"] else view.sim.track_name == ("eridanus" if course == "emergency" else course))
 		check(course + " opens its selected mission", not view.sim.job.is_empty() if course == "emergency" else view.sim.job.is_empty())
 		check(course + " launch respects obstacle collisions", view.sim.P.obstacleCollisions == collisions)
+		check(course + " launch builds the selected partner state", view.partner_on == partner_enabled and (view.partner != null) == partner_enabled)
 		if course == "gp":
 			check("Grand Prix starts in starfighter mode", view.sim.P.handling == "starfighter")
 		var start := Vector2(view.sim.pod.x, view.sim.pod.y)
@@ -132,6 +136,10 @@ func _run() -> void:
 		await frames(3)
 		check(course + " pause freezes simulation", view.sim.time == before)
 		check(course + " pause mutes output", AudioServer.is_bus_mute(0))
+		check(course + " pause shows current partner setting", overlay.partner_checkbox.button_pressed == partner_enabled)
+		overlay.partner_checkbox.button_pressed = not partner_enabled
+		check(course + " pause toggles the actual partner", view.partner_on != partner_enabled and (view.partner != null) != partner_enabled and Settings.driving_partner_enabled() != partner_enabled)
+		overlay.partner_checkbox.button_pressed = partner_enabled
 		if course == "range":
 			await shot("pause")
 		key(KEY_ESCAPE, true)
@@ -147,6 +155,7 @@ func _run() -> void:
 		check(course + " restart keeps selected course", view.sim.kind == course if course in ["range", "network"] else view.sim.track_name == ("eridanus" if course == "emergency" else course))
 		check(course + " restart clears throttle", view.inp.thrL == 0.0 and view.inp.thrR == 0.0)
 		check(course + " restart retains obstacle collisions", view.sim.P.obstacleCollisions == collisions)
+		check(course + " restart retains partner", view.partner_on == partner_enabled and (view.partner != null) == partner_enabled)
 		if course == "network":
 			check("Network traffic follows obstacle checkbox", view.traffic_net.collide == collisions)
 			for city in view.sim.cities:
@@ -156,12 +165,14 @@ func _run() -> void:
 			await get_tree().scene_changed
 			view = get_tree().current_scene
 			check("city GP preserves obstacle collisions", view.sim.track_name == "gp_dunes" and view.sim.P.obstacleCollisions == collisions)
+			check("city GP preserves partner", view.partner_on == partner_enabled and (view.partner != null) == partner_enabled)
 		await frames(2)
 		overlay.set_paused(true)
 		overlay.return_to_menu()
 		await get_tree().scene_changed
 		check(course + " return to menu", get_tree().current_scene.scene_file_path == MENU_SCENE and not get_tree().paused and not overlay.is_paused)
 		check(course + " menu restores obstacle checkbox", get_tree().current_scene.collision_checkbox.button_pressed == collisions)
+		check(course + " menu restores partner checkbox", get_tree().current_scene.partner_checkbox.button_pressed == partner_enabled)
 	_finish()
 
 func _finish() -> void:

@@ -216,8 +216,57 @@ func _initialize() -> void:
 	fails += _check("dead end: braking into N1's end, the binder %s (js %s); hits %s (js %s); the bodies within %.6f m of js's" % [
 		"torn" if ds.binder_broken else "holds", "torn" if bool(D.binder) else "holds", devents, D.events, ddp],
 		d_ok and not ds.binder_broken and not bool(D.binder) and ddp < 0.001)
+	# Forward/reverse shaft transport and gravity-induced stall: all three bodies,
+	# every second, including exact road/sample transitions and carried attitude.
+	fails += _check("shaft references include forward, reverse and stall", X.get("shafts", []).size() == 3)
+	for sh: Dictionary in X.get("shafts", []):
+		fails += _shaft_parity(sh)
 	print("NETWORK PARITY ", "PASS" if fails == 0 else "FAIL (%d)" % fails)
 	quit(1 if fails > 0 else 0)
+
+
+func _shaft_parity(sh: Dictionary) -> int:
+	var sim = CraftSimScript.new({"track": "network", "handling": "speed"})
+	var r := int(sh.start[0])
+	var i := int(sh.start[1])
+	var direction := int(sh.start[2])
+	var road = sim.roads[r]
+	sim.respawn_on(r, i, direction)
+	for body in sim.bodies:
+		body.vx = float(sh.speed) * road.tx[i] * direction
+		body.vy = float(sh.speed) * road.ty[i] * direction
+	var peak := 0.0
+	var back := false
+	var crash := false
+	var binder := false
+	var pose_error := 0.0
+	var velocity_error := 0.0
+	var angle_error := 0.0
+	var indices_match := true
+	for k in int(sh.secs) * 480:
+		sim.step({"thrL": float(sh.lev), "thrR": float(sh.lev), "brkL": 0.0, "brkR": 0.0, "repair": false, "reignite": true}, DT)
+		peak = maxf(peak, sim.pod.z)
+		back = back or sim.pod.vx * road.tx[i] + sim.pod.vy * road.ty[i] < -5.0
+		crash = crash or sim.crash_t > 0.0
+		for event in sim.events:
+			binder = binder or event.type == "binder"
+		sim.events.clear()
+		if k % 480 != 479:
+			continue
+		var expected: Array = sh.samples[k / 480]
+		for bi in 3:
+			var body = sim.bodies[bi]
+			var ex: Array = expected[bi]
+			indices_match = indices_match and body.path == int(ex[0]) and body.hint == int(ex[1])
+			for pair in [[body.x, ex[2]], [body.y, ex[3]], [body.z, ex[4]]]:
+				pose_error = maxf(pose_error, absf(float(pair[0]) - float(pair[1])))
+			for pair in [[body.vx, ex[5]], [body.vy, ex[6]], [body.vz, ex[7]]]:
+				velocity_error = maxf(velocity_error, absf(float(pair[0]) - float(pair[1])))
+			angle_error = maxf(angle_error, absf(body.th - float(ex[8])))
+	var returned: bool = sim.roads[sim.pod.path].name == "E2" and sim.pod.vx < -500.0 and not sim.pod.off_road
+	var physical: bool = not crash and not binder and (back and peak < 700.0 if bool(sh.stall) else returned and peak > 11000.0)
+	var good: bool = physical and indices_match and pose_error < 0.001 and velocity_error < 0.001 and angle_error < 1e-6 and absf(peak - float(sh.peak)) < 0.001 and back == bool(sh.back) and returned == bool(sh.returned)
+	return _check("shaft %s %s: peak %.1f m, physical %s, indices %s; pose %.9f m, velocity %.9f m/s, angle %.9f rad from JS" % [sh.name, "stall" if bool(sh.stall) else "forward" if direction > 0 else "reverse", peak, physical, indices_match, pose_error, velocity_error, angle_error], good)
 
 
 func _check(label: String, ok: bool) -> int:

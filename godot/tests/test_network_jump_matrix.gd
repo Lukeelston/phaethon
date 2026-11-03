@@ -23,7 +23,7 @@ func _run() -> void:
 			print("%s J%d %s %.0f MPH: lip %.0f, catch %s, ground/lower road %s, peak %.0f m, returned %s" % ["PASS" if good else "FAIL", k, pair[0], pair[1], r.lip_speed, r.caught, r.settled, r.peak, r.home])
 			if pair[0] == "minimum":
 				peaks.append(r.peak)
-	if sim.jumps.size() != 9 or peaks.max() - peaks.min() < 900.0:
+	if sim.jumps.size() != 20 or peaks.max() - peaks.min() < 900.0:
 		failures += 1
 	print("NETWORK JUMP MATRIX %s (%d failures)" % ["PASS" if failures == 0 else "FAIL", failures])
 	quit(0 if failures == 0 else 1)

@@ -11,6 +11,7 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
+const assert = require('assert');
 const NR = require('./net_route.js');
 
 const [simPath, outDir] = process.argv.slice(2);
@@ -102,6 +103,34 @@ function runOut(sim, out, lev, secs) {
   }
   return Object.assign(out, { events, final_pod: [S.pod.x, S.pod.y, S.pod.z], final_path: S.pod.path, off_road: S.pod.offRoad });
 }
+
+// Shafts need real transport parity: a forward pass, reverse pass on the rolled leg,
+// and an unpowered climb that must stall and slide back. Sample every body each second.
+function shaftRun(name, dir, mph, lev, stall = false) {
+  const sim = PS.makeSim({track: 'network', handling: 'speed'}), {S,T} = sim;
+  const r = T.roads.findIndex(R => R.name === name), sh = T.shafts.find(s => s[0] === r), R = T.roads[r];
+  assert(sh, `shaft ${name} exists`);
+  const i = dir > 0 ? sh[1] - (stall ? 40 : 200) : sh[2] + 40;
+  const a = R.pts[i], speed = mph / NR.MPH;
+  sim.respawnOn(r, i, dir);
+  for (const b of S.bodies) { b.vx = speed * a.tx * dir; b.vy = speed * a.ty * dir; }
+  const samples = [], secs = 40;
+  let peak = 0, back = false, crash = false, binder = false;
+  for (let k = 0; k < secs * 480; k++) {
+    sim.step({thrL: lev, thrR: lev, brkL: 0, brkR: 0, repair: false, reignite: true}, DT);
+    peak = Math.max(peak, S.pod.z);
+    back ||= S.pod.vx * a.tx + S.pod.vy * a.ty < -5;
+    crash ||= S.crashT > 0;
+    binder ||= S.events.some(e => e.type === 'binder');
+    S.events.length = 0;
+    if (k % 480 === 479) samples.push(S.bodies.map(b => [b.path,b.hint,b.x,b.y,b.z,b.vx,b.vy,b.vz,b.th]));
+  }
+  const returned = T.roads[S.pod.path].name === 'E2' && S.pod.vx < -500 && !S.pod.offRoad;
+  const good = !crash && !binder && (stall ? back && peak < 700 : returned && peak > 11000);
+  assert(good, `${name} ${stall ? 'stall' : dir > 0 ? 'forward' : 'reverse'} physically succeeds before recording (peak ${peak}, returned ${returned}, back ${back}, crash ${crash}, binder ${binder})`);
+  console.log(`shaft ${name} ${stall ? 'stall' : dir > 0 ? 'forward' : 'reverse'}: peak ${peak.toFixed(1)} m, returned ${returned}, back ${back}`);
+  return {name,start:[r,i,dir],speed,lev,secs,stall,samples,peak,back,returned};
+}
 // the burner as the headset lights it (inp.burner, the levers under the gate): on E2 at 3,000 mph,
 // the levers split 0.87 / 0.6 for 2 s, then swapped for 2 s, the burner flagged on throughout; then
 // 1 s flagged off at 0.87 both
@@ -171,10 +200,15 @@ const expected = {
   frames: rec.log.length, switches: rec.switches, arrivals: rec.arrivals, hits: rec.hits, scrapes: rec.scrapes,
   final_pod: [P.x, P.y], final_path: P.path, top_mph: Math.round(rec.top * NR.MPH),
   traffic: trafficDrive(),
-  jumps: [jumpRun(0, 4000, 0.87, 12), jumpRun(0, 2500, 0.3, 25), groundRun()],
+  jumps: [jumpRun(0, 4000, 0.87, 12), jumpRun(0, 2500, 0.3, 30), groundRun()],
   burner: burnerRun(),
-  dead_end: deadEndRun()
+  dead_end: deadEndRun(),
+  shafts: [shaftRun('TE2+', 1, 4000, 0.87), shaftRun('TE2+', -1, 4000, 0.87), shaftRun('TE2+', 1, 300, 0, true)]
 };
+assert(expected.arrivals.length === 1 && expected.arrivals[0][1] === T.cities.findIndex(c => c.name === 'GLACIER'), 'reference drive reaches Glacier once');
+assert(expected.hits === 0 && expected.scrapes === 0, 'reference drive is clear of walls');
+assert(expected.jumps[0].events.some(e => e[1] === 'catch'), 'reference fast jump catches');
+assert(expected.jumps[1].events.some(e => e[1] === 'ground') && !expected.jumps[1].events.some(e => e[1] === 'catch'), 'reference slow jump misses and reaches ground');
 fs.mkdirSync(outDir, { recursive: true });
 fs.writeFileSync(path.join(outDir, 'network_inputs.json'), JSON.stringify(rec.log));
 fs.writeFileSync(path.join(outDir, 'network_expected.json'), JSON.stringify(expected));

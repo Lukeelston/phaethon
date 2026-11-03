@@ -4,6 +4,7 @@ const View := preload("res://view/craft_view.gd")
 const UI := preload("res://release/release_config.gd")
 
 var collision_checkbox: CheckBox
+var partner_checkbox: CheckBox
 
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
@@ -45,8 +46,13 @@ func _ready() -> void:
 		if course.id == "range":
 			sprint = button
 	collision_checkbox = UI.collision_checkbox()
-	left.add_child(collision_checkbox)
-	left.add_child(UI.label("Pillars and traffic. Guardrails stay on.", 14, UI.MUTED))
+	partner_checkbox = UI.partner_checkbox()
+	var flight_options := HBoxContainer.new()
+	flight_options.add_theme_constant_override("separation", 24)
+	flight_options.add_child(collision_checkbox)
+	flight_options.add_child(partner_checkbox)
+	left.add_child(flight_options)
+	left.add_child(UI.label("Collisions: pillars and traffic. Guardrails stay on.", 14, UI.MUTED))
 	var spacer := Control.new()
 	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	left.add_child(spacer)

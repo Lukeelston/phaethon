@@ -45,10 +45,10 @@ const CAP_EVERY := 3            # frames between a car's readings of its road ah
 const NEAR := 6000.0             # m (either way): nearer vehicles are driven every frame; farther, every other
                                  # (half of them a frame, for both frames' time) and drawn where they'll be.
                                  # The sims' obstacles (R_FIELD) are all near. Round a city ~70% are far
-const BRAKE_AT := [250.0, 500.0, 1000.0, 2000.0, 3000.0, 4500.0, 6000.0, 8000.0, 10000.0, 12000.0]   # m ahead: where a car reads its road's limits
-const BRAKE_BY := [0.0, 250.0, 500.0, 1000.0, 2000.0, 3000.0, 4500.0, 6000.0, 8000.0, 10000.0]   # ... and where it's slowed for each: the reading
+const BRAKE_AT := [250.0, 500.0, 1000.0, 2000.0, 3000.0, 4500.0, 6000.0, 8000.0, 10000.0, 12000.0, 16000.0, 22000.0, 30000.0, 40000.0, 50000.0]   # straight highways let demons reach speeds that need >30 km to brake
+const BRAKE_BY := [0.0, 250.0, 500.0, 1000.0, 2000.0, 3000.0, 4500.0, 6000.0, 8000.0, 10000.0, 12000.0, 16000.0, 22000.0, 30000.0, 40000.0]   # ... and where it's slowed for each: the reading
 	# before it (a limit read at 500 m may start at 251: braked for at 500 they crossed a zone's edge 70 mph over)
-const AFTER := [0.0, 1000.0, 2000.0, 3500.0, 5000.0, 7000.0, 9000.0, 11000.0, 13000.0, 15000.0]   # m along a road it'll take: where its limits are read
+const AFTER := [0.0, 1000.0, 2000.0, 3500.0, 5000.0, 7000.0, 9000.0, 11000.0, 13000.0, 15000.0, 20000.0, 28000.0, 38000.0, 50000.0]   # m along a road it'll take: where its limits are read
 enum { CAR, SLOW, DEMON, TRANSPORT, RACER }
 # [top mph, lateral grip g, headway s, colour]: a racer's style
 const RACERS := {
@@ -154,6 +154,8 @@ func build(s, v, w) -> void:
 			lim[i] = 1e9 if k < 1e-7 else sqrt(G / k)   # per g of grip: times sqrt(grip) for each vehicle
 			if R.mode[i] == 0:
 				lim[i] = -SF_V   # a STARFIGHTER zone: a fixed cap (negative marks it)
+			if R.shaft and world.shaft.on(r, float(i)):
+				lim[i] = 1e9     # a shaft's bulb is the plan's, not a bend: it carries them round
 		_vlim.append(lim)
 		_lanes.append(LANES_HWY if R.w[0] >= 300.0 else LANES_RAMP)
 		_switch.append([])
@@ -349,7 +351,11 @@ func _spawn(px: float, py: float, first: bool) -> void:
 			c.headway = 2.0
 	c.turn_p = 0.35 if c.kind != TRANSPORT else 0.15
 	c.lat = _lane_lat(c, c.lane)
-	c.v = _brake_for(c)   # already slow enough for what's ahead (a city's zone a few km on)
+	# A car can spawn beside an exit. Choose its route before its initial speed,
+	# so it is already able to brake for that road's curves and city zone.
+	_next_switch(c)
+	_decide(c)
+	c.v = _speed_cap(c, 0.0)
 	_place(c)
 	cars.append(c)
 	spawned += 1
@@ -370,7 +376,7 @@ func _drive(c: Car, arr: Array, idx: int, delta: float) -> void:
 	if c.nsp_road != c.road or c.nsp_dir != c.dir:
 		_next_switch(c)
 	# the speed it wants: its own, the curve's, and slow enough to brake (at BRAKE) for every limit up
-	# to 12 km ahead (a city's STARFIGHTER zone from 2,400 mph is 7.5 km of braking), and for the road
+	# to 50 km ahead (demons can reach full speed on the straight highways), and for the road
 	# beyond the exit it's taking. Read every CAP_EVERY frames, as if from where it'll be by the next.
 	if c.kind != RACER:
 		_decide(c)
@@ -448,14 +454,14 @@ func _drive(c: Car, arr: Array, idx: int, delta: float) -> void:
 		cars.erase(c)
 
 
-## The fastest it can go here and still brake (at BRAKE) for every limit on its road up to 12 km on
+## The fastest it can go here and still brake (at BRAKE) for every limit on its road up to 50 km on
 ## (down to each by the reading before it), each `margin` m nearer than it is.
 func _brake_for(c: Car, margin := 0.0) -> float:
 	var R = sim.roads[c.road]
 	var vl: PackedFloat32Array = _vlim[c.road]   # (as an Array it would be converted: a copy every call)
 	var vt := minf(c.vdes, _limit(c))
 	var gs := sqrt(c.a_lat / G)   # (the same sums as before, with the constants out of the loop: ~200
-	var n1: int = R.N - 1         # cars, a third of them a frame, ten readings each)
+	var n1: int = R.N - 1         # cars, a third of them a frame, fifteen readings each)
 	for k in _brake_at_s.size():
 		var ai := clampi(int(c.f + c.dir * _brake_at_s[k]), 0, n1)
 		var la: float = vl[ai]
@@ -733,7 +739,7 @@ func _build_meshes() -> void:
 		mi.name = "traffic_%d" % kind
 		mi.multimesh = mm
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		mi.custom_aabb = AABB(Vector3(-40000, -100, -40000), Vector3(80000, 400, 80000))
+		mi.custom_aabb = AABB(Vector3(-40000, -100, -40000), Vector3(80000, 20000, 80000))
 		add_child(mi)
 		_mm[kind] = mi
 	# a beacon per vehicle: its tail (or head) light, a few pixels from miles away
@@ -762,7 +768,7 @@ func _build_meshes() -> void:
 	bm.set_shader_parameter("energy", 2.0)
 	_beams.material_override = bm
 	_beams.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	_beams.custom_aabb = AABB(Vector3(-40000, -100, -40000), Vector3(80000, 400, 80000))
+	_beams.custom_aabb = AABB(Vector3(-40000, -100, -40000), Vector3(80000, 20000, 80000))
 	add_child(_beams)
 
 
@@ -778,17 +784,26 @@ func _render() -> void:
 	for c in cars:
 		var mm: MultiMesh = (_mm[c.kind] as MultiMeshInstance3D).multimesh
 		var h: float = sim.net_height(c.road, c.f) + 1.0
+		var shaft_on: bool = sim.roads[c.road].shaft and world.shaft.on(c.road, c.f)
 		var cx: float = c.x + c.hx * c.v * c.owed   # where it is now (a far one not driven this frame: on along its way)
 		var cy: float = c.y + c.hy * c.v * c.owed
 		var yaw := atan2(-c.hx, c.hy)   # +z (the model's back) against the way it's going
 		var b := Basis(Vector3.UP, yaw).scaled(Vector3.ONE * SCALE)
+		if shaft_on:
+			b = world.shaft.carry(c.road, c.f) * b
 		var cnt := TRAIN if c.kind == TRANSPORT else 1
 		for k in cnt:
 			if n[c.kind] >= mm.instance_count:
 				break
 			var back := k * TRAIN_GAP
 			var p := Vector3(cx - c.hx * back - ox, h, -(cy - c.hy * back - oy))
-			mm.set_instance_transform(n[c.kind], Transform3D(b, p))
+			var body_basis := b
+			if shaft_on:
+				var f: float = c.f - c.dir * back / 24.0
+				p = world.shaft.point(c.road, f, c.lat, 1.0, ox, oy)
+				body_basis = world.shaft.frame(c.road, f) * Basis(Vector3.UP, PI if c.dir < 0 else 0.0)
+				body_basis = body_basis.scaled(Vector3.ONE * SCALE)
+			mm.set_instance_transform(n[c.kind], Transform3D(body_basis, p))
 			mm.set_instance_color(n[c.kind], c.col)
 			n[c.kind] += 1
 		if nb < bmm.instance_count:
@@ -796,6 +811,8 @@ func _render() -> void:
 			var coming: bool = c.hx * pod_v.x + c.hy * pod_v.y < 0.0
 			var off := -6.5 * SCALE if coming else 6.5 * SCALE + (cnt - 1) * TRAIN_GAP
 			var lp := Vector3(cx - c.hx * off - ox, h + 1.2 * SCALE, -(cy - c.hy * off - oy))
+			if shaft_on:
+				lp = world.shaft.point(c.road, c.f - c.dir * off / 24.0, c.lat, 1.0 + 1.2 * SCALE, ox, oy)
 			bmm.set_instance_transform(nb, Transform3D(Basis(), lp))
 			var lc := Color(1.0, 0.95, 0.85) if coming else (Color(1.0, 0.3, 0.9) if c.kind == RACER else Color(1.0, 0.15, 0.08))
 			bmm.set_instance_color(nb, lc)
@@ -841,10 +858,22 @@ func _feed() -> void:
 				parts = [[3.5 * SCALE, 2.6 * SCALE], [-3.5 * SCALE, 2.6 * SCALE]]
 		for q in parts.size():
 			var back: float = parts[q][0]
-			# _render keeps the whole rigid train at its lead vehicle's height.
-			# Bounds must follow that visible body, not a different road sample.
+			var x: float = c.x - c.hx * back
+			var y: float = c.y - c.hy * back
 			var h: float = sim.net_height(c.road, c.f)
-			obs.append({"id": c.id * 32 + q, "r": parts[q][1], "x": c.x - c.hx * back, "y": c.y - c.hy * back,
+			# Flat roads retain a rigid train at the lead height. A shaft carries each car at its
+			# own sample: project the collision footprint to that same sample in the flat sim.
+			if sim.roads[c.road].shaft and world.shaft.on(c.road, c.f):
+				var center_back := floorf(float(q) / 2.0) * TRAIN_GAP if c.kind == TRANSPORT else 0.0
+				var f: float = c.f - c.dir * center_back / 24.0
+				var R = sim.roads[c.road]
+				var i := clampi(int(f), 0, R.N - 2)
+				var t := clampf(f - i, 0.0, 1.0)
+				var tangent := Vector2(lerpf(R.tx[i], R.tx[i + 1], t), lerpf(R.ty[i], R.ty[i + 1], t)).normalized()
+				x = R.px[i] + R.tx[i] * R.len[i] * t - tangent.y * c.lat - tangent.x * c.dir * (back - center_back)
+				y = R.py[i] + R.ty[i] * R.len[i] * t + tangent.x * c.lat - tangent.y * c.dir * (back - center_back)
+				h = sim.net_height(c.road, f)
+			obs.append({"id": c.id * 32 + q, "r": parts[q][1], "x": x, "y": y,
 				"vx": vx, "vy": vy, "zMin": h, "zMax": h + (9.6 if c.kind == TRANSPORT else 6.0)})
 	sim.obstacles = obs
 

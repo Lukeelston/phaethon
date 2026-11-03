@@ -43,7 +43,7 @@ func _run() -> void:
 				node.hide()
 			else:
 				node.free()
-	_check("all six planned sign kinds exercised", examples.size() == 6)
+	_check("all eight planned sign kinds exercised", examples.size() == 8)
 	# Terminal specs are paired in the planner. Their renderer must not stack coincident faces.
 	var terminal_count := 0
 	for key in world._signs:
@@ -101,9 +101,21 @@ func _check_board(node: Node3D, spec: Array, travel: Vector3) -> void:
 			var font: Font = label.font if label.font else ThemeDB.fallback_font
 			var width: float = font.get_string_size(label.text, HORIZONTAL_ALIGNMENT_LEFT, -1, label.font_size).x * label.pixel_size
 			_check(tag + " words fit within board", width < face.mesh.size.x * 0.98)
+			if side < 0 and spec[2] in ["jump", "fork"]:
+				var local: Vector3 = face.basis.inverse() * (label.position - face.position)
+				var panel_start: float = face.mesh.size.x * (0.5 - World.ARROW_PANEL)
+				_check(tag + " words stay left of animated arrow", local.x + width / 2.0 <= panel_start - 3.9 and local.x - width / 2.0 >= -face.mesh.size.x / 2.0 + 3.9)
+		if spec[2] in ["jump", "fork"]:
+			var material: ShaderMaterial = face.material_override
+			_check(tag + " steady words on both faces", is_zero_approx(float(material.get_shader_parameter("flash_hz"))))
+			var arrow_shader := material.shader.resource_path.ends_with("arrow_board.gdshader")
+			_check(tag + " arrow only on valid approach", arrow_shader == (side < 0))
+			if arrow_shader:
+				var angle: float = material.get_shader_parameter("angle")
+				_check(tag + " arrow points toward correct branch", is_equal_approx(angle, deg_to_rad(52.0) if spec[2] == "jump" else PI / 2.0))
 		if side < 0:
 			_check(tag + " retains front instructions", words == spec[3])
-		elif spec[2] == "jump":
+		elif spec[2] in ["jump", "fork"]:
 			_check(tag + " rear preserves ascent and minimum only", words.size() == 3 and words[0] == spec[3][0] and words[1] == spec[3][1] and words[2] == "APPROACH OTHER SIDE")
 		elif spec[2] == "terminal":
 			_check(tag + " rear preserves terminal name", words == spec[3])
@@ -126,7 +138,7 @@ func _render_examples() -> void:
 	camera.fov = 55.0
 	root.add_child(camera)
 	root.msaa_3d = Viewport.MSAA_4X
-	for kind in ["jump", "exit", "city", "end", "brake", "terminal"]:
+	for kind in ["jump", "fork", "corner", "exit", "city", "end", "brake", "terminal"]:
 		var node: Node3D = examples[kind][0]
 		var travel: Vector3 = examples[kind][1]
 		node.show()
@@ -145,4 +157,26 @@ func _render_examples() -> void:
 			var path := "res://../evidence/" + filename
 			_check("saved " + filename, root.get_texture().get_image().save_png(path) == OK)
 			print("SIGN RENDER ", path)
+			if side < 0 and kind in ["jump", "fork"]:
+				# Sample the arrow's interior in two real rendered frames, clear of border lamps.
+				var front: MeshInstance3D
+				for candidate in node.get_children():
+					if candidate is MeshInstance3D and candidate.mesh is QuadMesh and candidate.basis.z.dot(-travel) > 0.99:
+						front = candidate
+				var size: Vector2 = front.mesh.size
+				var a := camera.unproject_position(front.to_global(Vector3(size.x * (0.5 - World.ARROW_PANEL * 0.9), size.y * 0.35, 0.0)))
+				var b := camera.unproject_position(front.to_global(Vector3(size.x * (0.5 - World.ARROW_PANEL * 0.1), -size.y * 0.35, 0.0)))
+				var before: Image = root.get_texture().get_image()
+				await create_timer(0.23).timeout
+				await RenderingServer.frame_post_draw
+				var after: Image = root.get_texture().get_image()
+				var changed := 0
+				for y in range(maxi(0, floori(minf(a.y, b.y))), mini(before.get_height(), ceili(maxf(a.y, b.y))), 3):
+					for x in range(maxi(0, floori(minf(a.x, b.x))), mini(before.get_width(), ceili(maxf(a.x, b.x))), 3):
+						var ca := before.get_pixel(x, y)
+						var cb := after.get_pixel(x, y)
+						if absf(ca.r - cb.r) + absf(ca.g - cb.g) + absf(ca.b - cb.b) > 0.05:
+							changed += 1
+				_check(kind + " arrow animates in rendered frames (%d changed samples)" % changed, changed > 20)
+				_check("saved animated " + kind, after.save_png("res://../evidence/network-sign-%s-animated.png" % kind) == OK)
 		node.hide()

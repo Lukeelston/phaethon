@@ -3,11 +3,10 @@
 A seated VR podracer flown with two 3D-printed throttle levers, one per engine.
 Spec: https://claude.ai/artifact/VeY5CdSPzxcEq568JgkJh8 (source: `phaethon.html`).
 
-The v0.1.6 release builds open a main menu with Sprint, Grand Prix, Eridanus,
+The v0.1.7 release builds open a main menu with Sprint, Grand Prix, Eridanus,
 Emergency Run, and the Network. In PC VR, flick either stick up/down and use A
 or a trigger to select a map, then Start flight. Hold the left Menu button for
-1.5 seconds to end the current run and return to selection; tapping it still
-changes the flight control scheme. Release triggers and center sticks on menu
+1.5 seconds to end the current run and return to selection; tapping it opens the quick menu with partner and control-scheme options. Release triggers and center sticks on menu
 entry. The menu stays still in front of you; stick-click recenters it. Flight
 entry recenters your seat. Desktop uses clickable map buttons and Escape to
 return through the pause menu.
@@ -314,10 +313,30 @@ off ramps, and maybe some speed specific jumps to other roads"; "Eridanus is one
 design is `docs/superpowers/specs/2026-10-19-network-design.md`; phase 1 (this) is the mesh, then
 traffic and racers, jumps and the open ground, and the cities' GPs.
 
-- **The country:** ~375 mi square, three highways east-west and three north-south (400 m wide,
-  long S-bends, flat out at 4,000 mph), crossing at nine interchanges: the north-south highway flies
-  120 m over the other, and four 12 km quadrant ramps (~12 mi each, ~2,400 mph) join them. Each
-  highway ends in a turnaround loop under an END OF THE ROAD board. 4,725 km of road in all.
+- **The country:** ~375 mi square, three highways east-west and three north-south (400 m wide, flat
+  out at 4,000 mph), crossing at nine interchanges: the north-south highway flies 120 m over the
+  other, and four 12 km quadrant ramps (~12 mi each, ~2,400 mph) join them. E2, N2 and E3 are dead
+  straight from edge to edge (Luke: "completely straight"); E1, N1 and N3 keep their long S-bends. Each
+  highway ends in a shaft under an END OF THE ROAD board. About 7,000 km of road in all.
+- **The shafts** (Luke: "a vertical shaft that turns over on itself and enters the same road it came
+  from"; they replace the turnaround loops): at the end of the highway the road splits, you take the
+  right half, and it pulls up into a 3.5 km arc, runs 5.6 km straight up, goes over the top in a half
+  arc (upside down at 41,000 ft, the land overhead), comes 5.6 km straight down rolling half a turn so
+  you're the right way up, and pulls out onto the same highway going the other way. 34 km; 20 s at
+  4,000 mph. Nothing to steer, lit hoops every 190 m going past. Gravity's real along it: with the
+  levers shut at 300 mph you stop about 2,000 ft up and slide back. **In the sims** a shaft is flat, as
+  the shade line's corkscrews are: a paperclip in plan (its `T` road, out along the highway's right, a
+  3.6 km bulb, back along its left) whose bulb carries the bodies round (`kap`: nothing to steer, and it
+  holds the engines abreast) and whose height is the real altitude (`gs`: gravity along the slope);
+  `NET_SHAFTS` says where, and `view/network_shaft.gd` draws the stretch between the feet as the shape
+  above and takes the craft, the cockpit and traffic onto it. The minimap shows the plan's bulb, your
+  arrow going round it. From 100 km down a straight highway you can see it standing at the end of the road.
+- **Side roads** (Luke: "different shapes, that would reasonably cause the person to actually shift, while
+  still staying at 'highway' speeds"): twelve loops off the straight highways, about 60 mi each, in six
+  shapes: esses, a hairpin, a chicane, a tightening radius, kinks, a crook. They leave in third-gear
+  bends (16 km radius, ~2,900 mph) into second-gear corners (6-11 km, 1,800-2,500 mph), with straights
+  long enough for top gear. A board before every corner, both ways, gives its speed at 11 g and its
+  gear (`2,100 / GEAR 2`); `SIDE ROAD  60 MI` at the exits. Traffic takes them too.
 - **Five cities,** each in its own landscape: Eridanus (verdant, the centre), Dunes (desert), Glacier
   (ice), Basalt (black rock, ember cracks), Mesa (red strata). A city is a bypass off its highway (a
   big S out through the city and back: in from either direction), STARFIGHTER through the middle
@@ -373,14 +392,26 @@ traffic and racers, jumps and the open ground, and the cities' GPs.
   light"); thin sky-blue wall strips (pink through a STARFIGHTER zone), not white ones; darker,
   less glossy asphalt; a deeper blue haze that brightens less toward the sun. `tests/render_network.gd`
   checks the horizon band at 4,400 mph: its whitest 5-row strip is 9% near-white (the gate is 30%).
-- **Jumps:** nine long ascent routes, spread across the highway crossings, with varied
-  launch angles and heights. Their marked minimum launch speeds range from 2,000 to
-  4,000 mph. Advance, entrance and launch signs identify the ramp and its required
-  speed; the approach display shows distance, current speed and readiness. The
-  minimum applies at the launch lip, so hold enough throttle through the climb.
-  Each gap leads to a raised catch deck, then a long descent back to the highway.
-  Arriving too slowly can miss the deck and drop you to lower roads or open ground.
-  The existing airborne timer, caught message and recovery on-ramps remain.
+- **Jumps:** twenty ascent routes, one for each direction through five highway crossings.
+  The exit ramp on your right forks: the ramp turns away while the jump spur continues
+  straight toward its launch lip. The existing varied profiles are retained across the
+  expanded layout: minimum lip speeds from 2,000 to 4,000 mph, different launch angles
+  and summit heights. Advance, exit, fork and launch boards show the ascent and minimum;
+  animated arrows and amber lane chevrons lead to the correct spur. Text stays steadily lit
+  and readable from both sides; reverse faces identify the opposite approach.
+  The minimum applies at the lip, so hold enough throttle through the climb. Each jump
+  crosses a gap onto a raised catch deck, then descends back to the highway. Underspeed
+  approaches can miss the deck. Catch decks and on-ramps accept travel in their intended
+  direction, preventing a reverse highway merge from dragging the craft up the ramp.
+- **Driving partner and flight menus:** an optional teal craft follows your speed and heading,
+  usually about 50 m off your wing, through ordinary roads, jumps and shafts. It provides
+  a moving reference without collisions or a separate physics participant. Toggle Driving
+  partner in either startup menu, the desktop Escape pause menu, or the VR quick menu.
+  The choice is saved in `game_settings.cfg`; `--partner` / `--no-partner` override a launch
+  without rewriting the saved choice. In VR, tap left Menu for partner/control-scheme
+  options, map selection and Resume. Gameplay waits while the quick menu is open; release
+  controls before resuming. Hold left Menu for 1.5 seconds to return to map selection.
+  Desktop Escape retains the release pause menu.
 - **The roads' heights are real now** (both sims): the deck lock, the roads' forcefield, holds you to
   the surface as well as up off it (at 4,000 mph any crest tighter than a 326 km radius would throw
   you off: every flyover would be a jump). Off a road's open end (a lip, the end of the road) you're
@@ -405,8 +436,8 @@ traffic and racers, jumps and the open ground, and the cities' GPs.
   nearer and harder the pass); a wall's push flares the pod's forcefield white-blue (softer for a
   scrape; a bump with traffic too, when collision's on).
 - **The whole country on the minimap** (Luke, after "I only saw 1 jump and never ran into a gp":
-  "make the minimap the whole extents"): on the Network the map shows all 82 roads, north up, with
-  the nine jumps (orange), the four GP cities (pink), every city, the on-ramps (violet), the craft
+  "make the minimap the whole extents"): on the Network the map shows all 116 roads, north up, with
+  the twenty jumps (orange), the four GP cities (pink), every city, the on-ramps (violet), the craft
   and its target (`view/minimap.gd` `whole`; the near-roads, heading-up map is `whole = false`).
 - **The edges ramp up** (Luke: "make the walls ramp up on the sides rather that a hard stop? Let the
   craft drift a bit"): the outer 15% of each side (30-60 m across) rises toward the wall as a
@@ -445,7 +476,7 @@ traffic and racers, jumps and the open ground, and the cities' GPs.
 ```bash
 python tools/design_network.py --plot network.png                 # the layout and its checks
 python tools/sync_network.py                                      # ... into both sims
-node tools/network_test.js sim-core.js                            # the JS sim: junctions, strangers, a drive, a turnaround, walls
+node tools/network_test.js sim-core.js                            # the JS sim: junctions, strangers, a drive, a shaft, walls
 node tools/record_network.js sim-core.js godot/tests/replay       # the parity reference (Eridanus -> Glacier, and traffic's forcefields)
 python tools/sync_gp_variants.py                                  # the city GPs into both sims
 node tools/network_test.js sim-core.js                            # the JS Network: drives, walls, traffic, the jumps, the open ground
@@ -510,7 +541,7 @@ at 1,000 / 2,000 / 3,000 ft, the range's countdown in feet and its ramps' height
 
 ## Quest controls
 
-A tap on the left menu button cycles four schemes (saved). **Hold the menu button 1.5 s to return to map selection**. Choose Sprint, Grand Prix, Eridanus, Emergency Run, or the Network, then Start flight. Returning ends the current run. The headset session carries on; entering flight recenters the seat and waits for neutral controllers before accepting flight input (`tests/test_vr_menu.gd`).
+A tap on the left menu button opens the quick menu; its Controls item cycles four schemes (saved). **Hold the menu button 1.5 s to return to map selection**. Choose Sprint, Grand Prix, Eridanus, Emergency Run, or the Network, then Start flight. Returning ends the current run. The headset session carries on; entering flight recenters the seat and waits for neutral controllers before accepting flight input (`tests/test_vr_menu.gd`).
 
 - **Trigger throttles:** the triggers are crossed, so each hand steers its own way. The right trigger throttles the left engine: squeeze right harder to go right. Together the triggers are the throttle, on a softened curve: about 25% less lever per bit of pull on average, most at the bottom, full lever at 97% of the pull with no dead band before it (it used to go flat from ~92%). The triggers *magnet* to each other: fingers that are nearly together act exactly together. At the 0.07 mismatch measured from a real session they steer 14% as hard, while a real split still turns 78% as hard. The magnet is smooth, with no dead zone to snap out of. Each engine's lever rises over 1.3 s from idle to full at most (Luke: "double the ramp to 1.3 seconds to full throttle"; it was 0.67 s), so a finger that lands first can't spin you off the line. Letting off is instant, and letting go of both triggers is idle at once. Steering authority grows with speed, because the same split yaws you about five times harder at 240 mph than at 750. Authority is full from 500 mph, so every GP corner has all of it, and never drops below 15%. Below 500 mph the stronger engine is eased toward the weaker, never the weaker raised, so a trigger you've let go of keeps its engine off at any speed. Each engine follows its own trigger: it rises on the ramp, eases down over about 0.08 s, and never moves because the other trigger did. (An earlier version shaped one shared throttle plus a smoothed split, so a quick one-sided squeeze briefly raised both engines and drove you straight on instead of turning.) With the triggers together the craft holds itself straight, fly-by-wire style: it cancels its own yaw, so a correction stops instead of overshooting. The hold fades out as the triggers part, so it never fights a turn. It only shares out throttle you're already giving, so it does nothing at idle, and it stands aside while either air brake is in. It works on the burner too. It never fires an engine you didn't ask for. An earlier version did that while you braked one side. The remaining difference steers gentler near the middle, smoothed over ~0.08 s. `tests/test_controls_flyable.gd` checks an ideal pilot on the GP and a jittery-fingered straight hold (32 m of drift in 8 s at ~1,000 mph, against 120 m before). It also checks six mashed launches (0.2° of heading swing on average, against 13.9° before). And it checks a stroke pilot that corrects the way a real session log showed, with a 0.3 squeeze whenever it's 1.5° off: accelerating from the line, its heading swing drops from 34° unassisted to about 8°. (A squared curve with a 1.25 s ramp was tried once and made the craft unflyable. That test guards against it too.) Both spring back. **The burner is on the left stick, not the triggers** (Luke: "take the afterburners away from the triggers - I think that's part of the steering problem"): flick it up to light the burner (Starfighter or Speedcraft fourth: a double tap in the left hand if unavailable), down to put it out; letting go of both triggers puts it out too, and so does shifting down. A thump in the left hand as it lights, a softer one as it goes out. On the burner the triggers still throttle and steer (the sims take an explicit `burner` input, bit-checked in `test_network_parity`; the keyboard, a gamepad and the replays still light it with both levers past the gate). It used to be the last 3% of each trigger's pull: with fingers squeezed to the stop and wobbling it switched on and off 11.5 times in 10 s, and easing one finger off to steer put it out on both engines. Measured honestly, it wasn't the wag: through a 150 m lane change at 3,500 mph with corrections, the yaw rate swings about the same either way (0.4 deg/s easing a trigger 0.3, 4.1-4.3 deg/s dropping one whole, 5 reversals both); dropping a trigger whole is the wag's size. Grips are the air brakes, same side, so the left grip turns you left.
 - **Gears (trigger throttles):** Starfighter has one gear spanning its full ordinary speed range, with full steering and afterburner available. Speedcraft has four gears using the previous Speedcraft gears 2–5. Switching into Speedcraft selects its first gear; restart selects first for the current handling. Flick the right stick up/down in Speedcraft. Its first three bands end at 40%, 62%, and 84% of the original reference speed (about 1,780 / 2,760 / 3,740 mph). Fourth retains unlimited logarithmic speed growth, and its engine note keeps rising. Higher gears wind up more slowly and upshifts drop the revs. Starfighter uses ordinary drag, without the unlimited top-gear behavior. Handling changes follow the actual mode transition, including the existing 1,250 mph Starfighter engagement gate.
@@ -575,7 +606,7 @@ Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/tes
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_dashboard.gd           # instrument panel
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_route.gd -- --track=range --mute   # overpasses + landmarks placement
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_scenery.gd -- --track=range --mute   # mountains, light, ground, asphalt, props, streaming budget
-Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_track_switch.gd -- --track=range --mute   # menu tap = scheme, hold = map selection
+Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_track_switch.gd -- --track=range --mute   # menu tap = quick menu, hold = map selection
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_mode_parity.gd                # live handling switch parity
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_mode_switch.gd                # the MODE switch, lamps, cable and rim lighting
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_canopy.gd -- --track=range --mute   # windscreen + forcefield
@@ -598,6 +629,8 @@ Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/tes
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_network_traffic.gd -- --mute   # lanes, kinds, junctions, headway, zones, density, forcefields, cost, racers
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_gears.gd                       # shifting, ranges, overshoot, corners
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_network_jumps.gd -- --mute     # the jump boards, airborne, caught, missed, restart, traffic kept off
+Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_network_shaft.gd -- --mute     # straight highways, the shafts' shape and a flight up one, the stall, side roads' corners, the partner, the main menu, the cockpit
+Godot_v4.7.1-stable_win64_console.exe --path godot --resolution 1600x900 -s res://tests/render_shaft_sheet.gd -- --mute --out=DIR   # a look at the boards, a shaft from every angle, a side road
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_traffic_audio.gd               # the whoosh, passes, following
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_wag_meter.gd                   # the in-flight wag meter on known yaw rates
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_city_gps.gd -- --mute          # the city GPs: parity laps, landscapes, entry and back

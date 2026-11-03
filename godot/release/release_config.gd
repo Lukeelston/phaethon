@@ -84,6 +84,19 @@ static func collision_checkbox(font_size: int = 18) -> CheckBox:
 	item.toggled.connect(Settings.set_obstacle_collisions)
 	return item
 
+static func partner_checkbox(font_size: int = 18) -> CheckBox:
+	var item := CheckBox.new()
+	item.text = "Driving partner"
+	item.custom_minimum_size.y = 38
+	item.add_theme_font_size_override("font_size", font_size)
+	item.add_theme_icon_override("unchecked", preload("res://release/checkbox_off.svg"))
+	item.add_theme_icon_override("checked", preload("res://release/checkbox_on.svg"))
+	item.add_theme_color_override("checkbox_unchecked_color", Color.WHITE)
+	item.add_theme_color_override("checkbox_checked_color", Color.WHITE)
+	item.button_pressed = Settings.driving_partner_enabled()
+	item.toggled.connect(Settings.set_driving_partner)
+	return item
+
 static func controls_panel() -> PanelContainer:
 	var panel := PanelContainer.new()
 	panel.add_theme_stylebox_override("panel", box(PANEL))
