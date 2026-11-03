@@ -317,10 +317,13 @@ Stan still serves v0.1.0; these archives are local builds.
 The previous user-play v0.1.2 process was closed and the extracted v0.1.3 PC VR
 player launched for Luke to try, with no automatic shutdown timer. Automated
 test processes exited; only this interactive game was intentionally left open.
-Physical headset readability, controller feel and seat alignment:
-unverified - needs user confirmation. A confirmation question was sent.
+Physical headset acceptance: Luke answered "it works" to the check covering
+seeing the main menu, choosing a map with stick/A/trigger, starting flight,
+and returning by holding left Menu for 1.5 seconds. These flows are now
+user-confirmed. No text/control awkwardness was reported; this is not a
+separate extended comfort assessment or validation of other headset models.
 The live log subsequently recorded PCVR STARTUP: menu, menu selection of the
 Network, TRACK: network, RECENTER, and menu inputs released. Both controllers
 then reported tracking and trigger-driven flight. This verifies a live
-menu-to-Network transition; return to menu and subjective readability/comfort
-remain awaiting Luke's confirmation. Evidence: evidence/menu-headset.log.
+menu-to-Network transition, alongside Luke's confirmation of the full flow.
+Evidence: evidence/menu-headset.log and Luke's headset acceptance response.
