@@ -381,8 +381,13 @@ Source verification:
   projected search windows found no invalid nearest-search endpoints.
   Evidence: evidence/reviewer-projection.log.
 
-Physical headset acceptance of these changes: unverified - needs user
-confirmation. Stan still serves v0.1.0; v0.1.4 is a local tuning build.
+Physical headset acceptance: confirmed by Luke on 2026-11-02. He answered
+"Yes, gearing feels right" for one Starfighter gear and four Speedcraft gears
+starting at the former second gear, and "Yes, the junctions look clear" for
+the highway merges/exits without driving through raised road mesh.
+This confirms the requested behavior on his headset; it is not an extended
+comfort or other-device assessment. v0.1.4 remains a local tuning build;
+no store update was performed in this iteration.
 
 LOCAL 0.1.4 ARCHIVES
 Desktop: build/Phaethon-Experimental-0.1.4-Windows.zip
