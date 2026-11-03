@@ -32,7 +32,7 @@ function check(msg, cond) { console.log(`${cond ? 'ok  ' : 'FAIL'} ${msg}`); ok 
 const sim = PS.makeSim({ track: 'network', handling: 'speed' });
 const { S, T } = sim;
 check(`build: kind ${T.kind}, ${T.roads ? T.roads.length : 0} roads, ${T.roads ? T.roads.reduce((a, R) => a + R.N, 0) : 0} samples, ${T.junctions ? T.junctions.length : 0} junctions, ${T.cities ? T.cities.length : 0} cities`,
-  T.kind === 'network' && T.roads.length === 72 && T.junctions.length === 119 && T.cities.length === 5);
+  T.kind === 'network' && T.roads.length === 116 && T.junctions.length === 175 && T.cities.length === 5);
 if (T.kind !== 'network') { console.log('NETWORK FAIL'); process.exit(1); }
 
 // zones: the child's centreline inside the parent's corridor (plus its own half width) through the zone

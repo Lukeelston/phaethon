@@ -9,7 +9,8 @@
 ##   away from the triggers")
 ##   the MODE switch on the right console: push it up for SPEEDCRAFT, down for STARFIGHTER (live,
 ##   mid-lap; STARFIGHTER takes below 1,250 mph). Y hold 1 s flips it too. Y tap: restart
-##   menu tap: next control scheme · menu hold 1.5 s: next track (range, grand prix, Eridanus)
+##   menu tap: the main menu (driving partner, control scheme, next track; right stick up and down to
+##   step, A to change, B or a tap to close; the flight waits) · menu hold 1.5 s: next track
 ## Haptics: a kick on the sonic boom; a tick in that hand when a lever crosses the burner gate (the
 ## stick schemes); a thump in the left hand as the burner lights, a softer one as it goes out, a
 ## double tap when it can't (below top gear).
@@ -41,6 +42,7 @@ var interior   # vr/cockpit_interior.gd
 var mode_switch   # vr/mode_switch.gd: the SPEEDCRAFT / STARFIGHTER toggle on the right console
 var canopy: Node3D   # view/canopy.gd: the windscreen ahead and the forcefield round the nose
 var minimap_panel: Node3D   # vr/minimap_panel.gd
+var menu_panel: Node3D      # the main menu's panel (view/main_menu.gd)
 var _ride := {}   # CraftModel.ride's smoothing state
 var _buzz_hold := {}   # controller -> seconds an event buzz still owns it (the shudder waits)
 const SHAKE_M := 0.004   # cockpit shake per unit of air-brake shudder, metres
@@ -415,6 +417,33 @@ func _build_cockpit() -> void:
 	minimap_panel.transform = MinimapPanelScript.mount(SEAT)
 	minimap_panel.build()
 	minimap_panel.visible = sim.kind == "circuit" or sim.kind == "network"
+	menu_panel = Node3D.new()   # the main menu: a dark panel and its words, a metre out, never behind anything
+	menu_panel.name = "main_menu"
+	menu_panel.position = SEAT + Vector3(0.0, 0.02, -1.1)
+	menu_panel.visible = false
+	shell.add_child(menu_panel)
+	var back := MeshInstance3D.new()
+	var bq := QuadMesh.new()
+	bq.size = Vector2(1.05, 0.6)
+	back.mesh = bq
+	var bm := StandardMaterial3D.new()
+	bm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	bm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	bm.albedo_color = Color(0.03, 0.05, 0.09, 0.88)
+	bm.no_depth_test = true
+	bm.render_priority = 10
+	back.material_override = bm
+	menu_panel.add_child(back)
+	var words := Label3D.new()
+	words.name = "words"
+	words.font_size = 40
+	words.pixel_size = 0.0011
+	words.no_depth_test = true
+	words.render_priority = 11
+	words.outline_size = 0
+	words.position = Vector3(0.0, 0.0, 0.01)
+	words.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	menu_panel.add_child(words)
 
 
 func _build_fade(xr_cam: XRCamera3D) -> void:
@@ -453,6 +482,18 @@ func _read_input(delta: float) -> void:
 		"ls": _stick(l, "primary"), "rs": _stick(r, "primary"), "lz": l.position.z, "rz": r.position.z,
 		"speed": sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy), "yaw": (sim.eL.w + sim.eR.w) / 2.0,
 		"vtop": lerpf(QuestControlsScript.V_TOP_SPEED, QuestControlsScript.V_TOP_SF, sim.hblend), "sf": sim.hblend}
+	# the left menu button first: while the main menu's open the rest of the controls are its
+	match _menu(_button(l, "menu_button"), delta):
+		"menu":
+			menu_open(not menu.open)
+			_buzz(l, 0.5, 0.08)
+		"track":
+			_buzz(l, 0.9, 0.2)
+			_buzz(r, 0.9, 0.2)
+			switch_track()
+	if menu.open:
+		_menu_hands(l, r)
+		return
 	var q: Dictionary = quest.update(c, delta)
 	if q.shift != 0:   # a shift: a click in the right hand (up firmer than down)
 		_buzz(r, 0.8 if q.shift > 0 else 0.5, 0.05 if q.shift > 0 else 0.03)
@@ -513,17 +554,6 @@ func _read_input(delta: float) -> void:
 			_respawn()
 		_y_held = 0.0
 		_y_fired = false
-	match _menu(_button(l, "menu_button"), delta):
-		"scheme":
-			quest.next_scheme()
-			_save_prefs()
-			_scheme_flash = 4.0
-			_buzz(l, 0.5, 0.08)
-			print("CONTROLS: ", quest.scheme)
-		"track":
-			_buzz(l, 0.9, 0.2)
-			_buzz(r, 0.9, 0.2)
-			switch_track()
 	_frames += 1
 	if _switch_at > 0 and _frames == _switch_at and track_override == "":   # once
 		switch_track()
@@ -548,8 +578,8 @@ func _track() -> String:   # "range", "gp", "eridanus", "emergency" (Eridanus on
 	return sim.track_name if sim.course else ("range" if sim.kind == "range" else "circuit")
 
 
-## The left menu button: a tap (released before MENU_HOLD) cycles the control scheme; holding it
-## MENU_HOLD switches track. Returns "scheme", "track" or "".
+## The left menu button: a tap (released before MENU_HOLD) opens or closes the main menu; holding it
+## MENU_HOLD switches track. Returns "menu", "track" or "".
 func _menu(down: bool, delta: float) -> String:
 	if down:
 		_menu_held += delta
@@ -560,7 +590,60 @@ func _menu(down: bool, delta: float) -> String:
 	var tapped := _menu_held > 0.0 and not _menu_fired
 	_menu_held = 0.0
 	_menu_fired = false
-	return "scheme" if tapped else ""
+	return "menu" if tapped else ""
+
+
+## The main menu in the headset: the right stick steps, A changes, B closes.
+func _menu_hands(l: XRController3D, r: XRController3D) -> void:
+	var y: float = _stick(r, "primary").y
+	if _pressed_once("menu_up", y > 0.7):
+		menu.move(-1)
+		_buzz(r, 0.3, 0.03)
+		_menu_show()
+	if _pressed_once("menu_down", y < -0.7):
+		menu.move(1)
+		_buzz(r, 0.3, 0.03)
+		_menu_show()
+	if _pressed_once("menu_a", _button(r, "ax_button")):
+		_buzz(r, 0.6, 0.05)
+		menu_choose()
+	if _pressed_once("menu_b", _button(r, "by_button")):
+		menu_open(false)
+	_pressed_once("arm", _button(r, "by_button"))   # (the B that closed it doesn't also arm the ramjet)
+
+
+func _menu_items() -> Array:
+	return [{"key": "partner", "label": "DRIVING PARTNER", "value": "ON" if partner_on else "OFF"},
+		{"key": "scheme", "label": "CONTROLS", "value": String(quest.scheme).to_upper()},
+		{"key": "track", "label": "NEXT TRACK", "value": String(next_track(_track())).to_upper()},
+		{"key": "resume", "label": "RESUME"}]
+
+
+func menu_choose() -> bool:
+	match menu.key():
+		"scheme":
+			quest.next_scheme()
+			_save_prefs()
+			_scheme_flash = 4.0
+			print("CONTROLS: ", quest.scheme)
+			var at: int = menu.at
+			menu.items = _menu_items()
+			menu.at = at
+			_menu_show()
+			return true
+		"track":
+			menu_open(false)
+			switch_track()
+			return false
+	return super()
+
+
+## The panel in the cockpit: over the dash, in the middle of the view.
+func _menu_show() -> void:
+	if menu_panel == null:
+		return
+	menu_panel.visible = menu.open
+	(menu_panel.get_node("words") as Label3D).text = menu.text()
 
 
 ## Range -> grand prix -> Eridanus -> the emergency run -> the Network -> range, in the headset: reload the scene on
@@ -607,10 +690,11 @@ func _place_camera(_k: float) -> void:
 		rig.transform = CraftModelScript.onto_road(sim, Transform3D(b_flat, floor_flat + b_yaw * head - b_flat * head), floor_flat,
 			_ride.roll, pitch, org_x, org_y)
 	else:
-		var b_full := Basis.from_euler(Vector3(pitch, yaw, roll))   # lean + the track's banking (capped), and its slope
-		var base := wz(sim.pod.x, sim.pod.y, sim.pod.z - 0.8 + CraftModelScript.POD_LIFT) + Vector3.UP * (r.x - surface(sim.pod.x, sim.pod.y).x)   # floor 0.8 m below the pod body centre, lifted with the pod
+		var Q := shaft_carry_at(sim.pod.x, sim.pod.y)   # (identity but up a shaft: there the world turns over round you)
+		var b_full: Basis = Q * Basis.from_euler(Vector3(pitch, yaw, roll))   # lean + the track's banking (capped), and its slope
+		var base := wz(sim.pod.x, sim.pod.y, sim.pod.z - 0.8 + CraftModelScript.POD_LIFT) + Q * Vector3.UP * (r.x - surface(sim.pod.x, sim.pod.y).x)   # floor 0.8 m below the pod body centre, lifted with the pod
 		rig.basis = b_full
-		rig.position = base + b_yaw * head - b_full * head
+		rig.position = base + Q * (b_yaw * head) - b_full * head
 	var thr := [inp.thrL, inp.thrR]
 	for k in 2:
 		lever_pivots[k].rotation.x = deg_to_rad(lerpf(30.0, -30.0, thr[k]))

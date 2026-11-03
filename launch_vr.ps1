@@ -6,7 +6,9 @@
 # Controls: four Touch schemes, cycled with the left menu button (trigger throttles, throttle +
 # steer, grab the levers, stick levers); A reignite, B arm ramjet, X repair, Y tap restart,
 # the MODE switch (or Y hold) flips SPEEDCRAFT / STARFIGHTER live, thumbstick click recenters,
-# menu hold 1.5 s steps track (range -> grand prix -> Eridanus) without relaunching.
+# a menu tap opens the main menu (driving partner, control scheme, next track), menu hold 1.5 s steps track
+# (range -> grand prix -> Eridanus) without relaunching.
+#   .\launch_vr.ps1 -Partner          the driving partner on (it's on the main menu too)
 #   .\launch_vr.ps1 -Handling starfighter   start in the tight ~1,200 mph handling mode
 #   .\launch_vr.ps1 -Track gp              the grand prix: 29 km for STARFIGHTER at ~1,000 mph
 #   .\launch_vr.ps1 -Track eridanus        the dual-purpose course: 199 km, SPEEDCRAFT loop + STARFIGHTER towns
@@ -14,7 +16,7 @@
 #   .\launch_vr.ps1 -Track network         the Network: a country of highways, five cities (A: next target city)
 #   .\launch_vr.ps1 -Track range     the 100-mile test range (jump lane +400 m left, twisty lane right)
 #   .\launch_vr.ps1 -Track range -StartMile 95   start further down the range
-param([switch]$WaitForHeadset, [int]$WaitMinutes = 30, [ValidateSet("circuit", "range", "gp", "eridanus", "network")][string]$Track = "circuit", [double]$StartMile = 0, [ValidateSet("", "speed", "starfighter")][string]$Handling = "", [ValidateSet("", "emergency")][string]$Job = "", [switch]$HeavyPod)
+param([switch]$WaitForHeadset, [int]$WaitMinutes = 30, [ValidateSet("circuit", "range", "gp", "eridanus", "network")][string]$Track = "circuit", [double]$StartMile = 0, [ValidateSet("", "speed", "starfighter")][string]$Handling = "", [ValidateSet("", "emergency")][string]$Job = "", [switch]$HeavyPod, [switch]$Partner)
 
 function Test-QuestLinked {
     # Meta's service log is the ground truth. A Quest over Link streams through the RemoteHeadset
@@ -49,5 +51,6 @@ if ($Track -eq "range") { $userArgs = @("--", "--track=range", "--startx=$([int]
 if ($Track -eq "gp" -or $Track -eq "eridanus" -or $Track -eq "network") { $userArgs = @("--", "--track=$Track") }
 if ($Job -eq "emergency") { $userArgs = @("--", "--track=eridanus", "--job=emergency") }   # the job flies Eridanus
 if ($Handling -ne "") { if ($userArgs.Count -eq 0) { $userArgs = @("--") }; $userArgs += "--handling=$Handling" }
+if ($Partner) { if ($userArgs.Count -eq 0) { $userArgs = @("--") }; $userArgs += "--partner" }
 if ($HeavyPod) { if ($userArgs.Count -eq 0) { $userArgs = @("--") }; $userArgs += "--pod=heavy" }   # the 1,500 kg pod (an experiment)
 & $godot --path "$PSScriptRoot\godot" --xr-mode on res://vr.tscn @userArgs 2>&1 | Tee-Object -FilePath $log

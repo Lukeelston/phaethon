@@ -49,14 +49,27 @@ H0, H1 = 25 * KM, 575 * KM        # each highway's extent along its axis
 ZONE = 45 * KM                    # straight either side of a crossing
 S_R = 45 * KM                     # S-bend arcs (4,000 mph needs 30 km at 11 g)
 S_DEG = [16.0, -13.0, 20.0, -15.0, 14.0, -18.0, 17.0, -19.0, 21.0, -14.0, 13.0, -20.0]   # per span, signs alternate sides
-W_HWY, W_RAMP, W_CITY = 400.0, 200.0, 200.0
+W_HWY, W_RAMP, W_CITY, W_SIDE = 400.0, 200.0, 200.0, 200.0
 OFF = 100.0                       # a ramp's start: its centreline this far off the highway's, on its side
 R_RAMP = 12 * KM                  # quadrant ramps and the city roads' turns (2,500 mph at 11 g)
 BY_FAR = 43 * KM                  # a city's bypass leaves its highway this far from the crossing
 BY_R, BY_DEG, BY_M = 7 * KM, 60.0, 3.5 * KM   # its arcs and straights: ~10 km out, ~28 km along
 CITY_OUT = 3 * KM                 # the city's centre: this far past the bypass's apex
-R_BULB = 6 * KM                   # turnarounds (1,800 mph at 11 g)
-BULB_BACK = 1600.0                # the bulb leaves this far before the highway's end
+STRAIGHT = ("E2", "N2", "E3")     # dead straight edge to edge (Luke); the other three keep their S-bends
+# The shafts at the highways' ends (Luke: "a vertical shaft that turns over on itself and enters the same
+# road it came from"). The world's shape, along the road from the highway: flat out to the pull-up, a
+# quarter arc SH_R up, SH_V straight up, a half arc SH_R over the top (upside down at the apex), SH_V
+# straight down rolling half a turn (so you're the right way up again), a quarter arc SH_R out onto
+# the highway the other way. The sims stay flat: the road is a paperclip in plan (out on the right of
+# the highway, a bulb SH_BULB, back on its left) whose bulb carries the craft round (NET_SHAFTS: its
+# curvature turns the bodies with it, nothing to steer); view/network_shaft.gd draws the plan's stretch
+# between the two feet as the shape above, and sim heights are the real altitude along it.
+SH_R = 3504.0                     # m: the pull-up, the top and the pull-out (2 SH_R and the legs' flats whole samples,
+                                  # so the world's feet land exactly on the plan's)
+SH_BULB = 3600.0                  # m: the plan's bulb (its length sets SH_V)
+SH_SPLIT = 1600.0                 # the two legs leave the highway this far before its end
+SH_FLAT = 296.0                   # the landing touches down this far past the highway's end
+SH_KEYS = 24                      # samples between the height keys round the arcs
 FLY_H, FLY_FLAT, FLY_END = 120.0, 3 * KM, 9 * KM   # the flyover: 120 m, flat for +-3 km, down by 9 km
 JZ_MARGIN = 10                    # samples past the overlap in each junction zone
 GAP = 300.0                       # clear between roads outside their junction zones and crossings
@@ -66,16 +79,18 @@ MPH = 0.44704
 JUMP_GAP = 3218.7                 # 2 miles, lip to catch deck
 JUMP_UP = 457.2                   # 1,500 ft
 JL_ANG = 8.5                      # the lip's angle, deg (4,000 mph: 2 mi and 1,500 ft up in 1.8 s)
-JL_LEAVE, JL_LIP, JL_KICK, JL_LAT = 32 * KM, 13 * KM, 4 * KM, 800.0
+JL_FORK = 4.5                     # deg round the quadrant ramp where the spur forks straight on off it
+JL_LIP, JL_KICK = 3 * KM, 4 * KM  # the lip this far short of the crossing, the kick's length
 JUMP_REF = 3000.0                 # mph: the slowest that lands (the catch deck's lip is on its line)
 JC_W, JC_REACH, JC_PULL = 400.0, 40.0, 5 * KM
-JC_FLAT, JC_DOWN, JC_MERGE = 14 * KM, 28 * KM, 38 * KM   # level to, down by, merged by (past the crossing)
-JUMPS = [   # highway (E/N index), crossing (i, j), the way it's taken (+1 up its samples)
-    ("E", 1, (1, 1), 1),
-    ("N", 1, (1, 0), 1),
-    ("E", 2, (1, 2), -1),
-    ("N", 0, (0, 1), -1),
-]
+JC_FLAT, JC_DOWN, JC_MERGE = 14 * KM, 34 * KM, 44 * KM   # level to, down by, merged by (past the crossing)
+# The jumps are the interchanges' (Luke: "incorporate the jumps into the interchanges"), every way
+# through them (Luke: "all of the jumps are backwards"): at each of these crossings, for each of the four
+# ways through it, the exit ramp on your right forks: it curves off to the other highway, its spur runs
+# straight on and kicks up to a lip just short of the crossing, and the deck two miles on carries you
+# over the crossing and back down onto the highway beyond it.
+JUMP_AT = [(1, 1), (1, 0), (1, 2), (0, 1), (2, 1)]
+JUMP_WAYS = [("E", 1), ("E", -1), ("N", 1), ("N", -1)]   # the highway it's on, the way it's taken
 ON_OUT, ON_R, ON_AT = 4 * KM, 12 * KM, 34 * KM   # on-ramps: out from the highway, their S, start short of the crossing
 CITIES = [   # name, biome, crossing (i, j) on (LINES x, LINES y), quadrant (qx, qy)
     ("ERIDANUS", "verdant", (1, 1), (1, 1)),
@@ -83,6 +98,27 @@ CITIES = [   # name, biome, crossing (i, j) on (LINES x, LINES y), quadrant (qx,
     ("GLACIER", "ice", (2, 2), (1, 1)),
     ("BASALT", "basalt", (0, 0), (-1, -1)),
     ("MESA", "mesa", (2, 0), (1, -1)),
+]
+
+
+# The side roads (Luke: "different shapes, that would reasonably cause the person to actually shift, while
+# still staying at 'highway' speeds"): loops off the straight highways, out over OUT_BEND and back the
+# same way (each half's bends net to nothing, so the second half is the first reversed and lands back
+# tangent). Their corners are 6-16 km radius: 1,800-2,900 mph at 11 g, second and third gear between
+# straights long enough for top (gears: 1,330 / 2,450 / 3,470 / 4,450 mph).
+OUT_BEND = [("O", 16 * KM, 26.0), ("S", 3 * KM), ("I", 16 * KM, 26.0)]   # out into the country first, in third
+SHAPES = {
+    "esses": [("O", 8 * KM, 30.0), ("I", 8 * KM, 60.0), ("O", 8 * KM, 30.0), ("S", 1.5 * KM)],
+    "hairpin": [("S", 4 * KM), ("O", 7 * KM, 100.0), ("S", 2 * KM), ("I", 7 * KM, 100.0), ("S", 3 * KM)],
+    "chicane": [("S", 12 * KM), ("O", 6 * KM, 35.0), ("I", 6 * KM, 70.0), ("O", 6 * KM, 35.0), ("S", 6 * KM)],
+    "tighten": [("O", 16 * KM, 55.0), ("S", 5 * KM), ("I", 9 * KM, 55.0), ("S", 2 * KM)],
+    "kinks": [("O", 10 * KM, 18.0), ("S", 3 * KM), ("I", 10 * KM, 36.0), ("S", 3 * KM), ("O", 10 * KM, 36.0), ("S", 3 * KM), ("I", 10 * KM, 18.0)],
+    "crook": [("O", 7 * KM, 120.0), ("I", 11 * KM, 120.0), ("S", 2 * KM)],
+}
+SIDES = [   # highway, its middle along the highway (m), side (+1 its left, -1 its right), shape
+    ("E2", 200 * KM, 1, "esses"), ("E2", 200 * KM, -1, "hairpin"), ("E2", 400 * KM, 1, "chicane"), ("E2", 400 * KM, -1, "tighten"),
+    ("N2", 200 * KM, 1, "kinks"), ("N2", 200 * KM, -1, "crook"), ("N2", 400 * KM, 1, "hairpin"), ("N2", 400 * KM, -1, "esses"),
+    ("E3", 200 * KM, 1, "crook"), ("E3", 200 * KM, -1, "chicane"), ("E3", 400 * KM, 1, "kinks"), ("E3", 400 * KM, -1, "tighten"),
 ]
 
 
@@ -171,11 +207,15 @@ def s_bend(D, deg):
 
 
 def highway(name, axis, line, spans):
-    """axis 'x': runs west-east at y = line; 'y': south-north at x = line."""
-    segs = [("S", LINES[0] + ZONE - H0, 0, "sp")]
-    for k in range(2):
-        segs += s_bend(LINES[k + 1] - LINES[k] - 2 * ZONE, spans[k])
-        segs.append(("S", 2 * ZONE if k == 0 else H1 - LINES[2] + ZONE, 0, "sp"))
+    """axis 'x': runs west-east at y = line; 'y': south-north at x = line. STRAIGHT ones (Luke: "completely
+    straight from edge to edge") are one long straight."""
+    if name in STRAIGHT:
+        segs = [("S", H1 - H0, 0, "sp")]
+    else:
+        segs = [("S", LINES[0] + ZONE - H0, 0, "sp")]
+        for k in range(2):
+            segs += s_bend(LINES[k + 1] - LINES[k] - 2 * ZONE, spans[k])
+            segs.append(("S", 2 * ZONE if k == 0 else H1 - LINES[2] + ZONE, 0, "sp"))
     if axis == "x":
         return Road(name, "highway", H0, line, 0.0, W_HWY, segs)
     return Road(name, "highway", line, H0, 90.0, W_HWY, segs)
@@ -183,6 +223,46 @@ def highway(name, axis, line, spans):
 
 def heading_deg(dx, dy):
     return math.degrees(math.atan2(dy, dx))
+
+
+def shaft_z(d, R, V):
+    """A shaft's altitude and its slope (dz/ds) d m along it from the pull-up."""
+    q = math.pi * R / 2
+    if d <= 0:
+        return 0.0, 0.0
+    if d < q:                          # the pull-up
+        return R * (1 - math.cos(d / R)), math.sin(d / R)
+    if d < q + V:                      # straight up
+        return R + d - q, 1.0
+    if d < 3 * q + V:                  # over the top
+        a = (d - q - V) / R
+        return R + V + R * math.sin(a), math.cos(a)
+    if d < 3 * q + 2 * V:              # straight down, rolling half a turn
+        return R + V - (d - 3 * q - V), -1.0
+    if d < 4 * q + 2 * V:              # the pull-out
+        a = (d - 3 * q - 2 * V) / R
+        return R - R * math.sin(a), -math.cos(a)
+    return 0.0, 0.0
+
+
+def shaft_keys(r, i_up, i_dn, V):
+    """Height keys [sample, m, slope] along a shaft: every SH_KEYS samples, the exact height and slope, so
+    the sims' Hermite cubics hold the real altitude (the view's shape: view/network_shaft.gd)."""
+    s = np.concatenate([[0.0], np.cumsum(r.len[:-1])])
+    keys = [[0, 0.0, 0.0]] if i_up > 0 else []
+    i = i_up
+    while True:
+        z, m = shaft_z(s[i] - s[i_up], SH_R, V)
+        keys.append([i, z, m])
+        if i >= i_dn:
+            break
+        i = min(i_dn, i + SH_KEYS)
+    keys[-1] = [i_dn, 0.0, 0.0]
+    keys.append([r.N - 1, 0.0, 0.0])
+    return keys
+
+
+join_off = {}   # (child road, end) -> its lateral off the parent, where that isn't OFF
 
 
 def build():
@@ -196,6 +276,7 @@ def build():
         ns.append(len(roads))
         roads.append(highway(f"N{k + 1}", "y", xl, [next(span), next(span)]))
     joins = []   # (child road, which end 0/1, parent road)
+    join_off.clear()
     # quadrant ramps
     for i, X in enumerate(LINES):
         for j, Y in enumerate(LINES):
@@ -222,9 +303,13 @@ def build():
         cities.append((name, biome, cx, cy, len(roads), term))
         joins += [(len(roads), 0, ew[j]), (len(roads), 1, ew[j])]
         roads.append(r)
-    # turnarounds
-    ca = (OFF + R_BULB) / (2 * R_BULB)
+    # the shafts: a paperclip in plan, flat along the highway's right past its end, the bulb, flat back
+    # along its left. A leg's flat stretch: from the split past the highway's end by the landing (the way
+    # back) or by the landing and 2 SH_R (the way out: the top comes back that far over the road)
+    shafts = []
+    ca = (OFF + SH_BULB) / (2 * SH_BULB)
     alpha = math.degrees(math.acos(ca))
+    bulb = SH_BULB * math.radians(360.0 + 4 * alpha - 180.0)   # (alpha, 180 + 2 alpha, alpha)
     for hi in ew + ns:
         H = roads[hi]
         for end in (0, 1):
@@ -235,54 +320,109 @@ def build():
                 px, py = H.p[0]
                 u = -H.t[0]
             nl = (-u[1], u[0])
-            sx, sy = px - BULB_BACK * u[0] - OFF * nl[0], py - BULB_BACK * u[1] - OFF * nl[1]
+            sx, sy = px - SH_SPLIT * u[0] - OFF * nl[0], py - SH_SPLIT * u[1] - OFF * nl[1]
+            land = SH_SPLIT + SH_FLAT                 # flat, split to touchdown (and the plan's way back)
+            out = land + 2 * SH_R                     # flat, split to pull-up (and the plan's way out)
             r = Road(f"T{H.name}{'+' if end else '-'}", "turn", sx, sy, heading_deg(u[0], u[1]), W_RAMP,
-                     [("R", R_BULB, alpha, "sp"), ("L", R_BULB, 180.0 + 2 * alpha, "sp"), ("R", R_BULB, alpha, "sp")])
+                     [("S", out, 0, "sp"), ("R", SH_BULB, alpha, "sp"), ("L", SH_BULB, 180.0 + 2 * alpha, "sp"),
+                      ("R", SH_BULB, alpha, "sp"), ("S", out, 0, "sp")])
+            # the world's length between the feet is the plan's: bulb + (out - land) back on the leg
+            s_up, s_dn = out, r.len[:-1].sum() - land
+            V = (s_dn - s_up - 2 * math.pi * SH_R) / 2.0
+            assert V > 2000, f"the shaft's straight is only {V:.0f} m"
+            i_up, i_dn = int(round(out / STEP)), r.N - 1 - int(round(land / STEP))
+            s_up, s_dn = float(np.sum(r.len[:i_up])), float(np.sum(r.len[:i_dn]))
+            V = (s_dn - s_up - 2 * math.pi * SH_R) / 2.0
+            r.keys = shaft_keys(r, i_up, i_dn, V)
+            shafts.append((len(roads), i_up, i_dn, SH_R, V))
             joins += [(len(roads), 0, hi), (len(roads), 1, hi)]
             roads.append(r)
-    # jump sets
+    # the jump sets: one each way through each crossing in JUMP_AT, off the exit ramp on that way's right
     jumps = []
-    for axis, li, (ci, cj), d in JUMPS:
-        H = roads[(ew if axis == "E" else ns)[li]]
+    for ci, cj in JUMP_AT:
         X, Y = LINES[ci], LINES[cj]
-        fx, fy = ((1.0, 0.0) if axis == "E" else (0.0, 1.0))
-        fx, fy = fx * d, fy * d                  # the way it's taken
-        rx, ry = fy, -fx                         # its right
-        hdg = heading_deg(fx, fy)
-        th = math.degrees(math.acos(1.0 - (JL_LAT - OFF) / (2 * S_R)))
-        s_len = 2 * S_R * math.sin(math.radians(th))
-        # the launch spur: out to JL_LAT on the right (an S: right then left), straight to the lip
-        x0, y0 = X - fx * JL_LEAVE + rx * OFF, Y - fy * JL_LEAVE + ry * OFF
-        st = JL_LEAVE - JL_LIP - s_len
-        L = Road(f"J{len(jumps)}", "jump", x0, y0, hdg, W_RAMP,
-                 [("R", S_R, th, "sp"), ("L", S_R, th, "sp"), ("S", st, 0, "sp")])
-        L.role = "launch"
-        m_lip = math.tan(math.radians(JL_ANG))
-        k0 = L.N - 1 - round(JL_KICK / STEP)
-        h_lip = (L.N - 1 - k0) * STEP * m_lip / 2.0   # a parabola from level: the even pull
-        L.keys = [[k0, 0.0, 0.0], [L.N - 1, h_lip, m_lip]]
-        joins.append((len(roads), 0, roads.index(H)))
-        roads.append(L)
-        # the catch deck, two miles on: on JUMP_REF's line, 3 m under it
-        v = JUMP_REF * MPH
-        c2 = 1.0 / (1.0 + m_lip * m_lip)        # cos^2 of the lip's angle
-        hc = h_lip + JUMP_GAP * m_lip - G * JUMP_GAP ** 2 / (2 * v * v * c2) - 3.0
-        mc = m_lip - G * JUMP_GAP / (v * v * c2)
-        lx, ly = L.p[-1]
-        cx0, cy0 = lx + fx * JUMP_GAP, ly + fy * JUMP_GAP
-        along = JC_MERGE - s_len + JL_LIP - JUMP_GAP   # catch start (crossing - JL_LIP + gap) to the S
-        C = Road(f"K{len(jumps)}", "jump", cx0, cy0, hdg, JC_W,
-                 [("S", along, 0, "sp"), ("L", S_R, th, "sp"), ("R", S_R, th, "sp")])
-        C.role = "catch"
-        ip = round(JC_PULL / STEP)
-        top = hc + ip * STEP * mc / 2.0          # the pull-out: a parabola to level
-        u_c0 = -JL_LIP + JUMP_GAP                # the deck's start, from the crossing
-        i_flat = round((JC_FLAT - u_c0) / STEP)
-        i_down = round((JC_DOWN - u_c0) / STEP)
-        C.keys = [[0, hc, mc], [ip, top, 0.0], [i_flat, top, 0.0], [i_down, 0.0, 0.0]]
-        joins.append((len(roads), 1, roads.index(H)))
-        roads.append(C)
-        jumps.append((len(roads) - 2, len(roads) - 1, JUMP_REF, h_lip, top))
+        for axis, d in JUMP_WAYS:
+            fx, fy = ((1.0, 0.0) if axis == "E" else (0.0, 1.0))
+            fx, fy = fx * d, fy * d                  # the way it's taken
+            rx, ry = fy, -fx                         # its right
+            H = roads[(ew[cj] if axis == "E" else ns[ci])]
+            qx, qy = int(round(-fx + rx)), int(round(-fy + ry))   # the exit's quadrant: behind and to the right
+            ramp = next(k for k, R in enumerate(roads) if R.name == f"R{ci}{cj}{'E' if qx > 0 else 'W'}{'N' if qy > 0 else 'S'}")
+            hdg = heading_deg(fx, fy) - JL_FORK
+            a = math.radians(JL_FORK)
+            ux, uy = math.cos(math.radians(hdg)), math.sin(math.radians(hdg))
+            # the fork: JL_FORK round the ramp from its mouth on this highway
+            u0 = -(R_RAMP + OFF) + R_RAMP * math.sin(a)   # along the way it's taken, from the crossing
+            r0 = OFF + R_RAMP * (1 - math.cos(a))         # to its right
+            x0, y0 = X + fx * u0 + rx * r0, Y + fy * u0 + ry * r0
+            st = (-JL_LIP - u0) / math.cos(a)
+            L = Road(f"J{len(jumps)}", "jump", x0, y0, hdg, W_RAMP, [("S", st, 0, "sp")])
+            L.role = "launch"
+            m_lip = math.tan(math.radians(JL_ANG))
+            k0 = L.N - 1 - round(JL_KICK / STEP)
+            h_lip = (L.N - 1 - k0) * STEP * m_lip / 2.0   # a parabola from level: the even pull
+            L.keys = [[k0, 0.0, 0.0], [L.N - 1, h_lip, m_lip]]
+            join_off[(len(roads), 0)] = 0.0              # on the ramp's own centreline
+            joins.append((len(roads), 0, ramp))
+            roads.append(L)
+            # the catch deck, two miles on: on JUMP_REF's line, 3 m under it
+            v = JUMP_REF * MPH
+            c2 = 1.0 / (1.0 + m_lip * m_lip)        # cos^2 of the lip's angle
+            hc = h_lip + JUMP_GAP * m_lip - G * JUMP_GAP ** 2 / (2 * v * v * c2) - 3.0
+            mc = m_lip - G * JUMP_GAP / (v * v * c2)
+            lx, ly = L.p[-1]
+            cx0, cy0 = lx + ux * JUMP_GAP, ly + uy * JUMP_GAP
+            uc = (cx0 - X) * fx + (cy0 - Y) * fy      # the deck's start, along the way, from the crossing
+            rc = (cx0 - X) * rx + (cy0 - Y) * ry      # ... and to the right of the highway
+            # straight on, a long left and a long right back onto the highway's right edge at JC_MERGE:
+            # A from the along, the angle beta from the right (bisection)
+            Rs = S_R
+            def miss(bt):
+                A = (JC_MERGE - uc - Rs * (math.sin(a) + 2 * math.sin(bt))) / math.cos(a)
+                return rc + A * math.sin(a) + Rs * (2 * math.cos(bt) - math.cos(a) - 1) - OFF, A
+            lo, hi = 0.0, math.radians(45.0)
+            for _ in range(60):
+                m = (lo + hi) / 2
+                if miss(m)[0] > 0:
+                    lo = m
+                else:
+                    hi = m
+            bt = (lo + hi) / 2
+            A = miss(bt)[1]
+            assert A > 0 and abs(miss(bt)[0]) < 0.01, f"K{len(jumps)}: no way back ({A:.0f} m straight)"
+            C = Road(f"K{len(jumps)}", "jump", cx0, cy0, hdg, JC_W,
+                     [("S", A, 0, "sp"), ("L", Rs, JL_FORK + math.degrees(bt), "sp"), ("R", Rs, math.degrees(bt), "sp")])
+            C.role = "catch"
+            ip = round(JC_PULL / STEP)
+            top = hc + ip * STEP * mc / 2.0          # the pull-out: a parabola to level
+            i_flat = round((JC_FLAT - uc) / STEP)
+            i_down = round((JC_DOWN - uc) / STEP)
+            C.keys = [[0, hc, mc], [ip, top, 0.0], [i_flat, top, 0.0], [i_down, 0.0, 0.0]]
+            joins.append((len(roads), 1, roads.index(H)))
+            roads.append(C)
+            jumps.append((len(roads) - 2, len(roads) - 1, JUMP_REF, h_lip, top))
+    # the side roads
+    for k, (hname, mid, sd, shape) in enumerate(SIDES):
+        hi = next(q for q, R in enumerate(roads) if R.name == hname)
+        H = roads[hi]
+        half = OUT_BEND + SHAPES[shape]
+        out_, in_ = ("L", "R") if sd > 0 else ("R", "L")
+        def seg(q):
+            if q[0] == "S":
+                return ("S", q[1], 0, "sp")
+            return (out_ if q[0] == "O" else in_, q[1], q[2], "sp")
+        segs = [seg(q) for q in half] + [seg(q) for q in reversed(half)]
+        # its length along the highway, walked from nothing: start so its middle lands at mid
+        pts, end = walk(segs, 0.0, 0.0, 0.0)
+        along = end[0]
+        fx, fy = H.t[0]
+        lat = sd * OFF
+        x0 = H.x0 + fx * (mid - H1 / 2 - along / 2 + H1 / 2 - H0) - fy * lat
+        y0 = H.y0 + fy * (mid - H1 / 2 - along / 2 + H1 / 2 - H0) + fx * lat
+        S_ = Road(f"S{k}", "side", x0, y0, H.hdeg, W_SIDE, segs)
+        S_.shape = shape
+        joins += [(len(roads), 0, hi), (len(roads), 1, hi)]
+        roads.append(S_)
     # on-ramps from the open ground, one a city
     onramps = []
     for k, (name, biome, (i, j), (qx, qy)) in enumerate(CITIES):
@@ -302,7 +442,7 @@ def build():
         joins.append((len(roads), 1, roads.index(H)))
         roads.append(O)
         onramps.append((k, len(roads) - 1))
-    return roads, joins, cities, ew, ns, jumps, onramps
+    return roads, joins, cities, ew, ns, jumps, onramps, shafts
 
 
 def junction(roads, c, end, p):
@@ -313,6 +453,10 @@ def junction(roads, c, end, p):
     inside = []
     for i in idx:
         k, lat, _ = P.nearest(C.p[i])
+        if C.kind == "turn" and (k == P.N - 1 or k == 0):   # a shaft's leg runs on past the highway's end: not joined there
+            past = abs((C.p[i, 0] - P.p[k, 0]) * P.t[k, 0] + (C.p[i, 1] - P.p[k, 1]) * P.t[k, 1])
+            if past > 2 * STEP:
+                break
         if abs(lat) < reach:
             inside.append((i, k))
         else:
@@ -364,11 +508,12 @@ def check(roads, joins, J, cities, ew, ns, jumps=(), onramps=()):
         C, P = roads[c], roads[p]
         i = 0 if end == 0 else C.N - 1
         k, lat, _ = P.nearest(C.p[i])
-        if abs(abs(lat) - OFF) > 0.5:
-            bad(f"{C.name} end {end} sits {abs(lat):.2f} m off {P.name} (want {OFF:.0f})")
+        want = join_off.get((c, end), OFF)
+        if abs(abs(lat) - want) > 0.5:
+            bad(f"{C.name} end {end} sits {abs(lat):.2f} m off {P.name} (want {want:.0f})")
         h = math.radians(C.hdeg) if end == 0 else C.end[2]   # the pose, not the first chord
         ang = math.degrees(math.acos(min(1.0, abs(math.cos(h) * P.t[k, 0] + math.sin(h) * P.t[k, 1]))))
-        if ang > 0.05:
+        if ang > (0.15 if (c, end) in join_off else 0.05):   # (a fork onto an arc: a chord's own angle)
             bad(f"{C.name} end {end} meets {P.name} at {ang:.3f} deg")
     # junction zones on a road: at most two overlap (a pair of ramps side by side, a turnaround's
     # two ends): the sims take the deepest of the roads a body's zones offer
@@ -426,6 +571,8 @@ def check(roads, joins, J, cities, ew, ns, jumps=(), onramps=()):
                 gore_j = GORE_LONG if roads[rj].kind in ("jump", "on") else GORE
                 if d >= -1.0 and (in_zone(ri, i, gore_i) or in_zone(rj, j, gore_j)):
                     continue
+                if (A.role == "launch" and in_zone(ri, i, GORE_LONG)) or (B.role == "launch" and in_zone(rj, j, GORE_LONG)):
+                    continue   # a spur forking off its ramp, still drawing clear of the highway the ramp left
                 if any(z[0] - sub <= i <= z[1] + sub for z in zone.get((ri, rj), [])) or any(z[0] - sub <= j <= z[1] + sub for z in zone.get((rj, ri), [])):
                     continue
                 if in_zone(ri, i) and in_zone(rj, j):
@@ -439,16 +586,14 @@ def check(roads, joins, J, cities, ew, ns, jumps=(), onramps=()):
         bad(f"{roads[ri].name} and {roads[rj].name} {d:.0f} m apart at {at[0]:.1f},{at[1]:.1f} km (want {GAP:.0f})")
     # self-clearance of the turnarounds and city roads (non-adjacent parts)
     for R in roads:
-        if R.kind == "highway":
-            continue
+        if R.kind in ("highway", "turn"):
+            continue   # (a shaft's plan is a paperclip by design: its legs share a wall)
         q = R.p[::sub]
         for a in range(len(q)):
             d = np.hypot(q[a + 30:, 0] - q[a, 0], q[a + 30:, 1] - q[a, 1]) if a + 30 < len(q) else np.array([])
             hit = np.where(d < R.width + GAP)[0]
             for h in hit:
                 ia, ib = a * sub, (a + 30 + h) * sub
-                if R.kind == "turn" and (ia < 200 and ib > R.N - 200):
-                    continue   # its two ends, side by side at the split
                 bad(f"{R.name} comes within {d[h]:.0f} m of itself ({ia}, {ib})")
                 break
     # every city reaches every other
@@ -495,7 +640,7 @@ def check(roads, joins, J, cities, ew, ns, jumps=(), onramps=()):
 
 
 def main():
-    roads, joins, cities, ew, ns, jumps, onramps = build()
+    roads, joins, cities, ew, ns, jumps, onramps, shafts = build()
     J = [junction(roads, c, end, p) for c, end, p in joins]
     H = heights(roads, ew, ns)
     km = sum(float(R.len[:-1].sum()) for R in roads) / KM
@@ -511,13 +656,13 @@ def main():
     for name, biome, cx, cy, r, i in cities:
         print(f"  {name:<9} {biome:<8} at {cx / KM:.0f},{cy / KM:.0f} km: {roads[r].name} sample {i} of {roads[r].N}")
     ok = check(roads, joins, J, cities, ew, ns, jumps, onramps)
-    if km > 6000 or N > 250000:
+    if km > 7500 or N > 315000:
         ok = False
         print(f"  BAD  too big: {km:.0f} km, {N} samples")
     print("NETWORK DESIGN OK" if ok else "NETWORK DESIGN NOT OK")
     if "--plot" in sys.argv:
         plot(roads, cities, sys.argv[sys.argv.index("--plot") + 1] if len(sys.argv) > sys.argv.index("--plot") + 1 else "network.png")
-    return roads, J, cities, H, ok, jumps, onramps
+    return roads, J, cities, H, ok, jumps, onramps, shafts
 
 
 def plot(roads, cities, out):
@@ -525,7 +670,7 @@ def plot(roads, cities, out):
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     fig, ax = plt.subplots(figsize=(10, 10))
-    col = {"highway": "#2a6fdb", "ramp": "#6a8", "city": "#d33", "turn": "#999", "jump": "#f80", "on": "#a0a"}
+    col = {"highway": "#2a6fdb", "ramp": "#6a8", "city": "#d33", "turn": "#999", "jump": "#f80", "on": "#a0a", "side": "#0a7"}
     for R in roads:
         ax.plot(R.p[:, 0] / KM, R.p[:, 1] / KM, color=col[R.kind], lw=1.6 if R.kind == "highway" else 0.9)
     for name, biome, cx, cy, r, i in cities:

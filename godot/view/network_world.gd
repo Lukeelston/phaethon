@@ -7,8 +7,12 @@
 ## pink with tall panels), masts with beacons, and on a flyover (the sim's NET_HEIGHTS) the deck's
 ## edges, its underside and pillars. Walls stay open where another road joins (inside its corridor).
 ## Its signs come with it: a board before every junction naming where that exit goes (road miles,
-## from the junction table), END OF THE ROAD before each turnaround, braking boards before each
-## city's STARFIGHTER zone, the city's name over its terminal (a lit line across the road).
+## from the junction table), END OF THE ROAD before each shaft, braking boards before each
+## city's STARFIGHTER zone, the city's name over its terminal (a lit line across the road), a jump's
+## boards with a big lit arrow (view/arrow_board.gdshader) on the highway before its exit and over the
+## fork where its spur runs straight on off the ramp, a speed and a gear before each side road's corner.
+## A shaft's stretch is built on the shape it is in the world (view/network_shaft.gd): every point
+## through _p, "up" the road's own (_up), hoops round it in place of masts.
 ## The cities' skylines are built once at the start: towers in each city's colours, hazed by their
 ## own shader so they stand out of the fog from far off.
 ##   var w := NetworkWorld.new(); add_child(w); w.build(sim, view)
@@ -16,6 +20,7 @@
 extends Node3D
 
 const Kit := preload("res://view/mesh_kit.gd")
+const ShaftScript := preload("res://view/network_shaft.gd")
 const CH := 64                    # samples a chunk (~1.5 km): one builds well inside a 72 Hz frame
 const CELL := 8000.0              # the grid's cells, m
 const VIS := 20000.0              # build chunks this close (m, to the nearest point of their circle)
@@ -62,7 +67,20 @@ const MILE := 1609.344
 # (At 200 px each new glyph cost ~200 ms in the middle of a run.)
 const FONT := [72, 43, 36, 79, 25]   # a board's title, its lines, three lines' lines; a braking board's miles, its words
 const SIGN_PX := 0.139
-const SIGN_CHARS := "ABCDEFGHIJKLMNOPQRSTUVWXYZ 0123456789/:+-."
+const SIGN_CHARS := "ABCDEFGHIJKLMNOPQRSTUVWXYZ 0123456789/:+-.,"
+const JUMP_W := 170.0             # a jump's board: wider, its arrow on a panel at the right
+const JUMP_H := 56.0
+const ARROW_PANEL := 0.36
+const SIGN_FAR := 290             # samples (~7 km) before a jump's exit: its first board (clear of the ramp's own, at SIGN_BEFORE)
+const SIGN_NEAR := 90             # samples (~2 km) before a jump's exit: its second board
+const ARROW_WORDS := 1.8          # a jump's board's words, this much bigger (the same glyphs, scaled)
+const FORK_BEFORE := 22           # samples before the fork: the board over it, the arrow straight on
+const CHEV_EVERY := 14            # samples between the lit chevrons on a launch spur
+const HOOP_EVERY := 8             # samples between a shaft's hoops (~190 m); every second one lit
+const HOOP_H := 80.0              # the hoops' clearance over the road
+const CORNER_MIN_K := 1.0 / 17000.0   # side roads: a bend this tight gets a board (speed, gear)
+const CORNER_BEFORE := 100        # samples (~2.4 km) before it
+const CORNER_G := 11.0            # g: the speed on its board
 const TOWER_VIS := 140000.0       # skylines show this far
 # a city's colours: [tower body a, tower body b, crown light]
 const PALETTE := {
@@ -75,6 +93,9 @@ const PALETTE := {
 
 var sim
 var view
+var shaft                 # the shafts' shapes (view/network_shaft.gd)
+var _up := Vector3.UP     # the road's up at the sample being built (a shaft's goes round with it)
+var _smap := {}           # TrackPath -> road index, the shafts'
 var chunks := {}          # Vector2i(road, chunk) -> [node, ox, oy]
 var grid := {}            # Vector2i cell -> Array of [road, chunk, cx, cy, radius]
 var built := 0            # tests read these
@@ -88,6 +109,7 @@ var boards := 0
 var cities_built := 0
 var towers := 0
 var skylines := []        # [node, cx, cy]
+var far_shafts := []      # [node, ox, oy]: each shaft's shape from far off, before its chunks stream in
 var _signs := {}
 var halls := {}            # road -> [first, last sample] of its hall (the cities' terminals; CourseAudio reads it)
 var hall_samples := 0      # samples built under a hall's roof (tests)          # Vector2i(road, chunk) -> Array of sign specs
@@ -103,6 +125,8 @@ var _beam: ShaderMaterial
 var _board_mat: ShaderMaterial
 var _end_mat: ShaderMaterial
 var _city_mat: ShaderMaterial
+var _arrow_mat: ShaderMaterial
+var _fork_mat: ShaderMaterial
 var _job := {}            # the chunk being built, a slice a frame (_start_chunk, _work)
 
 
@@ -110,6 +134,10 @@ func build(s, v) -> void:
 	var t0 := Time.get_ticks_msec()
 	sim = s
 	view = v
+	shaft = ShaftScript.new()
+	shaft.setup(sim)
+	for sh in sim.shafts:
+		_smap[sim.roads[int(sh[0])]] = int(sh[0])
 	_mat = Kit.vertex_colors()
 	_lit = Kit.vertex_colors(true)
 	_bright = Kit.vertex_colors(true)
@@ -132,6 +160,13 @@ func build(s, v) -> void:
 	_city_mat = ShaderMaterial.new()
 	_city_mat.shader = preload("res://view/authorized.gdshader")
 	_city_mat.set_shader_parameter("col", Vector3(0.25, 0.65, 1.0))
+	_arrow_mat = ShaderMaterial.new()   # a jump's board on the highway: the arrow up and to the right, to the exit
+	_arrow_mat.shader = preload("res://view/arrow_board.gdshader")
+	_arrow_mat.set_shader_parameter("aspect", JUMP_W / JUMP_H)
+	_arrow_mat.set_shader_parameter("panel", ARROW_PANEL)
+	_arrow_mat.set_shader_parameter("angle", deg_to_rad(52.0))
+	_fork_mat = _arrow_mat.duplicate()  # ... over the fork: straight on
+	_fork_mat.set_shader_parameter("angle", PI / 2.0)
 	_asph = ShaderMaterial.new()
 	_asph.shader = preload("res://view/asphalt.gdshader")
 	_asph.set_shader_parameter("period", ASPHALT_PERIOD)
@@ -151,11 +186,13 @@ func build(s, v) -> void:
 		while k * CH < R.N - 1:
 			var c0 := k * CH
 			var c1 := mini((k + 1) * CH, R.N - 1)
-			var cx: float = (R.px[c0] + R.px[c1]) / 2.0
-			var cy: float = (R.py[c0] + R.py[c1]) / 2.0
+			var m0 := _wxy(r, c0)
+			var m1 := _wxy(r, c1)
+			var cx: float = (m0.x + m1.x) / 2.0
+			var cy: float = (m0.y + m1.y) / 2.0
 			var rad := 0.0
 			for i in range(c0, c1 + 1, 8):
-				rad = maxf(rad, Vector2(R.px[i] - cx, R.py[i] - cy).length())
+				rad = maxf(rad, (_wxy(r, i) - Vector2(cx, cy)).length())
 			rad += R.w[c0]
 			var lo := Vector2i(int(floor((cx - rad) / CELL)), int(floor((cy - rad) / CELL)))
 			var hi := Vector2i(int(floor((cx + rad) / CELL)), int(floor((cy + rad) / CELL)))
@@ -170,6 +207,7 @@ func build(s, v) -> void:
 	for c in sim.cities:   # a hall over each city's terminal: the Network's tunnels
 		halls[int(c.road)] = [int(c.i) - HALL_HALF, int(c.i) + HALL_HALF]
 	_build_skylines()
+	_build_far_shafts()
 	_warm_fonts()
 	setup_ms = Time.get_ticks_msec() - t0
 
@@ -211,9 +249,8 @@ func sync(org_x: float, org_y: float) -> void:
 		var R = sim.roads[key.x]
 		var c0: int = key.y * CH
 		var c1: int = mini(c0 + CH, R.N - 1)
-		var cx: float = (R.px[c0] + R.px[c1]) / 2.0
-		var cy: float = (R.py[c0] + R.py[c1]) / 2.0
-		if Vector2(cx - org_x, cy - org_y).length() > DROP + CH * 24.0:
+		var cm := (_wxy(key.x, c0) + _wxy(key.x, c1)) / 2.0
+		if Vector2(cm.x - org_x, cm.y - org_y).length() > DROP + CH * 24.0:
 			(c[0] as Node3D).queue_free()
 			chunks.erase(key)
 			dropped += 1
@@ -222,6 +259,8 @@ func sync(org_x: float, org_y: float) -> void:
 			continue
 		(c[0] as Node3D).position = Vector3(c[1] - org_x, 0.0, -(c[2] - org_y))
 	for sk in skylines:
+		(sk[0] as Node3D).position = Vector3(sk[1] - org_x, 0.0, -(sk[2] - org_y))
+	for sk in far_shafts:
 		(sk[0] as Node3D).position = Vector3(sk[1] - org_x, 0.0, -(sk[2] - org_y))
 	sync_ms = (Time.get_ticks_usec() - t_in) / 1000.0
 
@@ -233,7 +272,19 @@ func _h(r: int, i: int) -> float:
 
 ## A point `off` m left of road r's sample i, `h` up, against the chunk origin (ox, oy).
 func _p(R, ox: float, oy: float, i: int, off: float, h: float) -> Vector3:
+	if R.shaft and shaft.on(_smap[R], float(i)):   # on a shaft's stretch: its own point and frame
+		var A: Array = shaft.at(_smap[R], float(i))
+		return Vector3(float(A[0]) - ox, A[2], -(float(A[1]) - oy)) + (A[4] as Vector3) * off + (A[5] as Vector3) * (h - float(A[2]))
 	return Vector3(R.px[i] + R.nx[i] * off - ox, h, -(R.py[i] + R.ny[i] * off - oy))
+
+
+## Road r's sample i in the world's plan (a shaft's stretch isn't where the sims' plan has it).
+func _wxy(r: int, i: int) -> Vector2:
+	var R = sim.roads[r]
+	if R.shaft and shaft.on(r, float(i)):
+		var A: Array = shaft.at(r, float(i))
+		return Vector2(A[0], A[1])
+	return Vector2(R.px[i], R.py[i])
 
 
 ## Is the wall on side sgn of road r's sample i open (another road joins there: the edge point is
@@ -270,8 +321,9 @@ func _start_chunk(r: int, k: int) -> void:
 	var R = sim.roads[r]
 	var c0 := k * CH
 	var c1 := mini((k + 1) * CH, R.N - 1)
-	var ox: float = R.px[c0]
-	var oy: float = R.py[c0]
+	var w0 := _wxy(r, c0)
+	var ox: float = w0.x
+	var oy: float = w0.y
 	var node := Node3D.new()
 	node.name = "%s_%d" % [R.name, k]
 	add_child(node)
@@ -334,6 +386,8 @@ func _sample(J: Dictionary, R, i: int) -> void:
 	var city: bool = R.mode[i] == 0
 	var sec := _section(R.w[i])
 	var te: float = sec.te   # the edges' ramps' top: the walls stand on it
+	var on_shaft: bool = R.shaft and shaft.on(r, float(i))
+	_up = (shaft.at(r, float(i))[5] as Vector3) if on_shaft else Vector3.UP
 	# the road: a flat middle and a ramp up each side (the sims' net_edge), a row of the chunk's grid
 	# a sample (its normals banked with the ramps)
 	if i == int(J.c0):
@@ -346,17 +400,21 @@ func _sample(J: Dictionary, R, i: int) -> void:
 		for sgn in [-1.0, 1.0]:
 			var ea := _p(R, ox, oy, i, sgn * hw, hi)
 			var eb := _p(R, ox, oy, j, sgn * hw, hj)
-			_quad(deco, [ea + Vector3.DOWN * DECK, eb + Vector3.DOWN * DECK, eb + Vector3.UP * te, ea + Vector3.UP * te], Color(0.55, 0.55, 0.53))
-			_quad(lglow, [ea + Vector3.DOWN * DECK, eb + Vector3.DOWN * DECK, eb + Vector3.DOWN * (DECK - 0.8), ea + Vector3.DOWN * (DECK - 0.8)], STRIP_LIGHT)   # a lit line along its foot
+			_quad(deco, [ea - _up * DECK, eb - _up * DECK, eb + _up * te, ea + _up * te], Color(0.55, 0.55, 0.53))
+			_quad(lglow, [ea - _up * DECK, eb - _up * DECK, eb - _up * (DECK - 0.8), ea - _up * (DECK - 0.8)], STRIP_LIGHT)   # a lit line along its foot
 		_quad(deco, [_p(R, ox, oy, i, hw, hi - DECK), _p(R, ox, oy, i, -hw, hi - DECK), _p(R, ox, oy, j, -hw, hj - DECK), _p(R, ox, oy, j, hw, hj - DECK)], Color(0.32, 0.32, 0.31))
 		var high := hi > 150.0   # a jump's kick or deck: pylons, fewer and thicker
-		if i % (40 if high else PILLAR_EVERY) == 0 and hi > DECK + 2.0:
+		if not on_shaft and i % (40 if high else PILLAR_EVERY) == 0 and hi > DECK + 2.0:
 			for sgn in [-1.0, 1.0]:
 				var foot := _p(R, ox, oy, i, sgn * (hw - 30.0), 0.0)
 				var thick := 14.0 if not high else 20.0 + hi * 0.02
 				_box(deco, foot + Vector3.UP * (hi - DECK) / 2.0, Vector3(thick, hi - DECK, thick), Color(0.6, 0.6, 0.58))
 	if halls.has(r) and i >= int(halls[r][0]) and i < int(halls[r][1]):
 		_hall(J, R, i, hw, hi + te, hj + te)
+	if on_shaft and i % HOOP_EVERY == 0:
+		_hoop(J, R, i, hw, hi + te, i % (HOOP_EVERY * 2) == 0)
+	if R.role == "launch" and i % CHEV_EVERY == 0 and i < R.N - 4:
+		_chevron(lglow, R, ox, oy, i, hi, 1.0)
 	# the walls, the strip on top, the masts
 	for sgn in [-1.0, 1.0]:
 		if _open(r, i, sgn):
@@ -372,7 +430,7 @@ func _sample(J: Dictionary, R, i: int) -> void:
 			_wall(deco, wa, wb, BAND_H, FENCE_H, Color(slate, slate + 0.01, slate + 0.03))
 			top = FENCE_H
 		_wall(lglow, wa, wb, top, top + STRIP_H, WALL_STRIP_SF if city else WALL_STRIP)
-		if i % (8 if city else MAST_EVERY) == 0:
+		if i % (8 if city else MAST_EVERY) == 0 and not on_shaft:
 			var foot := _p(R, ox, oy, i, sgn * (hw + 0.4), hi + te)
 			_box(deco, foot + Vector3.UP * (MAST_H / 2.0), Vector3(0.6, MAST_H, 0.6), Color(0.3, 0.31, 0.33))
 			_box(glow, foot + Vector3.UP * (MAST_H + 0.45), Vector3(0.9, 0.9, 0.9), STRIP_LIGHT)
@@ -428,6 +486,40 @@ func _hall(J: Dictionary, R, i: int, hw: float, hi: float, hj: float) -> void:
 		_wall(lglow, q0, q1, HALL_H - 3.0, HALL_H, WALL_STRIP_SF)
 		for q in [q0, q1]:
 			_box(lglow, q + Vector3.UP * (HALL_H / 2.0), Vector3(3.0, HALL_H - FENCE_H, 3.0), WALL_STRIP_SF)
+
+
+## A shaft's hoop round sample i: two legs and a beam over the road, HOOP_H clear, faced both ways so
+## it reads from outside too; every second one lit. Going up through them is the speed cue.
+func _hoop(J: Dictionary, R, i: int, hw: float, h: float, lit: bool) -> void:
+	var ox: float = J.ox
+	var oy: float = J.oy
+	var st: SurfaceTool = J.st[3] if lit else J.st[1]
+	var c := WALL_STRIP if lit else Color(0.16, 0.17, 0.2)
+	var j := mini(i + 1, R.N - 1)
+	var a0 := _p(R, ox, oy, i, -hw, h)
+	var a1 := _p(R, ox, oy, i, hw, h)
+	var along := (_p(R, ox, oy, j, 0.0, h) - _p(R, ox, oy, i, 0.0, h)).normalized() * 8.0
+	var top := _up * HOOP_H
+	for q in [[a0, a0 + top], [a0 + top, a1 + top], [a1 + top, a1]]:
+		var p: Vector3 = q[0]
+		var e: Vector3 = q[1]
+		_quad(st, [p, e, e + along, p + along], c)
+		_quad(st, [p + along, e + along, e, p], c)
+
+
+## A lit chevron across the road at sample i, its point the way `way` (1 up the samples): on a launch
+## spur, pointing you up it.
+func _chevron(st: SurfaceTool, R, ox: float, oy: float, i: int, h: float, way: float) -> void:
+	var hw: float = R.w[i] / 2.0 * 0.62
+	var t := Vector3(R.tx[i], 0.0, -R.ty[i]) * way
+	var c := Color(1.0, 0.55, 0.12)
+	var mid := _p(R, ox, oy, i, 0.0, h + 0.1)
+	var run := 90.0   # the arms sweep back this far
+	var wide := 18.0  # along the road, each arm
+	for sd in [-1.0, 1.0]:
+		var e := _p(R, ox, oy, i, sd * hw, h + 0.1) - t * run
+		var q := [mid, mid + t * wide, e + t * wide, e] if sd > 0.0 else [e, e + t * wide, mid + t * wide, mid]
+		_quad(st, q, c)
 
 
 ## The chunk in hand's ends (a barrier where nothing goes on), its meshes committed.
@@ -528,26 +620,24 @@ func _plan_signs() -> void:
 		var dq := 1 if at_start else -1           # into the joining road
 		var dp := dq * sense                       # on the parent, the way that takes you in
 		var P = sim.roads[p]
+		if C.role == "launch":
+			_plan_jump(c, p, ca, dp)
+			continue
 		var at := ca - dp * SIGN_BEFORE
 		if at < 1 or at > P.N - 2:
 			continue
 		var lines := []
 		var kind := "exit"
-		if C.role == "launch":
-			kind = "jump"
-			var mph := 3000
-			for jp in sim.jumps:
-				if int(jp[0]) == c:
-					mph = int(jp[2])
-			lines = ["JUMP", "%d,%03d+ MPH" % [mph / 1000, mph % 1000]]
-		elif C.role != "":
+		if C.role != "":
 			continue   # a catch deck or an on-ramp, taken backwards: nowhere but an open end
 		elif C.name.begins_with("T"):
 			if seen_turn.has(c):
 				continue
 			seen_turn[c] = true
 			kind = "end"
-			lines = ["END OF THE ROAD", "TURN AROUND  %d MI" % roundi(SIGN_BEFORE * 24.0 / MILE)]
+			lines = ["END OF THE ROAD", "SHAFT  %d MI" % roundi(SIGN_BEFORE * 24.0 / MILE)]
+		elif C.name.begins_with("S"):
+			lines = ["SIDE ROAD", "%d MI" % roundi(C.length / MILE)]
 		else:
 			var d := _dists(c, cb, dq)
 			var best := []
@@ -583,6 +673,65 @@ func _plan_signs() -> void:
 				_add_sign(city.road, z1 + n, -1, "brake", ["%d MI" % mi, "STARFIGHTER ZONE"])
 		_add_sign(city.road, city.i, 1, "terminal", [city.name])
 		_add_sign(city.road, city.i, -1, "terminal", [city.name])
+	for r in sim.roads.size():
+		if sim.roads[r].name.begins_with("S"):
+			_plan_corners(r)
+
+
+## A jump's boards: launch spur c forks off exit ramp p at the ramp's sample `fork`, going dp along it.
+## Two on the highway before the ramp's mouth (the arrow up and to the right), one over the fork (the
+## arrow straight on: the ramp curves away, the spur doesn't).
+func _plan_jump(c: int, p: int, fork: int, dp: int) -> void:
+	var mph := 3000
+	for jp in sim.jumps:
+		if int(jp[0]) == c:
+			mph = int(jp[2])
+	var lines := ["JUMP", "%d,%03d+ MPH" % [mph / 1000, mph % 1000]]
+	var P = sim.roads[p]
+	_add_sign(p, clampi(fork - dp * FORK_BEFORE, 1, P.N - 2), dp, "fork", lines)
+	# the ramp's mouth this way: the ramp's end behind the fork, on its highway
+	var e: int = 0 if dp > 0 else P.N - 1
+	for k in sim.junctions.size():
+		var J: Array = sim.junctions[k]
+		if int(J[3]) != p or not (int(J[4]) <= e and e <= int(J[5])):
+			continue
+		var h := int(J[0])
+		var at_mouth := _map(J, e)
+		var way := dp * int(J[6])
+		var H = sim.roads[h]
+		for back in [SIGN_FAR, SIGN_NEAR]:
+			var at: int = at_mouth - way * back
+			if at > 0 and at < H.N - 1:
+				_add_sign(h, at, way, "jump", lines)
+
+
+## Side road r's corners: a board before each bend CORNER_MIN_K or tighter, both ways: the speed that
+## holds it at CORNER_G and the gear for that speed, so the bend tells you to shift.
+func _plan_corners(r: int) -> void:
+	var R = sim.roads[r]
+	var i := 0
+	while i < R.N:
+		if absf(R.kap[i]) < CORNER_MIN_K:
+			i += 1
+			continue
+		var e := i
+		while e + 1 < R.N and R.kap[e + 1] == R.kap[i]:
+			e += 1
+		var mph := sqrt(CORNER_G * 9.81 / absf(R.kap[i])) * 2.236936
+		var lines := ["%d,%03d" % [int(mph / 100.0) * 100 / 1000, (int(mph / 100.0) * 100) % 1000], "GEAR %d" % gear_for(mph)]
+		if i - CORNER_BEFORE > 0:
+			_add_sign(r, i - CORNER_BEFORE, 1, "corner", lines)
+		if e + CORNER_BEFORE < R.N - 1:
+			_add_sign(r, e + CORNER_BEFORE, -1, "corner", lines)
+		i = e + 1
+
+
+## The gear that holds mph on SPEEDCRAFT (QuestControls' ranges).
+static func gear_for(mph: float) -> int:
+	for k in QuestControls.GEARS.size():
+		if mph <= float(QuestControls.GEARS[k][2]) * QuestControls.V_TOP_SPEED * 2.236936:
+			return k + 1
+	return QuestControls.GEARS.size()
 
 
 func _add_sign(r: int, i: int, dir: int, kind: String, lines: Array) -> void:
@@ -679,8 +828,10 @@ func _sign(node: Node3D, R, r: int, ox: float, oy: float, spec: Array) -> void:
 		mi.mesh = st.commit()
 		mi.material_override = _bright
 		node.add_child(mi)
-	var w := BOARD_W if kind != "brake" else 40.0
-	var h := BOARD_H if kind != "brake" else 24.0
+	var small: bool = kind == "brake" or kind == "corner"
+	var arrow: bool = kind == "jump" or kind == "fork"
+	var w := JUMP_W if arrow else (BOARD_W if not small else 40.0)
+	var h := JUMP_H if arrow else (BOARD_H if not small else 24.0)
 	var foot := h0 + BOARD_CLEAR
 	var steel := Color(0.22, 0.23, 0.25)
 	var parts := []
@@ -701,21 +852,22 @@ func _sign(node: Node3D, R, r: int, ox: float, oy: float, spec: Array) -> void:
 	quad.size = Vector2(w, h)
 	face.mesh = quad
 	face.transform = Transform3D(facing, sc - t * 1.1)
-	face.material_override = _end_mat if kind == "end" or kind == "jump" else (_city_mat if kind == "terminal" or kind == "city" else _board_mat)   # (a jump's board: orange, as the end of the road's)
+	face.material_override = _arrow_mat if kind == "jump" else (_fork_mat if kind == "fork" else (_end_mat if kind == "end" else (_city_mat if kind == "terminal" or kind == "city" else _board_mat)))
 	node.add_child(face)
 	var n := lines.size()
 	for li in n:
 		var l := Label3D.new()
 		l.text = lines[li]
-		l.font_size = (FONT[0] if li == 0 else FONT[1]) if kind != "brake" else (FONT[3] if li == 0 else FONT[4])
+		l.font_size = (FONT[0] if li == 0 else FONT[1]) if not small else (FONT[3] if li == 0 else FONT[4])
 		if n >= 3 and li > 0:
 			l.font_size = FONT[2]
-		l.pixel_size = SIGN_PX
+		l.pixel_size = SIGN_PX * (ARROW_WORDS if arrow else 1.0)
 		l.outline_size = 0
 		l.modulate = Color(0.03, 0.03, 0.04)
 		l.double_sided = false
 		var up := (h / 2.0 - h / (n + 1.0) * (li + 1.0)) if n > 1 else 0.0
-		l.transform = Transform3D(facing, sc + Vector3.UP * up - t * 1.4)
+		var aside := facing * Vector3.RIGHT * (-w * ARROW_PANEL / 2.0) if arrow else Vector3.ZERO   # (the words left of the arrow's panel)
+		l.transform = Transform3D(facing, sc + Vector3.UP * up - t * 1.4 + aside)
 		node.add_child(l)
 	boards += 1
 
@@ -733,6 +885,14 @@ func _warm_fonts() -> void:
 		l.pixel_size = SIGN_PX
 		l.position = Vector3(0.0, -400.0, 0.0)
 		holder.add_child(l)
+	for m in [_arrow_mat, _fork_mat, _end_mat, _city_mat, _board_mat]:   # ... and the boards' shaders, drawn once under the ground
+		var q := MeshInstance3D.new()
+		var qm := QuadMesh.new()
+		qm.size = Vector2(4.0, 4.0)
+		q.mesh = qm
+		q.material_override = m
+		q.position = Vector3(0.0, -60.0, -40.0)
+		holder.add_child(q)
 	get_tree().create_timer(1.0).timeout.connect(holder.queue_free)
 
 
@@ -804,6 +964,42 @@ func _build_skylines() -> void:
 		cities_built += 1
 
 
+## Each shaft's shape from far off (down a dead-straight highway you see it coming from 100 km): a flat
+## ribbon, unfogged, a blue-grey that sits in the haze, gone where the road's own chunks take over.
+func _build_far_shafts() -> void:
+	var m := Kit.vertex_colors(true)
+	m.disable_fog = true
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	m.albedo_color = Color(1.0, 1.0, 1.0)
+	var col := Color(0.46, 0.54, 0.66)
+	for sh in sim.shafts:
+		var r := int(sh[0])
+		var R = sim.roads[r]
+		var i0 := int(sh[1])
+		var i1 := int(sh[2])
+		var o := _wxy(r, i0)
+		var st := SurfaceTool.new()
+		st.begin(Mesh.PRIMITIVE_TRIANGLES)
+		var hw: float = R.w[i0] / 2.0
+		var keep := _up
+		for i in range(i0 + 1, i1 - 24, 24):
+			var j := mini(i + 24, i1 - 1)
+			_up = shaft.at(r, float(i))[5]
+			var hi := _h(r, i)
+			var hj := _h(r, j)
+			_quad(st, [_p(R, o.x, o.y, i, -hw, hi), _p(R, o.x, o.y, i, hw, hi), _p(R, o.x, o.y, j, hw, hj), _p(R, o.x, o.y, j, -hw, hj)], col)
+		_up = keep
+		var mi := MeshInstance3D.new()
+		mi.name = "far_%s" % R.name
+		mi.mesh = st.commit()
+		mi.material_override = m
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		mi.visibility_range_begin = VIS * 0.9
+		mi.visibility_range_end = TOWER_VIS
+		add_child(mi)
+		far_shafts.append([mi, o.x, o.y])
+
+
 # --- mesh helpers --------------------------------------------------------------------------------
 
 ## A road `w` wide across (cached by width: a chunk asks every sample), right edge to left, EDGE_SEGS
@@ -848,13 +1044,19 @@ func _road_row(J: Dictionary, R, sec: Dictionary, s: int, h: float) -> void:
 	var ss: PackedFloat32Array = sec.s
 	var left := Vector3(R.nx[s], 0.0, -R.ny[s])
 	var mid := Vector3(R.px[s] - J.ox, h + 0.02, -(R.py[s] - J.oy))
+	var up := Vector3.UP
+	if R.shaft and shaft.on(J.r, float(s)):
+		var A: Array = shaft.at(J.r, float(s))
+		left = A[4]
+		up = A[5]
+		mid = Vector3(float(A[0]) - J.ox, A[2], -(float(A[1]) - J.oy)) + up * 0.02
 	var u: float = J.u0 + _s[J.r][s]
 	var rv: PackedVector3Array = J.rv
 	var rn: PackedVector3Array = J.rn
 	var ru: PackedVector2Array = J.ru
 	for k in o.size():
-		rv.append(mid + left * o[k] + Vector3.UP * hh[k])
-		rn.append(Vector3.UP * cc[k] - left * ss[k])
+		rv.append(mid + left * o[k] + up * hh[k])
+		rn.append(up * cc[k] - left * ss[k])
 		ru.append(Vector2(u, o[k]))
 	J.rv = rv
 	J.rn = rn
@@ -908,13 +1110,13 @@ func _strip(st: SurfaceTool, R, ox: float, oy: float, i: int, o0: float, o1: flo
 	var d := _p(R, ox, oy, i + 1, o0, h1 + e0)
 	for q in [a, b, cc, a, cc, d]:
 		st.set_color(c)
-		st.set_normal(Vector3.UP)
+		st.set_normal(_up)
 		st.add_vertex(q)
 
 
 func _wall(st: SurfaceTool, a: Vector3, b: Vector3, h0: float, h1: float, c: Color) -> void:
-	var nrm := (b - a).cross(Vector3.UP).normalized()
-	for q in [a + Vector3.UP * h0, b + Vector3.UP * h0, b + Vector3.UP * h1, a + Vector3.UP * h0, b + Vector3.UP * h1, a + Vector3.UP * h1]:
+	var nrm := (b - a).cross(_up).normalized()
+	for q in [a + _up * h0, b + _up * h0, b + _up * h1, a + _up * h0, b + _up * h1, a + _up * h1]:
 		st.set_color(c)
 		st.set_normal(nrm)
 		st.add_vertex(q)

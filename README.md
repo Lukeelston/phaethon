@@ -282,10 +282,30 @@ off ramps, and maybe some speed specific jumps to other roads"; "Eridanus is one
 design is `docs/superpowers/specs/2026-10-19-network-design.md`; phase 1 (this) is the mesh, then
 traffic and racers, jumps and the open ground, and the cities' GPs.
 
-- **The country:** ~375 mi square, three highways east-west and three north-south (400 m wide,
-  long S-bends, flat out at 4,000 mph), crossing at nine interchanges: the north-south highway flies
-  120 m over the other, and four 12 km quadrant ramps (~12 mi each, ~2,400 mph) join them. Each
-  highway ends in a turnaround loop under an END OF THE ROAD board. 4,725 km of road in all.
+- **The country:** ~375 mi square, three highways east-west and three north-south (400 m wide, flat
+  out at 4,000 mph), crossing at nine interchanges: the north-south highway flies 120 m over the
+  other, and four 12 km quadrant ramps (~12 mi each, ~2,400 mph) join them. E2, N2 and E3 are dead
+  straight from edge to edge (Luke: "completely straight"); E1, N1 and N3 keep their long S-bends. Each
+  highway ends in a shaft under an END OF THE ROAD board. About 7,000 km of road in all.
+- **The shafts** (Luke: "a vertical shaft that turns over on itself and enters the same road it came
+  from"; they replace the turnaround loops): at the end of the highway the road splits, you take the
+  right half, and it pulls up into a 3.5 km arc, runs 5.6 km straight up, goes over the top in a half
+  arc (upside down at 41,000 ft, the land overhead), comes 5.6 km straight down rolling half a turn so
+  you're the right way up, and pulls out onto the same highway going the other way. 34 km; 20 s at
+  4,000 mph. Nothing to steer, lit hoops every 190 m going past. Gravity's real along it: with the
+  levers shut at 300 mph you stop about 2,000 ft up and slide back. **In the sims** a shaft is flat, as
+  the shade line's corkscrews are: a paperclip in plan (its `T` road, out along the highway's right, a
+  3.6 km bulb, back along its left) whose bulb carries the bodies round (`kap`: nothing to steer, and it
+  holds the engines abreast) and whose height is the real altitude (`gs`: gravity along the slope);
+  `NET_SHAFTS` says where, and `view/network_shaft.gd` draws the stretch between the feet as the shape
+  above and takes the craft, the cockpit and traffic onto it. The minimap shows the plan's bulb, your
+  arrow going round it. From 100 km down a straight highway you can see it standing at the end of the road.
+- **Side roads** (Luke: "different shapes, that would reasonably cause the person to actually shift, while
+  still staying at 'highway' speeds"): twelve loops off the straight highways, about 60 mi each, in six
+  shapes: esses, a hairpin, a chicane, a tightening radius, kinks, a crook. They leave in third-gear
+  bends (16 km radius, ~2,900 mph) into second-gear corners (6-11 km, 1,800-2,500 mph), with straights
+  long enough for top gear. A board before every corner, both ways, gives its speed at 11 g and its
+  gear (`2,100 / GEAR 2`); `SIDE ROAD  60 MI` at the exits. Traffic takes them too.
 - **Five cities,** each in its own landscape: Eridanus (verdant, the centre), Dunes (desert), Glacier
   (ice), Basalt (black rock, ember cracks), Mesa (red strata). A city is a bypass off its highway (a
   big S out through the city and back: in from either direction), STARFIGHTER through the middle
@@ -338,17 +358,35 @@ traffic and racers, jumps and the open ground, and the cities' GPs.
   less glossy asphalt; a deeper blue haze that brightens less toward the sun. `tests/render_network.gd`
   checks the horizon band at 4,400 mph: its whitest 5-row strip is 9% near-white (the gate is 30%).
 - **Jumps** (Luke: "taking a massive interchange and using it as a ramp to jump 2 miles and 1500' up
-  to the entrance of the next ramp"): four of them, at the centre crossing (E2 east), N2 north over
-  E1, E3 west over N2 and N1 south over E2. A launch spur leaves the highway 32 km before the
-  crossing (an orange board: `JUMP  3,000+ MPH`), slides out 800 m and kicks up 4 km to a lip 299 m
-  up at 8.5 deg (12 g at 4,000 mph). Two miles on and 1,500 ft above the lip a catch deck, 400 m wide
+  to the entrance of the next ramp"; "incorporate the jumps into the interchanges"; "all of the jumps
+  are backwards"): twenty of them, four at each of five crossings (the centre, and the middles of the
+  four edges), one each way through. They were one way only, and from Eridanus you met all of them
+  from behind, the backs of their signs and all; now whichever way you come through one of those
+  crossings, the exit ramp on your right forks: the ramp curves off, the spur runs straight on (lit
+  chevrons up its middle) and kicks up 4 km to a lip 299 m up at 8.5 deg, 3 km short of the crossing
+  (12 g at 4,000 mph). Each has three boards, `JUMP  3,000+ MPH` with a big lit arrow pointing at it
+  (`view/arrow_board.gdshader`), its stripes running the way it points: two on the highway before the
+  exit (7 km and 2 km out), one over the fork. Two miles on and 1,500 ft above the lip a catch deck, 400 m wide
   with a green-lit lip, is waiting on the line a 3,000 mph jump flies: at 4,000 you're 1.7 s in the
   air and it reaches up for you from 16 m above it; at 3,000 you just make it; slower you arrive
   under its lip, it turns you down and you drop to the open ground. Hold the levers through the kick:
   at 4,000 mph the drag is 16 g, so lifting off 7 km out leaves you at 2,600 by the lip. The deck
   pulls you level (it keeps climbing to 3,500 ft first: at these speeds you'd otherwise climb for 47
   km), crosses the interchange on pylons, comes down and merges back. The dash reads `AIRBORNE  1.2 s
-  2,400 FT`, then `CAUGHT  1.7 s IN THE AIR  4,326 MPH`.
+  2,400 FT`, then `CAUGHT  1.7 s IN THE AIR  4,326 MPH`. A deck only catches what's flying along it (you
+  fly on through another way's), and decks and on-ramps are one-way: drifting into a deck's merge from
+  the highway against its way used to take you up it, and tore the binder.
+- **The main menu and the driving partner** (Luke: "a 'driving partner', that stays around your speed
+  and just generally does what you do - i found it interesting to see a stable reference point at high
+  speed - kind of trippy"): a tap on the left menu button (Esc on the flat view) opens the main menu,
+  and the flight waits while it's open: DRIVING PARTNER on or off (saved in `settings.json`), the control
+  scheme (that tap used to cycle it), the next track, resume. Right stick up and down steps, A changes,
+  B closes (the keyboard: arrows and Enter). The menu hold still steps the track, and `-Partner` on
+  `launch_vr.ps1` (or `--partner`) turns it on from the start. The partner is a second craft with teal
+  engines flying formation about 50 m off your wing (`view/driving_partner.gd`), on any track: your
+  velocity a beat late, so it drops back a little when you brake and comes up when you accelerate;
+  your heading, your road, your side with the room, a few metres of wander so it's alive; off lips and
+  up shafts with you. It isn't in the sims: nothing to hit, nothing in the parity.
 - **The roads' heights are real now** (both sims): the deck lock, the roads' forcefield, holds you to
   the surface as well as up off it (at 4,000 mph any crest tighter than a 326 km radius would throw
   you off: every flyover would be a jump). Off a road's open end (a lip, the end of the road) you're
@@ -412,7 +450,7 @@ traffic and racers, jumps and the open ground, and the cities' GPs.
 ```bash
 python tools/design_network.py --plot network.png                 # the layout and its checks
 python tools/sync_network.py                                      # ... into both sims
-node tools/network_test.js sim-core.js                            # the JS sim: junctions, strangers, a drive, a turnaround, walls
+node tools/network_test.js sim-core.js                            # the JS sim: junctions, strangers, a drive, a shaft, walls
 node tools/record_network.js sim-core.js godot/tests/replay       # the parity reference (Eridanus -> Glacier, and traffic's forcefields)
 python tools/sync_gp_variants.py                                  # the city GPs into both sims
 node tools/network_test.js sim-core.js                            # the JS Network: drives, walls, traffic, the jumps, the open ground
@@ -537,7 +575,7 @@ Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/tes
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_dashboard.gd           # instrument panel
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_route.gd -- --track=range --mute   # overpasses + landmarks placement
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_scenery.gd -- --track=range --mute   # mountains, light, ground, asphalt, props, streaming budget
-Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_track_switch.gd -- --track=range --mute   # menu tap = scheme, hold = next track (range, gp, eridanus, emergency)
+Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_track_switch.gd -- --track=range --mute   # menu tap = the main menu, hold = next track (range, gp, eridanus, emergency)
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_mode_parity.gd                # live handling switch parity
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_mode_switch.gd                # the MODE switch, lamps, cable and rim lighting
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_canopy.gd -- --track=range --mute   # windscreen + forcefield
@@ -560,6 +598,8 @@ Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/tes
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_network_traffic.gd -- --mute   # lanes, kinds, junctions, headway, zones, density, forcefields, cost, racers
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_gears.gd                       # shifting, ranges, overshoot, corners
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_network_jumps.gd -- --mute     # the jump boards, airborne, caught, missed, restart, traffic kept off
+Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_network_shaft.gd -- --mute     # straight highways, the shafts' shape and a flight up one, the stall, side roads' corners, the partner, the main menu, the cockpit
+Godot_v4.7.1-stable_win64_console.exe --path godot --resolution 1600x900 -s res://tests/render_shaft_sheet.gd -- --mute --out=DIR   # a look at the boards, a shaft from every angle, a side road
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_traffic_audio.gd               # the whoosh, passes, following
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_wag_meter.gd                   # the in-flight wag meter on known yaw rates
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_city_gps.gd -- --mute          # the city GPs: parity laps, landscapes, entry and back

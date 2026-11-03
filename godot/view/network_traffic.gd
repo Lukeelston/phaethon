@@ -153,6 +153,8 @@ func build(s, v, w) -> void:
 			lim[i] = 1e9 if k < 1e-7 else sqrt(G / k)   # per g of grip: times sqrt(grip) for each vehicle
 			if R.mode[i] == 0:
 				lim[i] = -SF_V   # a STARFIGHTER zone: a fixed cap (negative marks it)
+			if R.shaft and world.shaft.on(r, float(i)):
+				lim[i] = 1e9     # a shaft's bulb is the plan's, not a bend: it carries them round
 		_vlim.append(lim)
 		_lanes.append(LANES_HWY if R.w[0] >= 300.0 else LANES_RAMP)
 		_switch.append([])
@@ -777,16 +779,21 @@ func _render() -> void:
 	for c in cars:
 		var mm: MultiMesh = (_mm[c.kind] as MultiMeshInstance3D).multimesh
 		var h: float = sim.net_height(c.road, c.f) + 1.0
+		var shaft_on: bool = sim.roads[c.road].shaft and world.shaft.on(c.road, c.f)
 		var cx: float = c.x + c.hx * c.v * c.owed   # where it is now (a far one not driven this frame: on along its way)
 		var cy: float = c.y + c.hy * c.v * c.owed
 		var yaw := atan2(-c.hx, c.hy)   # +z (the model's back) against the way it's going
 		var b := Basis(Vector3.UP, yaw).scaled(Vector3.ONE * SCALE)
+		if shaft_on:
+			b = world.shaft.carry(c.road, c.f) * b
 		var cnt := TRAIN if c.kind == TRANSPORT else 1
 		for k in cnt:
 			if n[c.kind] >= mm.instance_count:
 				break
 			var back := k * TRAIN_GAP
 			var p := Vector3(cx - c.hx * back - ox, h, -(cy - c.hy * back - oy))
+			if shaft_on:
+				p = world.shaft.point(c.road, c.f - c.dir * back / 24.0, c.lat, 1.0, ox, oy)
 			mm.set_instance_transform(n[c.kind], Transform3D(b, p))
 			mm.set_instance_color(n[c.kind], c.col)
 			n[c.kind] += 1
@@ -795,6 +802,8 @@ func _render() -> void:
 			var coming: bool = c.hx * pod_v.x + c.hy * pod_v.y < 0.0
 			var off := -6.5 * SCALE if coming else 6.5 * SCALE + (cnt - 1) * TRAIN_GAP
 			var lp := Vector3(cx - c.hx * off - ox, h + 1.2 * SCALE, -(cy - c.hy * off - oy))
+			if shaft_on:
+				lp = world.shaft.point(c.road, c.f - c.dir * off / 24.0, c.lat, 1.0 + 1.2 * SCALE, ox, oy)
 			bmm.set_instance_transform(nb, Transform3D(Basis(), lp))
 			var lc := Color(1.0, 0.95, 0.85) if coming else (Color(1.0, 0.3, 0.9) if c.kind == RACER else Color(1.0, 0.15, 0.08))
 			bmm.set_instance_color(nb, lc)

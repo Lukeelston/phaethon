@@ -2,7 +2,9 @@
 ## Luke: "taking a massive interchange and using it as a ramp to jump 2 miles and 1500' up to the
 ## entrance of the next ramp"; "Missing a jump drops the pod to the ground, where it will look for a
 ## city for an onramp or just reset"):
-##   board      each launch spur's exit has its board on the highway: "JUMP", its window ("3,000+ MPH")
+##   boards     each jump has two boards on the highway before its exit and one over the fork off the
+##              ramp: "JUMP", its window ("3,000+ MPH"), and each faces the way the spur is taken (the
+##              big arrow: view/arrow_board.gdshader, arrow up and right on the highway, straight on at the fork)
 ##   airborne   off the lip at 4,000 mph the dash reads "AIRBORNE  x.x s  y FT"
 ##   caught     caught by the deck: the dash flashes "CAUGHT  x.x s IN THE AIR  y MPH"; on the deck
 ##              (~3,500 ft up) the craft is drawn at the pod's own height (the roads' heights are the
@@ -65,11 +67,30 @@ func _process(_d: float) -> bool:
 	var sim = v.sim
 	# the boards
 	var boards := []
+	var forks := []
+	var facing_right := 0
 	for key in v.network_world._signs:
 		for spec in v.network_world._signs[key]:
-			if spec[2] == "jump":
-				boards.append(spec[3])
-	_check("board: %d jump boards %s" % [boards.size(), boards.slice(0, 1)], boards.size() == sim.jumps.size() and boards.all(func(b): return b[0] == "JUMP" and b[1] == "3,000+ MPH"))
+			if spec[2] == "jump" or spec[2] == "fork":
+				(boards if spec[2] == "jump" else forks).append(spec[3])
+	# each spur's own way: the board nearest its mouth faces traffic heading along the spur's heading
+	for jp in sim.jumps:
+		var L = sim.roads[int(jp[0])]
+		var best := INF
+		var bd := -9.0
+		for key in v.network_world._signs:
+			for spec in v.network_world._signs[key]:
+				if spec[2] != "jump":
+					continue
+				var R = sim.roads[key.x]
+				var d := Vector2(R.px[spec[0]] - L.px[0], R.py[spec[0]] - L.py[0]).length()
+				if d < best:
+					best = d
+					bd = (R.tx[spec[0]] * spec[1] * L.tx[0] + R.ty[spec[0]] * spec[1] * L.ty[0])
+		if bd > 0.9:
+			facing_right += 1
+	_check("boards: %d on the highways, %d over the forks %s; %d of %d jumps' nearest board faces the way the spur's taken" % [boards.size(), forks.size(), boards.slice(0, 1), facing_right, sim.jumps.size()],
+		boards.size() == 2 * sim.jumps.size() and forks.size() == sim.jumps.size() and boards.all(func(b): return b[0] == "JUMP" and b[1] == "3,000+ MPH") and facing_right == sim.jumps.size())
 	# a jump at 4,000 mph
 	_line_up(0, 4000.0)
 	var st := {"air": "", "caught": "", "off": ""}   # (a Dictionary: lambdas capture locals by value)

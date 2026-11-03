@@ -865,6 +865,8 @@ func _update_bank(sim, delta: float) -> void:
 		var ay: float = (b.vy - _prev_v[k][1]) / delta
 		_prev_v[k] = [b.vx, b.vy]
 		var lat_g: float = (-sin(b.th) * ax + cos(b.th) * ay) / 9.81
+		if sim.kind == "network" and not b.off_road and sim.roads[b.path].shaft:   # a shaft's bulb carries you: not a turn you lean into
+			lat_g -= sim.roads[b.path].kap[b.hint] * (b.vx * b.vx + b.vy * b.vy) / 9.81
 		if absf(lat_g) > 150.0 or sim.crash_t > 0.0:   # respawn / crash: not a turn
 			lat_g = 0.0
 		lat_g *= b.grip   # airborne: nothing to lean against
@@ -890,7 +892,10 @@ func sync(sim, inp: Dictionary, delta: float) -> void:
 		# the deck lock, the jumps)
 		var climb := 0.0 if sim.kind == "network" else slope_pitch(view, e.x, e.y, e.th, maxf(4.0, pitch_half(vh)))
 		var lean := clampf(bank[k] + view.surface(e.x, e.y).y, -ROLL_MAX, ROLL_MAX)   # lean, plus the track's banking
-		if sim.pod.path > 0 and sim.kind != "network":   # the shade line: flat, carried onto the twisted road
+		var Qe: Basis = view.shaft_carry_at(e.x, e.y) if sim.kind == "network" else Basis.IDENTITY
+		if not Qe.is_equal_approx(Basis.IDENTITY):   # up a shaft: flat, carried onto its shape (its climb is the shape's)
+			eng.basis = Qe * Basis.from_euler(Vector3(0.0, e.th - PI / 2.0, lean))
+		elif sim.pod.path > 0 and sim.kind != "network":   # the shade line: flat, carried onto the twisted road
 			eng.basis = road_attitude(sim, e.x, e.y, climb) * Basis.from_euler(Vector3(pitch, e.th - PI / 2.0, lean))
 		else:
 			eng.rotation = Vector3(pitch + climb, e.th - PI / 2.0, lean)
@@ -953,7 +958,10 @@ func sync(sim, inp: Dictionary, delta: float) -> void:
 	var pvh: float = sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy)
 	var pclimb := (atan2(sim.pod.vz, maxf(pvh, 1.0)) if pvh > 5.0 else 0.0) if sim.kind == "network" else slope_pitch(view, sim.pod.x, sim.pod.y, sim.pod.th, pitch_half(pvh))
 	var plean := clampf(bank[2] + view.surface(sim.pod.x, sim.pod.y).y, -ROLL_MAX, ROLL_MAX)
-	if sim.pod.path > 0 and sim.kind != "network":
+	var Qp: Basis = view.shaft_carry_at(sim.pod.x, sim.pod.y) if sim.kind == "network" else Basis.IDENTITY
+	if not Qp.is_equal_approx(Basis.IDENTITY):
+		pod.basis = Qp * Basis.from_euler(Vector3(0.0, sim.pod.th - PI / 2.0, plean))
+	elif sim.pod.path > 0 and sim.kind != "network":
 		pod.basis = road_attitude(sim, sim.pod.x, sim.pod.y, pclimb) * Basis.from_euler(Vector3(0.0, sim.pod.th - PI / 2.0, plean))
 	else:
 		pod.rotation = Vector3(pclimb, sim.pod.th - PI / 2.0, plean)
@@ -1093,8 +1101,10 @@ static func ride(v, sim, st: Dictionary, delta: float) -> Vector3:
 	var spd: float = sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy)
 	var s: Vector2 = v.surface(sim.pod.x, sim.pod.y)
 	var p := slope_pitch(v, sim.pod.x, sim.pod.y, sim.pod.th, pitch_half(spd))
-	if sim.kind == "network":   # the climb is the pod's own (the deck lock, the jumps)
+	if sim.kind == "network":   # the climb is the pod's own (the deck lock, the jumps); up a shaft, the shape's
 		p = atan2(sim.pod.vz, maxf(spd, 1.0)) if spd > 5.0 else 0.0
+		if v.shaft_carry_at(sim.pod.x, sim.pod.y) != Basis.IDENTITY:
+			p = 0.0
 	var rr := pod_roll(sim)
 	if st.is_empty() or delta <= 0.0:
 		st.merge({"h": s.x, "p": p, "b": s.y, "roll": rr}, true)

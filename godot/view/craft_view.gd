@@ -12,6 +12,7 @@
 ##   --shot=PATH     save a screenshot after 90 rendered frames, then quit
 ##   --shotframe=N   take that screenshot after N frames instead
 ##   --mute          no engine or wind audio
+##   --partner       the driving partner on (the main menu's DRIVING PARTNER; --no-partner off)
 ##   --handling=H    speed (default: the 100-mile sprint model) or starfighter (tight, ~1,200 mph)
 ##   --brake=L,R     with --cruise: hold the air brakes too (screenshots)
 ##   --at=I          circuits: start at track sample I (screenshots of a given corner)
@@ -42,6 +43,8 @@ const DawnScript := preload("res://view/dawn.gd")
 const VerdantWorldScript := preload("res://view/verdant_world.gd")
 const NetworkWorldScript := preload("res://view/network_world.gd")
 const NetworkTrafficScript := preload("res://view/network_traffic.gd")
+const DrivingPartnerScript := preload("res://view/driving_partner.gd")
+const MainMenuScript := preload("res://view/main_menu.gd")
 const DT := 1.0 / 480.0
 const HAZE := Color(0.78, 0.66, 0.52)
 const GROUND_PERIOD := 4096.0             # view/ground.gdshader's PERIOD
@@ -125,6 +128,11 @@ var light_preset := "afternoon"   # "afternoon", or "twilight" on a job (the eme
 var burn_rect: ColorRect     # the flat view's burn to white when the dawn catches you
 var verdant_world: Node3D    # ... and the green valley round it (view/verdant_world.gd)
 var dust: Node3D
+var partner: Node3D          # the driving partner (view/driving_partner.gd), null when it's off
+var partner_on := false      # the main menu's DRIVING PARTNER (saved: best_dir + settings.json)
+var menu = MainMenuScript.new()   # the main menu (view/main_menu.gd): the flight waits while it's open
+var menu_label: Label             # the flat view's panel
+var _menu_edges := {}
 
 
 func _ready() -> void:
@@ -184,6 +192,11 @@ func _ready() -> void:
 			net_beaten = saved.get("beaten", {})
 			if int(saved.get("last", -1)) >= 0 and int(saved.get("last", -1)) < CraftSimScript.NET_CITIES.size():
 				opts["startCity"] = int(saved.last)
+	partner_on = _load_settings().get("partner", false)
+	if "--partner" in OS.get_cmdline_user_args():
+		partner_on = true
+	if "--no-partner" in OS.get_cmdline_user_args():
+		partner_on = false
 	if "--pod=heavy" in OS.get_cmdline_user_args():   # the heavy pod (Luke: "giving the pod some weight"): 1,500 kg, not
 		opts["podMass"] = 1500.0                       # 500, with thrust and drag scaled to the total mass so the
 		opts["forceScale"] = 3900.0 / 2900.0          # speed and acceleration are as before
@@ -243,6 +256,7 @@ func _ready() -> void:
 		_sim_step()
 	_follow_origin()
 	_place_camera(1.0)
+	set_partner(partner_on)
 
 
 func _sim_step() -> void:
@@ -670,8 +684,101 @@ func _respawn() -> void:
 	_job_started = false
 
 
+# --- the main menu and the driving partner ---
+
+func _settings_path() -> String:
+	return best_dir + "settings.json"
+
+
+func _load_settings() -> Dictionary:
+	if FileAccess.file_exists(_settings_path()):
+		var d = JSON.parse_string(FileAccess.get_file_as_string(_settings_path()))
+		if d is Dictionary:
+			return d
+	return {}
+
+
+## The driving partner on or off, now and from now on (it's the menu's; a launch flag doesn't save).
+func set_partner(on: bool, save := false) -> void:
+	partner_on = on
+	if on and partner == null:
+		partner = DrivingPartnerScript.new()
+		add_child(partner)
+		partner.build(self)
+		partner.update(0.0)
+	elif not on and partner != null:
+		partner.queue_free()
+		partner = null
+	if save:
+		var d := _load_settings()
+		d["partner"] = on
+		var f := FileAccess.open(_settings_path(), FileAccess.WRITE)
+		if f:
+			f.store_string(JSON.stringify(d))
+
+
+## Overridable: the menu's items.
+func _menu_items() -> Array:
+	return [{"key": "partner", "label": "DRIVING PARTNER", "value": "ON" if partner_on else "OFF"},
+		{"key": "resume", "label": "RESUME"}]
+
+
+func menu_open(on: bool) -> void:
+	menu.open = on
+	if on:
+		menu.at = 0
+		menu.items = _menu_items()
+	_menu_show()
+
+
+## Act on the item under the cursor. -> false if that closed the menu.
+func menu_choose() -> bool:
+	match menu.key():
+		"partner":
+			set_partner(not partner_on, true)
+			menu.items = _menu_items()
+		"resume":
+			menu_open(false)
+			return false
+	_menu_show()
+	return true
+
+
+## Overridable: draw the panel.
+func _menu_show() -> void:
+	if menu_label:
+		menu_label.visible = menu.open
+		menu_label.text = menu.text()
+
+
+func _key_once(k: Key) -> bool:
+	var down := Input.is_key_pressed(k)
+	var fired: bool = down and not _menu_edges.get(k, false)
+	_menu_edges[k] = down
+	return fired
+
+
+## The keyboard's menu: Esc opens and closes it, up and down step, Enter (or left and right) changes.
+func _menu_keys() -> void:
+	if _key_once(KEY_ESCAPE):
+		menu_open(not menu.open)
+	if not menu.open:
+		return
+	if _key_once(KEY_UP):
+		menu.move(-1)
+		_menu_show()
+	if _key_once(KEY_DOWN):
+		menu.move(1)
+		_menu_show()
+	if _key_once(KEY_ENTER) or _key_once(KEY_LEFT) or _key_once(KEY_RIGHT):
+		menu_choose()
+
+
 ## Overridable: fill `inp` for this frame and handle arm/respawn edges.
 func _read_input(delta: float) -> void:
+	_menu_keys()
+	if menu.open:
+		return
 	var p: Dictionary = levers.poll(delta)
 	inp = {"thrL": p.thrL, "thrR": p.thrR, "brkL": p.brkL, "brkR": p.brkR, "repair": p.repair, "reignite": p.reignite}
 	if p.arm:
@@ -685,6 +792,8 @@ func _process(delta: float) -> void:
 		_read_input(delta)
 	acc += minf(delta, 0.05)
 	var t_sim := Time.get_ticks_usec()
+	if menu.open:   # the flight waits
+		acc = 0.0
 	while acc >= DT:
 		_sim_step()
 		acc -= DT
@@ -703,6 +812,8 @@ func _process(delta: float) -> void:
 	_sync_craft(delta)
 	cues.sync(sim, delta)
 	dust.sync(sim, delta)
+	if network_world:   # no road spray up a shaft
+		dust.visible = _shaft_f(sim.pod.x, sim.pod.y) < 0.0
 	_place_camera(1.0 - exp(-delta * 6.0))
 	craft.sync_cables(sim, delta)   # after the camera: in VR the cables' pod end rides the cockpit
 	var t_world := Time.get_ticks_usec()
@@ -765,12 +876,43 @@ func _place_on_branch(j: int) -> void:
 func _follow_origin() -> void:
 	org_x = sim.pod.x
 	org_y = sim.pod.y
+	var f := _shaft_f(org_x, org_y)
+	if f >= 0.0:   # up a shaft: the world's point under the pod, not the sims' plan's
+		var A: Array = network_world.shaft.at(sim.pod.path, f)
+		org_x = A[0]
+		org_y = A[1]
+
+
+## Where sim plan point (x, y) is on the pod's shaft's stretch (the fractional sample, and sim._n_lat
+## its place across), -1 if the pod's not on one or the point's not on it. The sims are flat up there:
+## view/network_shaft.gd says where that is in the world.
+func _shaft_f(x: float, y: float) -> float:
+	if network_world == null or sim.pod.off_road:
+		return -1.0
+	var r: int = sim.pod.path
+	if not sim.roads[r].shaft:
+		return -1.0
+	sim._nearest_on(r, x, y, sim.pod.hint, 12)   # (the craft and its partner are within a few samples of the pod)
+	var f: float = sim._n_i + sim._n_t
+	if sim._n_off or absf(sim._n_lat) > 400.0 or not network_world.shaft.on(r, f):
+		return -1.0
+	return f
+
+
+## The rotation from an attitude worked out flat (the sims' plane) to the world's at plan point (x, y):
+## identity but up a shaft.
+func shaft_carry_at(x: float, y: float) -> Basis:
+	var f := _shaft_f(x, y)
+	return Basis.IDENTITY if f < 0.0 else network_world.shaft.carry(sim.pod.path, f)
 
 
 ## A sim body's point -> render position: on the Network a body's height is its own (the roads'
 ## heights are real in the sims: the deck lock, the jumps), elsewhere it's over the surface (w3).
 func wz(x: float, y: float, z: float) -> Vector3:
 	if sim and sim.kind == "network":
+		var f := _shaft_f(x, y)
+		if f >= 0.0:
+			return network_world.shaft.point(sim.pod.path, f, sim._n_lat, z - sim.net_height(sim.pod.path, f), org_x, org_y)
 		return Vector3(x - org_x, z, -(y - org_y))
 	return w3(x, y, z)
 
@@ -780,6 +922,10 @@ func wz(x: float, y: float, z: float) -> Vector3:
 func w3(x: float, y: float, h := 0.0) -> Vector3:
 	if sim and sim.pod.path > 0 and sim.kind != "network":
 		return road_xf(x, y) * Vector3(x - org_x, h, -(y - org_y))
+	if sim and sim.kind == "network":
+		var f := _shaft_f(x, y)
+		if f >= 0.0:
+			return network_world.shaft.point(sim.pod.path, f, sim._n_lat, h, org_x, org_y)
 	return Vector3(x - org_x, h + surface(x, y).x, -(y - org_y))
 
 
@@ -1109,6 +1255,8 @@ func _sync_world() -> void:
 		_net_biome()
 		if course_audio and course_audio.net_halls.is_empty():
 			course_audio.net_halls = network_world.halls
+	if partner:
+		partner.update(get_process_delta_time())
 	if traffic_net:
 		traffic_net.update(get_process_delta_time())
 		if traffic_audio:   # the whooshes: the vehicles within 3 km going by
@@ -1175,6 +1323,16 @@ func _make_view() -> void:
 	cam.far = 120000   # the backdrop peaks sit at 45-57 km; Eridanus' far ranges up to ~100 km away
 	add_child(cam)
 	var layer := CanvasLayer.new()
+	menu_label = Label.new()
+	menu_label.visible = false
+	menu_label.add_theme_font_size_override("font_size", 26)
+	menu_label.add_theme_color_override("font_color", Color(0.95, 0.97, 1.0))
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.03, 0.05, 0.09, 0.86)
+	sb.set_content_margin_all(24.0)
+	menu_label.add_theme_stylebox_override("normal", sb)
+	menu_label.position = Vector2(420, 220)
+	layer.add_child(menu_label)
 	hud = Label.new()
 	hud.position = Vector2(16, 12)
 	hud.add_theme_font_size_override("font_size", 18)
@@ -1203,7 +1361,9 @@ var cam_th := 0.0
 # metres at 700 km/h and the craft shrinks to a toy.
 func _place_camera(k: float) -> void:
 	cam_th = sim.pair_th if k >= 1.0 else cam_th + CraftSimScript.wrap_angle(sim.pair_th - cam_th) * k
-	var fwd := Vector3(cos(cam_th), 0, -sin(cam_th))
+	var Q := shaft_carry_at(sim.pod.x, sim.pod.y)   # (identity but up a shaft)
+	var fwd: Vector3 = Q * Vector3(cos(cam_th), 0, -sin(cam_th))
+	var cam_up: Vector3 = Q * Vector3.UP
 	var pod_p := wz(sim.pod.x, sim.pod.y, sim.pod.z)
 	if eye != Vector3.INF:
 		cam.position = w3(eye.x, eye.y, eye.z)
@@ -1215,8 +1375,8 @@ func _place_camera(k: float) -> void:
 		cam.position = pod_p + fwd * cam_offset.x + left * cam_offset.y + Vector3.UP * cam_offset.z
 		cam.look_at(mid, Vector3.UP)
 		return
-	cam.position = pod_p - fwd * 12.0 + Vector3.UP * 4.5
-	cam.look_at(pod_p + fwd * 40.0 + Vector3.UP * 1.0, Vector3.UP)
+	cam.position = pod_p - fwd * 12.0 + cam_up * 4.5
+	cam.look_at(pod_p + fwd * 40.0 + cam_up * 1.0, cam_up)
 
 
 ## Second HUD line: lap info on the circuit, mileage and top speed on the range; the job's line on

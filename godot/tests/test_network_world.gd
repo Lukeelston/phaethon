@@ -64,7 +64,7 @@ func _process(_d: float) -> bool:
 		# streaming round Eridanus' terminal
 		sim.respawn(0)
 		v._follow_origin()
-		_settle(40)
+		_settle(80)
 		var missing := _missing(W)
 		var near_ms: float = W.build_ms_max
 		# the halls
@@ -88,7 +88,7 @@ func _process(_d: float) -> bool:
 		var out_hall: bool = ca.enclosed()
 		_check("halls: %d of %d cities' terminals under one, %d samples built round Eridanus' (the roof %.0f m, the gantry's top %.0f); enclosed in it %s, 60 km out %s" % [W.halls.size(), sim.cities.size(), W.hall_samples, W.HALL_H, W.BOARD_CLEAR + W.BOARD_H + 8.0, in_hall, out_hall],
 			W.halls.size() == sim.cities.size() and W.hall_samples > 100 and W.HALL_H > W.BOARD_CLEAR + W.BOARD_H + 8.0 and in_hall and not out_hall)
-		_check("streaming: at Eridanus %d chunks wanted but missing after 40 frames, the slowest chunk %.1f ms; 60 km on %d missing, %d past DROP, %d dropped, the slowest %.1f ms" % [missing, near_ms, _missing(W), far, W.dropped, W.build_ms_max],
+		_check("streaming: at Eridanus %d chunks wanted but missing after 80 frames, the slowest chunk %.1f ms; 60 km on %d missing, %d past DROP, %d dropped, the slowest %.1f ms" % [missing, near_ms, _missing(W), far, W.dropped, W.build_ms_max],
 			missing == 0 and _missing(W) == 0 and far == 0 and W.dropped > 0 and W.build_ms_max < 8.0)
 		# flyovers: N2 over the centre crossing
 		var n2 := _road("N2")

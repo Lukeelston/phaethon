@@ -1,7 +1,7 @@
 ## Track-switch gate (Luke: "can we get a way to switch to gp mode"): in the headset, the left
 ## menu button does two things.
-##   tap         (released before MENU_HOLD) cycles the control scheme, on release, once
-##   hold 1.5 s  switches track once, and letting go after doesn't also cycle the scheme
+##   tap         (released before MENU_HOLD) opens or closes the main menu, on release, once
+##   hold 1.5 s  switches track once, and letting go after doesn't also open the menu
 ##   cycle       each hold steps range -> grand prix -> Eridanus -> the emergency run -> the Network -> range
 ##   override    CraftView.track_override (static: it survives the reload that does the switch)
 ##               builds the asked-for track, and wins over --track
@@ -20,7 +20,7 @@ var frames := 0
 func _initialize() -> void:
 	var c = Cockpit.new()   # not in the tree: only its button logic runs
 	var dt := 1.0 / 72.0
-	# a short tap: nothing while held, one scheme step on release
+	# a short tap: nothing while held, the menu on release
 	var during := []
 	for i in 20:
 		var a: String = c._menu(true, dt)
@@ -28,8 +28,8 @@ func _initialize() -> void:
 			during.append(a)
 	var on_release: String = c._menu(false, dt)
 	var after: String = c._menu(false, dt)
-	_check("a %.2f s tap cycles the scheme once, on release (held: %s, release: '%s', then '%s')" % [20 * dt, during, on_release, after],
-		during.is_empty() and on_release == "scheme" and after == "")
+	_check("a %.2f s tap opens the menu once, on release (held: %s, release: '%s', then '%s')" % [20 * dt, during, on_release, after],
+		during.is_empty() and on_release == "menu" and after == "")
 	# a long hold: the track switches once at MENU_HOLD; the release doesn't cycle the scheme
 	var acts := []
 	var at := -1.0
