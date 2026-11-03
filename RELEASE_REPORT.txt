@@ -552,3 +552,80 @@ and export helpers have exited; only this user-play process is intentionally
 left open. Final source-snapshot check: all 297 original files unchanged.
 Physical headset acceptance remains unverified - needs user confirmation.
 The live store remains unchanged.
+
+LOCAL 0.1.6 SIGN FACES / BRAKE FEATHERING - 2026-11-02
+Luke's v0.1.5 headset feedback: signs were visible from only one side, and
+braking was better but jolty even with a gentle squeeze. He requested tiny
+feathering, approximately 3%. Obstacle-collision acceptance remains pending;
+he will check pillars and guardrails later. No collision behavior changed here.
+
+Every Network sign now has separately oriented front/rear faces and readable
+labels outside its solid backing. Jump backs retain the ascent identity and
+minimum lip speed, plus APPROACH OTHER SIDE. Other directional backs identify
+the destination/zone with OPPOSITE APPROACH, avoiding false arrows or mileage.
+Co-located terminal approaches share one two-sided gantry. Text is fitted to
+board width on both sides, including the formerly overflowing end-of-road title.
+
+Quest brake inputs soften only the first 3% of usable travel, then join the
+existing linear demand continuously. Increasing pressure has a 30 ms time
+constant; reductions and releases remain immediate. All four Quest schemes
+use the same time-based onset. Full settled authority, simulation forces,
+gearing and desktop keyboard braking are unchanged. Scheme changes clear
+stored pressure. Brake rumble now grows smoothly from zero rather than jumping
+to roughly 24% at its old threshold; full rumble and event priority remain.
+
+Source verification:
+- Initial behavioral regression reproduced five failures: hard toe and instant
+  engagement in all four schemes. Final brake feathering: 20 checks, zero
+  failures (v016-feather-final.log). Over 99% of demand is reached by 150 ms;
+  response at 100 ms matches at 30/60/90/120 Hz. Release is exact zero.
+- Eight existing suites pass without logged errors: speed_brakes, quest_controls,
+  brakes, controls_flyable, xr_focus, mode_gears, vr_menu, shudder.
+  Evidence: v016-regressions.json. The older held-full-grip assertion now waits
+  0.5 s for settled pressure; the new test separately gates onset and release.
+- Sign geometry/text regression: 4,281 checks, zero failures. All six sign
+  types were rendered front and rear; all 12 screenshots inspected. Evidence:
+  network-sign-{jump,exit,city,end,brake,terminal}-{front,rear}.png.
+- Existing jump check passes. Serial streaming: no missing chunks after
+  40 frames or at 60 km onward; slowest chunk 5.1 ms against the 8 ms limit.
+  Earlier tests while the old interactive VR player ran failed on both old
+  and new renderers; closing that player resolved the clean serial gate.
+- Independent read-only review found no remaining material issues in the
+  input, rumble and two-sided sign change. Final width fitting was also
+  inspected in the rendered end-of-road front sign.
+
+Physical headset readability and gentle brake feel for v0.1.6 remain
+unverified - needs user confirmation. This is a local tuning iteration;
+the live store has not been updated.
+
+LOCAL 0.1.6 ARCHIVES AND PLAYER VERIFICATION
+Editor import and sequential desktop/PC VR exports exited 0 with no logged
+errors. Each ZIP contains 42 allowlisted files and passes archive integrity
+plus every fresh-extracted file hash.
+Desktop: build/Phaethon-Experimental-0.1.6-Windows.zip
+Bytes: 61278320
+SHA256: f1714da1c017f46463f8eae3c899d86c336cf2a0da51d50a391aa4c0f65544e5
+PC VR: build/Phaethon-Experimental-0.1.6-Windows-PCVR.zip
+Bytes: 61353237
+SHA256: baf7516f58733e118b65ebc7297eb58667e4880c0cf96a2a74ab2f27204f80b6
+Fresh extracted desktop: 130 checks, zero failures, exit 0, no logged errors
+(v016-desktop-extracted.log). Fresh extracted PC VR with XR explicitly off:
+197 checks, zero failures, exit 0, no logged errors (v016-pcvr-extracted.log).
+Saved preferences were restored. Exported VR menu panel inspected; checkbox,
+map choices and actions remain legible. These diagnostics do not establish
+physical headset comfort. All 297 original development files are unchanged.
+
+The first desktop package attempt ran out of C: drive space during extraction.
+Older v0.1.0-0.1.5 staging directories were preserved under
+D:/Phaethon-build-staging-2026-11-02 after all 12 saved ZIP checksums matched.
+All 468 moved staging files then matched their versioned inventory hashes.
+Versioned ZIPs, prior fresh-extracted players, source and evidence stay in this
+repository. The complete v0.1.6 packaging/verification succeeded after this.
+
+Live launch: old v0.1.5 was gracefully closed after its exact process path
+was checked. All test/export processes exited. Extracted v0.1.6 PC VR launched
+with Network preselected and no shutdown timer, PID 86884, responding at the
+verified v0.1.6 executable path. Its log records the Oculus OpenXR runtime,
+xr_ready=true, startup menu and menu ready. The existing stereo object-picking
+warning remains; explicit XR menu controls are used. Only this intentional
+interactive player is left running. Evidence: v016-headset.log.

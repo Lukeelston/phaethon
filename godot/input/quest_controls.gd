@@ -60,6 +60,8 @@ const TRIG_TOP := 0.97      # ... at this much pull (the stop's last 3% is slack
 const STICK_DZ := 0.15
 const GRIP_ON := 0.6        # grab: grip squeezed past this holds the lever
 const GRIP_DZ := 0.08       # brake grips: ignore a resting finger
+const BRAKE_TOE := 0.03    # soften only the first 3% of usable brake travel
+const BRAKE_ENGAGE_TAU := 0.03 # 30 ms pressure blend on engagement; release stays immediate
 const GRAB_TRAVEL := 0.22   # metres of hand travel for the whole lever range
 const RATE_UP := 0.9        # sticks / collective, per second
 const RATE_DOWN := 1.4
@@ -117,6 +119,7 @@ var split := 0.0            # triggers: the shaped steering split asked for, -1.
 var magnet_w := MAGNET      # tunable for the tests (0 = off)
 var ramp_up := RAMP_UP      # tunable for the tests (0 = instant)
 var _ramp := [0.0, 0.0]     # triggers: each engine's lever as delivered (eased, ramped)
+var _brake := [0.0, 0.0]    # delivered brake pressure, independent of throttle/gear
 var speed_ref := SPEED_REF  # tunable for the tests (0 = full authority at any speed)
 var hold_k := HOLD_K        # tunable for the tests (0 = off)
 var brake_ref := BRAKE_REF  # tunable for the tests (0 = full grip-difference authority at any speed)
@@ -218,6 +221,7 @@ func next_scheme() -> String:
 	_grab = [{}, {}]
 	split = 0.0
 	_ramp = [0.0, 0.0]
+	_brake = [0.0, 0.0]
 	return scheme
 
 
@@ -253,7 +257,13 @@ static func magnetise(d: float, w: float) -> float:
 
 
 static func _grip_brake(g: float) -> float:
-	return clampf((g - GRIP_DZ) / (1.0 - GRIP_DZ), 0.0, 1.0)
+	return _brake_toe(clampf((g - GRIP_DZ) / (1.0 - GRIP_DZ), 0.0, 1.0))
+
+
+## Zero slope at first contact, joining the unchanged linear demand at 3% with slope one.
+static func _brake_toe(x: float) -> float:
+	x = clampf(x, 0.0, 1.0)
+	return x * x * (2.0 * BRAKE_TOE - x) / (BRAKE_TOE * BRAKE_TOE) if x < BRAKE_TOE else x
 
 
 ## Returns {thrL, thrR, brkL, brkR, tickL, tickR}. thrL/brkL are the left ENGINE's; tickL/tickR
@@ -430,6 +440,16 @@ func update(c: Dictionary, delta: float) -> Dictionary:
 			out.thrR = thr_r
 			out.brkL = c.lt
 			out.brkR = c.rt
+	# Brief, time-based pressure rise prevents one sampled squeeze from applying all
+	# the high-speed flap force at once. No residual braking after release/focus loss.
+	var brake_ease := 1.0 - exp(-maxf(delta, 0.0) / BRAKE_ENGAGE_TAU)
+	for k in 2:
+		var key := "brkL" if k == 0 else "brkR"
+		var target: float = out[key] if scheme == "triggers" else _brake_toe(out[key])
+		_brake[k] = target if target <= _brake[k] else lerpf(_brake[k], target, brake_ease)
+		if target - _brake[k] < 1e-6:
+			_brake[k] = target
+		out[key] = _brake[k]
 	var cross_l: bool = (out.thrL >= GATE) != (_was[0] >= GATE)
 	var cross_r: bool = (out.thrR >= GATE) != (_was[1] >= GATE)
 	var crossed := scheme == "triggers"

@@ -1,5 +1,5 @@
 PHAETHON - EXPERIMENTAL PC VR EDITION
-Windows x64 / OpenXR - v0.1.5 - ElstonWorks
+Windows x64 / OpenXR - v0.1.6 - ElstonWorks
 
 Two engines. One cockpit. We know it's a little fucky.
 
@@ -53,6 +53,8 @@ with progressively smaller gains. Its engine note also keeps rising.
 Speedcraft air brakes gain drag and turning grip above 1,250 mph. Hold one
 grip to turn toward that side, or both to brake straight. Ease off the triggers
 to shorten the stop. Leave room to settle into a tight corner or finish box.
+The first 3% of usable brake travel is softened, with a brief engagement blend.
+Full braking strength is unchanged; letting go releases the brakes immediately.
 Starfighter retains ordinary aerodynamic drag and does not use overdrive.
 
 Above 1,500 mph the speed shield powers up and muffles the wind. Its low
@@ -121,4 +123,4 @@ copyright. Third-party components and the CC BY engine audio retain their
 own licenses and permissions. See THIRD_PARTY_NOTICES.txt and licenses/.
 Adapted engine audio is supplied separately in audio/engines/.
 
-Build: 0.1.5-experimental | 2026-11-02
+Build: 0.1.6-experimental | 2026-11-02

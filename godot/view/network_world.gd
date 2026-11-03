@@ -791,6 +791,10 @@ func _sign(node: Node3D, R, r: int, ox: float, oy: float, spec: Array) -> void:
 	var dir: int = spec[1]
 	var kind: String = spec[2]
 	var lines: Array = spec[3]
+	# Both terminal approaches are planned at the same sample. One two-faced gantry covers
+	# the pair; building the second would stack identical lit faces and labels in the same plane.
+	if kind == "terminal" and dir < 0:
+		return
 	var hw: float = R.w[i] / 2.0 + 4.0
 	var h0 := _h(r, i)
 	var tx: float = R.tx[i] * dir
@@ -824,7 +828,20 @@ func _sign(node: Node3D, R, r: int, ox: float, oy: float, spec: Array) -> void:
 	frame.material_override = _mat
 	frame.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	node.add_child(frame)
-	var facing := Basis(Vector3.UP, atan2(-tx, ty))   # +Z toward the oncoming craft
+	_sign_face(node, sc, t, kind, lines, w, h, false)
+	var rear := lines
+	if kind == "jump":
+		rear = [lines[0], lines[1], "APPROACH OTHER SIDE"]
+	elif kind != "terminal":
+		rear = [lines[1] if kind == "brake" else lines[0], "OPPOSITE APPROACH"]
+	_sign_face(node, sc, -t, kind, rear, w, h, true)
+	boards += 1
+
+
+## Each face has its own outward normal and sits outside the solid two-metre backing.
+## A double-sided label alone would be mirrored from behind and buried inside that backing.
+func _sign_face(node: Node3D, sc: Vector3, t: Vector3, kind: String, lines: Array, w: float, h: float, rear: bool) -> void:
+	var facing := Basis(Vector3.UP, atan2(-t.x, -t.z))   # +Z toward this side's approaching craft
 	var face := MeshInstance3D.new()
 	var quad := QuadMesh.new()
 	quad.size = Vector2(w, h)
@@ -839,16 +856,19 @@ func _sign(node: Node3D, R, r: int, ox: float, oy: float, spec: Array) -> void:
 		l.font_size = (FONT[0] if li == 0 else FONT[1]) if kind != "brake" else (FONT[3] if li == 0 else FONT[4])
 		if n >= 3 and li > 0:
 			l.font_size = FONT[2]
+		if rear and kind == "brake":
+			l.font_size = FONT[4] # rear has a zone name, not the front's large mile numeral
 		l.pixel_size = SIGN_PX
 		if kind == "jump":
 			l.pixel_size *= 2.1
+		var width := ThemeDB.fallback_font.get_string_size(l.text, HORIZONTAL_ALIGNMENT_LEFT, -1, l.font_size).x
+		l.pixel_size = minf(l.pixel_size, (w - 8.0) / maxf(width, 1.0))
 		l.outline_size = 0
 		l.modulate = Color(0.03, 0.03, 0.04)
 		l.double_sided = false
 		var up := (h / 2.0 - h / (n + 1.0) * (li + 1.0)) if n > 1 else 0.0
 		l.transform = Transform3D(facing, sc + Vector3.UP * up - t * 1.4)
 		node.add_child(l)
-	boards += 1
 
 
 ## Every glyph the signs use, at every size, rasterised now (labels under the ground, freed a few

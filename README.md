@@ -3,7 +3,7 @@
 A seated VR podracer flown with two 3D-printed throttle levers, one per engine.
 Spec: https://claude.ai/artifact/VeY5CdSPzxcEq568JgkJh8 (source: `phaethon.html`).
 
-The v0.1.5 release builds open a main menu with Sprint, Grand Prix, Eridanus,
+The v0.1.6 release builds open a main menu with Sprint, Grand Prix, Eridanus,
 Emergency Run, and the Network. In PC VR, flick either stick up/down and use A
 or a trigger to select a map, then Start flight. Hold the left Menu button for
 1.5 seconds to end the current run and return to selection; tapping it still
@@ -54,6 +54,12 @@ simulation starting at 4,000 mph with the throttles released, one grip turns the
 48 degrees, versus 10 before this change. Held throttle still allows useful braking;
 releasing it shortens the stop. Starfighter and unbraked flight retain their prior tuning.
 `tests/test_speed_brakes.gd` measures actual controller input, turn radius, energy and release.
+
+VR brake engagement feathers the first 3% of usable travel and blends rising pressure over
+a 30 ms time constant. By 150 ms it delivers more than 99% of the held demand; full strength
+is unchanged. Letting go clears pressure immediately. Rumble also fades in gently without
+the former minimum-strength kick. Network signs have readable faces on both sides; rear
+directional faces say to approach from the other side, rather than giving false exit guidance.
 
 Marker poles and a telegraph line tick past every 50 m; trucks (70 mph), freight trains
 (90 mph) and airliners (575 mph, 450 m up) give you something to lap. Dust plumes stream off

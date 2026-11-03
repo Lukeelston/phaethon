@@ -156,6 +156,12 @@ func _buzz(c: XRController3D, amp: float, dur: float, delay := 0.0) -> void:
 ## the wind audio (the same bursts you hear) trembles the hand on that brake (the left brake is
 ## the left hand in every scheme) and shakes the cockpit around you by a few millimetres. Never
 ## the view itself: your head stays put. Event buzzes (hits, the gate) win while they last.
+static func brake_haptic_strength(shudder: float) -> float:
+	var s := clampf(shudder, 0.0, 1.0)
+	# A light squeeze must not suddenly cross into the former 20% minimum rumble.
+	return 0.8 * s * smoothstep(0.03, 0.12, s)
+
+
 func _apply_shudder(delta: float) -> void:
 	for c in _buzz_hold.keys():
 		_buzz_hold[c] = maxf(0.0, _buzz_hold[c] - delta)
@@ -166,8 +172,9 @@ func _apply_shudder(delta: float) -> void:
 	var w: Array = wind_audio.shake
 	for k in 2:
 		var hand: XRController3D = hands.left if k == 0 else hands.right
-		if s[k] > 0.06 and _buzz_hold.get(hand, 0.0) <= 0.0:
-			hand.trigger_haptic_pulse("haptic", 0.0, 0.2 + 0.6 * s[k], 0.05, 0.0)
+		var strength := brake_haptic_strength(s[k])
+		if strength > 0.0 and _buzz_hold.get(hand, 0.0) <= 0.0:
+			hand.trigger_haptic_pulse("haptic", 0.0, strength, 0.05, 0.0)
 	var up: float = s[0] * w[0] + s[1] * w[1]
 	var side: float = s[0] * w[0] - s[1] * w[1]
 	shell.position = Vector3(0.6 * side, up, 0.0) * SHAKE_M + _grab_jolt(delta)

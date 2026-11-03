@@ -167,8 +167,8 @@ func _initialize() -> void:
 	var idle_yaw: Dictionary = run(qi, snap({"speed": 250.0, "yaw": 0.5}), 0.5)
 	_check("triggers: braking (or coasting) with the triggers let go never fires an engine, however the pod yaws (worst lever %.3f; coasting %.3f / %.3f)" % [
 		worst, idle_yaw.thrL, idle_yaw.thrR], worst == 0.0 and idle_yaw.thrL == 0.0 and idle_yaw.thrR == 0.0)
-	o = run(q, snap({"lg": 1.0}), 0.1)
-	_check("triggers: let go = idle, left grip = left brake only (thr %.2f/%.2f brk %.2f/%.2f)" % [o.thrL, o.thrR, o.brkL, o.brkR],
+	o = run(q, snap({"lg": 1.0}), 0.5) # settle the brief pressure rise; onset has its own gate
+	_check("triggers: let go = idle, held left grip = full left brake only (thr %.2f/%.2f brk %.2f/%.2f)" % [o.thrL, o.thrR, o.brkL, o.brkR],
 		o.thrL == 0.0 and o.thrR == 0.0 and o.brkL == 1.0 and o.brkR == 0.0)
 	# mixed: held collective, spring steering
 	q.scheme = "mixed"
