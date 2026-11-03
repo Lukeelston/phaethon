@@ -3,6 +3,8 @@ extends Control
 const View := preload("res://view/craft_view.gd")
 const UI := preload("res://release/release_config.gd")
 
+var collision_checkbox: CheckBox
+
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	theme = UI.make_theme()
@@ -20,7 +22,7 @@ func _ready() -> void:
 	for edge in ["left", "right"]:
 		margin.add_theme_constant_override("margin_" + edge, 48)
 	for edge in ["top", "bottom"]:
-		margin.add_theme_constant_override("margin_" + edge, 32)
+		margin.add_theme_constant_override("margin_" + edge, 24)
 	add_child(margin)
 	var columns := HBoxContainer.new()
 	columns.add_theme_constant_override("separation", 52)
@@ -30,7 +32,7 @@ func _ready() -> void:
 	left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	columns.add_child(left)
 	left.add_child(UI.label("EXPERIMENTAL DESKTOP BUILD", 15, UI.AMBER))
-	left.add_child(UI.label("PHAETHON", 56))
+	left.add_child(UI.label("PHAETHON", 50))
 	left.add_child(UI.label("Two engines. One cockpit.\nWe know it’s a little fucky.", 25))
 	var breathing_room := Control.new()
 	breathing_room.custom_minimum_size.y = 6
@@ -38,10 +40,13 @@ func _ready() -> void:
 	left.add_child(UI.label("CHOOSE YOUR BAD IDEA", 14, UI.MUTED))
 	var sprint: Button
 	for course in UI.COURSES:
-		var button := UI.button(course.name, start_course.bind(course.id), 52)
+		var button := UI.button(course.name, start_course.bind(course.id), 46)
 		left.add_child(button)
 		if course.id == "range":
 			sprint = button
+	collision_checkbox = UI.collision_checkbox()
+	left.add_child(collision_checkbox)
+	left.add_child(UI.label("Pillars and traffic. Guardrails stay on.", 14, UI.MUTED))
 	var spacer := Control.new()
 	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	left.add_child(spacer)

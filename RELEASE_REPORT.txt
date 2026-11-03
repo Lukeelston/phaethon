@@ -416,3 +416,139 @@ records OpenXR initialized on the Oculus runtime, xr_ready=true, startup menu,
 and menu ready. The stereo object-picking warning is logged; menu controller
 input uses the existing explicit XR handling. A process check found only the
 intentionally open v0.1.4 player (PID 84796), with no Godot/test processes.
+
+LOCAL 0.1.5 JUMPS / HIGH-SPEED AIR BRAKES / OBSTACLE COLLISIONS - 2026-11-02
+Luke requested more varied jumps, clearer entrance-speed indicators, useful
+high-speed air-brake turns, and a main-menu collision checkbox. He clarified
+that bridge pillars may be pass-through but actual guardrails must still
+keep the vehicle on the road.
+
+Network now has nine ascent routes, retaining the original four identities.
+Their minimum speeds at the launch lip range from 2,000 to 4,000 mph in
+250-mph steps. Summit heights range from 1,587 to 6,969 feet. Each has five
+large amber boards: eight and four miles before the exit, the exit itself,
+launch-lane confirmation, and one mile before the lip. Amber lane strips and
+chevrons identify the path. Desktop and VR guidance shows minimum at lip,
+current speed, READY / TOO SLOW, distance, and summit height. The VR readout
+is fixed to the cockpit rig above the canopy arch; it does not follow eyes.
+An initially obstructed placement was corrected after visual inspection.
+
+Speedcraft air-brake tuning was measured using the actual Quest controller
+mapping, with physics at 480 Hz and controller sampling at 60 Hz. Front flaps
+now deploy from 1,250 to 1,750 mph, coefficient 1.0 with a 90-g force cap per
+fully deployed engine flap. Deployed braking adds up to 45 g of lateral
+authority, scaled by speed/deployment and strongest brake. High-speed grip
+difference retains 30% authority. Fin, tow-bar and pod parameters did not
+change. Starfighter preserves its prior parameters; unbraked speed behavior
+and unlimited Speedcraft fourth remain. The JS reference now includes GD's
+already-existing overdrive drag behavior so fourth-gear parity is meaningful.
+
+Three-second one-grip turns with triggers released, BEFORE -> AFTER:
+Start mph     Actual path turn       Mean radius km       Exit mph after
+2,000          4.3 -> 24.7 deg        31.1 -> 4.4           1,184
+3,000          8.7 -> 40.4 deg        21.9 -> 3.4           1,285
+4,000         10.1 -> 48.1 deg        24.0 -> 3.8           1,392
+6,000          8.1 -> 37.6 deg        44.2 -> 7.9           2,008
+With both triggers fully held at 2,000 mph, one grip now exits at 1,656 mph
+instead of accelerating to 2,714; both grips exit at 1,488 instead of 2,419.
+The focused 54-scenario set includes partial-grip monotonicity, symmetry,
+unequal grips, coast energy, low-speed and unbraked invariance, and releasing
+grips while triggers remain held. Pod sway stayed below one degree in that
+Quest matrix. Raw desktop single-brake behavior was separately measured at
+4,448 mph: 15.4 degrees path turn in one second, 8.8-degree peak sway, 0.07 s
+settling after release, binder stretch 0.03 m without breakage. This is more
+aggressive than the Quest mapping; these are simulations, not comfort claims.
+Evidence: airbrake-baseline-expanded.json, airbrake-final-verified.json,
+airbrake-comparison.json, and v015-handling-desktop.log.
+
+Both menus now contain Obstacle collisions, default OFF, saved separately
+in user://game_settings.cfg. It controls Network bridge pillars and traffic.
+Guardrails, road switching, ground contact and jump landings stay active.
+Rendered pillar geometry supplies the physical bounds and a spatial index;
+height filtering prevents hitting pillars from the road above. Traffic
+bounds follow rendered height, including the existing rigid train layout.
+Other maps' decorative scenery retains its prior visual-only behavior.
+Source checks cover both checkbox states across every map, restart, menu
+return and city Grand Prix entry. Diagnostics restore exact saved settings.
+
+Source verification already completed:
+- Geometry clearance/connectivity: 82 roads, 129 junctions, 225,046 samples.
+- 27 actual flight cases in each simulation: nine below, nine minimum and
+  nine high-speed approaches. All at-minimum/high cases catch and merge.
+  All underspeed cases miss their intended catch; J3 reaches a lower ramp,
+  while the other eight reach terrain. See network-jump-matrix-js.log and
+  network-jumps.csv. This does not promise every entry speed survives a climb;
+  the posted minimum explicitly applies at the lip.
+- Network parity: exact road switches/flight events and zero pod-position
+  difference. Streaming serial test: no missing chunks after 40 frames,
+  slowest chunk 5.2 ms against 8 ms. A concurrent load run initially missed
+  two chunks; final serial run passed without changing the threshold.
+- Existing junction clearance: 33,685 vertices, 5,220 triangle probes,
+  33,192 projection offsets and 153 real body placements; zero obstructing
+  geometry, corridor mismatch or wall contacts. Max asphalt height 0.020 m.
+- Obstacle lifecycle 101 checks, physics 17 checks, JS 9 checks. Rendered
+  desktop menu 59 checks and VR menu 63 checks. Screenshots inspected at
+  1280x720 and 1440x900; checkbox and actions are clearly visible.
+- Final traffic regression passes, average 1.65 ms for 215 vehicles. OFF
+  feeds no obstacles; ON produces a real simulated impact.
+- New brake parity 64 checks and unlimited-overdrive 15 checks pass.
+- Core 20-script regression: 18 passed initially, including broad energy.
+  Sprint and mode recordings assumed the former brakes and were regenerated
+  from actual completed runs. Targeted updated sprint and mode tests pass:
+  sprint 107.560 s in both sims, stopped at 0.449 m/s and 0.31 m short of the
+  center; all three mode transitions occur on identical physics steps.
+  Recorder rejects a non-finishing sprint without saving a false reference.
+- All 297 original development files still match their source snapshot.
+
+Build/package verification and physical acceptance are recorded below once
+performed. Physical headset handling/readability is currently unverified -
+needs user confirmation. This iteration does not update the live store.
+
+LOCAL 0.1.5 INTEGRATION AND ARCHIVES
+Independent review identified an important derived-model issue: the old
+stopping guide omitted the new front-flap force ceiling and approximated the
+deployment band too coarsely. CPU and GPU now share capped analytic high-speed
+segments and eight-panel Simpson integration across smooth deployment. Nine
+physical stop comparisons pass, including capped/uncapped/disabled flaps and
+heavy-pod force scaling. Ordinary errors are 0.00-0.23%; the unlimited-fourth
+6,000 mph estimate is 3.53% short of the actual stop. Six actual GPU renders
+using the production include and material uniforms agree within the capture's
+33 m quantization. Real guide approach/color and clean-lap tests pass.
+At 4,000 mph, the town's 8/4/1-mile demand is 0.20/0.37/1.49 of full braking.
+The final review found no remaining Critical, Important or Minor issues.
+
+Eridanus and Emergency recordings also required fresh controls after the
+braking change. Fresh Eridanus lap: 188.8375 s, 4,292 mph top, 2,362 mph
+average, four handling switches, zero wall contacts. Emergency open succeeds
+at 183.5875 s with 18.1559 s margin; shade succeeds at 218.2729 s with 16.2739 s
+margin; late correctly fails to dawn at 195.3771 s after delivery. All three
+have zero wall contacts. Godot course parity, job parity, and real-view job
+flow pass, matching JS event frames and finish positions exactly. Recorders
+now reject incomplete/crashed/incorrect-route or mismatched replays before
+writing fixtures. Existing core regression failures are all resolved by the
+documented targeted reruns; no physics assertion was weakened.
+
+Editor import and sequential desktop/PC VR exports exited 0, no logged errors.
+Desktop: build/Phaethon-Experimental-0.1.5-Windows.zip
+Bytes: 61281193
+SHA256: a74d26931f54daa0d59cd6af3aa08cbedd3e8856da7f7882a44c903e37aa7215
+PC VR: build/Phaethon-Experimental-0.1.5-Windows-PCVR.zip
+Bytes: 61356372
+SHA256: accf3bd4b468ae78f71fbcc990eb418a7740d6eebd19366721663bf5a2772bba
+Each contains 42 allowlisted files; ZIP integrity and fresh-extraction hashes
+passed. Fresh extracted desktop player: 130 checks, zero failures, exit 0,
+no reported errors (v015-desktop-extracted.log). Fresh extracted PC VR player
+with XR explicitly off: 197 checks, zero failures, exit 0, no reported errors
+(v015-pcvr-extracted.log). Both exercise map launches and setting persistence;
+diagnostics restored saved preferences and removed only files they created.
+Exported menu screenshots inspected: checked desktop checkbox is legible,
+VR checkbox and Start/Quit/footer fit. The short flat diagnostic frame timings
+are not a physical-headset performance claim.
+
+The old v0.1.4 interactive player was closed after verifying its exact path.
+The extracted v0.1.5 PC VR player was launched with Network preselected and
+no automatic shutdown timer, PID 86080. Its process is responding. All test
+and export helpers have exited; only this user-play process is intentionally
+left open. Final source-snapshot check: all 297 original files unchanged.
+Physical headset acceptance remains unverified - needs user confirmation.
+The live store remains unchanged.

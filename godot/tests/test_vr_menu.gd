@@ -51,7 +51,7 @@ func _run() -> void:
 	check("held stick moves only one row", menu.focus_index == 1)
 	menu.consume_controller(0.0, false, true)
 	menu.consume_controller(0.0, true, true)
-	check("confirm chooses Grand Prix and focuses Start", menu.selected_course == "gp" and menu.focus_index == 5)
+	check("confirm chooses Grand Prix and focuses Start", menu.selected_course == "gp" and menu.focus_index == menu.start_index)
 	menu.consume_controller(0.0, true, true)
 	check("same held confirm cannot launch", current_scene == menu and not menu.launching)
 	menu.consume_controller(0.0, false, false)
@@ -66,10 +66,12 @@ func _run() -> void:
 		menu = current_scene
 		menu.set_process(false)
 		menu.choose_course(course)
+		await process_frame
+		check(course + " menu description and actions fit the panel", controls_fit(menu.screen))
 		check(course + " selection does not enter flight", current_scene == menu and menu.selected_course == course)
 		menu.choose_course("missing")
 		check("invalid map preserves " + course, menu.selected_course == course)
-		menu.focus_row(5)
+		menu.focus_row(menu.start_index)
 		menu.consume_controller(0.0, false, true)
 		tracker.set_input("trigger", 0.8)
 		menu.consume_controller(0.0, true, true)

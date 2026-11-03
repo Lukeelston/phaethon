@@ -23,12 +23,17 @@ func _initialize() -> void:
 			sim.events.clear()
 	var fails := 0
 	var got_type: String = sim.result.get("type", "none")
-	fails += _check("result %s == %s" % [got_type, want.result.type], got_type == want.result.type)
-	if got_type == "finish" and want.result.type == "finish":
+	var reference: Dictionary = want.get("result", {}) if want.get("result") is Dictionary else {}
+	var reference_type: String = reference.get("type", "none")
+	fails += _check("both simulation and reference actually finish (%s / %s)" % [got_type, reference_type], got_type == "finish" and reference_type == "finish")
+	if got_type == "finish" and reference_type == "finish":
 		var e := absf(float(sim.result.t) - float(want.result.t))
 		fails += _check("time %.3f vs %.3f s (diff %.3f s)" % [sim.result.t, want.result.t, e], e <= 0.05)
 		fails += _check("stop offset %.2f vs %.2f m" % [sim.pod.x - CraftSimScript.BOX_X, want.dx],
 			absf((sim.pod.x - CraftSimScript.BOX_X) - float(want.dx)) <= 0.5)
+		var speed := sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy)
+		fails += _check("craft is stopped inside the sprint box (%.3f m/s)" % speed,
+			speed < 0.5 and absf(sim.pod.x - CraftSimScript.BOX_X) <= CraftSimScript.BOX_HALF)
 	print("SPRINT PARITY ", "PASS" if fails == 0 else "FAIL (%d)" % fails)
 	quit(1 if fails > 0 else 0)
 

@@ -16,12 +16,20 @@ func _initialize() -> void:
 	var sim = CraftSimScript.new({"track": "range", "handling": "speed"})
 	var events := []
 	var trace := []
+	var waited_above_gate := false
+	var early_engagements := 0
 	for i in inputs.size():
 		var u: Array = inputs[i]
 		var inp := {"thrL": u[0], "thrR": u[1], "brkL": u[2], "brkR": u[3], "repair": false, "reignite": true}
 		if int(u[4]) > 0:
 			inp["handling"] = ASK[int(u[4])]
+		var before_blend: float = sim.hblend
+		var before_speed := sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy)
 		sim.step(inp, DT)
+		if sim.hwant == "starfighter" and before_blend == 0.0 and before_speed > sim.P.sfEngageV:
+			waited_above_gate = true
+			if sim.hblend > 0.0:
+				early_engagements += 1
 		for e in sim.events:
 			if e.type == "handling":
 				events.append([i, e.mode])
@@ -29,6 +37,8 @@ func _initialize() -> void:
 		if i % 480 == 479:
 			trace.append([i, sim.pod.x, sim.pod.y, sim.pod.vx, sim.pod.vy, sim.pod.th, sim.hblend, sim.P.thrustMax])
 	var fails := 0
+	fails += _check("STARFIGHTER request waits above 1,250 mph and never engages early", waited_above_gate and early_engagements == 0)
+	fails += _check("all three transitions occur: STARFIGHTER, SPEEDCRAFT, STARFIGHTER", events.size() == 3 and events[0][1] == "starfighter" and events[1][1] == "speed" and events[2][1] == "starfighter")
 	var ev_ok: bool = events.size() == expected.events.size()
 	if ev_ok:
 		for k in events.size():
@@ -49,10 +59,10 @@ func _initialize() -> void:
 		worst_v = maxf(worst_v, Vector2(a[3] - b[3], a[4] - b[4]).length())
 		worst_b = maxf(worst_b, absf(a[6] - b[6]) + absf(a[7] - b[7]))
 	fails += _check("pod and blend track the JS run over %d s: position within %.4f m (worst at step %d), velocity %.5f m/s, blend/handling %.6f" % [
-		n, worst_p, worst_at, worst_v, worst_b], n == expected.trace.size() and n > 50 and worst_p < 1.0 and worst_v < 0.05 and worst_b < 1e-6)
+		n, worst_p, worst_at, worst_v, worst_b], n == expected.trace.size() and n == inputs.size() / 480 and trace.size() == expected.trace.size() and worst_p < 1.0 and worst_v < 0.05 and worst_b < 1e-6)
 	var last: Array = trace[trace.size() - 1]
 	fails += _check("ends in STARFIGHTER (blend %.2f, thrustMax %.0f), engaged on the coast once below 1,250 mph" % [last[6], last[7]],
-		last[6] > 0.0 and String(expected.events[expected.events.size() - 1][1]) == "starfighter")
+		last[6] == 1.0 and String(sim.P.handling) == "starfighter" and String(expected.events[expected.events.size() - 1][1]) == "starfighter")
 	print("MODE PARITY ", "PASS" if fails == 0 else "FAIL (%d)" % fails)
 	quit(1 if fails > 0 else 0)
 

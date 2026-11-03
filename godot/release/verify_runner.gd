@@ -3,8 +3,9 @@
 extends Node
 
 const View := preload("res://view/craft_view.gd")
+const Settings := preload("res://release/game_settings.gd")
 const MENU_SCENE := "res://release/menu.tscn"
-const COURSES := ["range", "gp", "eridanus", "emergency", "network"]
+const COURSES := ["range", "gp", "eridanus", "emergency", "network", "network"]
 
 var failures := 0
 var checks := 0
@@ -12,6 +13,8 @@ var evidence := ""
 var capture: AudioEffectCapture
 var _started_ms := 0
 var _finished := false
+var _settings_existed := false
+var _settings_before := PackedByteArray()
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
@@ -55,6 +58,9 @@ func shot(name: String) -> void:
 	check(name + " screenshot saved", image.save_png(evidence.path_join(name + ".png")) == OK)
 
 func _run() -> void:
+	_settings_existed = FileAccess.file_exists(Settings.PREFS)
+	if _settings_existed:
+		_settings_before = FileAccess.get_file_as_bytes(Settings.PREFS)
 	if not check("evidence directory is absolute", evidence.is_absolute_path()):
 		_finish()
 		return
@@ -76,8 +82,15 @@ func _run() -> void:
 	capture = AudioEffectCapture.new()
 	capture.buffer_length = 3.0
 	AudioServer.add_bus_effect(0, capture)
+	var case_index := 0
 	for course in COURSES:
 		var menu = get_tree().current_scene
+		var collisions := case_index % 2 == 1
+		case_index += 1
+		menu.collision_checkbox.button_pressed = collisions
+		check(course + " collision checkbox persists", Settings.obstacle_collisions_enabled() == collisions)
+		if case_index <= 2:
+			await shot("menu-obstacles-" + ("on" if collisions else "off"))
 		var buttons := menu.find_children("*", "Button", true, false)
 		if not check(course + " launch button is available", buttons.size() >= 4):
 			_finish()
@@ -91,6 +104,7 @@ func _run() -> void:
 			return
 		check(course + " scene loaded", view.sim.kind == course if course in ["range", "network"] else view.sim.track_name == ("eridanus" if course == "emergency" else course))
 		check(course + " opens its selected mission", not view.sim.job.is_empty() if course == "emergency" else view.sim.job.is_empty())
+		check(course + " launch respects obstacle collisions", view.sim.P.obstacleCollisions == collisions)
 		if course == "gp":
 			check("Grand Prix starts in starfighter mode", view.sim.P.handling == "starfighter")
 		var start := Vector2(view.sim.pod.x, view.sim.pod.y)
@@ -132,11 +146,22 @@ func _run() -> void:
 		check(course + " restart restores playable scene", not get_tree().paused and view is View and view.get_instance_id() != old_id)
 		check(course + " restart keeps selected course", view.sim.kind == course if course in ["range", "network"] else view.sim.track_name == ("eridanus" if course == "emergency" else course))
 		check(course + " restart clears throttle", view.inp.thrL == 0.0 and view.inp.thrR == 0.0)
+		check(course + " restart retains obstacle collisions", view.sim.P.obstacleCollisions == collisions)
+		if course == "network":
+			check("Network traffic follows obstacle checkbox", view.traffic_net.collide == collisions)
+			for city in view.sim.cities:
+				if city.name == "DUNES":
+					view.sim.respawn_on(int(city.road), int(city.i), 1)
+			view.enter_city_gp()
+			await get_tree().scene_changed
+			view = get_tree().current_scene
+			check("city GP preserves obstacle collisions", view.sim.track_name == "gp_dunes" and view.sim.P.obstacleCollisions == collisions)
 		await frames(2)
 		overlay.set_paused(true)
 		overlay.return_to_menu()
 		await get_tree().scene_changed
 		check(course + " return to menu", get_tree().current_scene.scene_file_path == MENU_SCENE and not get_tree().paused and not overlay.is_paused)
+		check(course + " menu restores obstacle checkbox", get_tree().current_scene.collision_checkbox.button_pressed == collisions)
 	_finish()
 
 func _finish() -> void:
@@ -152,5 +177,13 @@ func _finish() -> void:
 		for index in range(AudioServer.get_bus_effect_count(0) - 1, -1, -1):
 			if AudioServer.get_bus_effect(0, index) == capture:
 				AudioServer.remove_bus_effect(0, index)
+	if _settings_existed:
+		var settings := FileAccess.open(Settings.PREFS, FileAccess.WRITE)
+		if settings:
+			settings.store_buffer(_settings_before)
+			settings.close()
+		check("diagnostic restores exact game settings", settings != null and FileAccess.get_file_as_bytes(Settings.PREFS) == _settings_before)
+	elif FileAccess.file_exists(Settings.PREFS):
+		check("diagnostic removes only game settings it created", DirAccess.remove_absolute(ProjectSettings.globalize_path(Settings.PREFS)) == OK)
 	print("EXPORTED RELEASE %s (%d checks, %d failures)" % ["PASS" if failures == 0 else "FAIL", checks, failures])
 	get_tree().quit(0 if failures == 0 else 1)

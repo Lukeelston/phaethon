@@ -55,6 +55,8 @@ const BOARD_W := 80.0
 const BOARD_H := 40.0
 const BOARD_CLEAR := 28.0
 const SIGN_BEFORE := 250          # samples (6 km) before a junction: its board
+const JUMP_BEFORE := [536, 268, 20] # 8 mi, 4 mi, then at the entrance: time to choose at 4,000 mph
+const JUMP_AMBER := Color(1.0, 0.55, 0.08)
 const BRAKE_MI := [4, 2, 1]       # braking boards, miles before a city's STARFIGHTER zone
 const MILE := 1609.344
 # the signs' glyphs: rendered at these sizes (px) and scaled up (SIGN_PX m a pixel), so a streamed
@@ -62,7 +64,7 @@ const MILE := 1609.344
 # (At 200 px each new glyph cost ~200 ms in the middle of a run.)
 const FONT := [72, 43, 36, 79, 25]   # a board's title, its lines, three lines' lines; a braking board's miles, its words
 const SIGN_PX := 0.139
-const SIGN_CHARS := "ABCDEFGHIJKLMNOPQRSTUVWXYZ 0123456789/:+-."
+const SIGN_CHARS := "ABCDEFGHIJKLMNOPQRSTUVWXYZ 0123456789/:+-.>,"
 const TOWER_VIS := 140000.0       # skylines show this far
 # a city's colours: [tower body a, tower body b, crown light]
 const PALETTE := {
@@ -102,11 +104,15 @@ var _idx_cache := {}               # Vector2i(rows, cols) -> the road grid's tri
 var _beam: ShaderMaterial
 var _board_mat: ShaderMaterial
 var _end_mat: ShaderMaterial
+var _jump_mat: ShaderMaterial
 var _city_mat: ShaderMaterial
 var _job := {}            # the chunk being built, a slice a frame (_start_chunk, _work)
 var _join_surface_cache := {}     # Vector2(sample, offset), for the current chunk's road
 var _join_hints := {}             # sample -> joining roads and their nearest centreline hints
 var _join_cache_road := -1
+var _pillar_cells := {} # fixed scenery, queried near the craft rather than scanning the whole map
+var _pillars_indexed := false
+const PILLAR_CELL := 512.0
 
 
 func build(s, v) -> void:
@@ -132,6 +138,8 @@ func build(s, v) -> void:
 	_end_mat = ShaderMaterial.new()
 	_end_mat.shader = preload("res://view/authorized.gdshader")
 	_end_mat.set_shader_parameter("col", Vector3(1.0, 0.55, 0.1))
+	_jump_mat = _end_mat.duplicate() as ShaderMaterial
+	_jump_mat.set_shader_parameter("flash_hz", 0.0) # stable amber remains legible; border lamps still chase
 	_city_mat = ShaderMaterial.new()
 	_city_mat.shader = preload("res://view/authorized.gdshader")
 	_city_mat.set_shader_parameter("col", Vector3(0.25, 0.65, 1.0))
@@ -370,6 +378,48 @@ func _work(end: int) -> bool:
 	return done
 
 
+## One source for the rendered support boxes and their optional collision footprints.
+func pillar_specs(r: int, i: int) -> Array:
+	var h := _h(r, i)
+	var high := h > 150.0
+	if h <= DECK + 2.0 or i % (40 if high else PILLAR_EVERY) != 0:
+		return []
+	var R = sim.roads[r]
+	var thick := 20.0 + h * 0.02 if high else 14.0
+	var out := []
+	for side in 2:
+		var off: float = (-1.0 if side == 0 else 1.0) * (R.w[i] / 2.0 - 30.0)
+		out.append({"id": -(r * 1000000 + i * 2 + side + 1), "r": 0.0, "halfSize": thick / 2.0,
+			"x": R.px[i] + R.nx[i] * off, "y": R.py[i] + R.ny[i] * off,
+			"zMin": 0.0, "zMax": h - DECK, "vx": 0.0, "vy": 0.0})
+	return out
+
+func _index_pillars() -> void:
+	for r in sim.roads.size():
+		for spacing in [PILLAR_EVERY, 40]:
+			for i in range(0, sim.roads[r].N - 1, spacing):
+				if (_h(r, i) > 150.0) != (spacing == 40):
+					continue
+				for pillar in pillar_specs(r, i):
+					var cell := Vector2i(floori(pillar.x / PILLAR_CELL), floori(pillar.y / PILLAR_CELL))
+					if not _pillar_cells.has(cell):
+						_pillar_cells[cell] = []
+					_pillar_cells[cell].append(pillar)
+	_pillars_indexed = true
+
+func obstacles_near(x: float, y: float, radius: float = 1000.0) -> Array:
+	if not _pillars_indexed:
+		_index_pillars()
+	var out := []
+	var cell := Vector2i(floori(x / PILLAR_CELL), floori(y / PILLAR_CELL))
+	var reach := ceili(radius / PILLAR_CELL) + 1
+	for dx in range(-reach, reach + 1):
+		for dy in range(-reach, reach + 1):
+			for pillar in _pillar_cells.get(cell + Vector2i(dx, dy), []):
+				if Vector2(pillar.x - x, pillar.y - y).length() <= radius + pillar.halfSize:
+					out.append(pillar)
+	return out
+
 ## Sample i of the chunk in hand: its stretch of road, lines, deck, walls, masts.
 func _sample(J: Dictionary, R, i: int) -> void:
 	var r: int = J.r
@@ -403,6 +453,15 @@ func _sample(J: Dictionary, R, i: int) -> void:
 		if open_i[side] or open_j[side]:
 			continue
 		_strip(deco, R, ox, oy, i, ln[0], ln[1], hi + 0.04, hj + 0.04, ln[4], ln[2], ln[3])
+	# The ascent lane has broad amber rails and repeated forward chevrons, visible through its S.
+	if R.role == "launch":
+		for side in [-1.0, 1.0]:
+			_strip(lglow, R, ox, oy, i, side * (hw * 0.55) - 1.75, side * (hw * 0.55) + 1.75, hi + 0.12, hj + 0.12, JUMP_AMBER)
+		if i > 150 and i % 20 == 0:
+			var tip := _p(R, ox, oy, i + 1, 0.0, hj + 0.16)
+			var back := _p(R, ox, oy, i, 0.0, hi + 0.16)
+			_quad(lglow, [_p(R, ox, oy, i, -32.0, hi + 0.16), tip, back, _p(R, ox, oy, i, -40.0, hi + 0.16)], JUMP_AMBER)
+			_quad(lglow, [tip, _p(R, ox, oy, i, 32.0, hi + 0.16), _p(R, ox, oy, i, 40.0, hi + 0.16), back], JUMP_AMBER)
 	# a flyover's deck: its edges, its underside, its pillars
 	if hi > 4.0 or hj > 4.0:
 		for sgn in [-1.0, 1.0]:
@@ -414,12 +473,10 @@ func _sample(J: Dictionary, R, i: int) -> void:
 			_quad(deco, [ea + Vector3.DOWN * DECK, eb + Vector3.DOWN * DECK, eb + Vector3.UP * te, ea + Vector3.UP * te], Color(0.55, 0.55, 0.53))
 			_quad(lglow, [ea + Vector3.DOWN * DECK, eb + Vector3.DOWN * DECK, eb + Vector3.DOWN * (DECK - 0.8), ea + Vector3.DOWN * (DECK - 0.8)], STRIP_LIGHT)   # a lit line along its foot
 		_quad(deco, [_p(R, ox, oy, i, hw, hi - DECK), _p(R, ox, oy, i, -hw, hi - DECK), _p(R, ox, oy, j, -hw, hj - DECK), _p(R, ox, oy, j, hw, hj - DECK)], Color(0.32, 0.32, 0.31))
-		var high := hi > 150.0   # a jump's kick or deck: pylons, fewer and thicker
-		if i % (40 if high else PILLAR_EVERY) == 0 and hi > DECK + 2.0:
-			for sgn in [-1.0, 1.0]:
-				var foot := _p(R, ox, oy, i, sgn * (hw - 30.0), 0.0)
-				var thick := 14.0 if not high else 20.0 + hi * 0.02
-				_box(deco, foot + Vector3.UP * (hi - DECK) / 2.0, Vector3(thick, hi - DECK, thick), Color(0.6, 0.6, 0.58))
+		for pillar in pillar_specs(r, i):
+			var thick: float = pillar.halfSize * 2.0
+			var center := Vector3(pillar.x - ox, pillar.zMax / 2.0, -(pillar.y - oy))
+			_box(deco, center, Vector3(thick, pillar.zMax, thick), Color(0.6, 0.6, 0.58))
 	if halls.has(r) and i >= int(halls[r][0]) and i < int(halls[r][1]):
 		_hall(J, R, i, hw, hi + te, hj + te)
 	# the walls, the strip on top, the masts
@@ -600,12 +657,18 @@ func _plan_signs() -> void:
 		var lines := []
 		var kind := "exit"
 		if C.role == "launch":
-			kind = "jump"
-			var mph := 3000
 			for jp in sim.jumps:
 				if int(jp[0]) == c:
-					mph = int(jp[2])
-			lines = ["JUMP", "%d,%03d+ MPH" % [mph / 1000, mph % 1000]]
+					var mph := int(jp[2])
+					var speed := "MIN %d,%03d MPH AT LIP" % [mph / 1000, mph % 1000]
+					for before in JUMP_BEFORE:
+						var si: int = ca - dp * int(before)
+						if si > 0 and si < P.N - 1:
+							var entry := "ENTER RIGHT >>>" if int(before) < 30 else "RIGHT EXIT  %d MI" % roundi(float(before) * 24.0 / MILE)
+							_add_sign(p, si, dp, "jump", ["ASCENT %s" % C.name, speed, entry])
+					_add_sign(c, 300, 1, "jump", ["ASCENT %s" % C.name, speed, "FOLLOW AMBER >>>"])
+					_add_sign(c, C.N - 61, 1, "jump", ["ASCENT %s" % C.name, speed, "LIFT-OFF  1 MI"])
+			continue
 		elif C.role != "":
 			continue   # a catch deck or an on-ramp, taken backwards: nowhere but an open end
 		elif C.name.begins_with("T"):
@@ -745,8 +808,8 @@ func _sign(node: Node3D, R, r: int, ox: float, oy: float, spec: Array) -> void:
 		mi.mesh = st.commit()
 		mi.material_override = _bright
 		node.add_child(mi)
-	var w := BOARD_W if kind != "brake" else 40.0
-	var h := BOARD_H if kind != "brake" else 24.0
+	var w := 220.0 if kind == "jump" else (BOARD_W if kind != "brake" else 40.0)
+	var h := 78.0 if kind == "jump" else (BOARD_H if kind != "brake" else 24.0)
 	var foot := h0 + BOARD_CLEAR
 	var steel := Color(0.22, 0.23, 0.25)
 	var parts := []
@@ -767,7 +830,7 @@ func _sign(node: Node3D, R, r: int, ox: float, oy: float, spec: Array) -> void:
 	quad.size = Vector2(w, h)
 	face.mesh = quad
 	face.transform = Transform3D(facing, sc - t * 1.1)
-	face.material_override = _end_mat if kind == "end" or kind == "jump" else (_city_mat if kind == "terminal" or kind == "city" else _board_mat)   # (a jump's board: orange, as the end of the road's)
+	face.material_override = _jump_mat if kind == "jump" else (_end_mat if kind == "end" else (_city_mat if kind == "terminal" or kind == "city" else _board_mat))
 	node.add_child(face)
 	var n := lines.size()
 	for li in n:
@@ -777,6 +840,8 @@ func _sign(node: Node3D, R, r: int, ox: float, oy: float, spec: Array) -> void:
 		if n >= 3 and li > 0:
 			l.font_size = FONT[2]
 		l.pixel_size = SIGN_PX
+		if kind == "jump":
+			l.pixel_size *= 2.1
 		l.outline_size = 0
 		l.modulate = Color(0.03, 0.03, 0.04)
 		l.double_sided = false

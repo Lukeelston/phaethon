@@ -5,9 +5,9 @@
 ##   the line    a safe speed at every track sample: the limits the autopilot plans its clean lap to
 ##               (tools/record_course.js: each mode's turn-rate and grip, STARFIGHTER's top speed,
 ##               1,200 mph in the towns so STARFIGHTER can engage)
-##   the brakes  full braking as a(v) = c0 + c2 v^2, from the sim's own drag for the live handling:
+##   the brakes  full braking from the sim's own drag for the live handling:
 ##               both engines' and the pod's drag with the air brakes in, the brakes' constant pull,
-##               and the front speed brakes opening from 1,500 to 2,500 mph; below 1,250 mph on
+##               and the front speed brakes' smooth deployment and force ceiling; below 1,250 mph on
 ##               STARFIGHTER's (you flip as you slow into a town: its drag is 10x, and it's what
 ##               the autopilot's clean lap leans on)
 ##   the cut     for a point ahead, the share of full braking it takes to be down to its safe speed
@@ -87,15 +87,55 @@ func brake_model(handling := "") -> Vector4:
 	var m: float = sim.eL.m + sim.eR.m + sim.pod.m
 	var base: float = 2.0 * (P.engineCd + P.brakeCd) + P.podCd + 0.5 * P.brakeCd
 	var fl: float = 2.0 * P.frontBrakeCd
-	return Vector4(2.5 * P.brakeConst / m, base / m, (base + 0.5 * fl) / m, (base + fl) / m)
+	return Vector4(2.5 * P.brakeConst / m, base / m, (base + 0.5 * fl) / m, (base + fl) / m) * P.forceScale
+
+
+## Maximum acceleration from the two fully deployed front flaps; zero means uncapped.
+func front_brake_cap() -> float:
+	var m: float = sim.eL.m + sim.eR.m + sim.pod.m
+	return (sim.eL.m + sim.eR.m) * sim.P.frontBrakeMaxG * G * sim.P.forceScale / m
 
 
 static func _seg(va: float, vb: float, c0: float, c2: float) -> float:
 	return log((c0 + c2 * va * va) / (c0 + c2 * vb * vb)) / (2.0 * c2) if va > vb else 0.0
 
 
+## Full flaps: split at the speed where their quadratic force reaches its ceiling.
+static func _front_seg(va: float, vb: float, b: Vector4, cap: float) -> float:
+	if va <= vb:
+		return 0.0
+	var a := va
+	var d := 0.0
+	var front: float = b.w - b.y
+	if cap > 0.0 and front > 0.0:
+		var vc := sqrt(cap / front)
+		if a > vc:
+			var e := maxf(vb, vc)
+			d += _seg(a, e, b.x + cap, b.y)
+			a = e
+	return d + _seg(a, vb, b.x, b.w)
+
+
+## Integrate the real smooth flap deployment. Eight Simpson panels resolve the strong
+## change in drag near the deployment threshold without per-point simulation.
+static func _ramp_seg(va: float, vb: float, b: Vector4, cap: float, v0: float, v1: float) -> float:
+	if va <= vb:
+		return 0.0
+	var h := (va - vb) / 8.0
+	var sum := 0.0
+	for i in 9:
+		var v := vb + h * i
+		var front := (b.w - b.y) * v * v
+		if cap > 0.0:
+			front = minf(front, cap)
+		var accel := b.x + b.y * v * v + front * smoothstep(v0, v1, v)
+		var weight := 1.0 if i == 0 or i == 8 else (4.0 if i % 2 == 1 else 2.0)
+		sum += weight * v / maxf(accel, 1e-6)
+	return sum * h / 3.0
+
+
 ## Distance (m) full brakes take from v down to vt (0 if already slower): the integral of v / a(v),
-## in pieces: the live handling `b` with the front flaps full above V1, half between, shut below
+## in pieces: live handling `b` with capped full flaps above V1, smooth deployment between, shut below
 ## V0, down to STARFIGHTER's engage speed; then STARFIGHTER's `bsf`.
 func stop_distance(v: float, vt: float, b: Vector4, bsf: Vector4) -> float:
 	if v <= vt:
@@ -103,15 +143,16 @@ func stop_distance(v: float, vt: float, b: Vector4, bsf: Vector4) -> float:
 	var v0: float = sim.P.frontBrakeV0
 	var v1: float = sim.P.frontBrakeV1
 	var ve: float = sim.P.sfEngageV
+	var cap := front_brake_cap()
 	var d := 0.0
 	var a := v
 	if a > v1:
 		var e := maxf(maxf(vt, ve), v1)
-		d += _seg(a, e, b.x, b.w)
+		d += _front_seg(a, e, b, cap)
 		a = e
 	if a > vt and a > v0:
 		var e := maxf(maxf(vt, ve), v0)
-		d += _seg(a, e, b.x, b.z)
+		d += _ramp_seg(a, e, b, cap, v0, v1)
 		a = e
 	if a > vt and a > ve:
 		var e := maxf(vt, ve)
@@ -173,4 +214,5 @@ func apply(mat: ShaderMaterial) -> void:
 	mat.set_shader_parameter("lap", float(s[sim.N]))
 	mat.set_shader_parameter("brake", brake_model())
 	mat.set_shader_parameter("brake_sf", brake_model("starfighter"))
+	mat.set_shader_parameter("brake_front_cap", front_brake_cap())
 	mat.set_shader_parameter("speeds", Vector3(sim.P.frontBrakeV0, sim.P.frontBrakeV1, sim.P.sfEngageV))

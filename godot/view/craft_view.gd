@@ -21,6 +21,7 @@
 extends Node3D
 
 const CraftSimScript := preload("res://sim/craft_sim.gd")
+const GameSettings := preload("res://release/game_settings.gd")
 const LeverInputScript := preload("res://input/lever_input.gd")
 const RangeWorldScript := preload("res://view/range_world.gd")
 const LandmarkScript := preload("res://view/landmark.gd")
@@ -128,7 +129,7 @@ var dust: Node3D
 
 
 func _ready() -> void:
-	var opts := {}
+	var opts := {"obstacleCollisions": GameSettings.obstacle_collisions_enabled()}
 	var seek := 0.0
 	var mute := false
 	for a in OS.get_cmdline_user_args():
@@ -1223,10 +1224,47 @@ func _place_camera(k: float) -> void:
 	cam.look_at(pod_p + fwd * 40.0 + Vector3.UP * 1.0, Vector3.UP)
 
 
+## An ascent warning shared by desktop and cockpit: only a launch lane or its parent approach,
+## travelling toward its lip. The posted minimum applies at lift-off, not at the highway exit.
+func _net_jump_approach_text() -> String:
+	if sim.kind != "network" or sim.pod.off_road:
+		return ""
+	for jp in sim.jumps:
+		var launch := int(jp[0])
+		var L = sim.roads[launch]
+		var forward: float = sim.pod.vx * L.tx[L.N - 1] + sim.pod.vy * L.ty[L.N - 1]
+		if forward < -1.0 or (absf(forward) < 1.0 and cos(sim.pod.th) * L.tx[L.N - 1] + sin(sim.pod.th) * L.ty[L.N - 1] < 0.5):
+			continue
+		var on_lane: bool = sim.pod.path == launch
+		var entry := INF
+		if not on_lane:
+			for ji in L.jx:
+				var J: Array = sim.junctions[ji]
+				if int(J[0]) == sim.pod.path and int(J[3]) == launch:
+					entry = (L.px[0] - sim.pod.x) * L.tx[L.N - 1] + (L.py[0] - sim.pod.y) * L.ty[L.N - 1]
+			if entry < -3500.0 or entry > 13000.0:
+				continue
+		var lip: float = maxf(0.0, (L.px[L.N - 1] - sim.pod.x) * L.tx[L.N - 1] + (L.py[L.N - 1] - sim.pod.y) * L.ty[L.N - 1])
+		var mph := roundi(sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy) * 2.236936)
+		var minimum := int(jp[2])
+		var state := "READY" if mph >= minimum else "TOO SLOW"
+		var top := 0.0
+		for key in sim.NET_HEIGHTS:
+			if int(key[0]) == int(jp[1]):
+				for h in key[1]:
+					top = maxf(top, float(h[1]))
+		var where := "LIP %.1f MI" % (lip / 1609.344) if on_lane else ("ENTER RIGHT NOW" if entry <= 800.0 else "RIGHT EXIT %.1f MI" % (entry / 1609.344))
+		return "ASCENT %s  %s\nMIN %d,%03d MPH AT LIP  |  %s\nNOW %s MPH  |  TOP %d FT" % [L.name, where, minimum / 1000, minimum % 1000, state, _grouped_mph(), roundi(top / 0.3048)]
+	return ""
+
+
 ## Second HUD line: lap info on the circuit, mileage and top speed on the range; the job's line on
 ## the emergency run.
 func _progress_text() -> String:
 	if sim.kind == "network":
+		var ascent := _net_jump_approach_text()
+		if ascent != "":
+			return ascent
 		return _net_text()
 	if not sim.job.is_empty():
 		return _job_text()

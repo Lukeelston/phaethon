@@ -79,6 +79,8 @@ func _process(_d: float) -> bool:
 		return false
 	var sim = v.sim
 	T = v.traffic_net
+	T.collide = false
+	sim.P.obstacleCollisions = false
 	v.traffic_net = null   # driven by hand here
 	road = _road("E2")
 	fi = 4000.0
@@ -205,6 +207,7 @@ func _process(_d: float) -> bool:
 		T._feed()
 		return sim.obstacles.is_empty()).call()
 	T.collide = true
+	sim.P.obstacleCollisions = true
 	road = _road("E2")
 	fi = 6000.0
 	speed = 2000.0 / MPH

@@ -55,7 +55,11 @@ function run(script) {
 
 const rec = run(null);
 const rep = run(rec.log);
-const same = JSON.stringify(rec.trace) === JSON.stringify(rep.trace);
+const same = JSON.stringify(rec.trace) === JSON.stringify(rep.trace) && JSON.stringify(rec.events) === JSON.stringify(rep.events);
+if (!same) throw new Error('Mode input replay differs from the recorded run');
+if (JSON.stringify(rep.events.map(e => e[1])) !== JSON.stringify(['starfighter', 'speed', 'starfighter']) ||
+    rep.S.hblend !== 1 || rep.S.P.handling !== 'starfighter')
+  throw new Error('Mode reference must complete all three handling transitions and finish in Starfighter');
 fs.mkdirSync(outDir, { recursive: true });
 fs.writeFileSync(path.join(outDir, 'modes_inputs.json'), JSON.stringify(rec.log));
 fs.writeFileSync(path.join(outDir, 'modes_expected.json'), JSON.stringify({ trace: rep.trace, events: rep.events }, null, 0));

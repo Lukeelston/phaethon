@@ -17,6 +17,8 @@ var buttons: Array[Button] = []
 var title: Label
 var description: Label
 var start_button: Button
+var collision_checkbox: CheckBox
+var start_index := 0
 var _confirm_down := true
 var _stick_down := true
 var _armed := false
@@ -77,13 +79,13 @@ func _build_screen() -> void:
 	var margin := MarginContainer.new()
 	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	for edge in ["left", "right", "top", "bottom"]:
-		margin.add_theme_constant_override("margin_" + edge, 48)
+		margin.add_theme_constant_override("margin_" + edge, 32)
 	screen.add_child(margin)
 	var layout := VBoxContainer.new()
-	layout.add_theme_constant_override("separation", 18)
+	layout.add_theme_constant_override("separation", 12)
 	margin.add_child(layout)
-	layout.add_child(UI.label("PHAETHON", 68))
-	layout.add_child(UI.label("Two engines. One cockpit. We know it’s a little fucky.", 26, UI.MUTED))
+	layout.add_child(UI.label("PHAETHON", 56))
+	layout.add_child(UI.label("Two engines. One cockpit. We know it’s a little fucky.", 24, UI.MUTED))
 	layout.add_child(HSeparator.new())
 	var columns := HBoxContainer.new()
 	columns.add_theme_constant_override("separation", 48)
@@ -100,21 +102,26 @@ func _build_screen() -> void:
 		buttons.append(button)
 	var details := VBoxContainer.new()
 	details.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	details.add_theme_constant_override("separation", 24)
+	details.add_theme_constant_override("separation", 12)
 	columns.add_child(details)
-	title = UI.label("", 36, UI.AMBER)
+	title = UI.label("", 32, UI.AMBER)
 	details.add_child(title)
-	description = UI.label("", 28)
+	description = UI.label("", 24)
 	description.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	details.add_child(description)
+	collision_checkbox = UI.collision_checkbox(28)
+	collision_checkbox.custom_minimum_size.y = 56
+	details.add_child(collision_checkbox)
+	buttons.append(collision_checkbox)
+	details.add_child(UI.label("Pillars and traffic. Guardrails stay on.", 22, UI.MUTED))
 	var spacer := Control.new()
 	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	details.add_child(spacer)
-	details.add_child(UI.label("During flight", 28, UI.AMBER))
-	details.add_child(UI.label("Release controls after Start.\nHold left Menu for map selection.\nThis ends the current run.\nClick either stick to recenter.", 25, UI.MUTED))
+	details.add_child(UI.label("Release controls after Start.\nHold left Menu to choose a map.\nThis ends the current run.", 22, UI.MUTED))
 	start_button = UI.button("Start flight", start_selected, 72)
 	start_button.add_theme_font_size_override("font_size", 30)
 	layout.add_child(start_button)
+	start_index = buttons.size()
 	buttons.append(start_button)
 	var quit_button := UI.button("Quit to desktop", get_tree().quit, 60)
 	quit_button.add_theme_font_size_override("font_size", 26)
@@ -142,9 +149,12 @@ func focus_row(index: int) -> void:
 func activate() -> void:
 	if launching:
 		return
-	buttons[focus_index].pressed.emit()
+	if buttons[focus_index] is CheckBox:
+		buttons[focus_index].button_pressed = not buttons[focus_index].button_pressed
+	else:
+		buttons[focus_index].pressed.emit()
 	if focus_index < UI.COURSES.size():
-		focus_row(UI.COURSES.size())
+		focus_row(start_index)
 
 func start_selected() -> void:
 	if launching or UI.course_index(selected_course) < 0:

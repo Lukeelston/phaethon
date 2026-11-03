@@ -12,6 +12,7 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
+const proof = require('./replay_proof.js');
 const [simPath, outDir, courseArg] = process.argv.slice(2);
 const COURSE = courseArg || 'eridanus';
 global.window = {};
@@ -124,6 +125,11 @@ if (rec.lap === null) {
   process.exit(1);
 }
 const rep = run(rec.log);
+proof.course(rec);
+proof.course(rep);
+if (JSON.stringify(rec.switches) !== JSON.stringify(rep.switches) || Math.abs(rec.lap - rep.lap) > 1e-9) {
+  throw new Error('Recording refused: lap replay differs from its source run.');
+}
 const expected = { lap_time: rep.lap, frames: rep.frames, final_pod: [rep.x, rep.y], track_length: rep.T.length, track_samples: rep.T.N,
   top_mph: rep.top * MPH, hits: rep.hits, switches: rep.switches };
 fs.mkdirSync(outDir, { recursive: true });

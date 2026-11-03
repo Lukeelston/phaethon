@@ -25,10 +25,10 @@ func _initialize() -> void:
 		absf(both[1]) < 10.0 and both[0] < 1.0)
 	var slow := _brake(0.22, [1.0, 0.0], true)
 	_check("one hand at %.0f mph still pivots you hard (%+.0f deg in 3 s)" % [slow[3], slow[1]], absf(slow[1]) > 60.0)
-	var fast := _pull(0.2)
+	var fast := _pull(QC.BRAKE_FLOOR_FAST)
 	var fast_old := _pull(0.1)
-	_check("one hand at %.0f mph (SPEEDCRAFT) pulls a few degrees more: %+.1f deg in 3 s (the old 10%% floor: %+.1f), %.0f mph left" % [fast[3], fast[1], fast_old[1], fast[2]],
-		absf(fast[1]) > absf(fast_old[1]) + 2.0 and absf(fast[1]) < 12.0)
+	_check("one hand at %.0f mph (SPEEDCRAFT) bends the actual path: %+.1f deg in 3 s (10%% control floor: %+.1f), %.0f mph left" % [fast[3], fast[1], fast_old[1], fast[2]],
+		absf(fast[1]) > absf(fast_old[1]) + 2.0 and absf(fast[1]) > 25.0 and absf(fast[1]) < 70.0)
 	var good := fails == 0 and passed == 4
 	print("BRAKES ", "PASS" if good else "FAIL (%d failed, %d passed)" % [fails, passed])
 	quit(0 if good else 1)
@@ -48,13 +48,14 @@ func _pull(floor_fast: float) -> Array:
 		t += 1.0 / 480.0
 	var v0: float = sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy) * 2.236936
 	var h0: float = atan2(sim.pod.vy, sim.pod.vx)
-	for f in int(3.0 * 72):
-		var v: float = sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy)
-		var o: Dictionary = q.update({"lt": 0.0, "rt": 0.0, "lg": 1.0, "rg": 0.0, "ls": Vector2.ZERO, "rs": Vector2.ZERO,
-			"lz": 0.0, "rz": 0.0, "speed": v, "yaw": (sim.eL.w + sim.eR.w) / 2.0}, 1.0 / 72.0)
-		for k in 480 / 72:
-			sim.step({"thrL": o.thrL, "thrR": o.thrR, "brkL": o.brkL, "brkR": o.brkR, "repair": false, "reignite": true}, 1.0 / 480.0)
-			sim.events.clear()
+	var o := {}
+	for i in 3 * 480:
+		if i % 8 == 0:
+			var v: float = sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy)
+			o = q.update({"lt": 0.0, "rt": 0.0, "lg": 1.0, "rg": 0.0, "ls": Vector2.ZERO, "rs": Vector2.ZERO,
+				"lz": 0.0, "rz": 0.0, "speed": v, "yaw": (sim.eL.w + sim.eR.w) / 2.0}, 1.0 / 60.0)
+		sim.step({"thrL": o.thrL, "thrR": o.thrR, "brkL": o.brkL, "brkR": o.brkR, "repair": false, "reignite": true}, 1.0 / 480.0)
+		sim.events.clear()
 	var dh := rad_to_deg(wrapf(atan2(sim.pod.vy, sim.pod.vx) - h0, -PI, PI))
 	return [0.0, dh, sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy) * 2.236936, v0]
 

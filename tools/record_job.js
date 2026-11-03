@@ -15,6 +15,7 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
+const proof = require('./replay_proof.js');
 
 const DT = 1 / 480, SUB = 8, MAX_T = 420, G = 9.81, MPH = 2.236936;
 const SF = { omega: 0.95, aLat: 38 * G, top: 1150 / MPH };
@@ -163,11 +164,13 @@ if (require.main === module) {
     `top ${(rec.top * MPH).toFixed(0)} mph, wall hits ${rec.hits}, dawn dir ${(P.dawnDir * 180 / Math.PI).toFixed(1)} deg t0 ${P.dawnT0} s; events ${JSON.stringify(rec.events)}`);
   const rep = run(PS, kind, null, rec.log);
   const same = JSON.stringify(rep.events) === JSON.stringify(rec.events);
+  proof.job(kind, rec);
+  proof.job(kind, rep);
+  if (!same) throw new Error('Recording refused: job replay events differ from its source run.');
   const expected = { frames: rep.frames, events: rep.events, final_pod: [rep.sim.S.pod.x, rep.sim.S.pod.y], margin: rep.job.margin, route: rep.job.route,
     stage: rep.job.stage, reason: rep.job.reason, t: rep.job.t, hits: rep.hits, dawn: [P.dawnDir, P.dawnT0] };
   fs.mkdirSync(outDir, { recursive: true });
   fs.writeFileSync(path.join(outDir, `job_${kind}_inputs.json`), JSON.stringify(rec.log));
   fs.writeFileSync(path.join(outDir, `job_${kind}_expected.json`), JSON.stringify(expected, null, 1));
   console.log(`replayed: ${rep.job.stage} at ${rep.job.t.toFixed(3)} s (${rec.log.length} frames, events ${same ? 'identical' : 'DIFFER'}) -> ${outDir}`);
-  if (!same) process.exit(1);
 }

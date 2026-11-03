@@ -56,6 +56,8 @@ var hands := {}
 var lever_pivots: Array[Node3D] = []
 var lever_tips: Array[StandardMaterial3D] = []
 var dashboard   # the instrument panel (vr/dashboard.gd)
+var _jump_guidance: Label3D   # rig-mounted ascent readout above the dash; never follows the pilot's eyes
+var _jump_guidance_backing: MeshInstance3D
 var wag = WagMeterScript.new()        # the nose wag since the last report (a WAG: line every 10 s)
 var wag_all = WagMeterScript.new()    # ... over the whole flight (on exit)
 var fade_mat: StandardMaterial3D
@@ -752,14 +754,46 @@ func _report_cpu() -> void:
 	_w_sum.clear()
 
 
+func _update_jump_guidance() -> void:
+	if not _jump_guidance:
+		_jump_guidance = Label3D.new()
+		_jump_guidance.name = "AscentGuidance"
+		_jump_guidance.font_size = 32
+		_jump_guidance.pixel_size = 0.0025
+		_jump_guidance.outline_size = 8
+		_jump_guidance.outline_modulate = Color(0.025, 0.03, 0.035, 0.96)
+		_jump_guidance.position = Vector3(0.0, 1.42, -1.8)
+		_jump_guidance.double_sided = false
+		rig.add_child(_jump_guidance)
+		_jump_guidance_backing = MeshInstance3D.new()
+		_jump_guidance_backing.name = "AscentGuidanceBacking"
+		var face := QuadMesh.new()
+		face.size = Vector2(1.9, 0.35)
+		_jump_guidance_backing.mesh = face
+		var mat := StandardMaterial3D.new()
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		mat.albedo_color = Color(0.015, 0.025, 0.04, 0.96)
+		_jump_guidance_backing.material_override = mat
+		_jump_guidance_backing.position = _jump_guidance.position + Vector3(0.0, 0.0, -0.01)
+		_jump_guidance_backing.scale = _jump_guidance.scale
+		rig.add_child(_jump_guidance_backing)
+	var text := _net_jump_approach_text()
+	_jump_guidance.visible = text != ""
+	_jump_guidance_backing.visible = _jump_guidance.visible
+	_jump_guidance.text = text
+	_jump_guidance.modulate = Color(1.0, 0.55, 0.12) if text.contains("TOO SLOW") else Color(0.45, 1.0, 0.6)
+
+
 func _update_hud() -> void:
+	_update_jump_guidance()
 	var kmh := _kmh()
 	_scheme_flash = maxf(0.0, _scheme_flash - get_process_delta_time())
 	var ctl: String = QuestControlsScript.HINTS[quest.scheme] if _scheme_flash > 0.0 else QuestControlsScript.NAMES[quest.scheme]
 	if minimap_panel.visible:
 		minimap_panel.show_frame(minimap.update(sim.pod.th, get_process_delta_time()))
 	dashboard.show_state({
-		"mph": kmh / 1.609344, "kmh": kmh, "mach_line": cues.readout(), "progress": _progress_text(),
+		"mph": kmh / 1.609344, "kmh": kmh, "mach_line": cues.readout(), "progress": "" if _jump_guidance.visible else _progress_text(),
 		"footer": "%s   /   %s" % [handling_text(), ctl],
 		"thr": [inp.thrL, inp.thrR], "brk": [inp.brkL, inp.brkR], "heat": [sim.eL.heat, sim.eR.heat],
 		"health": [sim.eL.health, sim.eR.health],

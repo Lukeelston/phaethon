@@ -19,7 +19,7 @@ extends SceneTree
 const ViewScript := preload("res://view/craft_view.gd")
 const CraftModelScript := preload("res://view/craft_model.gd")
 const MPH := 2.236936
-const CHECKS := 6
+const CHECKS := 10
 var fails := 0
 var passed := 0
 var v
@@ -69,7 +69,25 @@ func _process(_d: float) -> bool:
 		for spec in v.network_world._signs[key]:
 			if spec[2] == "jump":
 				boards.append(spec[3])
-	_check("board: %d jump boards %s" % [boards.size(), boards.slice(0, 1)], boards.size() == sim.jumps.size() and boards.all(func(b): return b[0] == "JUMP" and b[1] == "3,000+ MPH"))
+	var correct_boards: bool = boards.size() == sim.jumps.size() * 5
+	for jp in sim.jumps:
+		var name: String = "ASCENT " + sim.roads[int(jp[0])].name
+		var mph := int(jp[2])
+		var minimum := "MIN %d,%03d MPH AT LIP" % [mph / 1000, mph % 1000]
+		correct_boards = correct_boards and boards.filter(func(b): return b[0] == name and b[1] == minimum).size() == 5
+	_check("board: %d jump boards, five correct minimums for each of nine ascents" % boards.size(), correct_boards)
+	_line_up(0, 2500.0)
+	var slow: String = v._progress_text()
+	_check("approach below minimum: " + slow, slow.contains("TOO SLOW") and slow.contains("3,000 MPH AT LIP") and slow.contains("TOP") and slow.contains("LIP"))
+	_line_up(0, 4000.0)
+	var ready: String = v._progress_text()
+	_check("approach ready: " + ready, ready.contains("READY") and ready.contains("4,000 MPH") and not ready.contains("TOO SLOW"))
+	for b in sim.bodies:
+		b.vx = -b.vx
+		b.vy = -b.vy
+	_check("approach hidden when facing away", v._net_jump_approach_text().is_empty())
+	_line_up(0, 0.0)
+	_check("stopped on ascent still shows minimum", v._net_jump_approach_text().contains("TOO SLOW") and v._net_jump_approach_text().contains("3,000 MPH AT LIP"))
 	# a jump at 4,000 mph
 	_line_up(0, 4000.0)
 	var st := {"air": "", "caught": "", "off": ""}   # (a Dictionary: lambdas capture locals by value)

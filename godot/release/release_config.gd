@@ -1,5 +1,7 @@
 extends RefCounted
 
+const Settings := preload("res://release/game_settings.gd")
+
 const BACKGROUND := Color("10151b")
 const PANEL := Color("192129")
 const INK := Color("ecede9")
@@ -33,8 +35,8 @@ static func box(color: Color, border: Color = Color.TRANSPARENT) -> StyleBoxFlat
 	style.set_corner_radius_all(4)
 	style.content_margin_left = 22
 	style.content_margin_right = 22
-	style.content_margin_top = 13
-	style.content_margin_bottom = 13
+	style.content_margin_top = 8
+	style.content_margin_bottom = 8
 	return style
 
 static func make_theme() -> Theme:
@@ -67,6 +69,19 @@ static func button(text: String, action: Callable, height: float = 58) -> Button
 	item.custom_minimum_size.y = height
 	item.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	item.pressed.connect(action)
+	return item
+
+static func collision_checkbox(font_size: int = 18) -> CheckBox:
+	var item := CheckBox.new()
+	item.text = "Obstacle collisions"
+	item.custom_minimum_size.y = 38
+	item.add_theme_font_size_override("font_size", font_size)
+	item.add_theme_icon_override("unchecked", preload("res://release/checkbox_off.svg"))
+	item.add_theme_icon_override("checked", preload("res://release/checkbox_on.svg"))
+	item.add_theme_color_override("checkbox_unchecked_color", Color.WHITE)
+	item.add_theme_color_override("checkbox_checked_color", Color.WHITE)
+	item.button_pressed = Settings.obstacle_collisions_enabled()
+	item.toggled.connect(Settings.set_obstacle_collisions)
 	return item
 
 static func controls_panel() -> PanelContainer:

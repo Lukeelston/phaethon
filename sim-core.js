@@ -20,10 +20,10 @@
     // rides a tow bar (<4 deg sway). tools/handling_test.js measures all of it.
     thrustMax: 350000, burnerMult: 1.45, ramjetMult: 1.9, gate: 0.88,
     engineCd: 0.07, podCd: 0.035, brakeCd: 0.04, brakeLin: 0, brakeConst: 60000,
-    // Front speed brakes (Luke, 2026-10-19: "front speed brake flaps for braking done at high
-    // speed"): flaps ahead of the intakes open with the air brakes, phasing in from 1,500 to
-    // 2,500 mph, and add 0.05 to the drag coefficient (the air brakes: 0.04; STARFIGHTER never gets there).
-    frontBrakeCd: 0.05, frontBrakeV0: 670.6, frontBrakeV1: 1117.6,
+    // High-speed flaps brake against full thrust; force is bounded per deployed flap so
+    // unlimited speed cannot turn braking into an instantaneous impulse.
+    frontBrakeCd: 1.0, frontBrakeV0: 558.8, frontBrakeV1: 782.32, frontBrakeMaxG: 90,
+    brakeTurnG: 45,   // additional lateral repulsor authority while the high-speed flaps are deployed
     engineGrip: 30, podGrip: 10, gripCapG: 15, podCapG: 8, finOffset: 0.2, finK: 8,
     yawDamp: 150000, podYawDamp: 50000, podAlignK: 1e6, towK: 1e6, towC: 40000,
     cableLen: 16, cableK: 600000, cableC: 30000, cableCouple: 0.2, podAnchorW: 0.15,
@@ -33,6 +33,7 @@
     // closing speed over smashV (m/s, ~1,500 mph) is the catastrophic hit
     fieldK: 2e6, fieldC: 8e4, smashV: 670,
     damage: false,   // wall hits cost health (and can wreck you) only when this is on
+    obstacleCollisions: true, // pillars/traffic only; the release menu defaults this to off
     towLongK: 2e6, towLongC: 8e4, towLongSlack: 0.3,   // pod stand-off: never closer to the engines than its taut-cable spot
     bank: 1, bankDown: 3.9e-4,   // banked corners: downforce per (m/s)^2, as g, presses you into the bank (~8 g at 1,000 mph)
     towAudit: true, towAuditG: 3,   // tow-bar energy audit: drag on the speed, never harder than this (g) ...
@@ -82,6 +83,7 @@
     speed: {},
     starfighter: {
       thrustMax: 180000, engineCd: 0.725, podCd: 0.3625,
+      frontBrakeCd: 0.05, frontBrakeV0: 670.6, frontBrakeV1: 1117.6, frontBrakeMaxG: 0, brakeTurnG: 0,
       gripCapG: 50, engineGrip: 90, podGrip: 30, podCapG: 30, finK: 3, yawDamp: 20000,
       podAlignK: 6e6, podYawDamp: 250000, towK: 5e6, towC: 200000
     }
@@ -258,11 +260,21 @@
     ['J0', 268000.0, 299900.0, 0.0, 200.0, [['R', 45000.0, 7.1506790378981435, 'sp'], ['L', 45000.0, 7.1506790378981435, 'sp'], ['S', 7796.8754358438055, 0.0, 'sp']]],
     ['K0', 290218.6999999926, 299200.00000000047, 0.0, 400.0, [['S', 36578.175435843805, 0.0, 'sp'], ['L', 45000.0, 7.1506790378981435, 'sp'], ['R', 45000.0, 7.1506790378981435, 'sp']]],
     ['J1', 300100.0, 68000.0, 90.0, 200.0, [['R', 45000.0, 7.1506790378981435, 'sp'], ['L', 45000.0, 7.1506790378981435, 'sp'], ['S', 7796.8754358438055, 0.0, 'sp']]],
-    ['K1', 300799.9999999999, 90218.69999999818, 90.0, 400.0, [['S', 36578.175435843805, 0.0, 'sp'], ['L', 45000.0, 7.1506790378981435, 'sp'], ['R', 45000.0, 7.1506790378981435, 'sp']]],
+    ['K1', 300799.9999999999, 89682.24999999818, 90.0, 400.0, [['S', 37114.6254358438, 0.0, 'sp'], ['L', 45000.0, 7.1506790378981435, 'sp'], ['R', 45000.0, 7.1506790378981435, 'sp']]],
     ['J2', 332000.0, 500100.0, -180.0, 200.0, [['R', 45000.0, 7.1506790378981435, 'sp'], ['L', 45000.0, 7.1506790378981435, 'sp'], ['S', 7796.8754358438055, 0.0, 'sp']]],
-    ['K2', 309781.3000000074, 500799.9999999994, -180.0, 400.0, [['S', 36578.175435843805, 0.0, 'sp'], ['L', 45000.0, 7.1506790378981435, 'sp'], ['R', 45000.0, 7.1506790378981435, 'sp']]],
+    ['K2', 309244.85000000737, 500799.9999999994, -180.0, 400.0, [['S', 36041.7254358438, 0.0, 'sp'], ['L', 45000.0, 7.1506790378981435, 'sp'], ['R', 45000.0, 7.1506790378981435, 'sp']]],
     ['J3', 99900.0, 332000.0, -90.0, 200.0, [['R', 45000.0, 7.1506790378981435, 'sp'], ['L', 45000.0, 7.1506790378981435, 'sp'], ['S', 7796.8754358438055, 0.0, 'sp']]],
-    ['K3', 99199.99999999994, 309781.3000000074, -90.0, 400.0, [['S', 36578.175435843805, 0.0, 'sp'], ['L', 45000.0, 7.1506790378981435, 'sp'], ['R', 45000.0, 7.1506790378981435, 'sp']]],
+    ['K3', 99199.99999999994, 310049.5250000074, -90.0, 400.0, [['S', 36846.4004358438, 0.0, 'sp'], ['L', 45000.0, 7.1506790378981435, 'sp'], ['R', 45000.0, 7.1506790378981435, 'sp']]],
+    ['J4', 100100.0, 68000.0, 90.0, 200.0, [['R', 45000.0, 7.1506790378981435, 'sp'], ['L', 45000.0, 7.1506790378981435, 'sp'], ['S', 7796.8754358438055, 0.0, 'sp']]],
+    ['K4', 100800.00000000006, 89145.79999999818, 90.0, 400.0, [['S', 37651.0754358438, 0.0, 'sp'], ['L', 45000.0, 7.1506790378981435, 'sp'], ['R', 45000.0, 7.1506790378981435, 'sp']]],
+    ['J5', 99900.0, 532000.0, -90.0, 200.0, [['R', 45000.0, 7.1506790378981435, 'sp'], ['L', 45000.0, 7.1506790378981435, 'sp'], ['S', 7796.8754358438055, 0.0, 'sp']]],
+    ['K5', 99199.99999999994, 510585.97500000766, -90.0, 400.0, [['S', 37382.8504358438, 0.0, 'sp'], ['L', 45000.0, 7.1506790378981435, 'sp'], ['R', 45000.0, 7.1506790378981435, 'sp']]],
+    ['J6', 500100.0, 68000.0, 90.0, 200.0, [['R', 45000.0, 7.1506790378981435, 'sp'], ['L', 45000.0, 7.1506790378981435, 'sp'], ['S', 7796.8754358438055, 0.0, 'sp']]],
+    ['K6', 500799.9999999999, 90486.92499999818, 90.0, 400.0, [['S', 36309.9504358438, 0.0, 'sp'], ['L', 45000.0, 7.1506790378981435, 'sp'], ['R', 45000.0, 7.1506790378981435, 'sp']]],
+    ['J7', 499900.0, 332000.0, -90.0, 200.0, [['R', 45000.0, 7.1506790378981435, 'sp'], ['L', 45000.0, 7.1506790378981435, 'sp'], ['S', 7796.8754358438055, 0.0, 'sp']]],
+    ['K7', 499200.0000000001, 308976.6250000074, -90.0, 400.0, [['S', 35773.5004358438, 0.0, 'sp'], ['L', 45000.0, 7.1506790378981435, 'sp'], ['R', 45000.0, 7.1506790378981435, 'sp']]],
+    ['J8', 500100.0, 468000.0, 90.0, 200.0, [['R', 45000.0, 7.1506790378981435, 'sp'], ['L', 45000.0, 7.1506790378981435, 'sp'], ['S', 7796.8754358438055, 0.0, 'sp']]],
+    ['K8', 500799.9999999999, 491291.5999999926, 90.0, 400.0, [['S', 35505.2754358438, 0.0, 'sp'], ['L', 45000.0, 7.1506790378981435, 'sp'], ['R', 45000.0, 7.1506790378981435, 'sp']]],
     ['OEridanus', 266000.0, 304000.0, 0.0, 200.0, [['R', 12000.0, 33.12294020774379, 'sp'], ['L', 12000.0, 33.12294020774379, 'sp']]],
     ['ODunes', 134000.0, 504000.0, 180.0, 200.0, [['L', 12000.0, 33.12294020774379, 'sp'], ['R', 12000.0, 33.12294020774379, 'sp']]],
     ['OGlacier', 466000.0, 504000.0, 0.0, 200.0, [['R', 12000.0, 33.12294020774379, 'sp'], ['L', 12000.0, 33.12294020774379, 'sp']]],
@@ -289,8 +301,10 @@
     [2, 0, 77, 51, 0, 74, -1], [2, 0, 77, 51, 1751, 1825, 1], [2, 23105, 23182, 52, 0, 74, 1], [2, 23105, 23182, 52, 1751, 1825, -1], [3, 0, 77, 53, 0, 74, -1], [3, 0, 77, 53, 1751, 1825, 1],
     [3, 23154, 23231, 54, 0, 74, 1], [3, 23154, 23231, 54, 1751, 1825, -1], [4, 0, 77, 55, 0, 74, -1], [4, 0, 77, 55, 1751, 1825, 1], [4, 23145, 23222, 56, 0, 74, 1], [4, 23145, 23222, 56, 1751, 1825, -1],
     [5, 0, 77, 57, 0, 74, -1], [5, 0, 77, 57, 1751, 1825, 1], [5, 23117, 23194, 58, 0, 74, 1], [5, 23117, 23194, 58, 1751, 1825, -1], [1, 10299, 10505, 59, 0, 187, 1], [1, 12990, 13235, 60, 1768, 1995, 1],
-    [4, 1782, 1988, 61, 0, 187, 1], [4, 4473, 4718, 62, 1768, 1995, 1], [2, 12701, 12907, 63, 0, 187, -1], [2, 9971, 10216, 64, 1768, 1995, -1], [3, 12739, 12945, 65, 0, 187, -1], [3, 10009, 10254, 66, 1768, 1995, -1],
-    [1, 10662, 10782, 67, 479, 580, 1], [2, 3985, 4105, 68, 479, 580, -1], [2, 19077, 19197, 69, 479, 580, 1], [0, 3985, 4105, 70, 479, 580, -1], [0, 19036, 19156, 71, 479, 580, 1],
+    [4, 1782, 1988, 61, 0, 187, 1], [4, 4473, 4718, 62, 1790, 2017, 1], [2, 12701, 12907, 63, 0, 187, -1], [2, 9971, 10216, 64, 1745, 1972, -1], [3, 12739, 12945, 65, 0, 187, -1], [3, 10009, 10254, 66, 1779, 2006, -1],
+    [3, 1782, 1988, 67, 0, 187, 1], [3, 4473, 4718, 68, 1812, 2039, 1], [3, 21243, 21449, 69, 0, 187, -1], [3, 18513, 18758, 70, 1801, 2028, -1], [5, 1782, 1988, 71, 0, 187, 1], [5, 4473, 4718, 72, 1756, 1983, 1],
+    [5, 12689, 12895, 73, 0, 187, -1], [5, 9959, 10204, 74, 1734, 1961, -1], [5, 18726, 18932, 75, 0, 187, 1], [5, 21417, 21662, 76, 1723, 1950, 1], [1, 10662, 10782, 77, 479, 580, 1], [2, 3985, 4105, 78, 479, 580, -1],
+    [2, 19077, 19197, 79, 479, 580, 1], [0, 3985, 4105, 80, 479, 580, -1], [0, 19036, 19156, 81, 479, 580, 1],
   ];
   // [name, biome, centre x, centre y, road, terminal sample]
   const NET_CITIES = [
@@ -307,17 +321,27 @@
     [5, [[2750, 0.0, 0.0], [3000, 120.0, 0.0], [3250, 120.0, 0.0], [3500, 0.0, 0.0], [11177, 0.0, 0.0], [11427, 120.0, 0.0], [11677, 120.0, 0.0], [11927, 0.0, 0.0], [19694, 0.0, 0.0], [19944, 120.0, 0.0], [20194, 120.0, 0.0], [20444, 0.0, 0.0]]],
     [59, [[628, 0.0, 0.0], [795, 299.49980670365215, 0.1494510013491278]]],
     [60, [[0, 748.6536860839753, 0.13150334629453153], [208, 1076.886038435126, 0.0], [991, 1076.886038435126, 0.0], [1574, 0.0, 0.0]]],
-    [61, [[628, 0.0, 0.0], [795, 299.49980670365215, 0.1494510013491278]]],
-    [62, [[0, 748.6536860839753, 0.13150334629453153], [208, 1076.886038435126, 0.0], [991, 1076.886038435126, 0.0], [1574, 0.0, 0.0]]],
-    [63, [[628, 0.0, 0.0], [795, 299.49980670365215, 0.1494510013491278]]],
-    [64, [[0, 748.6536860839753, 0.13150334629453153], [208, 1076.886038435126, 0.0], [991, 1076.886038435126, 0.0], [1574, 0.0, 0.0]]],
-    [65, [[628, 0.0, 0.0], [795, 299.49980670365215, 0.1494510013491278]]],
-    [66, [[0, 748.6536860839753, 0.13150334629453153], [208, 1076.886038435126, 0.0], [991, 1076.886038435126, 0.0], [1574, 0.0, 0.0]]],
+    [61, [[628, 0.0, 0.0], [795, 228.32695903649758, 0.1139356083016455]]],
+    [62, [[0, 502.310972284849, 0.0925954855548939], [208, 733.4293042298642, 0.0], [1013, 733.4293042298642, 0.0], [1597, 0.0, 0.0]]],
+    [63, [[628, 0.0, 0.0], [795, 389.5381395119878, 0.19438030913771848]]],
+    [64, [[0, 1087.1448432958694, 0.1787641478261213], [208, 1533.3401562698682, 0.0], [969, 1533.3401562698682, 0.0], [1552, 0.0, 0.0]]],
+    [65, [[628, 0.0, 0.0], [795, 263.83160516514124, 0.13165249758739583]]],
+    [66, [[0, 620.5263053977804, 0.11216905672683439], [208, 900.5002709879591, 0.0], [1002, 900.5002709879591, 0.0], [1585, 0.0, 0.0]]],
+    [67, [[628, 0.0, 0.0], [795, 175.32728170595172, 0.08748866352592401]]],
+    [68, [[0, 331.5911891678977, 0.06095378913690197], [208, 483.731846853605, 0.0], [1036, 483.731846853605, 0.0], [1619, 0.0, 0.0]]],
+    [69, [[628, 0.0, 0.0], [795, 210.62888747241564, 0.10510423526567647]]],
+    [70, [[0, 432.78802015235755, 0.08143826755011199], [208, 636.057935957437, 0.0], [1024, 636.057935957437, 0.0], [1608, 0.0, 0.0]]],
+    [71, [[628, 0.0, 0.0], [795, 353.3592693397638, 0.17632698070846498]]],
+    [72, [[0, 936.0667957587359, 0.1596180289599231], [208, 1334.473396042704, 0.0], [980, 1334.473396042704, 0.0], [1563, 0.0, 0.0]]],
+    [73, [[628, 0.0, 0.0], [795, 444.27610393645153, 0.22169466264293988]]],
+    [74, [[0, 1303.5952628242878, 0.20695996631301689], [208, 1820.167338741578, 0.0], [957, 1820.167338741578, 0.0], [1541, 0.0, 0.0]]],
+    [75, [[628, 0.0, 0.0], [795, 499.6533176977341, 0.24932800284318068]]],
+    [76, [[0, 1536.6600310797119, 0.23534284876553296], [208, 2124.075781598482, 0.0], [946, 2124.075781598482, 0.0], [1530, 0.0, 0.0]]],
   ];
   // [launch road (its end is a lip), catch deck, the slowest that lands (mph)]
-  const NET_JUMPS = [[59, 60, 3000.0], [61, 62, 3000.0], [63, 64, 3000.0], [65, 66, 3000.0]];
+  const NET_JUMPS = [[59, 60, 3000.0], [61, 62, 2500.0], [63, 64, 3500.0], [65, 66, 2750.0], [67, 68, 2000.0], [69, 70, 2250.0], [71, 72, 3250.0], [73, 74, 3750.0], [75, 76, 4000.0]];
   // [city, road]: the on-ramps from the open ground (their start is open)
-  const NET_ONRAMPS = [[0, 67], [1, 68], [2, 69], [3, 70], [4, 71]];
+  const NET_ONRAMPS = [[0, 77], [1, 78], [2, 79], [3, 80], [4, 81]];
   // </network>
   // The courses: straights and exact arcs, sampled every ~12 m. widths: per mode (else GP_WIDTH,
   // constant); widthR: the width-easing box (samples); banks: per mode, degrees (else GP_BANK in
@@ -787,10 +811,21 @@
     // a damper on the closing speed, no friction, no damage); touching one starts a 'bump' (once per
     // contact); closing faster than smashV is the catastrophic hit: a 'smash' and a crash.
     function collideObstacles(b, circles) {
+      if (!P.obstacleCollisions) { b.touch.clear(); return; }
       const inside = new Set();
       for (const o of S.obstacles) {
+        if (b.z + 1 < (o.zMin ?? -Infinity) || b.z - 1 > (o.zMax ?? Infinity)) continue;
         for (const [cx, cy, r] of circles) {
-          const dx = cx - o.x, dy = cy - o.y, d = Math.hypot(dx, dy), pen = r + o.r - d;
+          let dx = cx - o.x, dy = cy - o.y, depth = o.r;
+          if (o.halfSize > 0) {
+            const h = o.halfSize, qx = dx - clamp(dx, -h, h), qy = dy - clamp(dy, -h, h);
+            if (qx === 0 && qy === 0) {
+              depth = h - Math.max(Math.abs(dx), Math.abs(dy)) + 1;
+              if (Math.abs(dx) >= Math.abs(dy)) { dx = dx >= 0 ? 1 : -1; dy = 0; }
+              else { dx = 0; dy = dy >= 0 ? 1 : -1; }
+            } else { dx = qx; dy = qy; depth = 0; }
+          }
+          const d = Math.hypot(dx, dy), pen = r + depth - d;
           if (pen <= 0 || d < 1e-6) continue;
           const nx = dx / d, ny = dy / d;
           const [vx, vy] = pointVel(b, cx, cy), vn = (vx - o.vx) * nx + (vy - o.vy) * ny;
@@ -982,6 +1017,19 @@
       const speed = Math.hypot(Pd.vx, Pd.vy);
 
       const gm = inp.thrMul ?? 1;   // the gearbox's pull (its ratio, at its revs; 1 without one)
+      const brakeGrip = P.brakeTurnG * Math.max(inp.brkL, inp.brkR) * smooth01((speed - P.frontBrakeV0) / (P.frontBrakeV1 - P.frontBrakeV0));
+      let cruiseDrag = 1;
+      if (inp.gearOverdrive) {
+        // Fourth's baseline drag approaches full-throttle thrust, giving logarithmic
+        // speed growth without a terminal speed. Brake drag remains fully effective.
+        const driveMult = ramjet ? P.ramjetMult : burner ? P.burnerMult : 1;
+        const nominalThrust = 2 * P.thrustMax * (0.87 / P.gate) * driveMult * gm;
+        const totalCd = 2 * P.engineCd + P.podCd;
+        const referenceSpeed = Math.sqrt(Math.max(1, nominalThrust / totalCd));
+        const blend = smooth01((speed / referenceSpeed - 0.6) / 0.2);
+        const shapedDrag = nominalThrust * (1 - Math.exp(-speed / (0.65 * referenceSpeed)));
+        cruiseDrag = 1 + (shapedDrag / Math.max(1, totalCd * speed * speed) - 1) * blend;
+      }
       for (const [e, thr, brk] of [[L, inp.thrL, inp.brkL], [R, inp.thrR, inp.brkR]]) {
         const c = Math.cos(e.th), s = Math.sin(e.th);
         const gain = e.flameout || !P.limits ? 0 : Math.max(0, thr - 0.6) * P.heatThrottle + (burner ? P.heatBurner : 0) + (ramjet ? P.heatRamjet : 0);
@@ -1002,13 +1050,14 @@
         // A constant term keeps the brakes biting across a 100x speed range (smoothed below 2 m/s).
         const v = Math.hypot(e.vx, e.vy);
         e.front = P.frontBrakeCd > 0 ? brk * smooth01((v - P.frontBrakeV0) / (P.frontBrakeV1 - P.frontBrakeV0)) : 0;
-        const cd = (P.engineCd + P.brakeCd * brk + P.frontBrakeCd * e.front) * P.forceScale;
+        const frontCd = P.frontBrakeMaxG > 0 ? Math.min(P.frontBrakeCd, e.m * P.frontBrakeMaxG * G / Math.max(v * v, 1)) : P.frontBrakeCd;
+        const cd = (P.engineCd * cruiseDrag + P.brakeCd * brk + frontCd * e.front) * P.forceScale;
         const bl = (P.brakeLin * brk + P.brakeConst * brk / Math.max(v, 2)) * P.forceScale;
         e.fx -= cd * v * e.vx + bl * e.vx; e.fy -= cd * v * e.vy + bl * e.vy;
         const fxp = e.x - c * P.finOffset, fyp = e.y - s * P.finOffset;
         const [pvx, pvy] = pointVel(e, fxp, fyp), vlat = -s * pvx + c * pvy;
-        // Repulsor grip saturates; braking lowers the cap, which is what lets you drift.
-        const cap = e.m * P.gripCapG * G * (1 - 0.45 * brk);
+        // Low-speed braking permits drift; deployed high-speed flaps restore cornering grip.
+        const cap = e.m * G * (P.gripCapG * (1 - 0.45 * brk) + brakeGrip);
         const flat = clamp(-e.m * P.engineGrip * vlat, -cap, cap) * e.grip;
         applyAt(e, -s * flat, c * flat, fxp, fyp);
         e.t -= P.yawDamp * e.w;
@@ -1059,7 +1108,7 @@
       });
 
       const pb = Math.min(inp.brkL, inp.brkR);
-      const pv = Math.hypot(Pd.vx, Pd.vy), pcd = (P.podCd + 0.5 * P.brakeCd * pb) * P.forceScale;
+      const pv = Math.hypot(Pd.vx, Pd.vy), pcd = (P.podCd * cruiseDrag + 0.5 * P.brakeCd * pb) * P.forceScale;
       const pbl = 0.5 * (P.brakeLin * pb + P.brakeConst * pb / Math.max(pv, 2)) * P.forceScale;
       Pd.fx -= pcd * pv * Pd.vx + pbl * Pd.vx; Pd.fy -= pcd * pv * Pd.vy + pbl * Pd.vy;
       const qx = Pd.x - pc * 1.2, qy = Pd.y - ps * 1.2, [qvx, qvy] = pointVel(Pd, qx, qy);

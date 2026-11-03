@@ -26,6 +26,9 @@ func _run() -> void:
 	await process_frame
 	var menu = current_scene
 	_check("menu labels and buttons fit the 1280 x 720 viewport", _controls_fit(menu))
+	if DisplayServer.get_name() != "headless":
+		await RenderingServer.frame_post_draw
+		_check("desktop collision menu screenshot saved", root.get_texture().get_image().save_png("res://../evidence/menu-collision-desktop.png") == OK)
 	overlay.set_paused(true)
 	_check("Escape cannot pause the menu", not paused and not overlay.is_paused)
 	menu.start_course("missing")
@@ -55,8 +58,7 @@ func _run() -> void:
 		_check("pause controls fit the viewport", _controls_fit(overlay))
 		_check("paused gameplay silences the master bus", AudioServer.is_bus_mute(0))
 		overlay.resume_game()
-		await process_frame
-		await process_frame
+		await create_timer(0.025).timeout # headless frames can be shorter than one fixed physics step
 		_check("resume restores gameplay and audio", not paused and not AudioServer.is_bus_mute(0) and view.sim.time > before)
 		if course == "gp":
 			overlay.set_paused(true)

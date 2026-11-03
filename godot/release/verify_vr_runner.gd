@@ -4,7 +4,8 @@ extends Node
 const View := preload("res://view/craft_view.gd")
 const Cockpit := preload("res://vr/vr_cockpit.gd")
 const Boot := preload("res://release/vr_boot.gd")
-const Stops := ["range", "gp", "eridanus", "emergency", "network", "range"]
+const Settings := preload("res://release/game_settings.gd")
+const Stops := ["range", "gp", "eridanus", "emergency", "network", "network", "range"]
 
 var checks := 0
 var failures := 0
@@ -13,6 +14,8 @@ var _started_ms := 0
 var _finished := false
 var _prefs_existed := false
 var _prefs_before := PackedByteArray()
+var _settings_existed := false
+var _settings_before := PackedByteArray()
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
@@ -56,6 +59,9 @@ func shot(name: String) -> void:
 	check(name + " VR scene screenshot saved", image.save_png(evidence.path_join("pcvr-" + name + ".png")) == OK)
 
 func _run() -> void:
+	_settings_existed = FileAccess.file_exists(Settings.PREFS)
+	if _settings_existed:
+		_settings_before = FileAccess.get_file_as_bytes(Settings.PREFS)
 	_prefs_existed = FileAccess.file_exists(Cockpit.PREFS)
 	if _prefs_existed:
 		_prefs_before = FileAccess.get_file_as_bytes(Cockpit.PREFS)
@@ -96,9 +102,12 @@ func _run() -> void:
 		var menu = get_tree().current_scene
 		check(stop + " starts at the VR menu", menu.scene_file_path == "res://release/vr_menu.tscn")
 		menu.set_process(false) # Explicitly XR-off diagnostic supplies controller samples below.
+		var collisions := index % 2 == 1
+		menu.collision_checkbox.button_pressed = collisions
+		check(stop + " obstacle checkbox persists", Settings.obstacle_collisions_enabled() == collisions)
 		menu.choose_course(stop)
 		check(stop + " selection keeps menu open", get_tree().current_scene == menu and menu.selected_course == stop)
-		menu.focus_row(5)
+		menu.focus_row(menu.start_index)
 		menu.consume_controller(0.0, true, true)
 		check(stop + " held entry trigger cannot launch", not menu.launching)
 		menu.consume_controller(0.0, false, true)
@@ -110,6 +119,7 @@ func _run() -> void:
 			return
 		check(stop + " native track selection is correct", view._track() == stop)
 		check(stop + " job selection is correct", not view.sim.job.is_empty() if stop == "emergency" else view.sim.job.is_empty())
+		check(stop + " launch respects obstacle checkbox", view.sim.P.obstacleCollisions == collisions)
 		check(stop + " has XR origin and camera", view.origin is XROrigin3D and view.cam is XRCamera3D)
 		check(stop + " has both controller nodes", view.hands.get("left") is XRController3D and view.hands.get("right") is XRController3D)
 		check(stop + " controller trackers are assigned", view.hands.left.tracker == &"left_hand" and view.hands.right.tracker == &"right_hand")
@@ -149,12 +159,24 @@ func _run() -> void:
 		check(stop + " desktop pause cannot reroute VR", get_tree().current_scene == view and not get_tree().paused and not overlay.is_paused)
 		if index < Stops.size() - 1:
 			await shot(stop)
+		view._respawn()
+		check(stop + " restart keeps obstacle checkbox", view.sim.P.obstacleCollisions == collisions)
+		if stop == "network":
+			check("VR traffic follows obstacle checkbox", view.traffic_net.collide == collisions)
+			for city in view.sim.cities:
+				if city.name == "DUNES":
+					view.sim.respawn_on(int(city.road), int(city.i), 1)
+			view.enter_city_gp()
+			await get_tree().scene_changed
+			view = get_tree().current_scene
+			check("VR city GP keeps obstacle checkbox", view.sim.track_name == "gp_dunes" and view.sim.P.obstacleCollisions == collisions)
 		var old: WeakRef = weakref(view)
 		view.return_to_menu()
 		await get_tree().scene_changed
 		await frames(2)
 		check(stop + " returns to VR menu and unloads flight", get_tree().current_scene.scene_file_path == "res://release/vr_menu.tscn" and old.get_ref() == null)
 		check(stop + " menu remembers selection", get_tree().current_scene.selected_course == stop)
+		check(stop + " menu restores obstacle checkbox", get_tree().current_scene.collision_checkbox.button_pressed == collisions)
 	await frames(3)
 	_finish()
 
@@ -172,6 +194,14 @@ func _finish() -> void:
 		check("VR diagnostic restores saved preferences", prefs != null and FileAccess.get_file_as_bytes(Cockpit.PREFS) == _prefs_before)
 	elif FileAccess.file_exists(Cockpit.PREFS):
 		check("VR diagnostic removes only preferences it created", DirAccess.remove_absolute(ProjectSettings.globalize_path(Cockpit.PREFS)) == OK)
+	if _settings_existed:
+		var settings := FileAccess.open(Settings.PREFS, FileAccess.WRITE)
+		if settings:
+			settings.store_buffer(_settings_before)
+			settings.close()
+		check("VR diagnostic restores exact game settings", settings != null and FileAccess.get_file_as_bytes(Settings.PREFS) == _settings_before)
+	elif FileAccess.file_exists(Settings.PREFS):
+		check("VR diagnostic removes only game settings it created", DirAccess.remove_absolute(ProjectSettings.globalize_path(Settings.PREFS)) == OK)
 	print("EXPORTED VR RELEASE %s (%d checks, %d failures)" % ["PASS" if failures == 0 else "FAIL", checks, failures])
 	print("PHYSICAL VR UNVERIFIED: headset tracking, stereo rendering, controller feel and comfort still need a headset session.")
 	get_tree().quit(0 if failures == 0 else 1)

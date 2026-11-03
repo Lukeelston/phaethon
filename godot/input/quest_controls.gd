@@ -84,9 +84,8 @@ const BRAKE_REF := 134.0    # triggers: the grips (air brakes) magnet like the t
                             # you 150 deg in 3 s and flung the pod into the engines (Luke: "if i brake
                             # too hard, the pod flies forward"). Now it slows you and turns you ~40 deg.
 const BRAKE_FLOOR := 0.1         # ... the difference never fades below this ...
-const BRAKE_FLOOR_FAST := 0.2    # ... rising to this from 2,000 to 2,500 mph: a one-hand brake at 4,000 mph
-                                 # turns you ~6 deg in 3 s, not ~3 (Luke: "they need a bit more pull - just
-                                 # a few degrees on this course"); the grand prix (~1,000 mph) is untouched
+const BRAKE_FLOOR_FAST := 0.3    # Speedcraft's high-speed flaps retain deliberate one-hand steering.
+                                 # Rises smoothly from 1,250 to 1,750 mph; Starfighter keeps its original mapping.
 const HOLD_FULL_AT := 0.15  # triggers: the hold is at full strength from this much throttle (lever)
 const GEARS := [[1.0, 1.0, 1.0], [1.3, 0.75, 0.40], [1.16, 0.4, 0.62], [1.06, 0.25, 0.84], [1.0, 0.18, 1.0]]
 	# [pull, steering, reference speed fraction]. Audio profile 0 is STARFIGHTER's sole gear;
@@ -372,7 +371,8 @@ func update(c: Dictionary, delta: float) -> Dictionary:
 			var bm := (bl + br) / 2.0
 			var bd := magnetise(bl - br, magnet_w)
 			if brake_ref > 0.0 and spd > brake_ref:
-				bd *= clampf(pow(brake_ref / spd, 2.0), lerpf(BRAKE_FLOOR, brake_floor_fast, smoothstep(894.1, 1117.6, spd)), 1.0)
+				var fast := 0.0 if starfighter else smoothstep(558.8, 782.32, spd)
+				bd *= clampf(pow(brake_ref / spd, 2.0), lerpf(BRAKE_FLOOR, brake_floor_fast, fast), 1.0)
 			out.brkL = clampf(bm + bd / 2.0, 0.0, 1.0)
 			out.brkR = clampf(bm - bd / 2.0, 0.0, 1.0)
 		"mixed":

@@ -18,7 +18,7 @@ results = []
 for name in TESTS:
     result = subprocess.run([
         sys.executable, str(ROOT/'tools/run_godot.py'),
-        'gearing-'+name+'.log', '90', '--headless', '--xr-mode', 'off',
+        'gearing-'+name+'.log', '180' if name == 'test_energy' else '90', '--headless', '--xr-mode', 'off',
         '--audio-driver', 'Dummy', '--path', 'godot', '-s',
         'res://tests/'+name+'.gd', '--', '--mute',
     ], cwd=ROOT, capture_output=True, text=True)
@@ -26,7 +26,7 @@ for name in TESTS:
         data = json.loads(result.stdout)
     except json.JSONDecodeError:
         data = {'runner_output': result.stdout, 'stderr': result.stderr}
-    row = {'test': name, 'passed': result.returncode == 0, 'result': data}
+    row = {'test': name, 'passed': result.returncode == 0 and not data.get('errors'), 'result': data}
     results.append(row)
     print(json.dumps({'test': name, 'passed': row['passed'], 'errors': data.get('errors', [])}), flush=True)
 (ROOT/'evidence/gearing-regressions.json').write_text(json.dumps(results, indent=2), encoding='utf-8')

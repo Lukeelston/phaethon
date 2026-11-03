@@ -3,7 +3,7 @@
 A seated VR podracer flown with two 3D-printed throttle levers, one per engine.
 Spec: https://claude.ai/artifact/VeY5CdSPzxcEq568JgkJh8 (source: `phaethon.html`).
 
-The v0.1.4 release builds open a main menu with Sprint, Grand Prix, Eridanus,
+The v0.1.5 release builds open a main menu with Sprint, Grand Prix, Eridanus,
 Emergency Run, and the Network. In PC VR, flick either stick up/down and use A
 or a trigger to select a map, then Start flight. Hold the left Menu button for
 1.5 seconds to end the current run and return to selection; tapping it still
@@ -30,8 +30,9 @@ return through the pause menu.
 Sprint 100 miles from a standing start, then stop dead inside the 50 m box at mile 100. The
 clock starts when you push the levers and stops when the pod is still (under 0.5 m/s) inside
 the box. More than 15 km past the box, or a crash, is a DNF. **Y restarts.** The best time is
-saved to `user://sprint_best.json`. Full brakes from 4,450 mph take about 11.1 km (6.9 mi), so
-the decision comes around miles 92–93. Countdown boards stand at 20, 15 and 10 down to 1 miles
+saved to `user://sprint_best.json`. Braking distance depends on handling mode, speed and held
+throttle. Speedcraft's stronger high-speed brakes shorten the stop; leave room to settle into
+the finish box. Countdown boards stand at 20, 15 and 10 down to 1 miles
 to go, then at 1000, 500, 250 and 100 m; a light column and a STOP marker sit on the box.
 
 Speed context on the way: the dash shows the Mach number and how long a mile takes. Opening the air brakes adds their own deep, growling roar, panned to the side that's braking. At speed they shudder in uneven 4–9 Hz bursts: you hear it in the roar, feel it as a tremor in the hand on that brake, and see the cockpit shake a few millimetres. Your view itself never shakes. Mach 1
@@ -45,6 +46,14 @@ At 1,500 mph the speed shield powers up, then seals out the wind; it opens again
 that rises with actual airspeed. Neither follows gear RPM, so an upshift drops the engine
 note without dropping the shield tone. The speed tone continues rising beyond the old
 top speed in Speedcraft fourth gear. `tests/test_speed_shield.gd` checks the separation.
+
+**High-speed air brakes.** In Speedcraft, stronger front flaps deploy smoothly between
+1,250 and 1,750 mph. Braking also adds lateral grip, so the flight path follows the nose
+through a turn. One grip turns toward that side; both brake straight. In a three-second
+simulation starting at 4,000 mph with the throttles released, one grip turns the path
+48 degrees, versus 10 before this change. Held throttle still allows useful braking;
+releasing it shortens the stop. Starfighter and unbraked flight retain their prior tuning.
+`tests/test_speed_brakes.gd` measures actual controller input, turn radius, energy and release.
 
 Marker poles and a telegraph line tick past every 50 m; trucks (70 mph), freight trains
 (90 mph) and airliners (575 mph, 450 m up) give you something to lap. Dust plumes stream off
@@ -144,7 +153,7 @@ The lap starts with a 2.8 km main straight into the T1-T2 braking drop (~510 mph
 
 New: thrust-vectoring vanes in the nozzle that swing with your steering, side intake louvres, top exhaust ports, coolant louvres, raised access covers with rivets, lights (red and green nav lights, a double-flash fin strobe, tail and landing lights, cyan repulsor underglow), and an upgraded energy binder: ring emitters on the inner faces, with a core beam and three crackling strands that shift toward violet as the binder strains. They bank and pitch with the turns and the track.
 
-**Hard braking.** The pod keeps its place behind the engines. Brake hard, or spin the pair, and the cables go slack, so a stand-off pushes back if the pod closes in past its taut-cable spot. It acts along the engines' centreline, compression only, equal and opposite, so it can't twist them or create energy. The grips magnet like the triggers, so nearly-even hands brake exactly evenly. Above 300 mph the difference between your grips fades as (300 mph / speed)²: a one-hand brake at 900 mph slows you and turns you about 40°, where it used to spin you 150° and fling the pod into the engines (`tests/test_brakes.gd`). The cables flex: they sag with their slack and sway and twang when their tension jumps. Their glow follows their engine's thrust and turns amber, then pulsing red, as their tension nears its limit. **Banked corners.** Every GP corner banks up to 15° toward its inside (it was 30°), easing in and out over about 360 m. The corners pivot on the inside edge, so that edge stays at ground level and the outside climbs up to 26 m on an earth berm. The banking is real physics in both sims: the surface pushes you toward the corner's centre with g·tan(bank), plus a downforce term that grows with speed squared (`bankDown`). In the big sweepers at 1,000 mph that's about 4–5 g of help; in the hairpins it's under 1 g. The craft and cockpit ride up the banking, roll with it on top of the lean (capped at 70° in total), and pitch with its rise and fall. Trackside: 96 m of asphalt, kerbs on every apex, and tall walls where the sim's walls are, so you can read where the track goes. Each wall is concrete topped with panels to 5.5 m, with a lit strip along the top: red on the left wall and green on the right, like navigation lights. Yellow chevrons on the outside wall of every corner start 120 m before it and point the way it turns. A lit mast every 96 m shows the line over the inside wall. There are braking boards at 3000/2000/1000 ft before the slow corners (raised above the walls), turn numbers, a start gantry and grandstands. The pod's nose is an open tube cage from the footwell forward, so you can see the track coming through it. Inside the cockpit there's a grated deck plate, a footrest bar and pedals out over the cage, frame ribs and coloured hoses along the walls, and a switch console down each side with toggles, backlit buttons and placards. A gate plate sits round each throttle lever, with the burner gate in orange, and there's a harness on the seat. A light strip runs just under the rim, coloured by mode: blue, amber on the burner, violet on the ramjet (`vr/cockpit_interior.gd`). The pod rides 1.3 m higher than the sim's body ("higher than the engines just a little bit more - a few feet": it was 0.4). That's a visual change only, and in VR your eye rides up with it, a little above the cockpit rim and further over the engines. The tow cables glow with their own engine's real thrust. They're dark at idle, energized blue as thrust rises, and white-hot and crackling on the burner. A damaged engine's sputter flickers its cable, and a flameout goes dark. The lap record is saved per handling.
+**Hard braking.** The pod keeps its place behind the engines. Brake hard, or spin the pair, and the cables go slack, so a stand-off pushes back if the pod closes in past its taut-cable spot. It acts along the engines' centreline, compression only, equal and opposite, so it can't twist them or create energy. The grips magnet like the triggers, so nearly-even hands brake exactly evenly. Above 300 mph the difference between your grips fades as (300 mph / speed)², with a 30% differential floor at high speed in Speedcraft: a one-hand brake at 900 mph slows you and turns you about 40°, where it used to spin you 150° and fling the pod into the engines (`tests/test_brakes.gd`). The cables flex: they sag with their slack and sway and twang when their tension jumps. Their glow follows their engine's thrust and turns amber, then pulsing red, as their tension nears its limit. **Banked corners.** Every GP corner banks up to 15° toward its inside (it was 30°), easing in and out over about 360 m. The corners pivot on the inside edge, so that edge stays at ground level and the outside climbs up to 26 m on an earth berm. The banking is real physics in both sims: the surface pushes you toward the corner's centre with g·tan(bank), plus a downforce term that grows with speed squared (`bankDown`). In the big sweepers at 1,000 mph that's about 4–5 g of help; in the hairpins it's under 1 g. The craft and cockpit ride up the banking, roll with it on top of the lean (capped at 70° in total), and pitch with its rise and fall. Trackside: 96 m of asphalt, kerbs on every apex, and tall walls where the sim's walls are, so you can read where the track goes. Each wall is concrete topped with panels to 5.5 m, with a lit strip along the top: red on the left wall and green on the right, like navigation lights. Yellow chevrons on the outside wall of every corner start 120 m before it and point the way it turns. A lit mast every 96 m shows the line over the inside wall. There are braking boards at 3000/2000/1000 ft before the slow corners (raised above the walls), turn numbers, a start gantry and grandstands. The pod's nose is an open tube cage from the footwell forward, so you can see the track coming through it. Inside the cockpit there's a grated deck plate, a footrest bar and pedals out over the cage, frame ribs and coloured hoses along the walls, and a switch console down each side with toggles, backlit buttons and placards. A gate plate sits round each throttle lever, with the burner gate in orange, and there's a harness on the seat. A light strip runs just under the rim, coloured by mode: blue, amber on the burner, violet on the ramjet (`vr/cockpit_interior.gd`). The pod rides 1.3 m higher than the sim's body ("higher than the engines just a little bit more - a few feet": it was 0.4). That's a visual change only, and in VR your eye rides up with it, a little above the cockpit rim and further over the engines. The tow cables glow with their own engine's real thrust. They're dark at idle, energized blue as thrust rises, and white-hot and crackling on the burner. A damaged engine's sputter flickers its cable, and a flameout goes dark. The lap record is saved per handling.
 
 `tools/design_gp.py` designed the layout. It solves two straights so the loop closes, keeps the track 184 m clear of itself, and plots the result. The scripted pilot laps it clean in 81.2 s (top 991 mph on the lever alone, 806 mph average). The GP parity gate replays that lap in Godot exactly.
 
@@ -190,9 +199,10 @@ into the river Eridanus; the course runs down its valley.
   cut it ... a 'proximity sensor' to the line of least wrecks"; `view/speed_guide.gd`). Every
   track sample has a safe speed: the limits the autopilot plans its clean lap to, with 1,200 mph
   or less in the towns so STARFIGHTER can engage. Full braking is modelled from the sim's own
-  drag for the live handling: the air brakes, the front speed brakes above 1,500 mph, and
-  STARFIGHTER's drag below 1,250 mph, since you flip as you slow. It stops within 1% of the sim:
-  4,000 to 1,250 mph is 4.10 mi in the sim and 4.11 mi in the guide. For any point ahead, the
+  drag for the live handling: the air brakes, front speed brakes deploying above 1,250 mph,
+  their high-speed force cap, and STARFIGHTER's drag below 1,250 mph when you switch.
+  Full braking from 4,000 to 1,250 mph now takes about 1.34 mi in the simulation.
+  For any point ahead, the
   guide works out the share of full braking it takes to be down to that point's safe speed when
   you get there.
   - **The beacons and light columns** light by that share for their own point: green where your
@@ -201,10 +211,10 @@ into the river Eridanus; the course runs down its valley.
     green only ever mean the guide.
   - **The braking boards** light the same way for the town ahead (the worst over its first
     2 mi), blink red when you'll blow past it, and fill a ten-lamp gauge, one lamp per tenth of
-    full braking. At 4,000 mph the 8-mile board reads green (0.53) and the 4-mile board red
-    (1.06); at 2,000 mph the 4-mile board is green (0.38).
-  - The autopilot's clean lap never needs more than 0.89 for a town, so the guide doesn't cry
-    wolf (`tests/test_speed_guide.gd`).
+    full braking. Colors use the current braking model rather than fixed speed/distance pairs.
+  - `tests/test_speed_guide.gd` compares the guide with simulated braking and checks the
+    clean course lap, so the lights reflect the current tuning.
+
 
 The world round it is green: a blue-grey haze and clearer air (fog 0.0002 against 0.00035), and
 the river, with poplar lines down its banks and both bridges where the track crosses it. There's
@@ -216,10 +226,10 @@ so the floating origin keeps millimetres at 50 km out (`view/course_world.gd`,
 to the bounding box cut the course's corners and put the track under the hills
 (`tests/test_eridanus_world.gd` keeps every ridge 5 km or more away; it's 7.4 km).
 
-The scripted pilot laps it in 185.3 s, clean (top 4,292 mph, average 2,407 mph). It flips to
-SPEEDCRAFT leaving each town (~1,220 mph) and back to STARFIGHTER into each one (engaging at 971
-and 1,126 mph). Measured SPEEDCRAFT cornering is ~14 g on a lever split and ~10 g on one brake, so
-it holds the sweepers on the levers and bleeds the surplus off on both brakes. The course parity
+The scripted pilot laps it in 188.8375 s, clean (top 4,292 mph, average 2,362 mph). It flips to
+SPEEDCRAFT leaving each town (~1,220 mph) and back to STARFIGHTER into each one (engaging at
+938 mph). The autopilot holds the sweepers on the levers and bleeds the surplus off on both brakes.
+Speedcraft now adds grip during high-speed air braking. The course parity
 gate replays that lap in Godot exactly, switches and all. One lap record, since every lap flies
 both modes.
 
@@ -248,9 +258,9 @@ mine collapse; you carry the medical team out and get home before the dawn.
   that horizon growing as it nears, the land behind it lit, and its line and countdown on the
   minimap. It only catches you in the open: the towns, the covered ramps and the shade line's
   canopy are shelter. Tuned by `tools/tune_dawn.js` against the autopilot's runs with a human
-  allowance of 15 s (`ALLOWANCE` in `tools/record_job.js`): the autopilot makes it by 20.0 s on the
-  open loop and 18.6 s on the shade line, so a pilot 15 s slower still makes it by about 5 s; a run
-  21 s late on the pad is caught; and the lake town stays dark 31.8 s after the drop.
+  allowance of 15 s (`ALLOWANCE` in `tools/record_job.js`): the autopilot makes it by 18.2 s on the
+  open loop and 16.3 s on the shade line in the current recording; a run
+  21 s late on the pad is caught after completing the delivery.
 - **Finding the pad** (Luke never saw it the first time: he flew past it and the dawn caught him on
   lap 2). Two red light columns 700 m tall stand either side of it, an overhead sign half a mile
   before it reads `MEDICAL PAD  /  STOP ON THE CROSS  /  1/2 MI`, the minimap carries a red cross
@@ -259,7 +269,7 @@ mine collapse; you carry the medical team out and get home before the dawn.
 - **The covered ramps** (Luke: "a 'receiving' and 'outgoing' onramp ... such that the vehicle can
   reach speed inside of a structure before being exposed to light"): halls 110 m tall over the
   loop's first and last 4 miles at each town, lit bars across the roof every 48 m. Full lever takes
-  SPEEDCRAFT from 1,200 to 4,000 mph in 3.9 mi; full brakes take it back to 1,250 in 4.1 mi. Home,
+  SPEEDCRAFT from 1,200 to 4,000 mph in 3.9 mi; full brakes take it back to 1,250 in about 1.34 mi. Home,
   the deadline is getting back under cover: the start town's receiving ramp on the open loop.
 - **The shade line** is a private covered STARFIGHTER line, 10 mi long, from the loop's final
   straight into the start town. Its gate says PRIVATE LINE unless the job authorizes you, and like
@@ -357,18 +367,14 @@ traffic and racers, jumps and the open ground, and the cities' GPs.
   light"); thin sky-blue wall strips (pink through a STARFIGHTER zone), not white ones; darker,
   less glossy asphalt; a deeper blue haze that brightens less toward the sun. `tests/render_network.gd`
   checks the horizon band at 4,400 mph: its whitest 5-row strip is 9% near-white (the gate is 30%).
-- **Jumps** (Luke: "taking a massive interchange and using it as a ramp to jump 2 miles and 1500' up
-  to the entrance of the next ramp"): four of them, at the centre crossing (E2 east), N2 north over
-  E1, E3 west over N2 and N1 south over E2. A launch spur leaves the highway 32 km before the
-  crossing (an orange board: `JUMP  3,000+ MPH`), slides out 800 m and kicks up 4 km to a lip 299 m
-  up at 8.5 deg (12 g at 4,000 mph). Two miles on and 1,500 ft above the lip a catch deck, 400 m wide
-  with a green-lit lip, is waiting on the line a 3,000 mph jump flies: at 4,000 you're 1.7 s in the
-  air and it reaches up for you from 16 m above it; at 3,000 you just make it; slower you arrive
-  under its lip, it turns you down and you drop to the open ground. Hold the levers through the kick:
-  at 4,000 mph the drag is 16 g, so lifting off 7 km out leaves you at 2,600 by the lip. The deck
-  pulls you level (it keeps climbing to 3,500 ft first: at these speeds you'd otherwise climb for 47
-  km), crosses the interchange on pylons, comes down and merges back. The dash reads `AIRBORNE  1.2 s
-  2,400 FT`, then `CAUGHT  1.7 s IN THE AIR  4,326 MPH`.
+- **Jumps:** nine long ascent routes, spread across the highway crossings, with varied
+  launch angles and heights. Their marked minimum launch speeds range from 2,000 to
+  4,000 mph. Advance, entrance and launch signs identify the ramp and its required
+  speed; the approach display shows distance, current speed and readiness. The
+  minimum applies at the launch lip, so hold enough throttle through the climb.
+  Each gap leads to a raised catch deck, then a long descent back to the highway.
+  Arriving too slowly can miss the deck and drop you to lower roads or open ground.
+  The existing airborne timer, caught message and recovery on-ramps remain.
 - **The roads' heights are real now** (both sims): the deck lock, the roads' forcefield, holds you to
   the surface as well as up off it (at 4,000 mph any crest tighter than a 326 km radius would throw
   you off: every flyover would be a jump). Off a road's open end (a lip, the end of the road) you're
@@ -384,16 +390,17 @@ traffic and racers, jumps and the open ground, and the cities' GPs.
 - **Halls** (the Network's tunnels): a 4 km hall over every city's terminal, its roof 110 m up, a lit
   bar across it every 96 m, steel ribs, pink-lit portals; inside, the air closes in (CourseAudio's
   reverb and tunnel ring, as in Eridanus' covered ramps).
-- **No collision with traffic** (Luke, after a flight with nine smashes: "please turn off collision"):
-  the vehicles go through you; their forcefields stay in the sims for the tests (`collide` in
-  `view/network_traffic.gd`). The walls still hold you on the road.
+- **Obstacle collisions:** a checkbox on both main menus controls impacts with bridge
+  pillars and traffic. It defaults off and remembers the choice. Guardrails always
+  keep the craft on the road; ground contact and jump landings remain active.
+  Pillar collisions respect their actual height, so the deck above stays drivable.
 - **Traffic's sound and forcefields:** a vehicle you pass close (or that passes you) whooshes by from
   where it is (`audio/traffic_audio.gd`: a synthesized noise burst through a falling band, louder the
   nearer and harder the pass); a wall's push flares the pod's forcefield white-blue (softer for a
   scrape; a bump with traffic too, when collision's on).
 - **The whole country on the minimap** (Luke, after "I only saw 1 jump and never ran into a gp":
-  "make the minimap the whole extents"): on the Network the map shows all 72 roads, north up, with
-  the four jumps (orange), the four GP cities (pink), every city, the on-ramps (violet), the craft
+  "make the minimap the whole extents"): on the Network the map shows all 82 roads, north up, with
+  the nine jumps (orange), the four GP cities (pink), every city, the on-ramps (violet), the craft
   and its target (`view/minimap.gd` `whole`; the near-roads, heading-up map is `whole = false`).
 - **The edges ramp up** (Luke: "make the walls ramp up on the sides rather that a hard stop? Let the
   craft drift a bit"): the outer 15% of each side (30-60 m across) rises toward the wall as a
@@ -470,13 +477,17 @@ bring both back.
 
 **Front speed brakes** (Luke: "front speed brake flaps for braking done at high speed"). A petal
 on each engine's flanks, just behind the intake lip, swings out with that engine's air brake.
-They phase in from 1,500 to 2,500 mph and add 0.05 to the drag coefficient (the air brakes add
-0.04), so STARFIGHTER never reaches them. Full brakes now take SPEEDCRAFT from 4,000 to
-1,250 mph in 4.4 mi (it was 5.2), at 47 g at the top. They're physics in both sims, so the sprint
-reference changed and the autopilot's sprint finish is now 143.1 s. **More pull from one air
-brake at speed** ("just a few degrees on this course"): above 2,000 mph the grip difference
-never fades below 20% (it was 10%), so a one-hand brake at 4,000 mph turns you 9° in 3 s instead
-of 4.7°. The grand prix is untouched (`tests/test_brakes.gd`).
+In Speedcraft they phase in from 1,250 to 1,750 mph, with a drag coefficient of 1.0 and
+a force cap of 90 g per fully deployed engine flap. Braking adds up to 45 g of lateral
+authority, scaled by deployment and the stronger brake input. The controller retains a
+30% brake differential at high speed. Starfighter keeps its original settings.
+Full brakes take Speedcraft from 4,000 to 1,250 mph in 2,162 m (1.34 mi), measured in the
+simulation. From 4,448 mph to a full stop takes about 4,884 m. One Quest grip at 4,000 mph,
+with both triggers released, turns the actual path 48.1 degrees in three seconds, versus
+10.1 before. The paired JS/Godot sprint reference finishes in 107.560 seconds, 0.31 m short
+of the box center. See `test_speed_brakes.gd`, `test_speed_brakes_parity.gd` and the release
+report for input assumptions and validation; physical headset feel still needs Luke's check.
+
 
 **The ride over the banking** (Luke: "going over hills makes the camera very shaky"). The
 cockpit's pitch used to read the surface's slope over a fixed 4 m. The surface is a 12 m

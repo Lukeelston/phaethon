@@ -134,6 +134,7 @@ func build(s, v, w) -> void:
 	sim = s
 	view = v
 	world = w
+	collide = bool(sim.P.obstacleCollisions)
 	_rng.seed = 20261019
 	for k in BRAKE_AT.size():
 		_brake_at_s.append(float(BRAKE_AT[k]) / 24.0)
@@ -817,12 +818,12 @@ func _render() -> void:
 ## The near vehicles as the sims' obstacles: circles along each body (a train's cars each), with
 ## its velocity (the sim moves them between frames).
 func _feed() -> void:
-	if not collide:   # (Luke, 2026-10-20: "please turn off collision": nine smashes in a flight)
+	if not collide or not sim.P.obstacleCollisions:
 		sim.obstacles = []
 		return
-	var obs: Array = []
 	var px: float = sim.pod.x
 	var py: float = sim.pod.y
+	var obs: Array = world.obstacles_near(px, py)
 	for c in cars:
 		if Vector2(c.x - px, c.y - py).length() > R_FIELD:
 			continue
@@ -840,7 +841,11 @@ func _feed() -> void:
 				parts = [[3.5 * SCALE, 2.6 * SCALE], [-3.5 * SCALE, 2.6 * SCALE]]
 		for q in parts.size():
 			var back: float = parts[q][0]
-			obs.append({"id": c.id * 32 + q, "r": parts[q][1], "x": c.x - c.hx * back, "y": c.y - c.hy * back, "vx": vx, "vy": vy})
+			# _render keeps the whole rigid train at its lead vehicle's height.
+			# Bounds must follow that visible body, not a different road sample.
+			var h: float = sim.net_height(c.road, c.f)
+			obs.append({"id": c.id * 32 + q, "r": parts[q][1], "x": c.x - c.hx * back, "y": c.y - c.hy * back,
+				"vx": vx, "vy": vy, "zMin": h, "zMax": h + (9.6 if c.kind == TRANSPORT else 6.0)})
 	sim.obstacles = obs
 
 

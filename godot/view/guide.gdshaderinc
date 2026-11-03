@@ -8,6 +8,7 @@ uniform float s_now = 0.0;                              // how far along the lap
 uniform float lap = 1.0;                                // the lap, m
 uniform vec4 brake = vec4(0.0, 1e-4, 1e-4, 1e-4);       // live handling: c0, c2 flaps shut, half, full
 uniform vec4 brake_sf = vec4(0.0, 1e-3, 1e-3, 1e-3);    // STARFIGHTER's (below its engage speed)
+uniform float brake_front_cap = 0.0;                  // front flaps' acceleration ceiling; zero = uncapped
 uniform vec3 speeds = vec3(670.6, 1117.6, 558.8);       // front flaps from, to; STARFIGHTER engages below
 
 const float GUIDE_AMBER_AT = 0.6;
@@ -24,7 +25,38 @@ float guide_seg(float va, float vb, float c0, float c2) {
 	return va > vb ? log((c0 + c2 * va * va) / (c0 + c2 * vb * vb)) / (2.0 * c2) : 0.0;
 }
 
-// Full brakes from v down to vt, m: the live handling (front flaps full, half, shut) down to
+float guide_front_seg(float va, float vb) {
+	if (va <= vb) { return 0.0; }
+	float a = va;
+	float d = 0.0;
+	float front = brake.w - brake.y;
+	if (brake_front_cap > 0.0 && front > 0.0) {
+		float vc = sqrt(brake_front_cap / front);
+		if (a > vc) {
+			float e = max(vb, vc);
+			d += guide_seg(a, e, brake.x + brake_front_cap, brake.y);
+			a = e;
+		}
+	}
+	return d + guide_seg(a, vb, brake.x, brake.w);
+}
+
+float guide_ramp_seg(float va, float vb) {
+	if (va <= vb) { return 0.0; }
+	float h = (va - vb) / 8.0;
+	float sum = 0.0;
+	for (int i = 0; i <= 8; i++) {
+		float v = vb + h * float(i);
+		float front = (brake.w - brake.y) * v * v;
+		if (brake_front_cap > 0.0) { front = min(front, brake_front_cap); }
+		float accel = brake.x + brake.y * v * v + front * smoothstep(speeds.x, speeds.y, v);
+		float weight = (i == 0 || i == 8) ? 1.0 : ((i % 2 == 1) ? 4.0 : 2.0);
+		sum += weight * v / max(accel, 1e-6);
+	}
+	return sum * h / 3.0;
+}
+
+// Full brakes from v down to vt, m: live handling (capped full flaps, smooth deployment, shut) down to
 // STARFIGHTER's engage speed, then STARFIGHTER's.
 float guide_stop(float v, float vt) {
 	if (v <= vt) {
@@ -35,12 +67,12 @@ float guide_stop(float v, float vt) {
 	float lo = max(vt, speeds.z);
 	if (a > speeds.y) {
 		float e = max(lo, speeds.y);
-		d += guide_seg(a, e, brake.x, brake.w);
+		d += guide_front_seg(a, e);
 		a = e;
 	}
 	if (a > vt && a > speeds.x) {
 		float e = max(lo, speeds.x);
-		d += guide_seg(a, e, brake.x, brake.z);
+		d += guide_ramp_seg(a, e);
 		a = e;
 	}
 	if (a > vt && a > speeds.z) {

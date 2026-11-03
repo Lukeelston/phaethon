@@ -17,11 +17,11 @@ docs/superpowers/specs/2026-10-19-network-design.md. Phase 1, the mesh:
   the highway on one side and coming back on the other, the highway's end just past the split.
 Phase 3, jumps and the ground (Luke: "taking a massive interchange and using it as a ramp to jump 2
 miles and 1500' up to the entrance of the next ramp"):
-- four jump sets, one at each of four crossings, on the right of the way they're taken: a launch
+- nine jump sets, one at each crossing, on the right of the way they're taken: a launch
   spur leaves the highway JL_LEAVE before the crossing, slides out to JL_LAT, and its last JL_KICK
-  rises (a parabola, so the pull is even: 12 g at 4,000 mph) to a lip at JL_ANG, JL_LIP short of
-  the crossing. Two miles on (JUMP_GAP) and 1,500 ft above the lip, a catch deck JC_W wide starts
-  on the trajectory of JUMP_REF (3 m under it): its window's low end, since at these speeds gravity
+  rises (a parabola, so the pull is even) to its configured lip angle, JL_LIP short of
+  the crossing. Each gap scales from the original two miles with its minimum speed; a catch deck
+  JC_W wide starts on the minimum speed's trajectory (3 m under it), its window's low end; gravity
   barely bends the line (faster arrives higher, the deck's lock reaches JC_REACH up for it; slower
   arrives under its lip and drops). The deck pulls out level over JC_PULL, crosses the
   interchange high, comes down to the ground by JC_DOWN past the crossing and merges back;
@@ -63,18 +63,20 @@ GAP = 300.0                       # clear between roads outside their junction z
 UP = 30.0                         # ... or this far apart in height (a deck over a road)
 G = 9.81
 MPH = 0.44704
-JUMP_GAP = 3218.7                 # 2 miles, lip to catch deck
-JUMP_UP = 457.2                   # 1,500 ft
-JL_ANG = 8.5                      # the lip's angle, deg (4,000 mph: 2 mi and 1,500 ft up in 1.8 s)
+JUMP_GAP = 3218.7                 # reference gap at 3,000 mph; others scale with minimum speed
 JL_LEAVE, JL_LIP, JL_KICK, JL_LAT = 32 * KM, 13 * KM, 4 * KM, 800.0
-JUMP_REF = 3000.0                 # mph: the slowest that lands (the catch deck's lip is on its line)
 JC_W, JC_REACH, JC_PULL = 400.0, 40.0, 5 * KM
 JC_FLAT, JC_DOWN, JC_MERGE = 14 * KM, 28 * KM, 38 * KM   # level to, down by, merged by (past the crossing)
-JUMPS = [   # highway (E/N index), crossing (i, j), the way it's taken (+1 up its samples)
-    ("E", 1, (1, 1), 1),
-    ("N", 1, (1, 0), 1),
-    ("E", 2, (1, 2), -1),
-    ("N", 0, (0, 1), -1),
+JUMPS = [   # highway, index, crossing, direction, minimum mph, lip angle deg
+    ("E", 1, (1, 1), 1, 3000.0, 8.5),   # original jump: retain its location and profile
+    ("N", 1, (1, 0), 1, 2500.0, 6.5),
+    ("E", 2, (1, 2), -1, 3500.0, 11.0),
+    ("N", 0, (0, 1), -1, 2750.0, 7.5),
+    ("N", 0, (0, 0), 1, 2000.0, 5.0),
+    ("N", 0, (0, 2), -1, 2250.0, 6.0),
+    ("N", 2, (2, 0), 1, 3250.0, 10.0),
+    ("N", 2, (2, 1), -1, 3750.0, 12.5),
+    ("N", 2, (2, 2), 1, 4000.0, 14.0),
 ]
 ON_OUT, ON_R, ON_AT = 4 * KM, 12 * KM, 34 * KM   # on-ramps: out from the highway, their S, start short of the crossing
 CITIES = [   # name, biome, crossing (i, j) on (LINES x, LINES y), quadrant (qx, qy)
@@ -242,7 +244,7 @@ def build():
             roads.append(r)
     # jump sets
     jumps = []
-    for axis, li, (ci, cj), d in JUMPS:
+    for axis, li, (ci, cj), d, ref, angle in JUMPS:
         H = roads[(ew if axis == "E" else ns)[li]]
         X, Y = LINES[ci], LINES[cj]
         fx, fy = ((1.0, 0.0) if axis == "E" else (0.0, 1.0))
@@ -257,32 +259,33 @@ def build():
         L = Road(f"J{len(jumps)}", "jump", x0, y0, hdg, W_RAMP,
                  [("R", S_R, th, "sp"), ("L", S_R, th, "sp"), ("S", st, 0, "sp")])
         L.role = "launch"
-        m_lip = math.tan(math.radians(JL_ANG))
+        m_lip = math.tan(math.radians(angle))
         k0 = L.N - 1 - round(JL_KICK / STEP)
         h_lip = (L.N - 1 - k0) * STEP * m_lip / 2.0   # a parabola from level: the even pull
         L.keys = [[k0, 0.0, 0.0], [L.N - 1, h_lip, m_lip]]
         joins.append((len(roads), 0, roads.index(H)))
         roads.append(L)
-        # the catch deck, two miles on: on JUMP_REF's line, 3 m under it
-        v = JUMP_REF * MPH
+        # Scale the gap with the advertised speed: similar flight time / capture margin, varied rise.
+        gap = JUMP_GAP * ref / 3000.0
+        v = ref * MPH
         c2 = 1.0 / (1.0 + m_lip * m_lip)        # cos^2 of the lip's angle
-        hc = h_lip + JUMP_GAP * m_lip - G * JUMP_GAP ** 2 / (2 * v * v * c2) - 3.0
-        mc = m_lip - G * JUMP_GAP / (v * v * c2)
+        hc = h_lip + gap * m_lip - G * gap ** 2 / (2 * v * v * c2) - 3.0
+        mc = m_lip - G * gap / (v * v * c2)
         lx, ly = L.p[-1]
-        cx0, cy0 = lx + fx * JUMP_GAP, ly + fy * JUMP_GAP
-        along = JC_MERGE - s_len + JL_LIP - JUMP_GAP   # catch start (crossing - JL_LIP + gap) to the S
+        cx0, cy0 = lx + fx * gap, ly + fy * gap
+        along = JC_MERGE - s_len + JL_LIP - gap   # catch start (crossing - JL_LIP + gap) to the S
         C = Road(f"K{len(jumps)}", "jump", cx0, cy0, hdg, JC_W,
                  [("S", along, 0, "sp"), ("L", S_R, th, "sp"), ("R", S_R, th, "sp")])
         C.role = "catch"
         ip = round(JC_PULL / STEP)
         top = hc + ip * STEP * mc / 2.0          # the pull-out: a parabola to level
-        u_c0 = -JL_LIP + JUMP_GAP                # the deck's start, from the crossing
+        u_c0 = -JL_LIP + gap                     # the deck's start, from the crossing
         i_flat = round((JC_FLAT - u_c0) / STEP)
         i_down = round((JC_DOWN - u_c0) / STEP)
         C.keys = [[0, hc, mc], [ip, top, 0.0], [i_flat, top, 0.0], [i_down, 0.0, 0.0]]
         joins.append((len(roads), 1, roads.index(H)))
         roads.append(C)
-        jumps.append((len(roads) - 2, len(roads) - 1, JUMP_REF, h_lip, top))
+        jumps.append((len(roads) - 2, len(roads) - 1, ref, h_lip, top))
     # on-ramps from the open ground, one a city
     onramps = []
     for k, (name, biome, (i, j), (qx, qy)) in enumerate(CITIES):
@@ -470,14 +473,15 @@ def check(roads, joins, J, cities, ew, ns, jumps=(), onramps=()):
         bad(f"{len(roads) - len(seen)} roads unreachable")
     # the jumps: the lip's angle, and who lands (the trajectory against the deck's lip: a speed
     # lands if it arrives over the deck's start and within JC_REACH of it)
-    for li, ci, ref, h_lip, top in jumps:
+    for jump_index, (li, ci, ref, h_lip, top) in enumerate(jumps):
         L, C = roads[li], roads[ci]
         m_lip = (L.h(L.N - 1) - L.h(L.N - 1 - 0.01)) / (0.01 * STEP)
-        if abs(math.degrees(math.atan(m_lip)) - JL_ANG) > 0.05:
-            bad(f"{L.name}'s lip is {math.degrees(math.atan(m_lip)):.2f} deg (want {JL_ANG})")
+        angle = JUMPS[jump_index][5]
+        if abs(math.degrees(math.atan(m_lip)) - angle) > 0.05:
+            bad(f"{L.name}'s lip is {math.degrees(math.atan(m_lip)):.2f} deg (want {angle})")
         gap = math.hypot(C.p[0, 0] - L.p[-1, 0], C.p[0, 1] - L.p[-1, 1])
         lands = []
-        for mph in range(2000, 7001, 250):
+        for mph in range(1500, 7001, 250):
             v = mph * MPH
             c2 = 1.0 / (1.0 + m_lip * m_lip)
             y = h_lip + gap * m_lip - G * gap * gap / (2 * v * v * c2)
@@ -486,7 +490,7 @@ def check(roads, joins, J, cities, ew, ns, jumps=(), onramps=()):
         lo = min((m for m, ok_ in lands if ok_), default=None)
         if lo is None or lo > ref + 1 or not all(ok_ for m, ok_ in lands if m >= lo):
             bad(f"{L.name}: lands {[m for m, ok_ in lands if ok_]} (want {ref:.0f} mph and up)")
-        print(f"  jump {L.name} -> {C.name}: lip {h_lip:.0f} m at {JL_ANG} deg, {gap:.0f} m to a deck "
+        print(f"  jump {L.name} -> {C.name}: lip {h_lip:.0f} m at {angle} deg, {gap:.0f} m to a deck "
               f"{C.h(0) - h_lip:.0f} m above it ({(C.h(0) - h_lip) / 0.3048:.0f} ft), level at {top:.0f} m; lands from {lo} mph")
     for k, r in onramps:
         O = roads[r]

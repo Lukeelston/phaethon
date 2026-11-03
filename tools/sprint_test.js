@@ -5,7 +5,7 @@
 const fs = require('fs');
 global.window = {};
 eval(fs.readFileSync(process.argv[2], 'utf8'));
-const brakeAt = +(process.argv[3] || 11300);
+const brakeAt = +(process.argv[3] || 5100); // measured 4,884 m full-lever stop + 216 m margin
 const DT = 1 / 480;
 const sim = window.PhaethonSim.makeSim({ track: 'range' }), S = sim.S, BOX = sim.box.x;
 const ev = [];

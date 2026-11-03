@@ -1,5 +1,5 @@
 PHAETHON
-Experimental Desktop Racer - Windows x64 - v0.1.4
+Experimental Desktop Racer - Windows x64 - v0.1.5
 ElstonWorks
 
 Two engines. One cockpit. We know it's a little fucky.
@@ -23,11 +23,20 @@ handling, sparse scenery, rough collisions, and the occasional spectacular
 mistake. There is no multiplayer. This download is the flat-screen edition.
 Future features, updates, and other platforms are not part of this purchase.
 
+The Network has nine ascent ramps with different heights and minimum launch
+speeds from 2,000 to 4,000 mph. Signs and the approach display show the speed
+needed at the launch lip. Keep enough throttle through the climb.
+The main-menu Obstacle collisions checkbox controls bridge pillars and
+traffic. It defaults off and saves your choice. Guardrails always keep you
+on the road; ground contact and jump landings remain active.
+
 FIRST FLIGHT
 Hold E briefly to raise both throttles, then release it. Throttle stays where
 you leave it. Hold D to reduce both; X cuts both. Engine thrust does not brake
 you: hold A and Right Arrow together for both air brakes. Brake early.
 Use unequal thrust or individual air brakes to turn. Small inputs are useful.
+In Speedcraft, air brakes gain drag and turning grip above 1,250 mph. Brake
+on the side you want to turn toward; both together slow you in a straight line.
 Backspace returns you to the track but keeps the throttle setting. Cut with X
 first, or use Escape > Restart course for a completely fresh start.
 
@@ -70,4 +79,4 @@ copyright. Third-party components and the CC BY engine audio retain their
 own licenses and permissions. See THIRD_PARTY_NOTICES.txt and licenses/.
 Adapted engine audio is also supplied separately in audio/engines/.
 
-Build: 0.1.4-experimental | 2026-11-02
+Build: 0.1.5-experimental | 2026-11-02

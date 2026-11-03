@@ -6,8 +6,8 @@
 ##            (below 1,250 mph the guide counts on STARFIGHTER's drag: you flip as you slow)
 ##   the line safe speeds: 1,200 mph or less in the towns, the top on the loop's straights, the
 ##            sweepers in between
-##   the cut  at the 8-mile board at 4,000 mph the town ahead is green, at the 4-mile board red, at
-##            the 4-mile board at 2,000 mph green again; the colours run green, amber, red
+##   the cut  approaching the town raises braking demand: 4,000 mph is safe four miles out but
+##            cannot be shed in the final mile; arriving at 1,200 mph leaves room again
 ##   honest   the autopilot's clean lap never needs more than full brakes for a town
 ## Prints SPEED GUIDE PASS.
 ## Run: Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_speed_guide.gd
@@ -18,7 +18,7 @@ const Guide := preload("res://view/speed_guide.gd")
 const CW := preload("res://view/course_world.gd")
 const DT := 1.0 / 480.0
 const MPH := 2.236936
-const CHECKS := 6
+const CHECKS := 5
 var fails := 0
 var passed := 0
 
@@ -71,9 +71,10 @@ func _initialize() -> void:
 	var town: int = g.mouths[0]
 	var q8 := _cut_at(sim, g, town, 8.0, 4000.0)
 	var q4 := _cut_at(sim, g, town, 4.0, 4000.0)
-	var q4s := _cut_at(sim, g, town, 4.0, 2000.0)
-	_check("the cut for the town: at the 8-mile board at 4,000 mph %.2f (green), at the 4-mile board %.2f (red), there at 2,000 mph %.2f (green)" % [q8, q4, q4s],
-		q8 < Guide.AMBER_AT and q4 > Guide.RED_AT and q4s < Guide.AMBER_AT)
+	var q1 := _cut_at(sim, g, town, 1.0, 4000.0)
+	var q1s := _cut_at(sim, g, town, 1.0, 1200.0)
+	_check("town approach: 4,000 mph at 8/4/1 miles needs %.2f/%.2f/%.2f of full brakes; at 1 mile and 1,200 mph %.2f" % [q8, q4, q1, q1s],
+		q8 < q4 and q4 < q1 and q4 < Guide.AMBER_AT and q1 > Guide.RED_AT and q1s < Guide.AMBER_AT)
 	var cg: Color = Guide.color(0.2)
 	var ca: Color = Guide.color(0.8)
 	var cr: Color = Guide.color(1.2)
@@ -96,13 +97,8 @@ func _initialize() -> void:
 		var v: float = sqrt(run.pod.vx * run.pod.vx + run.pod.vy * run.pod.vy)
 		worst = maxf(worst, gr.town_cut(v, gr.brake_model(), gr.brake_model("starfighter")))
 	_check("honest: the autopilot's clean lap never needs more than %.2f of full braking for a town" % worst, worst < Guide.RED_AT)
-	# wired into the trackside: the boards' material and the lights' share the guide
-	var code: String = FileAccess.get_file_as_string("res://view/guide.gdshaderinc")
-	_check("the GPU's sums are the guide's (view/guide.gdshaderinc: three-piece stop, AMBER_AT %.1f, RED_AT %.1f)" % [Guide.AMBER_AT, Guide.RED_AT],
-		code.contains("guide_stop") and code.contains("%.1f" % Guide.AMBER_AT) and code.contains("%.1f" % Guide.RED_AT)
-		and FileAccess.get_file_as_string("res://view/beacon.gdshader").contains("guide.gdshaderinc")
-		and FileAccess.get_file_as_string("res://view/pylon.gdshader").contains("guide.gdshaderinc")
-		and FileAccess.get_file_as_string("res://view/board.gdshader").contains("guide.gdshaderinc"))
+	# GPU arithmetic and material uniforms are exercised by test_speed_guide_shader.gd,
+	# which renders the actual shared include and reads its output instead of inspecting text.
 	var good: bool = fails == 0 and passed == CHECKS
 	print("SPEED GUIDE ", "PASS" if good else "FAIL (%d failed, %d of %d passed)" % [fails, passed, CHECKS])
 	quit(0 if good else 1)

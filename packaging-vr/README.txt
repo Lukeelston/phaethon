@@ -1,5 +1,5 @@
 PHAETHON - EXPERIMENTAL PC VR EDITION
-Windows x64 / OpenXR - v0.1.4 - ElstonWorks
+Windows x64 / OpenXR - v0.1.5 - ElstonWorks
 
 Two engines. One cockpit. We know it's a little fucky.
 
@@ -50,7 +50,9 @@ Speedcraft has four gears. Each higher gear winds up more slowly and reaches
 a higher engine note. Upshifts drop the revs before the next climb.
 Speedcraft gears 1-3 have limiters; fourth keeps gaining speed at full throttle,
 with progressively smaller gains. Its engine note also keeps rising.
-Air brakes still work; plan the stop earlier as speed rises.
+Speedcraft air brakes gain drag and turning grip above 1,250 mph. Hold one
+grip to turn toward that side, or both to brake straight. Ease off the triggers
+to shorten the stop. Leave room to settle into a tight corner or finish box.
 Starfighter retains ordinary aerodynamic drag and does not use overdrive.
 
 Above 1,500 mph the speed shield powers up and muffles the wind. Its low
@@ -91,6 +93,16 @@ to close the game. The menu stays still; stick-click brings it in front of you.
   Tap A to select the next destination. Hold A for one second inside an
   eligible city's Starfighter zone to enter its Grand Prix.
 
+NETWORK JUMPS AND OBSTACLES
+Nine ascent ramps have different heights and minimum launch speeds from
+2,000 to 4,000 mph. Follow the ramp signs and approach display. The marked
+minimum applies at the launch lip; keep enough throttle through the climb.
+If you miss the catch deck, look for a recovery on-ramp or restart.
+
+Obstacle collisions is a checkbox on the main menu. It controls bridge
+pillars and traffic and defaults off. Your choice is saved. Guardrails
+always keep you on the road; ground contact and jump landings stay active.
+
 ABOUT THIS BUILD
 Offline, single-player, seated cockpit prototype. Expect odd handling, rough
 collisions and unfinished scenery. This purchase includes the current build;
@@ -109,4 +121,4 @@ copyright. Third-party components and the CC BY engine audio retain their
 own licenses and permissions. See THIRD_PARTY_NOTICES.txt and licenses/.
 Adapted engine audio is supplied separately in audio/engines/.
 
-Build: 0.1.4-experimental | 2026-11-02
+Build: 0.1.5-experimental | 2026-11-02
