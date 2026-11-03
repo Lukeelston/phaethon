@@ -453,6 +453,8 @@ class Body:
 	var touch := {}   # the obstacles (ids) it's touching (one 'bump' a contact)
 	var off_road := false   # the Network: off the roads (off a lip, on the open ground): no walls, the hover over the terrain
 	var lock := false       # ... just caught by a road, easing onto its surface
+	var lock_gap := 0.0     # captured height/velocity relative to the moving deck
+	var lock_v := 0.0
 
 	func _init(mass: float, moment: float) -> void:
 		m = mass
@@ -548,8 +550,8 @@ var _net_cells := {}   # the Network's grid: a NET_CELL square's key -> [[road, 
 var on_ground := false   # the Network: the pod off the roads and down on the open ground (once per spell)
 const NET_CELL := 2048.0
 const NET_EDGE := 300.0
-const LOCK_W := 4.0          # the deck lock's catch: a critically damped spring ...
-const LOCK_A := 20.0 * G     # ... capped (a deck's pull-out at 4,300 mph is ~10 g: the catch has to follow it)
+const LOCK_W := 6.0          # damp arrival motion relative to the moving deck
+const LOCK_A := 30.0 * G     # cap relative arrival cushioning, independent of deck acceleration
 const JC_REACH := 40.0       # a catch deck reaches this far up for a jump
 const CORK_EASE := 0.15   # each corkscrew's roll rate ramps up and down over this share of it
 
@@ -739,13 +741,18 @@ func _rail_hover(b: Body, dt: float, after_move := false) -> void:
 	var dhdt := (road_h(b.path, f + vs * dt / R.len[i]) + net_edge(R.w[i], lat + vl * dt).x - h) / dt
 	if b.lock:
 		if not after_move:
-			var acc := clampf(LOCK_W * LOCK_W * (h + P.rideH - b.z) - 2.0 * LOCK_W * (b.vz - dhdt), -LOCK_A, LOCK_A)
-			b.vz += acc * dt
-			b.z += b.vz * dt
+			# Surface following carries the deck's slope/curvature acceleration;
+			# the spring only cushions the arrival relative to that moving surface.
+			# Keep 20 g upward cushioning; 30 g downward arrests outward overshoot.
+			var acc := clampf(-LOCK_W * LOCK_W * b.lock_gap - 2.0 * LOCK_W * b.lock_v, -LOCK_A, 20.0 * G)
+			b.lock_v += acc * dt
+			b.lock_gap += b.lock_v * dt
+		b.z = h + P.rideH + b.lock_gap
+		b.vz = dhdt + b.lock_v
 		# Soft capture above the deck, hard support on contact. A capped spring
 		# alone cannot arrest a fast arrival before it tunnels through the ramp.
 		# Recheck at the moved position without integrating vertical motion twice.
-		if b.z <= h + P.rideH or (absf(b.z - h - P.rideH) < 0.05 and absf(b.vz - dhdt) < 0.5):
+		if b.lock_gap <= 0.0 or (b.lock_gap < 0.05 and absf(b.lock_v) < 0.5):
 			b.z = h + P.rideH
 			b.vz = dhdt
 			b.lock = false
@@ -849,6 +856,8 @@ func _free_contact(b: Body, circles: Array, dt: float) -> void:
 			b.hint = i
 			b.contact = [false, false]
 			b.lock = absf(dz) > 0.05 or absf(b.vz - dhdt) > 0.5
+			b.lock_gap = dz
+			b.lock_v = b.vz - dhdt
 			if b == pod:
 				events.append({"type": "catch" if R.role == "catch" else "onroad", "road": n[0], "v": absf(b.vz - dhdt), "dz": dz})
 				on_ground = false

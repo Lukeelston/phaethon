@@ -730,7 +730,7 @@
   // path: the road a body's hint is on, 0 the main road, k + 1 branch k
   // offRoad (the Network): off the roads (off a lip, on the open ground): no walls, the hover over
   // the terrain; lock: just caught by a road, easing onto its surface
-  function body(m, I) { return { m, I, x: 0, y: 0, vx: 0, vy: 0, th: 0, w: 0, fx: 0, fy: 0, t: 0, hint: 0, path: 0, contact: [false, false], z: 0, vz: 0, grip: 1, touch: new Set(), offRoad: false, lock: false }; }
+  function body(m, I) { return { m, I, x: 0, y: 0, vx: 0, vy: 0, th: 0, w: 0, fx: 0, fy: 0, t: 0, hint: 0, path: 0, contact: [false, false], z: 0, vz: 0, grip: 1, touch: new Set(), offRoad: false, lock: false, lockGap: 0, lockV: 0 }; }
   function applyAt(b, fx, fy, px, py) {
     b.fx += fx; b.fy += fy; b.t += (px - b.x) * fy - (py - b.y) * fx;
   }
@@ -1006,7 +1006,7 @@
     // The Network's deck lock: a body on a road rides its surface (the road's forcefield holds it
     // down as well as up: at 4,000 mph any crest tighter than 326 km would throw you off). Just
     // caught (lock), it eases on: a critically damped spring, capped at LOCK_A.
-    const LOCK_W = 4, LOCK_A = 20 * G;   // (a deck's pull-out at 4,300 mph is ~10 g: the catch has to follow it)
+    const LOCK_W = 6, LOCK_A = 30 * G;   // relative arrival cushioning; surface-following is separate
     function roadF(b, i = b.hint) {
       const a = T.roads[b.path].pts[i];
       return i + clamp(((b.x - a.x) * a.tx + (b.y - a.y) * a.ty) / a.len, -1, 2);
@@ -1021,12 +1021,16 @@
       const dhdt = (roadH(T, b.path, f + vs * dt / a.len) + netEdge(a.w, lat + vl * dt)[0] - h) / dt;
       if (b.lock) {
         if (!afterMove) {
-          const acc = clamp(LOCK_W * LOCK_W * (h + P.rideH - b.z) - 2 * LOCK_W * (b.vz - dhdt), -LOCK_A, LOCK_A);
-          b.vz += acc * dt; b.z += b.vz * dt;
+          // The deck carries its own slope/curvature acceleration. Dampen only
+          // arrival motion relative to it, so a fast crest cannot outrun the spring.
+          // Retain the gentler 20 g upward cushion; 30 g downward arrests overshoot.
+          const acc = clamp(-LOCK_W * LOCK_W * b.lockGap - 2 * LOCK_W * b.lockV, -LOCK_A, 20 * G);
+          b.lockV += acc * dt; b.lockGap += b.lockV * dt;
         }
+        b.z = h + P.rideH + b.lockGap; b.vz = dhdt + b.lockV;
         // Soft capture above, hard support at touchdown. The spring alone lets
         // fast arrivals tunnel; afterMove checks the new surface without a second integration.
-        if (b.z <= h + P.rideH || (Math.abs(b.z - h - P.rideH) < 0.05 && Math.abs(b.vz - dhdt) < 0.5)) {
+        if (b.lockGap <= 0 || (b.lockGap < 0.05 && Math.abs(b.lockV) < 0.5)) {
           b.z = h + P.rideH; b.vz = dhdt; b.lock = false;
         }
         b.grip = clamp(1 - (b.z - h - P.rideH - 0.5) / 1.5, 0, 1);
@@ -1094,6 +1098,7 @@
           const dhdt = (roadH(T, n.r, n.i + u + vs * dt / a.len) + netEdge(n.w, n.lat + vl * dt)[0] - h) / dt;
           b.offRoad = false; b.path = n.r; b.hint = n.i; b.contact = [false, false];
           b.lock = Math.abs(dz) > 0.05 || Math.abs(b.vz - dhdt) > 0.5;
+          b.lockGap = dz; b.lockV = b.vz - dhdt;
           if (b === S.pod) {
             S.events.push({ type: R.role === 'catch' ? 'catch' : 'onroad', road: n.r, v: Math.abs(b.vz - dhdt), dz });
             S.onGround = false;
