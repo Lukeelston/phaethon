@@ -231,9 +231,15 @@ mine collapse; you carry the medical team out and get home before the dawn.
   horizon (shafts standing up from a hot line on the ground, `view/dawn.gd`), the suns' glow under
   that horizon growing as it nears, the land behind it lit, and its line and countdown on the
   minimap. It only catches you in the open: the towns, the covered ramps and the shade line's
-  canopy are shelter. Tuned by `tools/tune_dawn.js` against the autopilot's runs: the open loop
-  makes it by 5.0 s, the shade line by 3.6 s, a run 6 s slower on the pad is caught, and the lake
-  town stays dark 16.8 s after the drop.
+  canopy are shelter. Tuned by `tools/tune_dawn.js` against the autopilot's runs with a human
+  allowance of 15 s (`ALLOWANCE` in `tools/record_job.js`): the autopilot makes it by 20.0 s on the
+  open loop and 18.6 s on the shade line, so a pilot 15 s slower still makes it by about 5 s; a run
+  21 s late on the pad is caught; and the lake town stays dark 31.8 s after the drop.
+- **Finding the pad** (Luke never saw it the first time: he flew past it and the dawn caught him on
+  lap 2). Two red light columns 700 m tall stand either side of it, an overhead sign half a mile
+  before it reads `MEDICAL PAD  /  STOP ON THE CROSS  /  1/2 MI`, the minimap carries a red cross
+  for it on the way out, and the dash calls it: `MEDICAL PAD  x.x mi` inside 8 mi,
+  `STOP ON THE PAD` on it, `PAD BEHIND` if you overshoot.
 - **The covered ramps** (Luke: "a 'receiving' and 'outgoing' onramp ... such that the vehicle can
   reach speed inside of a structure before being exposed to light"): halls 110 m tall over the
   loop's first and last 4 miles at each town, lit bars across the roof every 48 m. Full lever takes
@@ -249,14 +255,169 @@ mine collapse; you carry the medical team out and get home before the dawn.
   (`tools/branch_test.js`); the view twists the flat sim onto the rolled road (`CraftModel.road_xf`).
 - **The light.** The run is flown in pre-dawn twilight (free Eridanus keeps its afternoon): no sun,
   the sky's light carrying the ground, so the grain, the asphalt joints, the dust and the lights
-  still read (`tests/render_twilight.gd`: 91% of the afternoon's ground detail).
+  still read (`tests/render_twilight.gd`: 91% of the afternoon's ground detail). The night is still
+  overhead: a dome of stars (`view/stars.gdshader`) thinning into the horizon's haze, none on the
+  dawn's side, fading as the front nears. In the halls, a steel rib every 96 m (a beam under the
+  roof, a pilaster down each wall) and a lit strip down each wall 18 m up stream past you.
+- **The sound** (`audio/course_audio.gd`, `tests/test_course_audio.gd`). Under a hall's roof or the
+  canopy the air closes in: a reverb on the wind and a low hall ring that rises with your speed. The
+  dawn has a voice: a sub rumble from 40 km that grows as it nears, and a searing hiss over the last
+  6 km, both muffled under cover. The pad beeps every half second you hold on it, then a chime for
+  the drop; the shade line's gate chirps as it opens for you and buzzes if it shuts; a chord when you
+  make it, a roar when the dawn catches you. All synthesized at start-up, nothing sampled.
 
 ```bash
 python tools/design_eridanus.py                                   # + the shade line, the pad, the ramps
 python tools/sync_eridanus.py                                     # ... into both sims, with the dawn
 node tools/tune_dawn.js sim-core.js                               # the dawn's direction and timing
 node tools/record_job.js sim-core.js godot/tests/replay open      # (and shade, late): job parity references
+Godot_v4.7.1-stable_win64_console.exe --path godot --resolution 1600x900 -s res://tests/render_sheet.gd -- --mute --out=DIR   # the run's sights, one frame each
 .\launch_vr.ps1 -Job emergency -WaitForHeadset
+```
+
+## The Network (open world, phase 1: the mesh)
+
+A country of highways (Luke: "a futuristic highway network of interconnected roads, tunnels, on ramps,
+off ramps, and maybe some speed specific jumps to other roads"; "Eridanus is one such city"). The
+design is `docs/superpowers/specs/2026-10-19-network-design.md`; phase 1 (this) is the mesh, then
+traffic and racers, jumps and the open ground, and the cities' GPs.
+
+- **The country:** ~375 mi square, three highways east-west and three north-south (400 m wide,
+  long S-bends, flat out at 4,000 mph), crossing at nine interchanges: the north-south highway flies
+  120 m over the other, and four 12 km quadrant ramps (~12 mi each, ~2,400 mph) join them. Each
+  highway ends in a turnaround loop under an END OF THE ROAD board. 4,725 km of road in all.
+- **Five cities,** each in its own landscape: Eridanus (verdant, the centre), Dunes (desert), Glacier
+  (ice), Basalt (black rock, ember cracks), Mesa (red strata). A city is a bypass off its highway (a
+  big S out through the city and back: in from either direction), STARFIGHTER through the middle
+  (pink walls, braking boards at 4/2/1 mi), the city's name over its terminal (a lit line across the
+  road), and a skyline of towers you can see from 100 km. The ground blends from one landscape to the
+  next as you go.
+- **Driving it:** you start at the last city you reached (Eridanus the first time). The dash names
+  the target city (the nearest you haven't found; `T`, or **A** in the headset, cycles it) and how
+  far it is, and your clock since you left. Every exit has a board naming where it goes and how many
+  road miles. The minimap shows every road near you and a gold diamond for the target (on its rim
+  when it's off the map). Cross another city's terminal: ARRIVED, your time, and the best for that
+  pair (`user://network.json`, with the cities found and the last city). Walls are forcefields: no
+  damage. A reset (or a crash) puts you back at the last city.
+- **In the sims:** a third track model, open roads plus a junction table (through a zone's samples
+  two roads are one: the shade line's union rule, with any number of roads), designed by
+  `tools/design_network.py` and synced into both sims; the GD sim matches the JS to the bit
+  (`tests/test_network_parity.gd`). Crossing roads are strangers (a flyover's two roads never feel
+  each other's walls); the decks' heights are the view's.
+- **Traffic** (Luke: "just regular traffic, just at speed. Some are speed demons, some are slower,
+  some are transport pods. Some want to race"; `view/network_traffic.gd`): it all goes your way
+  (Luke: "Traffic should always go the way the pilot is going - oncoming traffic cuts the available
+  road in half"). Your road is one-way, yours, across its whole width: eight lanes on a highway, four
+  on a ramp, a bypass or a turnaround. Nothing merges onto it against you, and when you turn round
+  the far traffic turns with you and the near is cleared. Cars at 2,000-3,000 mph, slow pods at
+  1,000-1,500 and transport pods (road trains of eight freight cars) keep right; speed demons at
+  4,000-4,800 weave through on the left. They keep their headway (you count), change lanes, slow for
+  the curves and the cities, take ramps, bypasses and turnarounds, and thicken round the cities. A
+  car decides on its next exit 40 km out and slows for the road beyond it beforehand, so nothing
+  arrives in a city's STARFIGHTER zone at highway speed. Their tail lights read
+  from miles off; the minimap shows them as dots. They're driven outside the sims, which see the near
+  ones as moving forcefields (`S.obstacles`, the same in both sims): brush one and you're shoved off
+  (a buzz, no damage); hit one closing at over ~1,500 mph and that's the catastrophic hit. (Off in
+  the game now: no collision with traffic, below.)
+- **Racers:** now and then on a highway a racer drops in behind and shadows you (`RACER BEHIND
+  VEGA`, a magenta dot on the minimap). Light the ramjet (B to arm, then the burner: the left stick up on the trigger throttles, full levers on the others) and it's on: first a
+  mile ahead (distance driven) wins (`RACE  VEGA  YOU +0.42 mi`). Ignore it and it peels off after
+  45 s. VEGA (6,300 mph, soft in the bends), KESTREL (fearless in traffic), MARROW (all-round), TALLOW
+  (the corner king); your wins are tallied in `network.json`.
+- **City GPs:** Dunes, Glacier, Basalt and Mesa each have the STARFIGHTER grand prix in their own
+  landscape, towers round the circuit: as designed, mirrored, reversed, and mirrored and reversed
+  (`tools/sync_gp_variants.py`; every corner keeps its radius, angle and banking). In a city's
+  STARFIGHTER zone the dash offers it (`HOLD A: GLACIER GP`): hold A (G on the keyboard) and you're
+  on its grid; the menu hold takes you back to the Network. Each keeps its own lap record.
+- **The dust:** on the Network the engines throw a faint grey road spray, not the desert's sand (Luke:
+  "everything looks like it's whitewashed when at speed": the sand plumes the pilot looks back
+  through brightened the road 31%; now under 8%, `tests/render_network.gd`).
+- **The horizon:** a mast every ~1 km (a city's zone every ~190 m), not every 240 m, with small
+  beacons that dim far off (Luke: "the light poles being so dense just washes the horizon out in
+  light"); thin sky-blue wall strips (pink through a STARFIGHTER zone), not white ones; darker,
+  less glossy asphalt; a deeper blue haze that brightens less toward the sun. `tests/render_network.gd`
+  checks the horizon band at 4,400 mph: its whitest 5-row strip is 9% near-white (the gate is 30%).
+- **Jumps** (Luke: "taking a massive interchange and using it as a ramp to jump 2 miles and 1500' up
+  to the entrance of the next ramp"): four of them, at the centre crossing (E2 east), N2 north over
+  E1, E3 west over N2 and N1 south over E2. A launch spur leaves the highway 32 km before the
+  crossing (an orange board: `JUMP  3,000+ MPH`), slides out 800 m and kicks up 4 km to a lip 299 m
+  up at 8.5 deg (12 g at 4,000 mph). Two miles on and 1,500 ft above the lip a catch deck, 400 m wide
+  with a green-lit lip, is waiting on the line a 3,000 mph jump flies: at 4,000 you're 1.7 s in the
+  air and it reaches up for you from 16 m above it; at 3,000 you just make it; slower you arrive
+  under its lip, it turns you down and you drop to the open ground. Hold the levers through the kick:
+  at 4,000 mph the drag is 16 g, so lifting off 7 km out leaves you at 2,600 by the lip. The deck
+  pulls you level (it keeps climbing to 3,500 ft first: at these speeds you'd otherwise climb for 47
+  km), crosses the interchange on pylons, comes down and merges back. The dash reads `AIRBORNE  1.2 s
+  2,400 FT`, then `CAUGHT  1.7 s IN THE AIR  4,326 MPH`.
+- **The roads' heights are real now** (both sims): the deck lock, the roads' forcefield, holds you to
+  the surface as well as up off it (at 4,000 mph any crest tighter than a 326 km radius would throw
+  you off: every flyover would be a jump). Off a road's open end (a lip, the end of the road) you're
+  off the roads: gravity, the hover over the open ground, no walls, and in the air the forces along
+  your path act along it (thrust minus drag scales your climb as it scales your speed). A road you
+  touch down inside takes you back (a catch deck reaches 40 m up for you); from outside, near the
+  ground, its walls hold you off.
+- **The open ground:** miss a jump (or run off the end of the road) and you're out in the landscape.
+  The dash and the minimap point you to the nearest city's on-ramp (`OFF THE ROAD   ERIDANUS
+  ON-RAMP  12 mi`): one per city, starting out on the open ground and curving in onto its highway;
+  drive into its mouth (lit posts) and you're back on the road. Or restart: off the roads it puts
+  you at the nearest city you've found (Luke: "reset to the nearest start-point").
+- **Halls** (the Network's tunnels): a 4 km hall over every city's terminal, its roof 110 m up, a lit
+  bar across it every 96 m, steel ribs, pink-lit portals; inside, the air closes in (CourseAudio's
+  reverb and tunnel ring, as in Eridanus' covered ramps).
+- **No collision with traffic** (Luke, after a flight with nine smashes: "please turn off collision"):
+  the vehicles go through you; their forcefields stay in the sims for the tests (`collide` in
+  `view/network_traffic.gd`). The walls still hold you on the road.
+- **Traffic's sound and forcefields:** a vehicle you pass close (or that passes you) whooshes by from
+  where it is (`audio/traffic_audio.gd`: a synthesized noise burst through a falling band, louder the
+  nearer and harder the pass); a wall's push flares the pod's forcefield white-blue (softer for a
+  scrape; a bump with traffic too, when collision's on).
+- **The whole country on the minimap** (Luke, after "I only saw 1 jump and never ran into a gp":
+  "make the minimap the whole extents"): on the Network the map shows all 72 roads, north up, with
+  the four jumps (orange), the four GP cities (pink), every city, the on-ramps (violet), the craft
+  and its target (`view/minimap.gd` `whole`; the near-roads, heading-up map is `whole = false`).
+- **The edges ramp up** (Luke: "make the walls ramp up on the sides rather that a hard stop? Let the
+  craft drift a bit"): the outer 15% of each side (30-60 m across) rises toward the wall as a
+  quarter-pipe, 18 deg at the wall, 7.8 m up on the highways. It pushes a drifting craft back toward
+  the middle as a GP corner's banking does (g tan bank plus the speed-squared downforce term; both
+  sims, bit-identical: `netEdge`), and the craft and the cockpit ride up it and roll with it. A 2 deg
+  drift at 4,000 mph, or 3 deg at 2,500, 1,500 or 800 mph, rides up to 174-188 m off the centre (the
+  wall's at 200) and comes back without touching the wall (`tools/network_test.js`); a harder drift
+  still meets the wall's forcefield. Dim lines mark where each ramp starts up; the walls, masts and
+  halls stand on its top.
+- **In the view:** streamed (`view/network_world.gd`): roads within 20 km are built a chunk (1.5 km)
+  at a time, nearest first, about 1 ms of building a frame (a chunk takes a few frames; 6 ms a frame
+  when it's behind, after a respawn), dropped past 28 km. `tests/render_network.gd` paces the sim at
+  the headset's 120 Hz through an interchange at 4,400 mph, traffic and all: p95 7.5 ms (the gate is
+  8.7), the worst frame 10.5 ms (16.7).
+- **Frame time:** the Quest 3 runs at 120 Hz over Link (8.3 ms a frame), and the Network is CPU-bound:
+  the GPU takes ~2 ms for both eyes at full resolution with MSAA 4x. It dropped to 60 fps through the
+  interchanges and cities (2026-10-20). Measured in the headset's shape (the cockpit, Quest 3
+  resolution, 8,300 km/h along E2 through the centre crossing and Eridanus), a frame went from
+  6.7 ms on average (p95 9.1, 15% of frames over 8.3) to 4.1 (p95 5.8, 0.1%); through the crossing
+  and the city from 7.9 (p95 9.7, 29% over) to 4.8 (p95 6.2, 0.1%). (The grand prix at Glacier, which
+  holds 120 in the headset, measures 3.1 the same way.)
+  - the minimap re-walked every road in a 2.7-ahead square and drew it through an ImmediateMesh,
+    2.1 ms at a crossing; now 0.7 ms (only the cells that reach the panel, packed arrays);
+  - the view's flyover heights searched 81 road samples ~20 times a frame, 0.9 ms; now none off a
+    flyover (`surface_at` returns the ground where no deck is in reach: the same answers);
+  - the sim's step: the nearest-road search reads its arrays from locals, and the forcefields skip
+    the vehicles well clear without a square root (the same sums: parity exact), 1.1 -> 0.7 ms;
+  - traffic beyond 6 km is driven every other frame (and drawn where it'll be), 1.6 -> 1.4 ms round
+    the city;
+  - a chunk's road, lines, walls and strips are one instance (four before), and chunks are built a
+    slice at a time, not whole in one frame (2-7 ms spikes).
+  In the headset log each FRAMES line is followed by a CPU line: the main thread's work by part
+  (sim, streaming, traffic, the HUD), the renderer's CPU and GPU time, and where you are.
+
+```bash
+python tools/design_network.py --plot network.png                 # the layout and its checks
+python tools/sync_network.py                                      # ... into both sims
+node tools/network_test.js sim-core.js                            # the JS sim: junctions, strangers, a drive, a turnaround, walls
+node tools/record_network.js sim-core.js godot/tests/replay       # the parity reference (Eridanus -> Glacier, and traffic's forcefields)
+python tools/sync_gp_variants.py                                  # the city GPs into both sims
+node tools/network_test.js sim-core.js                            # the JS Network: drives, walls, traffic, the jumps, the open ground
+for t in gp_dunes gp_glacier gp_basalt gp_mesa; do node tools/record_gp.js sim-core.js godot/tests/replay $t; done
+.\launch_vr.ps1 -Track network
 ```
 
 ## Handling modes
@@ -314,18 +475,22 @@ at 1,000 / 2,000 / 3,000 ft, the range's countdown in feet and its ramps' height
 
 A tap on the left menu button cycles four schemes (saved). **Hold the menu button 1.5 s to switch track**: range, grand prix, Eridanus, the emergency run, and round again. The scene reloads on the next track and the headset session carries on (`tests/test_track_switch.gd`).
 
-- **Trigger throttles:** the triggers are crossed, so each hand steers its own way. The right trigger throttles the left engine: squeeze right harder to go right. Together the triggers are the throttle, on a softened curve: about 25% less lever per bit of pull on average, most at the bottom, still full at a full pull. The triggers *magnet* to each other: fingers that are nearly together act exactly together. At the 0.07 mismatch measured from a real session they steer 14% as hard, while a real split still turns 78% as hard. The magnet is smooth, with no dead zone to snap out of. Each engine's lever rises over about 0.6 s at most, so a finger that lands first can't spin you off the line. Letting off is instant, and letting go of both triggers is idle at once. Steering authority grows with speed, because the same split yaws you about five times harder at 240 mph than at 750. Authority is full from 500 mph, so every GP corner has all of it, and never drops below 15%. Below 500 mph the stronger engine is eased toward the weaker, never the weaker raised, so a trigger you've let go of keeps its engine off at any speed. Each engine follows its own trigger: it rises on the ramp, eases down over about 0.08 s, and never moves because the other trigger did. (An earlier version shaped one shared throttle plus a smoothed split, so a quick one-sided squeeze briefly raised both engines and drove you straight on instead of turning.) With the triggers together the craft holds itself straight, fly-by-wire style: it cancels its own yaw, so a correction stops instead of overshooting. The hold fades out as the triggers part, so it never fights a turn. It only shares out throttle you're already giving, so it does nothing at idle, and it stands aside while either air brake is in and on the burner. It never fires an engine you didn't ask for. An earlier version did that while you braked one side. The remaining difference steers gentler near the middle, smoothed over ~0.08 s. `tests/test_controls_flyable.gd` checks an ideal pilot on the GP and a jittery-fingered straight hold (32 m of drift in 8 s at ~1,000 mph, against 120 m before). It also checks six mashed launches (0.2° of heading swing on average, against 13.9° before). And it checks a stroke pilot that corrects the way a real session log showed, with a 0.3 squeeze whenever it's 1.5° off: accelerating from the line, its heading swing drops from 34° unassisted to about 8°. (A squared curve with a 1.25 s ramp was tried once and made the craft unflyable. That test guards against it too.) Both spring back. The last few percent of pull is the burner detent. Grips are the air brakes, same side, so the left grip turns you left.
+- **Trigger throttles:** the triggers are crossed, so each hand steers its own way. The right trigger throttles the left engine: squeeze right harder to go right. Together the triggers are the throttle, on a softened curve: about 25% less lever per bit of pull on average, most at the bottom, full lever at 97% of the pull with no dead band before it (it used to go flat from ~92%). The triggers *magnet* to each other: fingers that are nearly together act exactly together. At the 0.07 mismatch measured from a real session they steer 14% as hard, while a real split still turns 78% as hard. The magnet is smooth, with no dead zone to snap out of. Each engine's lever rises over 1.3 s from idle to full at most (Luke: "double the ramp to 1.3 seconds to full throttle"; it was 0.67 s), so a finger that lands first can't spin you off the line. Letting off is instant, and letting go of both triggers is idle at once. Steering authority grows with speed, because the same split yaws you about five times harder at 240 mph than at 750. Authority is full from 500 mph, so every GP corner has all of it, and never drops below 15%. Below 500 mph the stronger engine is eased toward the weaker, never the weaker raised, so a trigger you've let go of keeps its engine off at any speed. Each engine follows its own trigger: it rises on the ramp, eases down over about 0.08 s, and never moves because the other trigger did. (An earlier version shaped one shared throttle plus a smoothed split, so a quick one-sided squeeze briefly raised both engines and drove you straight on instead of turning.) With the triggers together the craft holds itself straight, fly-by-wire style: it cancels its own yaw, so a correction stops instead of overshooting. The hold fades out as the triggers part, so it never fights a turn. It only shares out throttle you're already giving, so it does nothing at idle, and it stands aside while either air brake is in. It works on the burner too. It never fires an engine you didn't ask for. An earlier version did that while you braked one side. The remaining difference steers gentler near the middle, smoothed over ~0.08 s. `tests/test_controls_flyable.gd` checks an ideal pilot on the GP and a jittery-fingered straight hold (32 m of drift in 8 s at ~1,000 mph, against 120 m before). It also checks six mashed launches (0.2° of heading swing on average, against 13.9° before). And it checks a stroke pilot that corrects the way a real session log showed, with a 0.3 squeeze whenever it's 1.5° off: accelerating from the line, its heading swing drops from 34° unassisted to about 8°. (A squared curve with a 1.25 s ramp was tried once and made the craft unflyable. That test guards against it too.) Both spring back. **The burner is on the left stick, not the triggers** (Luke: "take the afterburners away from the triggers - I think that's part of the steering problem"): flick it up to light the burner (top gear only: a double tap in the left hand if you're not), down to put it out; letting go of both triggers puts it out too, and so does shifting down. A thump in the left hand as it lights, a softer one as it goes out. On the burner the triggers still throttle and steer (the sims take an explicit `burner` input, bit-checked in `test_network_parity`; the keyboard, a gamepad and the replays still light it with both levers past the gate). It used to be the last 3% of each trigger's pull: with fingers squeezed to the stop and wobbling it switched on and off 11.5 times in 10 s, and easing one finger off to steer put it out on both engines. Measured honestly, it wasn't the wag: through a 150 m lane change at 3,500 mph with corrections, the yaw rate swings about the same either way (0.4 deg/s easing a trigger 0.3, 4.1-4.3 deg/s dropping one whole, 5 reversals both); dropping a trigger whole is the wag's size. Grips are the air brakes, same side, so the left grip turns you left.
+- **Gears (trigger throttles):** flick the right stick up to shift up, down to shift down (a buzz in the right hand: firmer going up); the gear is the big number on the dash, and a restart is first gear. They're real gears (Luke: "the gears should rise and fall like actual gears - not just operate at lower or higher frequencies"): each has a redline at its share of the handling's top speed (30%, 55%, 78%, 100%: on SPEEDCRAFT 1,330 / 2,450 / 3,470 / 4,450 mph, on STARFIGHTER a quarter of that), and the revs climb through each gear and fall when you shift up; the engine sound follows them (`QuestControls.engine_spool`: the revs, eased by how hard you're on the lever). Each shift works a clutch: the pull dips to 30% for 0.12 s, then the next gear grabs with a surge (30% over its pull going up, 15% going down) that settles over 0.35 s, and the grab thumps both hands and shudders the cockpit, a 7 mm, 22 Hz jolt that dies away in 0.3 s (Luke: "add some shudder when the next gear grabs"). The low gears pull harder (1.5x, 1.3x, 1.12x, 1x: the sims' `thrMul` input), a rev limiter cuts the pull at each redline (shift up to go on), and only top gear lights the burner. Full lever in every gear. They began as a fix for the ping-pong (Luke: "the nose wagging as i correct and overshoot": his corrections drop one trigger whole), so on SPEEDCRAFT each gear also sets the steering's bite (100%, 75%, 40%, 18%, set against its pull): his first flight with them logged top gear's wag at 0.2-0.9 deg/s against first's 3.5-8.9. A dropped trigger at 4,000 mph in top still turns you 4.2 deg/s, where the Network's tightest highway bend needs 2.3. On STARFIGHTER the steering is whole in every gear: the grand prix is raced in third and top at full speed, where its corners need all of it (`tests/test_gears.gd`). Three things that didn't help, measured: building the steering in slowly (more lag, more overshoot: 86 deg of wag where it was 59); a swing damper that eased the stronger engine as the nose swung (it cut second gear's lane-change overshoot from 51 m to 4, but the grand prix's corners need the sustained swing it capped: walls at every strength); and a heavier pod (below). The headset measures the real thing: a `WAG:` line every 10 s in the log (`vr/wag_meter.gd`: the yaw rate's back-and-forth once its slow part, the bends and held turns, is taken off; swings per 10 s, their size, the time in each gear; `tests/test_wag_meter.gd`), and the whole flight's on exit.
+- **The heavy pod (an experiment):** `.\launch_vr.ps1 -Track network -HeavyPod` flies a 1,500 kg pod (500 standard), with thrust, drag and the brakes scaled to the total mass (`forceScale`, both sims, bit-identical) so straight-line speed and acceleration are as before. Measured, it doesn't calm the wag: the extra thrust turns the engines harder for the same squeeze (78 deg/s at 320 mph where 56 was), and the pod's weight barely reaches them through the tow bar (it swings 7-9 deg, not 3). Off by default.
 - **Throttle + steer:** the left stick sets one throttle for both engines, and it holds. The right stick steers and springs back, by easing the inside engine (on the burner, by feathering its air brake). Triggers brake.
 - **Grab the levers:** squeeze a grip and push your hand forward or back. That lever follows (22 cm is the whole travel) and stays when you let go. Triggers brake.
 - **Stick levers:** the original. Thumbsticks nudge the levers, which hold. Triggers brake, and both grips level the levers to the lower one.
 
 Every scheme: A reignite, B arm the ramjet, X hold to repair on the go (both engines mend about 12% a second while held; thrust is capped at 60% lever and the burner is off meanwhile; the pod itself isn't repaired), Y tap restart (a fresh start: whole engines, back to the start line or grid), Y hold 1 s flip the handling (as the MODE switch), thumbstick click recenter: sit where you're comfortable and click either stick, and your view and seat height both reset to the seat's eye point (the automatic recenter when the headset goes on keeps your height). A lever crossing the burner gate ticks that hand.
 
+**Focus lost, hands off.** While the OpenXR session isn't focused (stopping, the Link menu, the headset off) both controllers read as let go, held levers drop to idle, and buttons do nothing until it's focused again: OpenXR holds the controllers' last state, and on 2026-10-20 the pod flew on at full trigger, 7,991 km/h with nobody aboard. The keyboard and a gamepad still fly, and a flat run (no session) is never gated (`tests/test_xr_focus.gd`).
+
 **Wall damage is off by default** (`damage: false` in both sims). Hits still register, buzz and cost speed, but they no longer cost health or wreck the pod. Set it to `true` to get the damage below back. **Wall damage.** Hitting a wall damages the engine that touches it, and the damage stays until you repair it. On the GP the walls deflect rather than wreck: only impacts harder than 25 m/s into the wall do damage, a third as much as on the circuit. Scrapes cost speed, not health, and give a light buzz. A wrecked engine gives about a quarter of its thrust and sputters below half health. The dash shows each engine's HP, flags DAMAGED, and prompts HOLD X: REPAIR. A hit buzzes the hand that drives that engine.
 
 On the anticlockwise GP, running wide scrapes the right engine. With crossed triggers that's the left trigger's engine, which is why "my left trigger is weak" usually means a damaged right engine (`tests/test_engine_damage.gd`).
 
-The pod is one smooth lofted hull (`CraftModel.pod_hull()`) in polished metal with orange metallic speed stripes. It has an open cockpit with a rubber lip, matte trim inside, and a raked fin. The headset seats you inside that same hull, with a rounded seat and ball-knob levers. Reflections come from the sky; there's no live reflection probe, to save VR frame time.
+The pod is one smooth lofted hull (`CraftModel.pod_hull()`): polished metal below, its top decks and nose in clear-coated candy orange, a gunmetal racing stripe down each flank and a white pinstripe where the paint meets the metal. It has an open cockpit with a padded leather lip, orange piping along its crest (from the seat the lip hides the decks beyond it, so the piping is the paint you see), matte trim inside, and a painted raked fin with a dark leading edge, a pinstripe and a tip lamp. Out back, trim thrusters with polished collars and exhaust cones and a red tail lamp on each; nav lights at its widest point (red left, green right, as the engines'), and a cyan repulsor underglow like the engines'. The headset seats you inside that same hull, with a rounded seat and ball-knob levers. Reflections come from the sky; there's no live reflection probe, to save VR frame time.
 
 **Minimap.** On a circuit, a translucent heads-up map sits up and left of the instrument panel
 (30° left, 10° down, 1 m out, clear of the panel). It's heading-up, with the craft near the
@@ -366,6 +531,7 @@ Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/tes
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_quest_controls.gd     # Touch schemes
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_controls_flyable.gd   # ideal pilot holds the GP; jittery fingers fly straight; mashed launches don't spin
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_shudder.gd -- --track=range   # air-brake shudder: that side only, cockpit shakes, head doesn't
+Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_xr_focus.gd -- --mute   # session unfocused: the controllers let go, the keyboard still flies
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_energy.gd   # coasting into walls never gains energy; steering and coast-down untouched
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_cables.gd -- --track=range --mute   # cables on their hardpoints
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_dashboard.gd           # instrument panel
@@ -388,6 +554,18 @@ Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/tes
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_branch.gd                 # the shade line in the sim: gate, junctions, parity with JS
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_job.gd                    # the emergency run: dawn, shelter, ramps, pad, finish
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_job_parity.gd             # the job's runs (open, shade, late) match JS
+Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_network_parity.gd         # the Network's roads and a drive match JS
+Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_network_world.gd -- --mute     # streaming, flyovers, junction walls, boards, landscapes, minimap
+Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_network_flow.gd -- --mute      # target, dash, arrival and bests, reset, the VR cycle
+Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_network_traffic.gd -- --mute   # lanes, kinds, junctions, headway, zones, density, forcefields, cost, racers
+Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_gears.gd                       # shifting, ranges, overshoot, corners
+Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_network_jumps.gd -- --mute     # the jump boards, airborne, caught, missed, restart, traffic kept off
+Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_traffic_audio.gd               # the whoosh, passes, following
+Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_wag_meter.gd                   # the in-flight wag meter on known yaw rates
+Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_city_gps.gd -- --mute          # the city GPs: parity laps, landscapes, entry and back
+Godot_v4.7.1-stable_win64_console.exe --path godot --resolution 1600x900 -s res://tests/render_city_gps.gd -- --mute --out=DIR   # a look at the city GPs
+Godot_v4.7.1-stable_win64_console.exe --path godot --resolution 1600x900 -s res://tests/render_network.gd -- --mute   # frame time at the headset's 120 Hz, streaming through an interchange
+Godot_v4.7.1-stable_win64_console.exe --path godot --resolution 1600x900 -s res://tests/render_network_sheet.gd -- --mute --out=DIR   # a look round the Network
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_shade_line.gd -- --mute   # the shade line's world: roll, ground, canopy, gate, clearance
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_job_flow.gd -- --mute     # the dash through the run, best time, guide and minimap on the shade line
 Godot_v4.7.1-stable_win64_console.exe --path godot --resolution 1600x900 -s res://tests/render_twilight.gd -- --mute --print-fps   # windowed: twilight keeps the speed cues, no NaNs, frame time
@@ -436,6 +614,7 @@ arduino-cli compile --fqbn rp2040:rp2040:rpipico --output-dir firmware/build fir
 - Godot fronts are clockwise. A flat quad wound the other way faces down; with culling off it renders, but lit from below. Check `(p1 - p0).cross(p2 - p0)` points into the surface (`tests/test_scenery.gd`).
 - A `Color` passed to a plain `vec3` shader uniform arrives linearised. Pass a `Vector3` if the shader converts sRGB itself. A mesh without vertex colours gives the shader `COLOR` = 0, not 1.
 - The tow bar is one-way on purpose: the pod follows the engines but doesn't yaw them back, because that feedback made the pair sway. A one-way force creates energy, though. The pod whirled round a pivoting pair, or swung by one spinning after wall hits, gains speed from nothing, and the craft pinballs: a pod went 159 to 495 km/h coasting with no thrust. A real reaction, even 20% of one, makes the 22 m-long pod outweigh the pair in yaw. That cut steering 4x at 490 mph and wrecked the GP. Instead a per-substep energy audit (`towAudit`) takes out whatever the tow bar puts in beyond what its springs gave up. It drains the craft's speed when the craft is travelling, gently (`towAuditG`, 3 g at most). As the swing and spin take a bigger share of the energy, the drain shifts onto them (`towIntF0`/`towIntF1`). Draining the swing in normal flight deadens the steering, because every yaw step swings the pod. Draining only the speed pins a slowly spinning craft. Steering, coast-down and the GP autopilot lap are unchanged (`tests/test_energy.gd`).
+- On the Network a road end that a junction holds is closed: a highway's dead end sits inside its turnaround loop's junction zone. The wall code used to give a point past *any* end infinite depth ("no road here"), which made the junction's other road win, however far off it was. Past a highway's end the turnaround's centreline is about 300 m to the side, so a collision circle just past the end read 210 m of wall penetration. That's a 1.3×10⁹ N kick in one 1/480 s step: an engine went from 375 to 7,833 km/h, the binder tore, and the frozen crash showed speeds of 10,000–63,000 km/h. Every highway end did it, at any speed, braking or not. A closed end is now a wall across the road, as deep as the circle is past it, pushing back along the road. Open ends (a launch spur's lip) still release the craft (`tests/test_road_ends.gd`, plus the dead-end run in `test_network_parity`).
 
 ## Engine audio findings
 

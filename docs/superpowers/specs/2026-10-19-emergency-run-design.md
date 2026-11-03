@@ -188,6 +188,15 @@ allow.
 - **The dawn, re-tuned:** 143 deg, passing the start line 156.7 s into the job: open +5.0 s, shade
   +3.6 s (both tight now), a run 6 s late on the pad caught short of the ramp, the lake town unlit
   for 16.8 s after the drop.
+- **The dawn, re-tuned for a human** *(2026-10-19, after Luke's first flight)*: the margins above
+  were the autopilot's, which flies a perfect line, so a person had no slack. The tuner now gives
+  the autopilot a 15 s human allowance (`ALLOWANCE` in `tools/record_job.js`): 143 deg, passing the
+  start line 171.7 s into the job; the autopilot makes it by 20.0 s open and 18.6 s on the shade
+  line, a pilot 15 s slower by about 5 s, a run 21 s late on the pad is caught, and the lake town is
+  unlit for 31.8 s after the drop.
+- **The pad, made findable** *(same day)*: two red light columns 700 m tall either side of it, a
+  sign half a mile before it, a red cross on the minimap on the way out, and dash calls
+  (`MEDICAL PAD x.x mi`, `STOP ON THE PAD`, `PAD BEHIND`).
 - **The dawn's direction** *(found in the final review; Luke's call)*: the spec's "behind you and
   catching up" can't hold on this course. The loop's final straight runs due south at 4,000 mph,
   four times the dawn's speed, so a front behind you there only falls away, and no setting meets

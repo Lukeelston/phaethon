@@ -139,9 +139,10 @@ func _ramps(sim, cw) -> void:
 		if node.is_in_group("board_face") or node.is_in_group("authorized"):
 			var q := (node as MeshInstance3D).mesh as QuadMesh
 			top = maxf(top, (node as Node3D).position.y + q.size.y / 2.0 + 6.0)   # the face's top and its beacons
-	_check("ramps: %d covered, halls over %d samples (the sim's %d), roofs %.0f m up, the highest board or sign %.0f m" % [
-			sim.covered_ramps.size(), cw.hall_samples, want, CW.RAMP_H, top],
-		sim.covered_ramps.size() == 4 and cw.hall_samples == want and top < CW.RAMP_H)
+	_check("ramps: %d covered, halls over %d samples (the sim's %d), roofs %.0f m up, the highest board or sign %.0f m; %d ribs inside (one every %d samples), a lit strip down each wall; no stars in the afternoon (%s)" % [
+			sim.covered_ramps.size(), cw.hall_samples, want, CW.RAMP_H, top, cw.hall_ribs, CW.HALL_RIB_EVERY, v.stars],
+		sim.covered_ramps.size() == 4 and cw.hall_samples == want and top < CW.RAMP_H
+		and cw.hall_ribs >= want / CW.HALL_RIB_EVERY - 4 and v.stars == null)
 
 
 func _bridges(sim, vw) -> void:

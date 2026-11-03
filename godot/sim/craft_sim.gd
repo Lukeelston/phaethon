@@ -10,6 +10,9 @@ const G := 9.81
 const DEFAULTS := {
 	"engineMass": 1200.0, "engineLen": 8.0, "engineGap": 6.0,
 	"podMass": 500.0, "podLen": 4.0, "podWidth": 2.4,
+	# forceScale: thrust, drag and the brakes times this (a heavier pod comes with the total mass over
+	# the standard's, so it only changes the turning; mirrors sim-core.js)
+	"forceScale": 1.0,
 	# v3 (2026-10-17), mirrors sim-core.js: ~4,450 mph full lever, ~5,400 mph afterburner,
 	# ~15 g grip cap, speed^2 fins, tow-bar pod. tools/handling_test.js measures it.
 	"thrustMax": 350000.0, "burnerMult": 1.45, "ramjetMult": 1.9, "gate": 0.88,
@@ -22,6 +25,9 @@ const DEFAULTS := {
 	"cableLen": 16.0, "cableK": 600000.0, "cableC": 30000.0, "cableCouple": 0.2, "podAnchorW": 0.15,
 	"binderK": 3.0e6, "binderC": 70000.0, "alignK": 2.0e7, "alignC": 6.0e5, "binderBreak": 3.0,
 	"wallK": 6.0e6, "wallC": 1.5e5, "wallMu": 0.35, "wallDmgMin": 6.0,
+	# traffic's forcefields (the Network): a softer push than a wall's, no friction, no damage; a
+	# closing speed over smashV (m/s, ~1,500 mph) is the catastrophic hit
+	"fieldK": 2.0e6, "fieldC": 8.0e4, "smashV": 670.0,
 	"damage": false,   # wall hits cost health (and can wreck you) only when this is on
 	"towLongK": 2.0e6, "towLongC": 8.0e4, "towLongSlack": 0.3,   # pod stand-off: never closer to the engines than its taut-cable spot
 	"bank": 1.0, "bankDown": 3.9e-4,   # banked corners: downforce per (m/s)^2, as g, presses you into the bank (~8 g at 1,000 mph)
@@ -47,8 +53,16 @@ const DEFAULTS := {
 # impacts harder than 25 m/s into the wall do damage, a third as much; lower friction).
 const TRACKS := {
 	"gp": {"wallDmgMin": 25.0, "damagePerMs": 0.004, "wallMu": 0.22},
+	"gp_dunes": {"wallDmgMin": 25.0, "damagePerMs": 0.004, "wallMu": 0.22},
+	"gp_glacier": {"wallDmgMin": 25.0, "damagePerMs": 0.004, "wallMu": 0.22},
+	"gp_basalt": {"wallDmgMin": 25.0, "damagePerMs": 0.004, "wallMu": 0.22},
+	"gp_mesa": {"wallDmgMin": 25.0, "damagePerMs": 0.004, "wallMu": 0.22},
+
 	"eridanus": {"wallDmgMin": 25.0, "damagePerMs": 0.004, "wallMu": 0.22,
-		"dawnDir": 2.495821, "dawnT0": 156.7},   # the dawn: written by tools/sync_eridanus.py from tools/tune_dawn.js
+		"dawnDir": 2.495821, "dawnT0": 171.7},   # the dawn: written by tools/sync_eridanus.py from tools/tune_dawn.js
+	# The Network: walls are forcefields (docs/superpowers/specs/2026-10-19-network-design.md): a
+	# wall shoves you off, only a catastrophic crash (the binder breaking) costs you anything
+	"network": {"wallDmgMin": 1e9, "damagePerMs": 0.0, "wallMu": 0.22},
 }
 const HANDLING := {
 	"speed": {},
@@ -87,6 +101,12 @@ const GP_SEGS := [["S", 2798.158], ["R", 230.0, 90.0], ["S", 450.0], ["L", 230.0
 	["S", 700.0], ["L", 900.0, 30.0], ["S", 1278.727], ["L", 500.0, 90.0], ["S", 5200.0], ["R", 420.0, 40.0],
 	["L", 420.0, 80.0], ["R", 420.0, 40.0], ["S", 1400.0], ["L", 160.0, 180.0], ["S", 500.0], ["R", 350.0, 90.0],
 	["S", 3200.0], ["L", 1300.0, 90.0]]
+# <gp_variants> (tools/sync_gp_variants.py: the city GPs, the grand prix four ways; don't edit by hand)
+const GP_DUNES_SEGS := [["S", 2798.158], ["R", 230.0, 90.0], ["S", 450.0], ["L", 230.0, 90.0], ["S", 1500.0], ["L", 1100.0, 70.0], ["S", 700.0], ["R", 600.0, 40.0], ["S", 900.0], ["L", 380.0, 150.0], ["S", 1100.0], ["R", 260.0, 120.0], ["S", 700.0], ["L", 900.0, 30.0], ["S", 1278.727], ["L", 500.0, 90.0], ["S", 5200.0], ["R", 420.0, 40.0], ["L", 420.0, 80.0], ["R", 420.0, 40.0], ["S", 1400.0], ["L", 160.0, 180.0], ["S", 500.0], ["R", 350.0, 90.0], ["S", 3200.0], ["L", 1300.0, 90.0]]
+const GP_GLACIER_SEGS := [["S", 2798.158], ["L", 230.0, 90.0], ["S", 450.0], ["R", 230.0, 90.0], ["S", 1500.0], ["R", 1100.0, 70.0], ["S", 700.0], ["L", 600.0, 40.0], ["S", 900.0], ["R", 380.0, 150.0], ["S", 1100.0], ["L", 260.0, 120.0], ["S", 700.0], ["R", 900.0, 30.0], ["S", 1278.727], ["R", 500.0, 90.0], ["S", 5200.0], ["L", 420.0, 40.0], ["R", 420.0, 80.0], ["L", 420.0, 40.0], ["S", 1400.0], ["R", 160.0, 180.0], ["S", 500.0], ["L", 350.0, 90.0], ["S", 3200.0], ["R", 1300.0, 90.0]]
+const GP_BASALT_SEGS := [["S", 5200.0], ["R", 500.0, 90.0], ["S", 1278.727], ["R", 900.0, 30.0], ["S", 700.0], ["L", 260.0, 120.0], ["S", 1100.0], ["R", 380.0, 150.0], ["S", 900.0], ["L", 600.0, 40.0], ["S", 700.0], ["R", 1100.0, 70.0], ["S", 1500.0], ["R", 230.0, 90.0], ["S", 450.0], ["L", 230.0, 90.0], ["S", 2798.158], ["R", 1300.0, 90.0], ["S", 3200.0], ["L", 350.0, 90.0], ["S", 500.0], ["R", 160.0, 180.0], ["S", 1400.0], ["L", 420.0, 40.0], ["R", 420.0, 80.0], ["L", 420.0, 40.0]]
+const GP_MESA_SEGS := [["S", 5200.0], ["L", 500.0, 90.0], ["S", 1278.727], ["L", 900.0, 30.0], ["S", 700.0], ["R", 260.0, 120.0], ["S", 1100.0], ["L", 380.0, 150.0], ["S", 900.0], ["R", 600.0, 40.0], ["S", 700.0], ["L", 1100.0, 70.0], ["S", 1500.0], ["L", 230.0, 90.0], ["S", 450.0], ["R", 230.0, 90.0], ["S", 2798.158], ["L", 1300.0, 90.0], ["S", 3200.0], ["R", 350.0, 90.0], ["S", 500.0], ["L", 160.0, 180.0], ["S", 1400.0], ["R", 420.0, 40.0], ["L", 420.0, 80.0], ["R", 420.0, 40.0]]
+# </gp_variants>
 const GP_STEP := 12.0
 const GP_WIDTH := 96.0   # wider, and every corner banked GP_BANK degrees toward its inside (Luke, 2026-10-18),
 const GP_BANK := 15.0    # easing in and out over ~360 m: two passes of a (2 * GP_BANK_R + 1)-sample box (was 30: "50% smaller")
@@ -113,11 +133,143 @@ const ERI_SHADE := {"name": "shade", "segs": SHADE_SEGS, "from": 14838, "join": 
 const ERI_PAD := 6932
 const ERI_RAMPS := [[747, 1283], [6124, 6660], [6995, 7532], [15509, 16045]]   # the covered ramps at each end of each town: [first, last] main samples
 # </shade>
+# <network> (tools/sync_network.py from tools/design_network.py: don't edit by hand)
+const NET_STEP := 24.0
+# [name, x, y, heading deg, width, [[kind, length or radius, deg, mode], ...]]
+const NET_ROADS := [
+	["E1", 25000.0, 100000.0, 0.0, 400.0, [["S", 120000.0, 0.0, "sp"], ["L", 45000.0, 16.0, "sp"], ["S", 31409.384254095403, 0.0, "sp"], ["R", 45000.0, 32.0, "sp"], ["S", 31409.384254095403, 0.0, "sp"], ["L", 45000.0, 16.0, "sp"], ["S", 90000.0, 0.0, "sp"], ["R", 45000.0, 13.0, "sp"], ["S", 35668.58872733586, 0.0, "sp"], ["L", 45000.0, 26.0, "sp"], ["S", 35668.58872733586, 0.0, "sp"], ["R", 45000.0, 13.0, "sp"], ["S", 120000.0, 0.0, "sp"]]],
+	["E2", 25000.0, 300000.0, 0.0, 400.0, [["S", 120000.0, 0.0, "sp"], ["L", 45000.0, 20.0, "sp"], ["S", 25772.456402216954, 0.0, "sp"], ["R", 45000.0, 40.0, "sp"], ["S", 25772.456402216954, 0.0, "sp"], ["L", 45000.0, 20.0, "sp"], ["S", 90000.0, 0.0, "sp"], ["R", 45000.0, 15.0, "sp"], ["S", 32824.76260375352, 0.0, "sp"], ["L", 45000.0, 30.0, "sp"], ["S", 32824.76260375352, 0.0, "sp"], ["R", 45000.0, 15.0, "sp"], ["S", 120000.0, 0.0, "sp"]]],
+	["E3", 25000.0, 500000.0, 0.0, 400.0, [["S", 120000.0, 0.0, "sp"], ["L", 45000.0, 14.0, "sp"], ["S", 34244.22935835813, 0.0, "sp"], ["R", 45000.0, 28.0, "sp"], ["S", 34244.22935835813, 0.0, "sp"], ["L", 45000.0, 14.0, "sp"], ["S", 90000.0, 0.0, "sp"], ["R", 45000.0, 18.0, "sp"], ["S", 28587.64967214313, 0.0, "sp"], ["L", 45000.0, 36.0, "sp"], ["S", 28587.64967214313, 0.0, "sp"], ["R", 45000.0, 18.0, "sp"], ["S", 120000.0, 0.0, "sp"]]],
+	["N1", 100000.0, 25000.0, 90.0, 400.0, [["S", 120000.0, 0.0, "sp"], ["L", 45000.0, 17.0, "sp"], ["S", 29997.285275513706, 0.0, "sp"], ["R", 45000.0, 34.0, "sp"], ["S", 29997.285275513706, 0.0, "sp"], ["L", 45000.0, 17.0, "sp"], ["S", 90000.0, 0.0, "sp"], ["R", 45000.0, 19.0, "sp"], ["S", 27179.652269197013, 0.0, "sp"], ["L", 45000.0, 38.0, "sp"], ["S", 27179.652269197013, 0.0, "sp"], ["R", 45000.0, 19.0, "sp"], ["S", 120000.0, 0.0, "sp"]]],
+	["N2", 300000.0, 25000.0, 90.0, 400.0, [["S", 120000.0, 0.0, "sp"], ["L", 45000.0, 21.0, "sp"], ["S", 24365.211496849173, 0.0, "sp"], ["R", 45000.0, 42.0, "sp"], ["S", 24365.211496849173, 0.0, "sp"], ["L", 45000.0, 21.0, "sp"], ["S", 90000.0, 0.0, "sp"], ["R", 45000.0, 14.0, "sp"], ["S", 34244.22935835813, 0.0, "sp"], ["L", 45000.0, 28.0, "sp"], ["S", 34244.22935835813, 0.0, "sp"], ["R", 45000.0, 14.0, "sp"], ["S", 120000.0, 0.0, "sp"]]],
+	["N3", 500000.0, 25000.0, 90.0, 400.0, [["S", 120000.0, 0.0, "sp"], ["L", 45000.0, 13.0, "sp"], ["S", 35668.58872733586, 0.0, "sp"], ["R", 45000.0, 26.0, "sp"], ["S", 35668.58872733586, 0.0, "sp"], ["L", 45000.0, 13.0, "sp"], ["S", 90000.0, 0.0, "sp"], ["R", 45000.0, 20.0, "sp"], ["S", 25772.456402216954, 0.0, "sp"], ["L", 45000.0, 40.0, "sp"], ["S", 25772.456402216954, 0.0, "sp"], ["R", 45000.0, 20.0, "sp"], ["S", 120000.0, 0.0, "sp"]]],
+	["R00WS", 87900.0, 99900.0, 0.0, 200.0, [["R", 12000.0, 90.0, "sp"]]],
+	["R00WN", 87900.0, 100100.0, 0.0, 200.0, [["L", 12000.0, 90.0, "sp"]]],
+	["R00ES", 112100.0, 99900.0, 180.0, 200.0, [["L", 12000.0, 90.0, "sp"]]],
+	["R00EN", 112100.0, 100100.0, 180.0, 200.0, [["R", 12000.0, 90.0, "sp"]]],
+	["R01WS", 87900.0, 299900.0, 0.0, 200.0, [["R", 12000.0, 90.0, "sp"]]],
+	["R01WN", 87900.0, 300100.0, 0.0, 200.0, [["L", 12000.0, 90.0, "sp"]]],
+	["R01ES", 112100.0, 299900.0, 180.0, 200.0, [["L", 12000.0, 90.0, "sp"]]],
+	["R01EN", 112100.0, 300100.0, 180.0, 200.0, [["R", 12000.0, 90.0, "sp"]]],
+	["R02WS", 87900.0, 499900.0, 0.0, 200.0, [["R", 12000.0, 90.0, "sp"]]],
+	["R02WN", 87900.0, 500100.0, 0.0, 200.0, [["L", 12000.0, 90.0, "sp"]]],
+	["R02ES", 112100.0, 499900.0, 180.0, 200.0, [["L", 12000.0, 90.0, "sp"]]],
+	["R02EN", 112100.0, 500100.0, 180.0, 200.0, [["R", 12000.0, 90.0, "sp"]]],
+	["R10WS", 287900.0, 99900.0, 0.0, 200.0, [["R", 12000.0, 90.0, "sp"]]],
+	["R10WN", 287900.0, 100100.0, 0.0, 200.0, [["L", 12000.0, 90.0, "sp"]]],
+	["R10ES", 312100.0, 99900.0, 180.0, 200.0, [["L", 12000.0, 90.0, "sp"]]],
+	["R10EN", 312100.0, 100100.0, 180.0, 200.0, [["R", 12000.0, 90.0, "sp"]]],
+	["R11WS", 287900.0, 299900.0, 0.0, 200.0, [["R", 12000.0, 90.0, "sp"]]],
+	["R11WN", 287900.0, 300100.0, 0.0, 200.0, [["L", 12000.0, 90.0, "sp"]]],
+	["R11ES", 312100.0, 299900.0, 180.0, 200.0, [["L", 12000.0, 90.0, "sp"]]],
+	["R11EN", 312100.0, 300100.0, 180.0, 200.0, [["R", 12000.0, 90.0, "sp"]]],
+	["R12WS", 287900.0, 499900.0, 0.0, 200.0, [["R", 12000.0, 90.0, "sp"]]],
+	["R12WN", 287900.0, 500100.0, 0.0, 200.0, [["L", 12000.0, 90.0, "sp"]]],
+	["R12ES", 312100.0, 499900.0, 180.0, 200.0, [["L", 12000.0, 90.0, "sp"]]],
+	["R12EN", 312100.0, 500100.0, 180.0, 200.0, [["R", 12000.0, 90.0, "sp"]]],
+	["R20WS", 487900.0, 99900.0, 0.0, 200.0, [["R", 12000.0, 90.0, "sp"]]],
+	["R20WN", 487900.0, 100100.0, 0.0, 200.0, [["L", 12000.0, 90.0, "sp"]]],
+	["R20ES", 512100.0, 99900.0, 180.0, 200.0, [["L", 12000.0, 90.0, "sp"]]],
+	["R20EN", 512100.0, 100100.0, 180.0, 200.0, [["R", 12000.0, 90.0, "sp"]]],
+	["R21WS", 487900.0, 299900.0, 0.0, 200.0, [["R", 12000.0, 90.0, "sp"]]],
+	["R21WN", 487900.0, 300100.0, 0.0, 200.0, [["L", 12000.0, 90.0, "sp"]]],
+	["R21ES", 512100.0, 299900.0, 180.0, 200.0, [["L", 12000.0, 90.0, "sp"]]],
+	["R21EN", 512100.0, 300100.0, 180.0, 200.0, [["R", 12000.0, 90.0, "sp"]]],
+	["R22WS", 487900.0, 499900.0, 0.0, 200.0, [["R", 12000.0, 90.0, "sp"]]],
+	["R22WN", 487900.0, 500100.0, 0.0, 200.0, [["L", 12000.0, 90.0, "sp"]]],
+	["R22ES", 512100.0, 499900.0, 180.0, 200.0, [["L", 12000.0, 90.0, "sp"]]],
+	["R22EN", 512100.0, 500100.0, 180.0, 200.0, [["R", 12000.0, 90.0, "sp"]]],
+	["Eridanus", 343000.0, 300100.0, 180.0, 200.0, [["R", 7000.0, 60.0, "sp"], ["S", 3500.0, 0.0, "sp"], ["L", 7000.0, 120.0, "sf"], ["S", 3500.0, 0.0, "sp"], ["R", 7000.0, 60.0, "sp"]]],
+	["Dunes", 57000.0, 500100.0, 0.0, 200.0, [["L", 7000.0, 60.0, "sp"], ["S", 3500.0, 0.0, "sp"], ["R", 7000.0, 120.0, "sf"], ["S", 3500.0, 0.0, "sp"], ["L", 7000.0, 60.0, "sp"]]],
+	["Glacier", 543000.0, 500100.0, 180.0, 200.0, [["R", 7000.0, 60.0, "sp"], ["S", 3500.0, 0.0, "sp"], ["L", 7000.0, 120.0, "sf"], ["S", 3500.0, 0.0, "sp"], ["R", 7000.0, 60.0, "sp"]]],
+	["Basalt", 57000.0, 99900.0, 0.0, 200.0, [["R", 7000.0, 60.0, "sp"], ["S", 3500.0, 0.0, "sp"], ["L", 7000.0, 120.0, "sf"], ["S", 3500.0, 0.0, "sp"], ["R", 7000.0, 60.0, "sp"]]],
+	["Mesa", 543000.0, 99900.0, 180.0, 200.0, [["L", 7000.0, 60.0, "sp"], ["S", 3500.0, 0.0, "sp"], ["R", 7000.0, 120.0, "sf"], ["S", 3500.0, 0.0, "sp"], ["L", 7000.0, 60.0, "sp"]]],
+	["TE1-", 26600.0, 100100.0, -180.0, 200.0, [["R", 6000.0, 59.447122451642976, "sp"], ["L", 6000.0, 298.89424490328594, "sp"], ["R", 6000.0, 59.447122451642976, "sp"]]],
+	["TE1+", 573400.0000000542, 99900.00000000012, 3.8246170044598787e-13, 200.0, [["R", 6000.0, 59.447122451642976, "sp"], ["L", 6000.0, 298.89424490328594, "sp"], ["R", 6000.0, 59.447122451642976, "sp"]]],
+	["TE2-", 26600.0, 300100.0, -180.0, 200.0, [["R", 6000.0, 59.447122451642976, "sp"], ["L", 6000.0, 298.89424490328594, "sp"], ["R", 6000.0, 59.447122451642976, "sp"]]],
+	["TE2+", 573399.9999999488, 299899.99999999924, -3.26739873311754e-13, 200.0, [["R", 6000.0, 59.447122451642976, "sp"], ["L", 6000.0, 298.89424490328594, "sp"], ["R", 6000.0, 59.447122451642976, "sp"]]],
+	["TE3-", 26600.0, 500100.0, -180.0, 200.0, [["R", 6000.0, 59.447122451642976, "sp"], ["L", 6000.0, 298.89424490328594, "sp"], ["R", 6000.0, 59.447122451642976, "sp"]]],
+	["TE3+", 573399.9999999489, 499900.000000001, 3.7730572313033416e-13, 200.0, [["R", 6000.0, 59.447122451642976, "sp"], ["L", 6000.0, 298.89424490328594, "sp"], ["R", 6000.0, 59.447122451642976, "sp"]]],
+	["TN1-", 99900.0, 26600.0, -90.0, 200.0, [["R", 6000.0, 59.447122451642976, "sp"], ["L", 6000.0, 298.89424490328594, "sp"], ["R", 6000.0, 59.447122451642976, "sp"]]],
+	["TN1+", 100099.99999999856, 573399.9999999264, 90.0000000000011, 200.0, [["R", 6000.0, 59.447122451642976, "sp"], ["L", 6000.0, 298.89424490328594, "sp"], ["R", 6000.0, 59.447122451642976, "sp"]]],
+	["TN2-", 299900.0, 26600.0, -90.0, 200.0, [["R", 6000.0, 59.447122451642976, "sp"], ["L", 6000.0, 298.89424490328594, "sp"], ["R", 6000.0, 59.447122451642976, "sp"]]],
+	["TN2+", 300099.9999999948, 573399.9999999453, 90.00000000000979, 200.0, [["R", 6000.0, 59.447122451642976, "sp"], ["L", 6000.0, 298.89424490328594, "sp"], ["R", 6000.0, 59.447122451642976, "sp"]]],
+	["TN3-", 499900.0, 26600.0, -90.0, 200.0, [["R", 6000.0, 59.447122451642976, "sp"], ["L", 6000.0, 298.89424490328594, "sp"], ["R", 6000.0, 59.447122451642976, "sp"]]],
+	["TN3+", 500099.9999999891, 573400.0000000342, 90.00000000000406, 200.0, [["R", 6000.0, 59.447122451642976, "sp"], ["L", 6000.0, 298.89424490328594, "sp"], ["R", 6000.0, 59.447122451642976, "sp"]]],
+	["J0", 268000.0, 299900.0, 0.0, 200.0, [["R", 45000.0, 7.1506790378981435, "sp"], ["L", 45000.0, 7.1506790378981435, "sp"], ["S", 7796.8754358438055, 0.0, "sp"]]],
+	["K0", 290218.6999999926, 299200.00000000047, 0.0, 400.0, [["S", 36578.175435843805, 0.0, "sp"], ["L", 45000.0, 7.1506790378981435, "sp"], ["R", 45000.0, 7.1506790378981435, "sp"]]],
+	["J1", 300100.0, 68000.0, 90.0, 200.0, [["R", 45000.0, 7.1506790378981435, "sp"], ["L", 45000.0, 7.1506790378981435, "sp"], ["S", 7796.8754358438055, 0.0, "sp"]]],
+	["K1", 300799.9999999999, 90218.69999999818, 90.0, 400.0, [["S", 36578.175435843805, 0.0, "sp"], ["L", 45000.0, 7.1506790378981435, "sp"], ["R", 45000.0, 7.1506790378981435, "sp"]]],
+	["J2", 332000.0, 500100.0, -180.0, 200.0, [["R", 45000.0, 7.1506790378981435, "sp"], ["L", 45000.0, 7.1506790378981435, "sp"], ["S", 7796.8754358438055, 0.0, "sp"]]],
+	["K2", 309781.3000000074, 500799.9999999994, -180.0, 400.0, [["S", 36578.175435843805, 0.0, "sp"], ["L", 45000.0, 7.1506790378981435, "sp"], ["R", 45000.0, 7.1506790378981435, "sp"]]],
+	["J3", 99900.0, 332000.0, -90.0, 200.0, [["R", 45000.0, 7.1506790378981435, "sp"], ["L", 45000.0, 7.1506790378981435, "sp"], ["S", 7796.8754358438055, 0.0, "sp"]]],
+	["K3", 99199.99999999994, 309781.3000000074, -90.0, 400.0, [["S", 36578.175435843805, 0.0, "sp"], ["L", 45000.0, 7.1506790378981435, "sp"], ["R", 45000.0, 7.1506790378981435, "sp"]]],
+	["OEridanus", 266000.0, 304000.0, 0.0, 200.0, [["R", 12000.0, 33.12294020774379, "sp"], ["L", 12000.0, 33.12294020774379, "sp"]]],
+	["ODunes", 134000.0, 504000.0, 180.0, 200.0, [["L", 12000.0, 33.12294020774379, "sp"], ["R", 12000.0, 33.12294020774379, "sp"]]],
+	["OGlacier", 466000.0, 504000.0, 0.0, 200.0, [["R", 12000.0, 33.12294020774379, "sp"], ["L", 12000.0, 33.12294020774379, "sp"]]],
+	["OBasalt", 134000.0, 96000.0, 180.0, 200.0, [["R", 12000.0, 33.12294020774379, "sp"], ["L", 12000.0, 33.12294020774379, "sp"]]],
+	["OMesa", 466000.0, 96000.0, 0.0, 200.0, [["L", 12000.0, 33.12294020774379, "sp"], ["R", 12000.0, 33.12294020774379, "sp"]]],
+]
+# [parent road, a0, a1, child road, b0, b1, sense]: the two roads are one through these samples
+const NET_JUNCTIONS := [
+	[0, 2611, 2731, 6, 0, 101, 1], [3, 2611, 2731, 6, 685, 786, -1], [0, 2611, 2731, 7, 0, 101, 1], [3, 3519, 3639, 7, 685, 786, 1], [0, 3519, 3639, 8, 0, 101, -1], [3, 2611, 2731, 8, 685, 786, -1],
+	[0, 3519, 3639, 9, 0, 101, -1], [3, 3519, 3639, 9, 685, 786, 1], [1, 2611, 2731, 10, 0, 101, 1], [3, 11088, 11208, 10, 685, 786, -1], [1, 2611, 2731, 11, 0, 101, 1], [3, 11996, 12116, 11, 685, 786, 1],
+	[1, 3519, 3639, 12, 0, 101, -1], [3, 11088, 11208, 12, 685, 786, -1], [1, 3519, 3639, 13, 0, 101, -1], [3, 11996, 12116, 13, 685, 786, 1], [2, 2611, 2731, 14, 0, 101, 1], [3, 19592, 19712, 14, 685, 786, -1],
+	[2, 2611, 2731, 15, 0, 101, 1], [3, 20500, 20620, 15, 685, 786, 1], [2, 3519, 3639, 16, 0, 101, -1], [3, 19592, 19712, 16, 685, 786, -1], [2, 3519, 3639, 17, 0, 101, -1], [3, 20500, 20620, 17, 685, 786, 1],
+	[0, 11075, 11195, 18, 0, 101, 1], [4, 2611, 2731, 18, 685, 786, -1], [0, 11075, 11195, 19, 0, 101, 1], [4, 3519, 3639, 19, 685, 786, 1], [0, 11983, 12103, 20, 0, 101, -1], [4, 2611, 2731, 20, 685, 786, -1],
+	[0, 11983, 12103, 21, 0, 101, -1], [4, 3519, 3639, 21, 685, 786, 1], [1, 11128, 11248, 22, 0, 101, 1], [4, 11144, 11264, 22, 685, 786, -1], [1, 11128, 11248, 23, 0, 101, 1], [4, 12052, 12172, 23, 685, 786, 1],
+	[1, 12036, 12156, 24, 0, 101, -1], [4, 11144, 11264, 24, 685, 786, -1], [1, 12036, 12156, 25, 0, 101, -1], [4, 12052, 12172, 25, 685, 786, 1], [2, 11050, 11170, 26, 0, 101, 1], [4, 19583, 19703, 26, 685, 786, -1],
+	[2, 11050, 11170, 27, 0, 101, 1], [4, 20491, 20611, 27, 685, 786, 1], [2, 11958, 12078, 28, 0, 101, -1], [4, 19583, 19703, 28, 685, 786, -1], [2, 11958, 12078, 29, 0, 101, -1], [4, 20491, 20611, 29, 685, 786, 1],
+	[0, 19502, 19622, 30, 0, 101, 1], [5, 2611, 2731, 30, 685, 786, -1], [0, 19502, 19622, 31, 0, 101, 1], [5, 3519, 3639, 31, 685, 786, 1], [0, 20410, 20530, 32, 0, 101, -1], [5, 2611, 2731, 32, 685, 786, -1],
+	[0, 20410, 20530, 33, 0, 101, -1], [5, 3519, 3639, 33, 685, 786, 1], [1, 19578, 19698, 34, 0, 101, 1], [5, 11038, 11158, 34, 685, 786, -1], [1, 19578, 19698, 35, 0, 101, 1], [5, 11946, 12066, 35, 685, 786, 1],
+	[1, 20486, 20606, 36, 0, 101, -1], [5, 11038, 11158, 36, 685, 786, -1], [1, 20486, 20606, 37, 0, 101, -1], [5, 11946, 12066, 37, 685, 786, 1], [2, 19543, 19663, 38, 0, 101, 1], [5, 19555, 19675, 38, 685, 786, -1],
+	[2, 19543, 19663, 39, 0, 101, 1], [5, 20463, 20583, 39, 685, 786, 1], [2, 20451, 20571, 40, 0, 101, -1], [5, 19555, 19675, 40, 685, 786, -1], [2, 20451, 20571, 41, 0, 101, -1], [5, 20463, 20583, 41, 685, 786, 1],
+	[1, 13345, 13444, 42, 0, 80, -1], [1, 12267, 12366, 42, 1435, 1515, -1], [2, 1323, 1422, 43, 0, 80, 1], [2, 2401, 2500, 43, 1435, 1515, 1], [2, 21760, 21859, 44, 0, 80, -1], [2, 20682, 20781, 44, 1435, 1515, -1],
+	[0, 1323, 1422, 45, 0, 80, 1], [0, 2401, 2500, 45, 1435, 1515, 1], [0, 21719, 21818, 46, 0, 80, -1], [0, 20641, 20740, 46, 1435, 1515, -1], [0, 0, 77, 47, 0, 74, -1], [0, 0, 77, 47, 1751, 1825, 1],
+	[0, 23064, 23141, 48, 0, 74, 1], [0, 23064, 23141, 48, 1751, 1825, -1], [1, 0, 77, 49, 0, 74, -1], [1, 0, 77, 49, 1751, 1825, 1], [1, 23140, 23217, 50, 0, 74, 1], [1, 23140, 23217, 50, 1751, 1825, -1],
+	[2, 0, 77, 51, 0, 74, -1], [2, 0, 77, 51, 1751, 1825, 1], [2, 23105, 23182, 52, 0, 74, 1], [2, 23105, 23182, 52, 1751, 1825, -1], [3, 0, 77, 53, 0, 74, -1], [3, 0, 77, 53, 1751, 1825, 1],
+	[3, 23154, 23231, 54, 0, 74, 1], [3, 23154, 23231, 54, 1751, 1825, -1], [4, 0, 77, 55, 0, 74, -1], [4, 0, 77, 55, 1751, 1825, 1], [4, 23145, 23222, 56, 0, 74, 1], [4, 23145, 23222, 56, 1751, 1825, -1],
+	[5, 0, 77, 57, 0, 74, -1], [5, 0, 77, 57, 1751, 1825, 1], [5, 23117, 23194, 58, 0, 74, 1], [5, 23117, 23194, 58, 1751, 1825, -1], [1, 10299, 10505, 59, 0, 187, 1], [1, 12990, 13235, 60, 1768, 1995, 1],
+	[4, 1782, 1988, 61, 0, 187, 1], [4, 4473, 4718, 62, 1768, 1995, 1], [2, 12701, 12907, 63, 0, 187, -1], [2, 9971, 10216, 64, 1768, 1995, -1], [3, 12739, 12945, 65, 0, 187, -1], [3, 10009, 10254, 66, 1768, 1995, -1],
+	[1, 10662, 10782, 67, 479, 580, 1], [2, 3985, 4105, 68, 479, 580, -1], [2, 19077, 19197, 69, 479, 580, 1], [0, 3985, 4105, 70, 479, 580, -1], [0, 19036, 19156, 71, 479, 580, 1],
+]
+# [name, biome, centre x, centre y, road, terminal sample]
+const NET_CITIES := [
+	["ERIDANUS", "verdant", 329137.64169443276, 313131.07863207115, 42, 757],
+	["DUNES", "desert", 70862.35830556872, 513131.0786320711, 43, 757],
+	["GLACIER", "ice", 529137.6416944333, 513131.07863207115, 44, 757],
+	["BASALT", "basalt", 70862.35830556872, 86868.92136793051, 45, 757],
+	["MESA", "mesa", 529137.6416944332, 86868.92136793045, 46, 757],
+]
+# the roads' heights: [road, [[sample, m, slope], ...]], Hermite between keys (flyovers, jumps)
+const NET_HEIGHTS := [
+	[3, [[2750, 0.0, 0.0], [3000, 120.0, 0.0], [3250, 120.0, 0.0], [3500, 0.0, 0.0], [11227, 0.0, 0.0], [11477, 120.0, 0.0], [11727, 120.0, 0.0], [11977, 0.0, 0.0], [19731, 0.0, 0.0], [19981, 120.0, 0.0], [20231, 120.0, 0.0], [20481, 0.0, 0.0]]],
+	[4, [[2750, 0.0, 0.0], [3000, 120.0, 0.0], [3250, 120.0, 0.0], [3500, 0.0, 0.0], [11283, 0.0, 0.0], [11533, 120.0, 0.0], [11783, 120.0, 0.0], [12033, 0.0, 0.0], [19722, 0.0, 0.0], [19972, 120.0, 0.0], [20222, 120.0, 0.0], [20472, 0.0, 0.0]]],
+	[5, [[2750, 0.0, 0.0], [3000, 120.0, 0.0], [3250, 120.0, 0.0], [3500, 0.0, 0.0], [11177, 0.0, 0.0], [11427, 120.0, 0.0], [11677, 120.0, 0.0], [11927, 0.0, 0.0], [19694, 0.0, 0.0], [19944, 120.0, 0.0], [20194, 120.0, 0.0], [20444, 0.0, 0.0]]],
+	[59, [[628, 0.0, 0.0], [795, 299.49980670365215, 0.1494510013491278]]],
+	[60, [[0, 748.6536860839753, 0.13150334629453153], [208, 1076.886038435126, 0.0], [991, 1076.886038435126, 0.0], [1574, 0.0, 0.0]]],
+	[61, [[628, 0.0, 0.0], [795, 299.49980670365215, 0.1494510013491278]]],
+	[62, [[0, 748.6536860839753, 0.13150334629453153], [208, 1076.886038435126, 0.0], [991, 1076.886038435126, 0.0], [1574, 0.0, 0.0]]],
+	[63, [[628, 0.0, 0.0], [795, 299.49980670365215, 0.1494510013491278]]],
+	[64, [[0, 748.6536860839753, 0.13150334629453153], [208, 1076.886038435126, 0.0], [991, 1076.886038435126, 0.0], [1574, 0.0, 0.0]]],
+	[65, [[628, 0.0, 0.0], [795, 299.49980670365215, 0.1494510013491278]]],
+	[66, [[0, 748.6536860839753, 0.13150334629453153], [208, 1076.886038435126, 0.0], [991, 1076.886038435126, 0.0], [1574, 0.0, 0.0]]],
+]
+# [launch road (its end is a lip), catch deck, the slowest that lands (mph)]
+const NET_JUMPS := [[59, 60, 3000.0], [61, 62, 3000.0], [63, 64, 3000.0], [65, 66, 3000.0]]
+# [city, road]: the on-ramps from the open ground (their start is open)
+const NET_ONRAMPS := [[0, 67], [1, 68], [2, 69], [3, 70], [4, 71]]
+# </network>
 # The courses: widths per mode (else GP_WIDTH, constant); width_r: the width-easing box (samples);
 # banks: per mode, degrees (else GP_BANK in the corners), each eased by two passes of its own box,
 # bank_r (samples; else GP_BANK_R).
 const COURSES := {
 	"gp": {"segs": GP_SEGS, "checkpoints": 12},
+	"gp_dunes": {"segs": GP_DUNES_SEGS, "checkpoints": 12},
+	"gp_glacier": {"segs": GP_GLACIER_SEGS, "checkpoints": 12},
+	"gp_basalt": {"segs": GP_BASALT_SEGS, "checkpoints": 12},
+	"gp_mesa": {"segs": GP_MESA_SEGS, "checkpoints": 12},
+
 	"eridanus": {"segs": ERI_SEGS, "checkpoints": 24, "widths": {"sf": 140.0, "sp": 400.0}, "width_r": 40,
 		"banks": {"sf": 10.0, "sp": 3.0}, "bank_r": {"sf": 20, "sp": 100}, "branches": [ERI_SHADE], "pad": ERI_PAD, "ramps": ERI_RAMPS},
 }
@@ -151,6 +303,9 @@ class Body:
 	var vz := 0.0
 	var grip := 1.0
 	var path := 0   # the road its hint is on: 0 the main road, k + 1 branch k
+	var touch := {}   # the obstacles (ids) it's touching (one 'bump' a contact)
+	var off_road := false   # the Network: off the roads (off a lip, on the open ground): no walls, the hover over the terrain
+	var lock := false       # ... just caught by a road, easing onto its surface
 
 	func _init(mass: float, moment: float) -> void:
 		m = mass
@@ -181,6 +336,11 @@ class TrackPath:
 	var roll: Array = []   # the corkscrews: [first sample, last sample, deg from, deg to], in order
 	var height := 0.0      # the road's height under the canopy (m), turned over
 	var open := false
+	var mode := PackedByteArray()   # the Network: per sample, 0 STARFIGHTER ("sf"), 1 SPEEDCRAFT
+	var jx: Array = []              # the Network: the junctions this road is in (indices into junctions)
+	var role := ""                  # the Network: "launch" (its end is a lip), "catch" (a deck that catches jumps), "on" (from the open ground)
+	var open0 := true               # the Network: no junction holds its first sample (run off it: off the roads)
+	var open1 := true               # ... its last
 
 
 var P: Dictionary
@@ -215,6 +375,28 @@ var tcover := PackedByteArray()   # per main sample: 1 under a covered ramp (she
 ## "failed", t (s since its clock started, on the first move), t0 (when, null until then), held
 ## (s stopped on the pad), route "open" | "shade", margin (s), reason "" | "dawn" | "crash", prev_d.
 var job: Dictionary = {}
+## The Network (kind "network", tools/design_network.py): its roads (open TrackPaths, a body's path
+## is its road), the junction table ([a, a0, a1, b, b0, b1, sense]: through those samples roads a and
+## b are one), the cities ({name, biome, cx, cy, road, i}: i the terminal's sample), and the state:
+## from (the city last reached), t0 (when the clock started, -1 until the first move), found
+## ({city: true}), prev (the pod's Vector2i(road, sample) a step ago, x -1 for none).
+var roads: Array[TrackPath] = []
+var junctions: Array = []
+var cities: Array = []
+var net: Dictionary = {}
+## Moving obstacles (the Network's traffic, driven outside the sim), mirroring sim-core.js: each
+## {id, x, y, vx, vy, r}, advanced along its velocity every step; a body's circles feel their forcefields.
+var obstacles: Array = []
+var _net_h := {}   # road -> its height keys [[sample, m, slope], ...] (flyovers, jumps), Hermite between
+var jumps: Array = []      # the Network's jumps: [launch road, catch deck, the slowest that lands (mph)] (NET_JUMPS)
+var onramps: Array = []    # ... its on-ramps from the open ground: [city, road] (NET_ONRAMPS)
+var _net_cells := {}   # the Network's grid: a NET_CELL square's key -> [[road, first, last sample], ...] (sample runs in it)
+var on_ground := false   # the Network: the pod off the roads and down on the open ground (once per spell)
+const NET_CELL := 2048.0
+const NET_EDGE := 300.0
+const LOCK_W := 4.0          # the deck lock's catch: a critically damped spring ...
+const LOCK_A := 20.0 * G     # ... capped (a deck's pull-out at 4,300 mph is ~10 g: the catch has to follow it)
+const JC_REACH := 40.0       # a catch deck reaches this far up for a jump
 const CORK_EASE := 0.15   # each corkscrew's roll rate ramps up and down over this share of it
 
 # race and craft state
@@ -258,6 +440,9 @@ var _n_nx := 0.0
 var _n_ny := 0.0
 var _n_t := 0.0   # how far along sample _n_i's segment the nearest point lies, 0..1
 var _n_off := false   # the nearest point is past an end of a branch (no road there)
+var _n_tx := 0.0   # (branches and the Network) the tangent at _n_i ...
+var _n_ty := 0.0
+var _n_over := -INF   # ... and past an end, how far (m; negative short of it; -INF not an end sample)
 var _pvx := 0.0
 var _pvy := 0.0
 
@@ -287,6 +472,8 @@ func _init(overrides: Dictionary = {}) -> void:
 	if P.track == "range":
 		kind = "range"
 		_build_range()
+	elif P.track == "network":
+		_build_network()
 	elif COURSES.has(P.track):
 		_build_course(P.track)
 	else:
@@ -302,9 +489,12 @@ func _init(overrides: Dictionary = {}) -> void:
 		B.open = P.job == "emergency"
 	if P.job == "emergency" and pad >= 0:
 		job = _new_job()
+	if kind == "network":
+		var sc := int(P.get("startCity", 0))
+		net = {"from": sc, "t0": -1.0, "found": {sc: true}, "prev": Vector2i(-1, -1)}
 	pod.x = float(P.startX) + 30.0   # range spawn point (respawn backs off 30 m)
 	pod.y = float(P.startY)
-	respawn(0)
+	respawn(-1 if kind == "network" else 0)   # the Network: at the start city
 	visited[0] = true
 
 
@@ -349,6 +539,9 @@ func ground(x: float, y: float) -> float:
 ## Repulsor hover: spring-damper toward ride height, push-only, plus gravity. Exactly
 ## balanced on flat ground, so flat tracks are unchanged. Grip fades as a body lifts clear.
 func _hover(b: Body, dt: float, az: float) -> void:
+	if kind == "network" and not b.off_road:
+		_rail_hover(b, dt)
+		return
 	var h := ground(b.x, b.y)
 	var dhdt := (ground(b.x + b.vx * dt, b.y + b.vy * dt) - h) / dt
 	var w: float = P.hoverOmega
@@ -362,6 +555,148 @@ func _hover(b: Body, dt: float, az: float) -> void:
 				events.append({"type": "land", "v": dhdt - b.vz})
 			b.vz = dhdt
 	b.grip = clampf(1.0 - (b.z - h - P.rideH - 0.5) / 1.5, 0.0, 1.0)
+
+
+## The Network's deck lock, mirroring sim-core.js railHover: a body on a road rides its surface (the
+## road's forcefield holds it down as well as up: at 4,000 mph any crest tighter than 326 km would
+## throw you off). Just caught (lock), it eases on: a critically damped spring, capped at LOCK_A.
+func _road_f(b: Body) -> float:
+	var R: TrackPath = roads[b.path]
+	var i := b.hint
+	return float(i) + clampf(((b.x - R.px[i]) * R.tx[i] + (b.y - R.py[i]) * R.ty[i]) / R.len[i], -1.0, 2.0)
+
+
+func _rail_hover(b: Body, dt: float) -> void:
+	var R: TrackPath = roads[b.path]
+	var i := b.hint
+	var f := _road_f(b)
+	var lat := (b.x - R.px[i]) * R.nx[i] + (b.y - R.py[i]) * R.ny[i]
+	var vl := b.vx * R.nx[i] + b.vy * R.ny[i]
+	var h := road_h(b.path, f) + net_edge(R.w[i], lat).x
+	var vs := b.vx * R.tx[i] + b.vy * R.ty[i]
+	var dhdt := (road_h(b.path, f + vs * dt / R.len[i]) + net_edge(R.w[i], lat + vl * dt).x - h) / dt
+	if b.lock:
+		var acc := clampf(LOCK_W * LOCK_W * (h + P.rideH - b.z) - 2.0 * LOCK_W * (b.vz - dhdt), -LOCK_A, LOCK_A)
+		b.vz += acc * dt
+		b.z += b.vz * dt
+		if absf(b.z - h - P.rideH) < 0.05 and absf(b.vz - dhdt) < 0.5:
+			b.lock = false
+		b.grip = clampf(1.0 - (b.z - h - P.rideH - 0.5) / 1.5, 0.0, 1.0)
+		return
+	b.z = h + P.rideH
+	b.vz = dhdt
+	b.grip = 1.0
+
+
+## Off the roads, mirroring sim-core.js goFree: off an open end (a launch spur's lip, a highway's end).
+func _go_free(b: Body) -> void:
+	b.off_road = true
+	b.lock = false
+	b.contact = [false, false]
+	if b == pod:
+		events.append({"type": "airborne", "road": b.path, "lip": roads[b.path].role == "launch", "v": sqrt(b.vx * b.vx + b.vy * b.vy), "vz": b.vz})
+
+
+## The roads near (x, y), mirroring sim-core.js netNear: per run in its grid cell (and the next cells
+## if it's within NET_EDGE of an edge), the nearest point (every 8th sample, then the 8 either side).
+## -> [[road, i, lat, w, nx, ny, off], ...]
+func net_near(x: float, y: float) -> Array:
+	var out: Array = []
+	var cx := int(floor(x / NET_CELL))
+	var cy := int(floor(y / NET_CELL))
+	var fx := x - float(cx) * NET_CELL
+	var fy := y - float(cy) * NET_CELL
+	for dx in [-1, 0, 1]:
+		if (dx < 0 and fx > NET_EDGE) or (dx > 0 and fx < NET_CELL - NET_EDGE):
+			continue
+		for dy in [-1, 0, 1]:
+			if (dy < 0 and fy > NET_EDGE) or (dy > 0 and fy < NET_CELL - NET_EDGE):
+				continue
+			var runs = _net_cells.get((cx + dx) * 4096 + (cy + dy))
+			if runs == null:
+				continue
+			for run: Array in runs:
+				var r: int = run[0]
+				var R: TrackPath = roads[r]
+				var bi: int = run[1]
+				var bd := INF
+				var i: int = run[1]
+				while i <= int(run[2]):
+					var d := (x - R.px[i]) * (x - R.px[i]) + (y - R.py[i]) * (y - R.py[i])
+					if d < bd:
+						bd = d
+						bi = i
+					i += 8
+				_nearest_branch(R, x, y, bi, 8)
+				out.append([r, _n_i, _n_lat, _n_w, _n_nx, _n_ny, _n_off])
+	return out
+
+
+## A body off the roads, mirroring sim-core.js freeContact: caught by a road it touches down inside
+## (a catch deck reaches JC_REACH up for a jump; slower, under its lip, the deck turns it down), else
+## held off the roads' walls from outside near the ground.
+func _free_contact(b: Body, circles: Array, dt: float) -> void:
+	var ns := net_near(b.x, b.y)
+	for n: Array in ns:
+		var R: TrackPath = roads[n[0]]
+		if n[6] or absf(n[2]) > float(n[3]) / 2.0 - 2.0:
+			continue
+		var i: int = n[1]
+		var u := clampf(((b.x - R.px[i]) * R.tx[i] + (b.y - R.py[i]) * R.ty[i]) / R.len[i], -1.0, 2.0)
+		var h := road_h(n[0], float(i) + u) + net_edge(float(n[3]), float(n[2])).x
+		var dz: float = b.z - h - P.rideH
+		if dz >= -3.0 and dz <= (JC_REACH if R.role == "catch" else 2.5):
+			var vs := b.vx * R.tx[i] + b.vy * R.ty[i]
+			var dhdt := (road_h(n[0], float(i) + u + vs * dt / R.len[i]) - h) / dt
+			b.off_road = false
+			b.path = n[0]
+			b.hint = i
+			b.contact = [false, false]
+			b.lock = absf(dz) > 0.05 or absf(b.vz - dhdt) > 0.5
+			if b == pod:
+				events.append({"type": "catch" if R.role == "catch" else "onroad", "road": n[0], "v": absf(b.vz - dhdt), "dz": dz})
+				on_ground = false
+			return
+		if R.role == "catch" and dz < -3.0 and dz > -80.0:   # under the deck's lip: turned down
+			var vs2 := b.vx * R.tx[i] + b.vy * R.ty[i]
+			var dhdt2 := (road_h(n[0], float(i) + u + vs2 * dt / R.len[i]) - h) / dt
+			if dz > -8.0:
+				b.z = h + P.rideH - 8.0
+			if b.vz > dhdt2 - 2.0:
+				b.vz = dhdt2 - 2.0
+	# walls from outside, near the ground
+	for n: Array in ns:
+		if n[6]:
+			continue
+		var R: TrackPath = roads[n[0]]
+		var h := net_height(n[0], float(n[1])) + net_edge(float(n[3]), float(n[3]) / 2.0).x   # (at the wall's foot: the ramp's top)
+		if absf(b.z - h - P.rideH) > 25.0:
+			continue
+		for c: Array in circles:
+			var cx: float = c[0]
+			var cy: float = c[1]
+			var r: float = c[2]
+			_nearest_branch(R, cx, cy, n[1], 4)
+			var al := absf(_n_lat)
+			var pen := _n_w / 2.0 + r - al
+			if _n_off or al < _n_w / 2.0 - 2.0 or pen <= 0.0:
+				continue
+			var sgn := 1.0 if _n_lat > 0.0 else -1.0
+			var nx := _n_nx * sgn
+			var ny := _n_ny * sgn
+			_point_vel(b, cx, cy)
+			var vx := _pvx
+			var vy := _pvy
+			var vn := vx * nx + vy * ny
+			var fn: float = P.wallK * pen - (P.wallC * vn if vn < 0.0 else 0.0)
+			var tx := -ny
+			var ty := nx
+			var vt := vx * tx + vy * ty
+			var ft: float = -signf(vt) * minf(P.wallMu * fn, absf(vt) * b.m / dt)
+			_apply_at(b, fn * nx + ft * tx, fn * ny + ft * ty, cx, cy)
+	if b == pod and not on_ground and b.z - P.rideH < 1.0:
+		on_ground = true
+		events.append({"type": "ground"})
 
 
 ## xorshift32, bit-identical to the JS reference.
@@ -511,6 +846,171 @@ func _build_course(name: String) -> void:
 			break
 
 
+## The Network, mirroring sim-core.js buildNetwork: open roads, each walked from its own pose as a
+## branch is from its split (NET_STEP samples, a mode per segment; the last sample keeps the end
+## heading), and the junction table.
+func _build_network() -> void:
+	kind = "network"
+	track_name = "network"
+	for rd in NET_ROADS:
+		var B := TrackPath.new()
+		B.name = rd[0]
+		var x: float = rd[1]
+		var y: float = rd[2]
+		var h: float = rd[3] * PI / 180.0
+		var width: float = rd[4]
+		var md := 1
+		for sg in rd[5]:
+			md = 0 if sg[3] == "sf" else 1
+			if sg[0] == "S":
+				var n := maxi(1, int(ceil(sg[1] / NET_STEP)))
+				var d: float = sg[1] / n
+				for k in n:
+					B.px.append(x)
+					B.py.append(y)
+					B.mode.append(md)
+					x += d * cos(h)
+					y += d * sin(h)
+			else:
+				var r: float = sg[1]
+				var sn := 1.0 if sg[0] == "L" else -1.0
+				var ang: float = sg[2] * PI / 180.0
+				var n := maxi(1, int(ceil(r * ang / NET_STEP)))
+				var da := ang / n
+				var c := 2.0 * r * sin(da / 2.0)
+				for k in n:
+					B.px.append(x)
+					B.py.append(y)
+					B.mode.append(md)
+					x += c * cos(h + sn * da / 2.0)
+					y += c * sin(h + sn * da / 2.0)
+					h += sn * da
+		B.px.append(x)
+		B.py.append(y)
+		B.mode.append(md)
+		B.N = B.px.size()
+		for a in [B.tx, B.ty, B.nx, B.ny, B.len, B.w, B.bank]:
+			a.resize(B.N)
+		var s := 0.0
+		for i in B.N:
+			var dx := B.px[i + 1] - B.px[i] if i + 1 < B.N else NET_STEP * cos(h)
+			var dy := B.py[i + 1] - B.py[i] if i + 1 < B.N else NET_STEP * sin(h)
+			var l := sqrt(dx * dx + dy * dy)
+			B.tx[i] = dx / l
+			B.ty[i] = dy / l
+			B.nx[i] = -B.ty[i]
+			B.ny[i] = B.tx[i]
+			B.len[i] = l
+			s += l
+			B.w[i] = width
+			B.bank[i] = 0.0
+		B.length = s
+		roads.append(B)
+	for k in NET_JUNCTIONS.size():
+		var J: Array = NET_JUNCTIONS[k]
+		junctions.append(J)
+		roads[int(J[0])].jx.append(k)
+		roads[int(J[3])].jx.append(k)
+	for c in NET_CITIES:
+		cities.append({"name": c[0], "biome": c[1], "cx": float(c[2]), "cy": float(c[3]), "road": int(c[4]), "i": int(c[5])})
+	for hk in NET_HEIGHTS:
+		_net_h[int(hk[0])] = hk[1]
+	# Phase 3, mirroring sim-core.js: roles, open ends, the grid
+	jumps = NET_JUMPS.duplicate(true)
+	onramps = NET_ONRAMPS.duplicate(true)
+	for jp in NET_JUMPS:
+		roads[int(jp[0])].role = "launch"
+		roads[int(jp[1])].role = "catch"
+	for op in NET_ONRAMPS:
+		roads[int(op[1])].role = "on"
+	for J: Array in junctions:
+		for e in [[int(J[0]), int(J[1]), int(J[2])], [int(J[3]), int(J[4]), int(J[5])]]:
+			if e[1] <= 0:
+				roads[e[0]].open0 = false
+			if e[2] >= roads[e[0]].N - 1:
+				roads[e[0]].open1 = false
+	for r in roads.size():
+		var R: TrackPath = roads[r]
+		var key := -2147483648
+		var run: Array = []
+		for i in R.N:
+			var k := net_cell(R.px[i], R.py[i])
+			if k != key:
+				key = k
+				run = [r, i, i]
+				if not _net_cells.has(k):
+					_net_cells[k] = []
+				_net_cells[k].append(run)
+			else:
+				run[2] = i
+
+
+## The grid's key for (x, y) (NET_CELL squares), mirroring sim-core.js netCell.
+static func net_cell(x: float, y: float) -> int:
+	return int(floor(x / NET_CELL)) * 4096 + int(floor(y / NET_CELL))
+
+
+## A road's height at (fractional) sample i: Hermite cubics between its keys [sample, m, slope] (zero
+## slopes: a smoothstep), 0 off them. Real in the sims now (the deck lock), the view's decks too.
+func net_height(road: int, i: float) -> float:
+	var keys: Array = _net_h.get(road, [])
+	for k in range(0, keys.size() - 1):
+		var a: Array = keys[k]
+		var b: Array = keys[k + 1]
+		if i >= float(a[0]) and i <= float(b[0]):
+			var n := maxi(1, int(b[0]) - int(a[0]))
+			var u := (i - float(a[0])) / float(n)
+			var d := float(n) * NET_STEP
+			var u2 := u * u
+			var u3 := u2 * u
+			return (2.0 * u3 - 3.0 * u2 + 1.0) * float(a[1]) + (u3 - 2.0 * u2 + u) * d * float(a[2]) + (-2.0 * u3 + 3.0 * u2) * float(b[1]) + (u3 - u2) * d * float(b[2])
+	return 0.0
+
+
+## The Network's edges ramp up (Luke, 2026-10-20: "make the walls ramp up on the sides rather than a
+## hard stop? Let the craft drift a bit"), mirroring sim-core.js netEdge: the outer EDGE_FRAC of each
+## side (EDGE_MIN-EDGE_MAX m) banks up toward the wall, EDGE_ANG at it, as u^1.5 across (a quarter-pipe).
+## -> Vector2(its height there (m), its bank (rad)) at `lat` m off the centreline of a road `w` wide.
+const EDGE_FRAC := 0.15
+const EDGE_MIN := 30.0
+const EDGE_MAX := 60.0
+const EDGE_ANG := 18.0 * PI / 180.0
+static func net_edge_span(w: float) -> float:   # each ramp's width across (m)
+	return clampf(w * EDGE_FRAC, EDGE_MIN, EDGE_MAX)
+
+
+static func net_edge(w: float, lat: float) -> Vector2:
+	var E := clampf(w * EDGE_FRAC, EDGE_MIN, EDGE_MAX)
+	var u := (absf(lat) - (w / 2.0 - E)) / E
+	if u <= 0.0:
+		return Vector2.ZERO
+	var v := minf(u, 1.0)
+	var r := sqrt(v)
+	return Vector2(E * tan(EDGE_ANG) * v * v * r / 2.5, EDGE_ANG * v * r)
+
+
+## ... and past its ends (a body off its last sample, the step before it's freed), on at the end's slope.
+func road_h(road: int, f: float) -> float:
+	var N: int = roads[road].N
+	if f > float(N - 1):
+		return net_height(road, float(N - 1)) + (f - float(N - 1)) * (net_height(road, float(N - 1)) - net_height(road, float(N) - 1.01)) / 0.01
+	if f < 0.0:
+		return net_height(road, 0.0) + f * (net_height(road, 0.01) - net_height(road, 0.0)) / 0.01
+	return net_height(road, f)
+
+
+## Is any of the road's deck off the ground between samples lo and hi (inclusive)? Elsewhere
+## net_height is exactly 0.
+func _deck_between(road: int, lo: float, hi: float) -> bool:
+	var keys: Array = _net_h.get(road, [])
+	for k in range(0, keys.size() - 1):
+		var a: Array = keys[k]
+		var b: Array = keys[k + 1]
+		if (float(a[1]) != 0.0 or float(b[1]) != 0.0) and hi >= float(a[0]) and lo <= float(b[0]):
+			return true
+	return false
+
+
 func _build_branch(Bd: Dictionary) -> TrackPath:
 	var B := TrackPath.new()
 	B.name = Bd.name
@@ -625,26 +1125,39 @@ func _nearest(x: float, y: float, hint: int, win: int) -> void:
 ## is off it (_n_off: no road there, however close to the centreline's line).
 func _nearest_branch(B: TrackPath, x: float, y: float, hint: int, win: int) -> void:
 	var bd := INF
+	# the arrays in locals (the same sums; a member lookup each time cost ~40% of the search, which
+	# is most of a Network step)
+	var bx := B.px
+	var by := B.py
+	var btx := B.tx
+	var bty := B.ty
+	var bl := B.len
 	for i in range(maxi(0, hint - win), mini(B.N - 1, hint + win) + 1):
-		var u := ((x - B.px[i]) * B.tx[i] + (y - B.py[i]) * B.ty[i]) / B.len[i]
+		var u := ((x - bx[i]) * btx[i] + (y - by[i]) * bty[i]) / bl[i]
 		var t := clampf(u, 0.0, 1.0)
-		var px := B.px[i] + B.tx[i] * B.len[i] * t
-		var py := B.py[i] + B.ty[i] * B.len[i] * t
+		var px := bx[i] + btx[i] * bl[i] * t
+		var py := by[i] + bty[i] * bl[i] * t
 		var d := (x - px) * (x - px) + (y - py) * (y - py)
 		if d < bd:
 			bd = d
 			_n_i = i
-			_n_lat = (x - B.px[i]) * B.nx[i] + (y - B.py[i]) * B.ny[i]
+			_n_lat = (x - bx[i]) * B.nx[i] + (y - by[i]) * B.ny[i]
 			_n_w = B.w[i]
 			_n_nx = B.nx[i]
 			_n_ny = B.ny[i]
 			_n_t = t
 			_n_off = (i == 0 and u < 0.0) or (i == B.N - 1 and u > 1.0)
+			_n_tx = btx[i]
+			_n_ty = bty[i]
+			_n_over = (u - 1.0) * bl[i] if i == B.N - 1 else (-u * bl[i] if i == 0 else -INF)
 
 
-## Nearest centreline point on a path (0 the main road, k + 1 branch k), into the _n_ fields.
+## Nearest centreline point on a path (0 the main road, k + 1 branch k; on the Network: road path),
+## into the _n_ fields.
 func _nearest_on(path: int, x: float, y: float, hint: int, win: int) -> void:
-	if path == 0:
+	if kind == "network":
+		_nearest_branch(roads[path], x, y, hint, win)
+	elif path == 0:
 		_nearest(x, y, hint, win)
 	else:
 		_nearest_branch(branches[path - 1], x, y, hint, win)
@@ -653,6 +1166,33 @@ func _nearest_on(path: int, x: float, y: float, hint: int, win: int) -> void:
 ## How deep inside its road the last nearest point is, with radius r (negative inside; INF off a branch's end).
 func _depth(r: float) -> float:
 	return INF if _n_off else absf(_n_lat) + r - _n_w / 2.0
+
+
+## The same on the Network, for the last nearest point on road `path`: a closed road end (a junction
+## holds it: a highway's dead end inside its turnaround's zone) is a wall across the road, as deep as
+## the circle is past the end plus r; an open end has none (INF: past it you're off the roads).
+## Treating a closed end as INF too (no road here) made the junction's other road win however far off
+## it was: past a highway's end, its turnaround's centreline is ~300 m to the side, 210 m of "wall"
+## and a 1.3e9 N kick in one step, the binder torn (Luke's speeds jumping to 10,000-63,000 km/h at
+## mile ~0 and ~346). Elsewhere it is _depth.
+func _deep(path: int, r: float) -> float:
+	if kind != "network":
+		return _depth(r)
+	var R: TrackPath = roads[path]
+	var side := absf(_n_lat) + r - _n_w / 2.0
+	if not ((_n_i == R.N - 1 and not R.open1) or (_n_i == 0 and not R.open0)):
+		return INF if _n_off else side
+	return maxf(side, _n_over + r)
+
+
+## ... and whether that wall is the end's (1 the far end, -1 the first; 0 the sides)
+func _end_cap(path: int, r: float) -> int:
+	if kind != "network":
+		return 0
+	var R: TrackPath = roads[path]
+	if not ((_n_i == R.N - 1 and not R.open1) or (_n_i == 0 and not R.open0)) or not (_n_over + r > absf(_n_lat) + r - _n_w / 2.0):
+		return 0
+	return 1 if _n_i == R.N - 1 else -1
 
 
 ## A signed sample gap round the main loop.
@@ -680,6 +1220,37 @@ func _junction_alt(b: Body) -> Vector2i:
 			if b.hint > B.N - 1 - B.jz:
 				return Vector2i(0, posmod(B.join_i - (B.N - 1 - b.hint), N))
 	return Vector2i(-1, 0)
+
+
+## The Network's other roads at a body's junctions, [Vector2i(path, hint there), ...]: every
+## junction whose zone on the body's road holds its hint, mapped linearly onto the other road's zone.
+func _net_alts(b: Body) -> Array:
+	var out: Array = []
+	for k in roads[b.path].jx:
+		var J: Array = junctions[k]
+		var f0: int
+		var f1: int
+		var t0: int
+		var t1: int
+		var q: int
+		if int(J[0]) == b.path and b.hint >= int(J[1]) and b.hint <= int(J[2]):
+			f0 = J[1]
+			f1 = J[2]
+			t0 = J[4]
+			t1 = J[5]
+			q = J[3]
+		elif int(J[3]) == b.path and b.hint >= int(J[4]) and b.hint <= int(J[5]):
+			f0 = J[4]
+			f1 = J[5]
+			t0 = J[1]
+			t1 = J[2]
+			q = J[0]
+		else:
+			continue
+		var u := float(b.hint - f0) / float(f1 - f0) if f1 > f0 else 0.0
+		var m := t0 + u * (t1 - t0) if int(J[6]) > 0 else t1 - u * (t1 - t0)
+		out.append(Vector2i(q, int(round(m))))
+	return out
 
 
 ## The gates: a branch joins a craft's roads only if the craft reached its split's zone at or below
@@ -758,6 +1329,20 @@ func _point_vel(b: Body, px: float, py: float) -> void:
 ## On a branch (path k + 1): its centreline's height (branch_height) and no bank (the turn over is
 ## roll_at's).
 func surface_at(x: float, y: float, hint: int, path := 0) -> Vector2:
+	if kind == "network":   # the deck's height (the flyovers), and the edges' ramps (net_edge: banked
+		# toward the middle, + = down to the left as the GP's); the ramp from the hint's own sample
+		# (no search: its width and frame are the same for metres around)
+		var e := Vector2.ZERO
+		if path >= 0 and path < roads.size():
+			var R: TrackPath = roads[path]
+			var ih := clampi(hint, 0, R.N - 1)
+			var lat := (x - R.px[ih]) * R.nx[ih] + (y - R.py[ih]) * R.ny[ih]
+			e = net_edge(R.w[ih], lat)
+			e.y *= -signf(lat)
+		if not _deck_between(path, hint - 40, hint + 41):   # no flyover the search could reach: the ground,
+			return e                                       # without the search (~35 us; the view asks ~20 times a frame)
+		_nearest_on(path, x, y, hint, 40)
+		return Vector2(net_height(path, _n_i + _n_t) + e.x, e.y)
 	if path > 0:
 		_nearest_on(path, x, y, hint, 40)
 		return Vector2(branch_height(path, _n_i + _n_t), 0.0)
@@ -794,6 +1379,8 @@ func restart() -> void:
 		pod.x = 30.0
 		pod.y = 0.0
 		respawn()
+	elif kind == "network":
+		respawn()
 	else:
 		lap = 0
 		lap_start = -1.0
@@ -805,10 +1392,11 @@ func restart() -> void:
 
 
 func respawn(ci: int = -1, at_idx: int = -1) -> void:   # at_idx: a debug start at that track sample (views only)
-	# engines placed so each cable is exactly at length: a stretched spawn makes the stiff
-	# cables yank the pod forward on the first step
-	var lat: float = P.engineGap / 2.0 - P.podAnchorW * P.podWidth / 2.0
-	var ahead: float = sqrt(P.cableLen * P.cableLen - lat * lat) + P.podLen / 2.0 + P.engineLen / 2.0
+	# The Network: at a city's terminal (the last city reached unless ci names one), facing up its road
+	if kind == "network":
+		var c: Dictionary = cities[ci if ci >= 0 else int(net.from)]
+		respawn_on(c.road, c.i, 1)
+		return
 	# Circuit: back at a checkpoint. Range: 30 m behind where the pod is, facing +x.
 	var idx := 0
 	var ax: float
@@ -831,6 +1419,24 @@ func respawn(ci: int = -1, at_idx: int = -1) -> void:   # at_idx: a debug start 
 		aty = tty[idx]
 		anx = tnx[idx]
 		any = tny[idx]
+	_place(ax, ay, atx, aty, anx, any, idx, 0)
+
+
+## The Network: on road `road` at sample i, facing up it (dir 1) or down it (-1).
+func respawn_on(road: int, i: int, dir := 1) -> void:
+	var B: TrackPath = roads[road]
+	var d := -1.0 if dir < 0 else 1.0
+	_place(B.px[i], B.py[i], B.tx[i] * d, B.ty[i] * d, B.nx[i] * d, B.ny[i] * d, i, road)
+	if not net.is_empty():
+		net.t0 = -1.0
+		net.prev = Vector2i(-1, -1)
+
+
+func _place(ax: float, ay: float, atx: float, aty: float, anx: float, any: float, idx: int, path: int) -> void:
+	# engines placed so each cable is exactly at length: a stretched spawn makes the stiff
+	# cables yank the pod forward on the first step
+	var lat: float = P.engineGap / 2.0 - P.podAnchorW * P.podWidth / 2.0
+	var ahead: float = sqrt(P.cableLen * P.cableLen - lat * lat) + P.podLen / 2.0 + P.engineLen / 2.0
 	var th := atan2(aty, atx)
 	for pair in [[eL, 1.0], [eR, -1.0], [pod, 0.0]]:
 		var b: Body = pair[0]
@@ -843,11 +1449,14 @@ func respawn(ci: int = -1, at_idx: int = -1) -> void:   # at_idx: a debug start 
 		b.w = 0.0
 		b.th = th
 		b.hint = idx
-		b.path = 0
+		b.path = path
 		b.contact = [false, false]
-		b.z = ground(b.x, b.y) + P.rideH
+		b.z = (net_height(path, float(idx)) if kind == "network" else ground(b.x, b.y)) + P.rideH
 		b.vz = 0.0
 		b.grip = 1.0
+		b.off_road = false
+		b.lock = false
+	on_ground = false
 	for e: Body in [eL, eR]:
 		e.heat = minf(e.heat, 0.5) if P.limits else 0.0
 		e.flameout = false
@@ -867,47 +1476,80 @@ func respawn(ci: int = -1, at_idx: int = -1) -> void:   # at_idx: a debug start 
 ## At a junction the two roads are one (a union): a body takes the road it's deeper inside, when
 ## it's off its own or the other is 10 m deeper, and a wall is wherever it's off both.
 func _collide_walls(b: Body, circles: Array, dt: float) -> void:
-	_nearest_on(b.path, b.x, b.y, b.hint, 40)
+	# (the Network searches 16 samples, not 40: a body moves under a sample a step, and the
+	# junctions' linear maps are within 10 samples of the true nearest: the search is ~60% of a step)
+	var win := 16 if kind == "network" else 40
+	_nearest_on(b.path, b.x, b.y, b.hint, win)
 	b.hint = _n_i
-	var alt := _junction_alt(b) if not branches.is_empty() else Vector2i(-1, 0)
-	var alt_path := 0
-	var alt_hint := 0
-	if alt.x >= 0:
-		var d_own := _depth(0.0)
+	# the other roads here: one at most off a course's main road, any number on the Network (the
+	# body takes the deepest, under the same rule)
+	var alts: Array = []
+	if kind == "network":
+		alts = _net_alts(b)
+	elif not branches.is_empty():
+		var a1 := _junction_alt(b)
+		if a1.x >= 0:
+			alts = [a1]
+	var others: Array = []   # Vector2i(path, hint)
+	if not alts.is_empty():
+		var d_own := _deep(b.path, 0.0)
 		var own_i := _n_i
-		_nearest_on(alt.x, b.x, b.y, alt.y, 40)
-		var d_alt := _depth(0.0)
+		var mi: Array = []
+		var md: Array = []
+		for a: Vector2i in alts:
+			_nearest_on(a.x, b.x, b.y, a.y, win)
+			mi.append(_n_i)
+			md.append(_deep(a.x, 0.0))
+		var bi := 0
+		for k in range(1, md.size()):
+			if md[k] < md[bi]:
+				bi = k
+		var d_alt: float = md[bi]
 		if d_alt < d_own and (d_own > 0.0 or d_alt < d_own - 10.0):
-			alt_path = b.path
-			alt_hint = own_i
-			b.path = alt.x
-			b.hint = _n_i
+			others.append(Vector2i(b.path, own_i))
+			b.path = alts[bi].x
+			b.hint = mi[bi]
+			for k in alts.size():
+				if k != bi:
+					others.append(Vector2i(alts[k].x, mi[k]))
 		else:
-			alt_path = alt.x
-			alt_hint = _n_i
+			for k in alts.size():
+				others.append(Vector2i(alts[k].x, mi[k]))
+	if kind == "network":   # off an open end: off the roads (a lip, a highway's end)
+		var Rw: TrackPath = roads[b.path]
+		_nearest_on(b.path, b.x, b.y, b.hint, 2)
+		if _n_off and ((_n_i == 0 and Rw.open0) or (_n_i == Rw.N - 1 and Rw.open1)):
+			_go_free(b)
+			return
 	for ci in circles.size():
 		var cx: float = circles[ci][0]
 		var cy: float = circles[ci][1]
 		var r: float = circles[ci][2]
 		_nearest_on(b.path, cx, cy, b.hint, 12)
-		var pen := _depth(r)
+		var pen := _deep(b.path, r)
 		var lat := _n_lat
 		var wnx := _n_nx
 		var wny := _n_ny
-		if alt.x >= 0:
-			_nearest_on(alt_path, cx, cy, alt_hint, 12)
-			var pm := _depth(r)
+		var cap := _end_cap(b.path, r)   # a closed end pushes back along the road
+		var ctx := _n_tx
+		var cty := _n_ty
+		for o: Vector2i in others:
+			_nearest_on(o.x, cx, cy, o.y, 12)
+			var pm := _deep(o.x, r)
 			if pm < pen:
 				pen = pm
 				lat = _n_lat
 				wnx = _n_nx
 				wny = _n_ny
-		if pen <= 0.0:
+				cap = _end_cap(o.x, r)
+				ctx = _n_tx
+				cty = _n_ty
+		if pen <= 0.0 or pen == INF:   # (INF: past an open end, no wall)
 			b.contact[ci] = false
 			continue
 		var sgn := -1.0 if lat > 0.0 else 1.0
-		var nx := wnx * sgn
-		var ny := wny * sgn
+		var nx: float = -cap * ctx if cap != 0 else wnx * sgn
+		var ny: float = -cap * cty if cap != 0 else wny * sgn
 		_point_vel(b, cx, cy)
 		var vx := _pvx
 		var vy := _pvy
@@ -931,6 +1573,45 @@ func _collide_walls(b: Body, circles: Array, dt: float) -> void:
 		var vt := vx * tx + vy * ty
 		var ft: float = -signf(vt) * minf(P.wallMu * fn, absf(vt) * b.m / dt)
 		_apply_at(b, fn * nx + ft * tx, fn * ny + ft * ty, cx, cy)
+
+
+## Traffic's forcefields, mirroring sim-core.js collideObstacles: a body's circle inside an obstacle
+## is pushed straight out (a spring and a damper on the closing speed, no friction, no damage);
+## touching one starts a "bump" (once per contact); closing faster than smashV is the catastrophic
+## hit: a "smash" and a crash.
+func _collide_obstacles(b: Body, circles: Array) -> void:
+	var inside := {}
+	for o in obstacles:
+		var ox: float = o.x
+		var oy: float = o.y
+		var orr: float = o.r
+		for c in circles:
+			var cx: float = c[0]
+			var cy: float = c[1]
+			var r: float = c[2]
+			var dx: float = cx - ox
+			var dy: float = cy - oy
+			var reach: float = r + orr + 1.0
+			if dx * dx + dy * dy > reach * reach:   # well clear (the test below skips it too), without the
+				continue                             # sqrt: a city's ~100 obstacles x 3 bodies x 4 steps a frame
+			var d := sqrt(dx * dx + dy * dy)
+			var pen: float = r + orr - d
+			if pen <= 0.0 or d < 1e-6:
+				continue
+			var nx := dx / d
+			var ny := dy / d
+			_point_vel(b, cx, cy)
+			var vn: float = (_pvx - o.vx) * nx + (_pvy - o.vy) * ny
+			if not b.touch.has(o.id) and not inside.has(o.id):
+				if -vn > P.smashV and crash_t <= 0.0:
+					events.append({"type": "smash", "id": o.id, "v": -vn})
+					crash_t = 1.6
+				else:
+					events.append({"type": "bump", "who": "pod" if b == pod else ("L" if b == eL else "R"), "id": o.id, "v": maxf(0.0, -vn)})
+			inside[o.id] = true
+			var fn: float = P.fieldK * pen - (P.fieldC * vn if vn < 0.0 else 0.0)
+			_apply_at(b, fn * nx, fn * ny, cx, cy)
+	b.touch = inside
 
 
 func _engine_circles(e: Body) -> Array:
@@ -961,6 +1642,9 @@ func step(inp: Dictionary, dt: float) -> void:
 	var L := eL
 	var R := eR
 	var Pd := pod
+	for o in obstacles:
+		o.x += o.vx * dt
+		o.y += o.vy * dt
 	if crash_t > 0.0:
 		crash_t -= dt
 		if crash_t <= 0.0:
@@ -974,7 +1658,7 @@ func step(inp: Dictionary, dt: float) -> void:
 	var hask: String = inp.get("handling", "")
 	if hask == "speed" or hask == "starfighter":
 		hwant = hask
-	if pod.path > 0:
+	if pod.path > 0 and kind != "network":
 		hwant = "starfighter"   # a shade line is a STARFIGHTER line (its corkscrews are paced for it)
 	var htgt := 0.0
 	if hwant == "starfighter":
@@ -1007,7 +1691,11 @@ func step(inp: Dictionary, dt: float) -> void:
 	time += dt
 	var repair: bool = inp.get("repair", false)
 	var reignite: bool = inp.get("reignite", false)
-	var in_gate: bool = inp.thrL >= P.gate and inp.thrR >= P.gate and not repair
+	# the burner: an explicit inp.burner (the headset's trigger throttles light it from the left stick,
+	# so the levers stay under the gate and still throttle and steer on it), else both levers past
+	# the gate (the keyboard, a gamepad, the replays); mirroring sim-core.js
+	var lit: bool = bool(inp.burner) if inp.has("burner") else (inp.thrL >= P.gate and inp.thrR >= P.gate)
+	var in_gate: bool = lit and not repair
 	var ramjet := armed and in_gate
 	var burner := not ramjet and in_gate and battery > 0.0
 	mode = "ramjet" if ramjet else ("burner" if burner else "normal")
@@ -1017,6 +1705,7 @@ func step(inp: Dictionary, dt: float) -> void:
 		battery = minf(1.0, battery + P.batteryCharge * dt)
 	var speed := sqrt(Pd.vx * Pd.vx + Pd.vy * Pd.vy)
 
+	var gm: float = float(inp.get("thrMul", 1.0))   # the gearbox's pull (its ratio, at its revs; 1 without one)
 	for side in [[L, inp.thrL, inp.brkL], [R, inp.thrR, inp.brkR]]:
 		var e: Body = side[0]
 		var thr: float = side[1]
@@ -1045,14 +1734,14 @@ func step(inp: Dictionary, dt: float) -> void:
 		var mult: float = P.ramjetMult if ramjet else (P.burnerMult if burner else 1.0)
 		var thrust: float = 0.0 if e.flameout else P.thrustMax * lever * mult * (0.45 + 0.55 * e.health) * e.sputter
 		e.thrust = thrust / P.thrustMax
-		e.fx += thrust * c
-		e.fy += thrust * s
+		e.fx += thrust * P.forceScale * gm * c
+		e.fy += thrust * P.forceScale * gm * s
 		# Air brake = quadratic drag plus a linear term, so the flaps still bite at low speed.
 		var v := sqrt(e.vx * e.vx + e.vy * e.vy)
 		# A constant term keeps the brakes biting across a 100x speed range (smoothed below 2 m/s).
 		e.front = brk * smoothstep(P.frontBrakeV0, P.frontBrakeV1, v) if P.frontBrakeCd > 0.0 else 0.0
-		var cd: float = P.engineCd + P.brakeCd * brk + P.frontBrakeCd * e.front
-		var bl: float = P.brakeLin * brk + P.brakeConst * brk / maxf(v, 2.0)
+		var cd: float = (P.engineCd + P.brakeCd * brk + P.frontBrakeCd * e.front) * P.forceScale
+		var bl: float = (P.brakeLin * brk + P.brakeConst * brk / maxf(v, 2.0)) * P.forceScale
 		e.fx -= cd * v * e.vx + bl * e.vx
 		e.fy -= cd * v * e.vy + bl * e.vy
 		var fxp: float = e.x - c * P.finOffset
@@ -1144,8 +1833,8 @@ func step(inp: Dictionary, dt: float) -> void:
 
 	var pb := minf(inp.brkL, inp.brkR)
 	var pv := sqrt(Pd.vx * Pd.vx + Pd.vy * Pd.vy)
-	var pcd: float = P.podCd + 0.5 * P.brakeCd * pb
-	var pbl: float = 0.5 * (P.brakeLin * pb + P.brakeConst * pb / maxf(pv, 2.0))
+	var pcd: float = (P.podCd + 0.5 * P.brakeCd * pb) * P.forceScale
+	var pbl: float = 0.5 * (P.brakeLin * pb + P.brakeConst * pb / maxf(pv, 2.0)) * P.forceScale
 	Pd.fx -= pcd * pv * Pd.vx + pbl * Pd.vx
 	Pd.fy -= pcd * pv * Pd.vy + pbl * Pd.vy
 	var qx := Pd.x - pc * 1.2
@@ -1260,20 +1949,52 @@ func step(inp: Dictionary, dt: float) -> void:
 			var fb: float = P.bank * b.m * (G * tan(bk) + P.bankDown * v2 * sin(bk)) * b.grip
 			b.fx += fb * (tnx[b.hint] if b.path == 0 else branches[b.path - 1].nx[b.hint])
 			b.fy += fb * (tny[b.hint] if b.path == 0 else branches[b.path - 1].ny[b.hint])
+	# The Network's edges: their ramp pushes you back toward the middle, as the GP's banking does
+	# toward a corner's (mirroring sim-core.js)
+	if kind == "network":
+		for b: Body in bodies:
+			if b.off_road:
+				continue
+			var RB: TrackPath = roads[b.path]
+			var ib := b.hint
+			var latb := (b.x - RB.px[ib]) * RB.nx[ib] + (b.y - RB.py[ib]) * RB.ny[ib]
+			var bke := net_edge(RB.w[ib], latb).y
+			if bke == 0.0:
+				continue
+			var v2e := b.vx * b.vx + b.vy * b.vy
+			var fe: float = P.bank * b.m * (G * tan(bke) + P.bankDown * v2e * sin(bke)) * b.grip * (-1.0 if latb > 0.0 else 1.0)
+			b.fx += fe * RB.nx[ib]
+			b.fy += fe * RB.ny[ib]
 	var cl := _engine_circles(L)
 	var cr := _engine_circles(R)
 	var cp := [[Pd.x, Pd.y, 1.6]]
 	if not branches.is_empty():
 		_update_gates()
-	if kind == "circuit":
+	if kind == "network":
+		for bc in [[L, cl], [R, cr], [Pd, cp]]:
+			if bc[0].off_road:
+				_free_contact(bc[0], bc[1], dt)
+			else:
+				_collide_walls(bc[0], bc[1], dt)
+	elif kind == "circuit":
 		_collide_walls(L, cl, dt)
 		_collide_walls(R, cr, dt)
 		_collide_walls(Pd, cp, dt)
+	if not obstacles.is_empty():
+		_collide_obstacles(L, cl)
+		_collide_obstacles(R, cr)
+		_collide_obstacles(Pd, cp)
 	_body_push(L, cl, Pd, cp)
 	_body_push(R, cr, Pd, cp)
 	_body_push(L, cl, R, cr)
 
 	for b: Body in bodies:
+		# in the air (the Network, off the roads), the forces along its path act along it, mirroring
+		# sim-core.js: thrust minus drag scales its climb as it scales its speed (only gravity bends the line)
+		if kind == "network" and b.off_road:
+			var vh := sqrt(b.vx * b.vx + b.vy * b.vy)
+			if vh > 50.0:
+				b.vz += (b.fx * b.vx + b.fy * b.vy) / (b.m * vh) * (b.vz / vh) * dt
 		b.vx += b.fx / b.m * dt
 		b.vy += b.fy / b.m * dt
 		b.w += b.t / b.inertia * dt
@@ -1285,6 +2006,9 @@ func step(inp: Dictionary, dt: float) -> void:
 		events.append({"type": "wreck"})
 		crash_t = 1.6
 		Pd.health = 0.0
+	if kind == "network":
+		_net_step(inp)
+		return
 
 	if kind == "range":
 		# Sprint: the clock starts on the first lever input and stops when the pod sits still
@@ -1385,6 +2109,33 @@ func t_lit(x: float, y: float) -> float:
 ## town's mouth before the dawn front. The towns are shelter, and so is the shade line past its
 ## canopy's start; caught in the open, the job fails. Each route's margin is taken at its own
 ## deadline: the open loop's at the mouth, the shade line's as the pod goes under the canopy.
+## The Network's clock, mirroring sim-core.js netStep: it starts on the first move; crossing a
+## city's terminal (its sample on its road, either way) is arriving there: from another city, an
+## "arrive" event with the time since leaving it; then the clock runs from this city.
+func _net_step(inp: Dictionary) -> void:
+	var cur := Vector2i(pod.path, pod.hint)
+	if float(net.t0) < 0.0:
+		if float(inp.thrL) + float(inp.thrR) <= 0.02:
+			net.prev = cur
+			return
+		net.t0 = time
+	if pod.off_road:   # off the roads: no terminals crossed
+		net.prev = Vector2i(-1, -1)
+		return
+	var prev: Vector2i = net.prev
+	if prev.x == cur.x:
+		for k in cities.size():
+			var c: Dictionary = cities[k]
+			if c.road != cur.x or (prev.y >= c.i) == (cur.y >= c.i):
+				continue
+			if k != int(net.from):
+				events.append({"type": "arrive", "city": k, "from": int(net.from), "t": time - float(net.t0)})
+				net.found[k] = true
+			net.from = k
+			net.t0 = time
+	net.prev = cur
+
+
 func _job_step(inp: Dictionary, dt: float, pv: float) -> void:
 	var Pd := pod
 	if job.stage == "done" or job.stage == "failed":

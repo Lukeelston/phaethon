@@ -180,7 +180,7 @@ CANOPY_H = SHADE_W / 2 + 2.0      # the canopy's underside above the ground, m (
 RAMP_MI = 4.0
 RAMPS = None   # [[first, last], ...] main samples (design_ramps)
 DAWN_DIR_DEG = 143
-DAWN_T0 = 156.7
+DAWN_T0 = 171.7
 
 
 def wrap(a):

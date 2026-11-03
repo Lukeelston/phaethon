@@ -3,11 +3,15 @@
 ## a nacelle in livery, a hot section that glows with heat (the old whole-engine heat colours,
 ## now where the heat is), fins, and four split air-brake flaps, red inside, around the hot
 ## section. Each engine's flaps follow that engine's own brake. The pod: one smooth lofted
-## hull in polished metal with orange metallic speed stripes (pod_hull(): rounded-box sections
-## swelling through the cockpit, a rounded nose, a headrest fairing; an open cockpit with a
-## rubber lip; matte trim inside), a raked fin, side intakes, trim thrusters, the cable
-## hardpoints on the nose, and two rounded flaps that follow the pod's brake, which (as in
-## the sim) is the lesser of the two. The VR cockpit sits inside the same hull.
+## hull (pod_hull(): rounded-box sections swelling through the cockpit, a rounded nose, a
+## headrest fairing; an open cockpit with a rubber lip; matte trim inside), polished metal
+## below and its top decks and nose in clear-coated candy orange (from the seat the sills
+## either side read as paint, not a black mirror of the road), a gunmetal racing stripe down
+## each flank, white pinstripes where the paint meets the metal; a painted raked fin with a
+## tip lamp, side intakes, trim thrusters with polished collars and exhaust cones, nav lights,
+## tail lamps and a cyan repulsor underglow (as the engines'), the cable hardpoints on the
+## nose, and two rounded flaps that follow the pod's brake, which (as in the sim) is the
+## lesser of the two. The VR cockpit sits inside the same hull.
 ## Engines and pod list into turns like aircraft: each banks by its own lateral g (smoothed,
 ## easing toward BANK_MAX, roll rate capped so it builds rather than snaps), and the VR cockpit
 ## rolls with the pod. Visual only: the sim is flat.
@@ -34,6 +38,11 @@ const HULL := [[-2.22, 0.06, -0.19, -0.11], [-2.12, 0.30, -0.28, -0.05], [-1.90,
 	[0.40, 1.15, -0.58, -0.06], [1.05, 1.11, -0.56, 0.04], [1.45, 0.98, -0.51, 0.17],
 	[1.80, 0.76, -0.42, 0.15], [2.02, 0.48, -0.31, 0.06], [2.15, 0.18, -0.18, -0.04]]
 const HULL_N := 2.6
+const PAINT := Color(0.95, 0.42, 0.08)    # the top decks' and nose's candy orange (clear-coated)
+const STRIPE := Color(0.11, 0.12, 0.14)   # the flanks' racing stripe: gunmetal
+const PIN := Color(0.96, 0.95, 0.9)       # the pinstripes where the paint meets the metal
+const PAINT_SY := 0.42                    # paint above this share of the section's half-height
+const UNDERGLOW := Color(0.2, 0.75, 1.0)  # the repulsor glow under the pod (the engines' colour)
 const OPEN_ZC := 0.15        # cockpit opening: an ellipse in plan around the seat
 const OPEN_AZ := 1.15
 const OPEN_AX := 0.72
@@ -426,6 +435,11 @@ static func _in_opening(x: float, z: float) -> bool:
 const LIP_R := 0.055
 
 
+## The raked fin's frame (its leading edge and tip lamp sit in it).
+static func _fin_xf() -> Transform3D:
+	return Kit.at(Vector3(0, 0.42, 1.6), Vector3(-0.35, 0, 0))
+
+
 ## Is a pod-local point clear of the hull's material? "" if so, else why not. Clear means
 ## inside the inner trim surface (with `margin`), or up in the cockpit opening, and never
 ## within `margin` of the lip tube. For cockpit fittings (tests/test_dashboard.gd).
@@ -460,8 +474,9 @@ static func _tri(st: SurfaceTool, i0: int, i1: int, i2: int, p0: Vector3, p1: Ve
 		st.add_index(i2)
 
 
-## The pod: polished-metal outer skin (surface 0), matte trim inside (1), rubber lip round the
-## cockpit (2), fittings (3). Built once and shared (the flat view's pod and the VR cockpit).
+## The pod: polished-metal outer skin (surface 0), matte trim inside (1), the leather lip round
+## the cockpit (2), fittings (3), the nose cage (4), the paint (5: _outer_skin), the pinstripes and
+## the lip's piping (6), lamps (7). Built once and shared (the flat view's pod and the VR cockpit).
 static func pod_hull() -> ArrayMesh:
 	if _hull_cache:
 		return _hull_cache
@@ -481,7 +496,12 @@ static func pod_hull() -> ArrayMesh:
 			ring.append([Vector3(x, y, z), h[1], h[0], h[2]])
 		grid.append(ring)
 	var mesh := ArrayMesh.new()
-	for layer in 2:   # 0 outer skin, 1 inner trim
+	var paint := SurfaceTool.new()   # the paint (surface 5) and the pinstripes (6), committed after the cage
+	paint.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var pins := SurfaceTool.new()
+	pins.begin(Mesh.PRIMITIVE_TRIANGLES)
+	_outer_skin(grid, nz, na, mesh, paint, pins)   # surface 0
+	for layer in [1]:   # the inner trim (the outer skin: _outer_skin)
 		var st := SurfaceTool.new()
 		st.begin(Mesh.PRIMITIVE_TRIANGLES)
 		var pts := []
@@ -533,14 +553,14 @@ static func pod_hull() -> ArrayMesh:
 				_tri(st, a, b, ti, pts[a], pts[b], tip, axis)
 		st.generate_normals()
 		st.commit(mesh)
-	mesh.surface_set_material(0, Kit.polished(1.0, 0.14))
 	var trim := StandardMaterial3D.new()
 	trim.vertex_color_use_as_albedo = true
 	trim.vertex_color_is_srgb = true
 	trim.roughness = 0.85
 	mesh.surface_set_material(1, trim)
 
-	# lip: a rubber tube round the opening, laid on the hull top
+	# lip: a padded leather coaming round the opening, laid on the hull top, orange piping along its
+	# crest (from the seat the lip hides the decks beyond it: the piping is the paint you see)
 	var lip := SurfaceTool.new()
 	lip.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var nl := 96
@@ -562,7 +582,7 @@ static func pod_hull() -> ArrayMesh:
 		for m in nr:
 			var ps := TAU * m / nr
 			var nrm := side * cos(ps) + up * sin(ps)
-			lip.set_color(Color(0.07, 0.07, 0.08))
+			lip.set_color(Color(0.10, 0.085, 0.075))
 			lip.set_normal(nrm)
 			lip.add_vertex(pk + nrm * r)
 			lip_pts.append(pk + nrm * r)
@@ -576,20 +596,32 @@ static func pod_hull() -> ArrayMesh:
 			_tri(lip, a, b, c, lip_pts[a], lip_pts[b], lip_pts[c], lip_pts[a] - centres[a])
 			_tri(lip, b, d, c, lip_pts[b], lip_pts[d], lip_pts[c], lip_pts[b] - centres[b])
 	lip.commit(mesh)
+	var crest: Array = []
+	for k in nl + 1:
+		var pk: Vector3 = ring_pts[k]
+		var tan: Vector3 = (ring_pts[(k + 1) % nl] - ring_pts[(k - 1 + nl) % nl]).normalized()
+		var up := tan.cross(Vector3.UP).normalized().cross(tan).normalized()
+		crest.append(pk + up * (r + 0.002))
+	_tube(pins, crest, 0.007, PAINT, 6)
 	var rubber := StandardMaterial3D.new()
 	rubber.vertex_color_use_as_albedo = true
 	rubber.vertex_color_is_srgb = true
-	rubber.roughness = 0.55
+	rubber.roughness = 0.62
 	mesh.surface_set_material(2, rubber)
 
 	# fittings
 	Kit.compound([
-		[Kit.rounded_box(Vector3(0.07, 0.62, 0.85), 4.0), Kit.at(Vector3(0, 0.42, 1.6), Vector3(-0.35, 0, 0)), SILVER],   # raked fin
-		[Kit.rounded_box(Vector3(0.012, 0.16, 0.5), 4.0), Kit.at(Vector3(0, 0.62, 1.66), Vector3(-0.35, 0, 0)), LIVERY],
+		[Kit.rounded_box(Vector3(0.07, 0.62, 0.85), 4.0), Kit.at(Vector3(0, 0.42, 1.6), Vector3(-0.35, 0, 0)), PAINT],   # raked fin, painted
+		[Kit.rounded_box(Vector3(0.076, 0.6, 0.09), 4.0), _fin_xf() * Transform3D(Basis(), Vector3(0, 0, -0.39)), DARK.lightened(0.15)],   # its leading edge
+		[Kit.rounded_box(Vector3(0.078, 0.035, 0.66), 4.0), _fin_xf() * Transform3D(Basis(), Vector3(0, 0.2, 0.03)), PIN],   # a pinstripe along its top
 		[Kit.rounded_box(Vector3(0.1, 0.2, 0.72), 4.0), Kit.at(Vector3(-1.1, -0.26, -0.15)), DARK],   # side intakes, behind the cage
 		[Kit.rounded_box(Vector3(0.1, 0.2, 0.72), 4.0), Kit.at(Vector3(1.1, -0.26, -0.15)), DARK],
-		[Kit.cyl(0.15, 0.19, 0.36, 16), Kit.at(Vector3(-0.5, -0.24, 2.1), Vector3(PI / 2.0, 0, 0)), DARK],   # trim thrusters
-		[Kit.cyl(0.15, 0.19, 0.36, 16), Kit.at(Vector3(0.5, -0.24, 2.1), Vector3(PI / 2.0, 0, 0)), DARK],
+		[Kit.cyl(0.15, 0.19, 0.36, 28), Kit.at(Vector3(-0.5, -0.24, 2.1), Vector3(PI / 2.0, 0, 0)), DARK],   # trim thrusters
+		[Kit.cyl(0.15, 0.19, 0.36, 28), Kit.at(Vector3(0.5, -0.24, 2.1), Vector3(PI / 2.0, 0, 0)), DARK],
+		[Kit.cyl(0.168, 0.168, 0.035, 32), Kit.at(Vector3(-0.5, -0.24, 2.262), Vector3(PI / 2.0, 0, 0)), SILVER],   # their polished collars
+		[Kit.cyl(0.168, 0.168, 0.035, 32), Kit.at(Vector3(0.5, -0.24, 2.262), Vector3(PI / 2.0, 0, 0)), SILVER],
+		[Kit.cyl(0.025, 0.1, 0.12, 24), Kit.at(Vector3(-0.5, -0.24, 2.33), Vector3(PI / 2.0, 0, 0)), DARK.lightened(0.3)],   # and exhaust cones
+		[Kit.cyl(0.025, 0.1, 0.12, 24), Kit.at(Vector3(0.5, -0.24, 2.33), Vector3(PI / 2.0, 0, 0)), DARK.lightened(0.3)],
 		[Kit.cyl(0.035, 0.035, 0.56, 10), Kit.at(Vector3(0, -0.05, -2.06), Vector3(0, 0, PI / 2.0)), DARK.lightened(0.2)],   # nose ring bar
 		[Kit.cyl(0.07, 0.07, 0.06, 14), Kit.at(Vector3(-0.18, -0.05, -2.1), Vector3(0, 0, PI / 2.0)), Color(0.75, 0.77, 0.8)],   # hardpoint eyes
 		[Kit.cyl(0.07, 0.07, 0.06, 14), Kit.at(Vector3(0.18, -0.05, -2.1), Vector3(0, 0, PI / 2.0)), Color(0.75, 0.77, 0.8)],
@@ -641,8 +673,131 @@ static func pod_hull() -> ArrayMesh:
 			_tube(cage, run, CAGE_R * 0.8, SILVER)
 	cage.commit(mesh)
 	mesh.surface_set_material(4, Kit.polished(1.0, 0.18))
+	paint.index()
+	paint.commit(mesh)
+	var coat := StandardMaterial3D.new()   # candy over metal flake, under a clear coat
+	coat.vertex_color_use_as_albedo = true
+	coat.vertex_color_is_srgb = true
+	coat.metallic = 0.45
+	coat.roughness = 0.34
+	coat.metallic_specular = 0.6
+	coat.clearcoat_enabled = true
+	coat.clearcoat = 1.0
+	coat.clearcoat_roughness = 0.06
+	mesh.surface_set_material(5, coat)
+	pins.commit(mesh)
+	mesh.surface_set_material(6, Kit.polished(0.3, 0.22))
+	# lamps (unshaded, as the engines'): nav lights at the widest point (red left, green right),
+	# tail lamps on the thrusters, the fin's tip lamp, the repulsor underglow
+	Kit.compound([
+		[Kit.ball(0.035, 10), Kit.at(Vector3(-1.155, -0.31, -0.3)), NAV_L],
+		[Kit.ball(0.035, 10), Kit.at(Vector3(1.155, -0.31, -0.3)), NAV_R],
+		[Kit.box(Vector3(0.11, 0.022, 0.07)), Kit.at(Vector3(-0.5, -0.07, 2.2)), Color(1.0, 0.1, 0.08)],
+		[Kit.box(Vector3(0.11, 0.022, 0.07)), Kit.at(Vector3(0.5, -0.07, 2.2)), Color(1.0, 0.1, 0.08)],
+		[Kit.ball(0.03, 10), _fin_xf() * Transform3D(Basis(), Vector3(0, 0.3, 0.38)), Color(1.0, 1.0, 1.0)],
+		[Kit.box(Vector3(0.035, 0.01, 1.5)), Kit.at(Vector3(-0.5, -0.59, 0.3)), UNDERGLOW],
+		[Kit.box(Vector3(0.035, 0.01, 1.5)), Kit.at(Vector3(0.5, -0.59, 0.3)), UNDERGLOW],
+	], mesh)
+	mesh.surface_set_material(7, Kit.vertex_colors(true))
 	_hull_cache = mesh
 	return mesh
+
+
+## The outer skin (surface 0, polished metal) and its paint (into `paint`: the top decks and the
+## nose candy orange, a gunmetal stripe down each flank), smooth normals across both so the seams
+## don't show in the shading; a pinstripe (into `pins`) along each edge of the top decks' paint.
+static func _outer_skin(grid: Array, nz: int, na: int, mesh: ArrayMesh, paint: SurfaceTool, pins: SurfaceTool) -> void:
+	var z0: float = HULL[0][0]
+	var z1: float = HULL[HULL.size() - 1][0]
+	var pts: Array[Vector3] = []
+	for i in nz + 1:
+		for j in na:
+			pts.append(grid[i][j][0])
+	var faces := []   # [i0, i1, i2, outward, its paint (null: metal)]
+	for i in nz:
+		for j in na:
+			var j2 := (j + 1) % na
+			var a := i * na + j
+			var b := i * na + j2
+			var c := (i + 1) * na + j
+			var d := (i + 1) * na + j2
+			var cen: Vector3 = (pts[a] + pts[b] + pts[c] + pts[d]) / 4.0
+			var cc: float = (grid[i][j][1] + grid[i + 1][j][1]) / 2.0
+			if cen.y > cc and _in_opening(cen.x, cen.z):
+				continue   # the cockpit
+			if cen.z > CAGE_Z1 and cen.z < CAGE_Z0:
+				continue   # the open cage
+			var ha: float = (grid[i][j][2] + grid[i + 1][j][2]) / 2.0
+			var hb: float = (grid[i][j][3] + grid[i + 1][j][3]) / 2.0
+			var col = _paint_at(absf(cen.x) / ha, (cen.y - cc) / hb, cen.z)
+			var outward := Vector3(cen.x, cen.y - cc, 0.0)
+			faces.append([a, b, c, outward, col])
+			faces.append([b, d, c, outward, col])
+	for e in 2:   # end caps: fans to a point just beyond each end (the nose's painted)
+		var ri := 0 if e == 0 else nz
+		var ti := pts.size()
+		pts.append(Vector3(0.0, grid[ri][0][1], z0 - 0.02 if e == 0 else z1 + 0.02))
+		var axis := Vector3(0, 0, -1.0 if e == 0 else 1.0)
+		for j in na:
+			faces.append([ri * na + j, ri * na + (j + 1) % na, ti, axis, PAINT if e == 0 else null])
+	var nrm: Array[Vector3] = []
+	nrm.resize(pts.size())
+	nrm.fill(Vector3.ZERO)
+	for f in faces:
+		var fn: Vector3 = (pts[f[1]] - pts[f[0]]).cross(pts[f[2]] - pts[f[0]])
+		if fn.dot(f[3]) < 0.0:
+			fn = -fn
+		for q in 3:
+			nrm[f[q]] += fn
+	for k in nrm.size():
+		nrm[k] = nrm[k].normalized()
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for k in pts.size():
+		st.set_color(SILVER)
+		st.set_normal(nrm[k])
+		st.add_vertex(pts[k])
+	for f in faces:
+		var p0: Vector3 = pts[f[0]]
+		var p1: Vector3 = pts[f[1]]
+		var p2: Vector3 = pts[f[2]]
+		if f[4] == null:
+			_tri(st, f[0], f[1], f[2], p0, p1, p2, f[3])
+			continue
+		var order := [0, 2, 1] if (p1 - p0).cross(p2 - p0).dot(f[3]) > 0.0 else [0, 1, 2]
+		for q in order:
+			paint.set_color(f[4])
+			paint.set_normal(nrm[f[q]])
+			paint.add_vertex(pts[f[q]])
+	st.commit(mesh)
+	mesh.surface_set_material(0, Kit.polished(1.0, 0.14))
+	# the pinstripes: along the first row of the top decks' paint, each side, from the cage back
+	var jp := 0
+	for j in na / 4:
+		var s0 := Kit._sp(sin(TAU * j / na), 2.0 / HULL_N)
+		var s1 := Kit._sp(sin(TAU * (j + 1) / na), 2.0 / HULL_N)
+		if (s0 + s1) / 2.0 > PAINT_SY:
+			jp = j
+			break
+	for jj in [jp, na / 2 - jp]:
+		var run: Array = []
+		for i in range(1, nz):
+			var p: Vector3 = pts[i * na + jj]
+			if p.z < CAGE_Z0 + 0.02:
+				continue
+			run.append(p + nrm[i * na + jj] * 0.005)
+		if run.size() > 1:
+			_tube(pins, run, 0.008, PIN, 6)
+
+
+## The paint at a skin quad: |x| over the half-width, height over the half-height (from the
+## section's centre), station z. Null where it's bare metal.
+static func _paint_at(ax: float, sy: float, z: float):
+	if z < -1.98 or sy > PAINT_SY:
+		return PAINT
+	if ax > 0.7 and sy > -0.2 and sy < 0.22:
+		return STRIPE
+	return null
 
 
 ## A point on the skin's mid-line at station z, angle th round the section.
@@ -728,12 +883,14 @@ func sync(sim, inp: Dictionary, delta: float) -> void:
 	for k in 2:
 		var e = bodies[k]
 		var eng := engines[k]
-		eng.position = view.w3(e.x, e.y, e.z + 0.1)
+		eng.position = view.wz(e.x, e.y, e.z + 0.1)
 		var vh: float = sqrt(e.vx * e.vx + e.vy * e.vy)
 		var pitch: float = atan2(e.vz, maxf(vh, 1.0)) if vh > 5.0 else 0.0
-		var climb := slope_pitch(view, e.x, e.y, e.th, maxf(4.0, pitch_half(vh)))   # nose follows the banking's rise and fall
+		# nose follows the banking's rise and fall (on the Network the climb is in the body's own vz:
+		# the deck lock, the jumps)
+		var climb := 0.0 if sim.kind == "network" else slope_pitch(view, e.x, e.y, e.th, maxf(4.0, pitch_half(vh)))
 		var lean := clampf(bank[k] + view.surface(e.x, e.y).y, -ROLL_MAX, ROLL_MAX)   # lean, plus the track's banking
-		if sim.pod.path > 0:   # the shade line: flat, carried onto the twisted road
+		if sim.pod.path > 0 and sim.kind != "network":   # the shade line: flat, carried onto the twisted road
 			eng.basis = road_attitude(sim, e.x, e.y, climb) * Basis.from_euler(Vector3(pitch, e.th - PI / 2.0, lean))
 		else:
 			eng.rotation = Vector3(pitch + climb, e.th - PI / 2.0, lean)
@@ -792,10 +949,11 @@ func sync(sim, inp: Dictionary, delta: float) -> void:
 				(fmat as ShaderMaterial).set_shader_parameter("aspect", flame_len / FLAME_H)
 
 	CanopyScript.update(canopy, sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy), sim.hblend, sim.mode, delta)
-	pod.position = view.w3(sim.pod.x, sim.pod.y, sim.pod.z - 0.2 + POD_LIFT)
-	var pclimb := slope_pitch(view, sim.pod.x, sim.pod.y, sim.pod.th, pitch_half(sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy)))
+	pod.position = view.wz(sim.pod.x, sim.pod.y, sim.pod.z - 0.2 + POD_LIFT)
+	var pvh: float = sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy)
+	var pclimb := (atan2(sim.pod.vz, maxf(pvh, 1.0)) if pvh > 5.0 else 0.0) if sim.kind == "network" else slope_pitch(view, sim.pod.x, sim.pod.y, sim.pod.th, pitch_half(pvh))
 	var plean := clampf(bank[2] + view.surface(sim.pod.x, sim.pod.y).y, -ROLL_MAX, ROLL_MAX)
-	if sim.pod.path > 0:
+	if sim.pod.path > 0 and sim.kind != "network":
 		pod.basis = road_attitude(sim, sim.pod.x, sim.pod.y, pclimb) * Basis.from_euler(Vector3(0.0, sim.pod.th - PI / 2.0, plean))
 	else:
 		pod.rotation = Vector3(pclimb, sim.pod.th - PI / 2.0, plean)
@@ -935,12 +1093,14 @@ static func ride(v, sim, st: Dictionary, delta: float) -> Vector3:
 	var spd: float = sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy)
 	var s: Vector2 = v.surface(sim.pod.x, sim.pod.y)
 	var p := slope_pitch(v, sim.pod.x, sim.pod.y, sim.pod.th, pitch_half(spd))
+	if sim.kind == "network":   # the climb is the pod's own (the deck lock, the jumps)
+		p = atan2(sim.pod.vz, maxf(spd, 1.0)) if spd > 5.0 else 0.0
 	var rr := pod_roll(sim)
 	if st.is_empty() or delta <= 0.0:
 		st.merge({"h": s.x, "p": p, "b": s.y, "roll": rr}, true)
 	else:
 		var k := 1.0 - exp(-delta / RIDE_TAU)
-		st.h = maxf(lerpf(st.h, s.x, minf(1.0, 3.0 * k)), s.x)
+		st.h = s.x if sim.kind == "network" else maxf(lerpf(st.h, s.x, minf(1.0, 3.0 * k)), s.x)
 		st.p = lerpf(st.p, p, k)
 		st.b = lerpf(st.b, s.y, k)
 		st.roll = lerpf(st.get("roll", rr), rr, 1.0 - exp(-delta / ROLL_TAU))
@@ -949,7 +1109,7 @@ static func ride(v, sim, st: Dictionary, delta: float) -> Vector3:
 
 ## The corkscrews' roll of the road under the pod, radians (0 on the main road).
 static func pod_roll(sim) -> float:
-	if sim.pod.path <= 0:
+	if sim.pod.path <= 0 or sim.kind == "network":
 		return 0.0
 	sim._nearest_on(sim.pod.path, sim.pod.x, sim.pod.y, sim.pod.hint, 40)
 	return sim.roll_at(sim.pod.path, sim._n_i + sim._n_t)
@@ -978,7 +1138,7 @@ static func _road_at(sim, x: float, y: float, org_x: float, org_y: float) -> Arr
 ## the centreline and up m off the road lands lat along the rolled road's left and up along its
 ## up. Identity on the main road.
 static func road_xf(sim, x: float, y: float, org_x: float, org_y: float, roll := NAN) -> Transform3D:
-	if sim.pod.path <= 0:
+	if sim.pod.path <= 0 or sim.kind == "network":
 		return Transform3D.IDENTITY
 	var at := _road_at(sim, x, y, org_x, org_y)
 	var c: Vector3 = at[0]

@@ -120,7 +120,7 @@ func _check_cage() -> int:
 	var CM = v.craft.get_script()
 	var mesh: ArrayMesh = CM.pod_hull()
 	var skin_in_cage := 0
-	for surf in 2:   # outer skin, inner trim
+	for surf in [0, 1, 5]:   # outer skin, inner trim, paint
 		var a := mesh.surface_get_arrays(surf)
 		var vx: PackedVector3Array = a[Mesh.ARRAY_VERTEX]
 		var idx: PackedInt32Array = a[Mesh.ARRAY_INDEX]

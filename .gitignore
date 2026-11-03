@@ -5,3 +5,4 @@ firmware/build/*
 cad/stl/clash_*.stl
 __pycache__/
 .claude/launch.json
+.superpowers/

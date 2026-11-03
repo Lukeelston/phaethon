@@ -5,6 +5,9 @@
 ##                   the dawn's countdown, MADE IT  +m.m s  (OPEN); the late run: CAUGHT BY THE DAWN
 ##   the countdown   DAWN m:ss counts to each route's own deadline: the pad out; from the drop on,
 ##                   the receiving ramp on the loop, the canopy once on the shade line; then UNDER COVER
+##   the pad         findable (Luke flew straight past it): on the job a red light column stands at
+##                   it and a sign over the road before it; the dash calls MEDICAL PAD x.x mi from 8 mi
+##                   out, STOP ON THE PAD on it, PAD BEHIND if you overshoot
 ##   best time       saved when the run is made, not when it's caught; read from where the views
 ##                   are pointed from the build on (never the player's own best)
 ##   off the loop    on the shade line (tests/replay/job_shade) the speed guide is neutral (guide_on
@@ -20,7 +23,7 @@ const DT := 1.0 / 480.0
 const SUB := 8
 const ASK := ["", "speed", "starfighter"]
 const PREFIX := "user://test_job_flow_"
-const CHECKS := 10
+const CHECKS := 12
 var fails := 0
 var passed := 0
 var frames := 0
@@ -29,8 +32,8 @@ var v
 
 
 func _initialize() -> void:
-	_check("the menu hold's cycle: range -> %s -> %s -> %s -> %s" % [Cockpit.next_track("range"), Cockpit.next_track("gp"), Cockpit.next_track("eridanus"), Cockpit.next_track("emergency")],
-		Cockpit.next_track("range") == "gp" and Cockpit.next_track("gp") == "eridanus" and Cockpit.next_track("eridanus") == "emergency" and Cockpit.next_track("emergency") == "range")
+	_check("the menu hold's cycle: range -> %s -> %s -> %s -> %s -> %s" % [Cockpit.next_track("range"), Cockpit.next_track("gp"), Cockpit.next_track("eridanus"), Cockpit.next_track("emergency"), Cockpit.next_track("network")],
+		Cockpit.next_track("range") == "gp" and Cockpit.next_track("gp") == "eridanus" and Cockpit.next_track("eridanus") == "emergency" and Cockpit.next_track("emergency") == "network" and Cockpit.next_track("network") == "range")
 	_view("range")
 
 
@@ -103,6 +106,32 @@ func _replay(name: String, each: Callable) -> int:
 	return inputs.size()
 
 
+## The pad, findable: its column and sign on the job, and the dash's call as you come up to it.
+func _pad_marks() -> void:
+	var sim = v.sim
+	var cw = v.course_world
+	var col_ok := false
+	if cw.pad_column:
+		var p: Vector3 = (cw.pad_column as Node3D).global_position
+		col_ok = Vector2(p.x + v.org_x - sim.tpx[sim.pad], -p.z + v.org_y - sim.tpy[sim.pad]).length() < 150.0
+	_check("the pad on the job: a light column at it (%s) and a sign over the road before it (%s); stars in the twilight sky (%s)" % [col_ok, cw.pad_sign != null, v.stars != null],
+		col_ok and cw.pad_sign != null and v.stars != null and (v.stars as Node3D).visible)
+	# the dash as you come up to it: far, 2 mi out, on it, past it
+	var texts := []
+	var save := [sim.time, sim.job.t0]
+	sim.job.t0 = 0.0
+	sim.time = 10.0
+	for k in [-2000, -268, 0, 30]:   # samples from the pad (268 is ~2 mi)
+		sim.respawn(-1, posmod(sim.pad + k, sim.N))
+		texts.append(v._progress_text())
+	sim.time = save[0]
+	sim.job.t0 = save[1]
+	sim.restart()
+	_check("the dash comes up to the pad: %s" % [texts],
+		texts[0].begins_with("EMERGENCY  LAKE TOWN MINE") and texts[1].begins_with("MEDICAL PAD  2.0 mi") and texts[2].begins_with("STOP ON THE PAD")
+		and texts[3].begins_with("PAD BEHIND"))
+
+
 ## The DAWN m:ss on the dash, in seconds (-1 when there's none).
 func _dawn_secs(t: String) -> int:
 	var m := RegEx.create_from_string("DAWN (\\d+):(\\d\\d)").search(t)
@@ -115,6 +144,7 @@ func _want_secs(x: float, y: float) -> int:
 
 
 func _open_run() -> void:
+	_pad_marks()
 	_check("best time: the view read the best from where it was pointed, at its build (%s; the planted 1.0)" % v.best_saved, v.best_saved == 1.0)
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(PREFIX + "eridanus_emergency_best.json"))
 	v.best_saved = -1.0

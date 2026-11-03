@@ -1,10 +1,12 @@
 // Tunes the emergency run's dawn: the front's direction (dawnDir, 1 deg steps) and when it passes
 // the start line's point (dawnT0, 0.1 s steps), against tools/record_job.js's autopilot runs:
+// Every margin is for a pilot RJ.ALLOWANCE (15 s) slower than the autopilot (a human; the autopilot
+// corners at 38 g): the autopilot's own margins are that much bigger.
 //   open     makes it home, margin 3-10 s at its deadline: back under cover after the open loop
 //            (the start town's receiving ramp)
 //   shade    makes it, margin >= 2 s as it goes under the canopy; of the settings that meet the
 //            rest, the one with the tightest shade margin (the spec: both routes stay tight)
-//   late     (6 s longer on the pad) caught by the dawn, with a second to spare
+//   late     (the allowance + 6 s longer on the pad) caught by the dawn, with a second to spare
 //   out-leg  the lake town isn't lit before the drop: not for OUT_SLACK s after it, so a pilot a
 //            little slower out than the autopilot isn't caught leaving the lake town
 //   behind   on the run home the dawn is behind you, catching up (the spec): it reaches the lake
@@ -27,7 +29,8 @@ const PS = RJ.load(process.argv[2] || 'sim-core.js');
 const S0 = PS.makeSim({ track: 'eridanus', job: 'emergency' });
 const T = S0.T, SPD = S0.P.dawnSpeed, B = T.branches[0];
 const OFF = { dawnT0: 1e9 };
-const OUT_SLACK = 15, CATCH = 1.0;
+const A = RJ.ALLOWANCE;   // the human allowance: every margin below is for a pilot this much slower than the autopilot
+const OUT_SLACK = 15 + A, CATCH = 1.0;
 
 const fly = (kind) => {
   const r = RJ.run(PS, kind, OFF, null, true);
@@ -67,9 +70,9 @@ for (const off of order) {
   if (dot(pad) >= dot(mouth)) continue;   // the dawn must come up behind the run home
   const aOpen = exposedMax(runs.open.track, u);
   if (-aOpen < cOpen - CATCH) continue;   // the open run's tightest moment isn't the mouth
-  const lo = Math.max(aOpen, exposedMax(runs.shade.track, u, canopy[0]), 3 - cOpen, 2 - cShade, drop[0] + OUT_SLACK - dot(pad));
+  const lo = Math.max(aOpen, exposedMax(runs.shade.track, u, canopy[0]), 3 + A - cOpen, 2 + A - cShade, drop[0] + OUT_SLACK - dot(pad));
   const aLate = exposedMax(runs.late.track, u);
-  const hi = Math.min(10 - cOpen, aLate - 1.0);
+  const hi = Math.min(10 + A - cOpen, aLate - 1.0);
   const t0 = Math.floor(hi * 10) / 10;
   if (t0 > lo + 0.05 && (!pick || t0 + cShade < pick.t0 + pick.cShade - 1e-9)) pick = { deg, t0, u, cOpen, cShade, aLate };
 }
@@ -79,7 +82,7 @@ if (!pick) { console.log('no dawn setting meets all four'); process.exit(1); }
 const over = { dawnDir: pick.deg * Math.PI / 180, dawnT0: pick.t0 };
 const real = { open: RJ.run(PS, 'open', over), shade: RJ.run(PS, 'shade', over), late: RJ.run(PS, 'late', over) };
 const o = real.open.job, sh = real.shade.job, la = real.late.job;
-const ok = o.stage === 'done' && o.route === 'open' && o.margin >= 3 && o.margin <= 10 && sh.stage === 'done' && sh.route === 'shade' && sh.margin >= 2 &&
+const ok = o.stage === 'done' && o.route === 'open' && o.margin >= 3 + A && o.margin <= 10 + A && sh.stage === 'done' && sh.route === 'shade' && sh.margin >= 2 + A &&
   la.stage === 'failed' && la.reason === 'dawn';
 console.log(`dawn: dir ${pick.deg} deg, t0 ${pick.t0.toFixed(1)} s: open ${o.margin >= 0 ? '+' : ''}${o.margin.toFixed(1)} s, shade ${sh.margin >= 0 ? '+' : ''}${sh.margin.toFixed(1)} s, ` +
   `late caught at ${la.t.toFixed(1)} s` + (ok ? '' : `  -- FLOWN FOR REAL IT FAILS: open ${o.stage}/${o.reason}, shade ${sh.stage}/${sh.reason}, late ${la.stage}/${la.reason}`));

@@ -75,9 +75,9 @@ func sync(sim, delta: float) -> void:
 	var c := cos(sim.pair_th)
 	var s := sin(sim.pair_th)
 	var nose_d: float = sim.P.engineLen / 2.0 + 1.0
-	var apex: Vector3 = view.w3((sim.eL.x + sim.eR.x) / 2.0 + c * nose_d, (sim.eL.y + sim.eR.y) / 2.0 + s * nose_d,
+	var apex: Vector3 = view.wz((sim.eL.x + sim.eR.x) / 2.0 + c * nose_d, (sim.eL.y + sim.eR.y) / 2.0 + s * nose_d,
 		(sim.eL.z + sim.eR.z) / 2.0 + 0.6)
-	var tail: Vector3 = view.w3(sim.pod.x - c * 5.0, sim.pod.y - s * 5.0, sim.pod.z + 0.6)
+	var tail: Vector3 = view.wz(sim.pod.x - c * 5.0, sim.pod.y - s * 5.0, sim.pod.z + 0.6)
 	var axis := apex - tail
 	var length := axis.length()
 	var yb := axis / length

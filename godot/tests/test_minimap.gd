@@ -22,7 +22,7 @@ const MiniMap := preload("res://view/minimap.gd")
 const MapPanel := preload("res://vr/minimap_panel.gd")
 const ViewScript := preload("res://view/craft_view.gd")
 const VRScript := preload("res://vr/vr_cockpit.gd")
-const CHECKS := 13
+const CHECKS := 14
 const MI := 1609.344
 var fails := 0
 var passed := 0
@@ -148,6 +148,14 @@ func _logic() -> void:
 			lj.get("dawn") != null, off, eta, eta_err, MiniMap.readout(f), fn.get("dawn", {}).is_empty()],
 		lj.get("dawn") != null and off < 1.0 and eta_err < 0.1 and MiniMap.readout(f).contains(want_txt) and fn.get("dawn", {}).is_empty()
 		and not MiniMap.readout(fn).contains("DAWN"))
+	# the pad marked on the map on the way out, 3 km ahead
+	th = _place(js, posmod(js.pad - 250, js.N), 300.0)
+	js.job.stage = "out"
+	f = mj.update(th, 30.0)
+	var lp := MiniMap.layout(f, 0.22, 0.22, 0.007, 0.026)
+	var pd: Vector2 = f.get("pad", Vector2.INF)
+	_check("the pad marked on the map on the way out: %s m ahead (about 3 km), on the panel (%s)" % [pd, lp.get("pad") != null],
+		f.has("pad") and pd.y > 2500.0 and pd.y < 3200.0 and absf(pd.x) < 400.0 and lp.get("pad") != null)
 	# no modes, no readout
 	var gp = Sim.new({"track": "gp"})
 	var mg := MiniMap.new()
@@ -213,7 +221,7 @@ func _headset() -> void:
 		p.visible and absf(d.length() - MapPanel.DIST) < 0.01 and yaw > 18.0 and yaw < 40.0 and pitch < -3.0 and pitch > -25.0 and facing > 0.999)
 	_check("clear of the instrument panel: its right edge at %.1f deg, the instrument panel's left end at %.1f deg (or above its top: %.1f vs %.1f)" % [right, dash_left, bottom, dash_top],
 		right < dash_left - 1.0 or bottom > dash_top + 1.0)
-	var lines: ImmediateMesh = p.lines
+	var lines: Mesh = p.lines
 	var verts := 0
 	for k in lines.get_surface_count():
 		verts += (lines.surface_get_arrays(k)[Mesh.ARRAY_VERTEX] as PackedVector3Array).size()

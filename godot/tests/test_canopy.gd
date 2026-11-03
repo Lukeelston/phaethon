@@ -7,6 +7,7 @@
 ##   field    off when still, building with speed (~150 mph on, near full by 4,000), stronger on
 ##            the burner; blue in SPEEDCRAFT, magenta in STARFIGHTER; it wraps the nose
 ##   both     built into the flat view's pod and the VR cockpit, and marked "exterior"
+##   flash    a forcefield's push (traffic's bump, a wall) flares it white-blue, gone in under half a second
 ## Prints CANOPY PASS.
 ## Run: Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_canopy.gd -- --track=range --mute
 extends SceneTree
@@ -74,13 +75,24 @@ func _process(_d: float) -> bool:
 	var hull_nose: float = CM.HULL[0][0]
 	_check("its colour follows the handling (SPEEDCRAFT %s, STARFIGHTER %s); it reaches %.2f m past the nose" % [t_sp, t_sf, hull_nose - nose_z],
 		t_sp.z > t_sp.x and t_sf.x > 0.9 and t_sf.y < 0.4 and nose_z < hull_nose)
+	# the flash: a bump flares it, and it fades
+	var p_base: float = Canopy.field_power(1500.0, "normal")
+	Canopy.flash(c, 1.0)
+	Canopy.update(c, 1500.0, 0.0, "normal", 1.0 / 72.0)
+	var p_fl: float = m.get_shader_parameter("power")
+	var t_fl: Vector3 = m.get_shader_parameter("tint")
+	for k in 36:
+		Canopy.update(c, 1500.0, 0.0, "normal", 1.0 / 72.0)
+	var p_after: float = m.get_shader_parameter("power")
+	_check("a forcefield's push flares it: power %.2f (%.2f without), tint %s; half a second on %.2f" % [p_fl, p_base, t_fl, p_after],
+		p_fl > p_base + 1.0 and t_fl.x > 0.7 and absf(p_after - p_base) < 0.01)
 	# built into both views
 	var vr_c: Node3D = v.canopy
 	var flat_c: Node3D = v.craft.canopy
 	_check("built into the VR cockpit and the pod, every piece marked exterior",
 		vr_c != null and flat_c != null and vr_c.is_in_group("exterior") and vr_c.get_node("windscreen").is_in_group("exterior")
 		and vr_c.get_node("field").is_in_group("exterior") and flat_c.get_parent() == v.craft.pod)
-	var good := fails == 0 and passed == 6
+	var good := fails == 0 and passed == 7
 	print("CANOPY ", "PASS" if good else "FAIL (%d failed, %d passed)" % [fails, passed])
 	quit(0 if good else 1)
 	return true

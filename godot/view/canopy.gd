@@ -130,6 +130,17 @@ static func field_power(speed_ms: float, mode: String) -> float:
 	return p * (1.25 if mode != "normal" else 1.0)
 
 
+## A forcefield flash (Luke: "All traffic has 'forcefields'... Same with walls across the board"):
+## a bump or a wall's push flares the field white-blue, `amount` 0..1, fading over FLASH_T.
+const FLASH_T := 0.35
+const FLASH_COL := Color(0.8, 0.95, 1.0)
+
+
+static func flash(canopy: Node3D, amount: float) -> void:
+	if canopy:
+		canopy.set_meta("flash", maxf(float(canopy.get_meta("flash", 0.0)), clampf(amount, 0.0, 1.0)))
+
+
 static func update(canopy: Node3D, speed_ms: float, sf: float, mode: String, delta: float) -> void:
 	var field := canopy.get_node_or_null("field") as MeshInstance3D
 	if field == null:
@@ -138,8 +149,11 @@ static func update(canopy: Node3D, speed_ms: float, sf: float, mode: String, del
 	var tint := SPEED_COL.lerp(SF_COL, clampf(sf, 0.0, 1.0))
 	if mode != "normal":
 		tint = tint.lerp(Color(1.0, 0.95, 0.9), 0.4)
+	var fl := maxf(0.0, float(canopy.get_meta("flash", 0.0)) - delta / FLASH_T)
+	canopy.set_meta("flash", fl)
+	tint = tint.lerp(FLASH_COL, fl)
 	var flow: float = canopy.get_meta("flow", 0.0) + speed_ms * delta * 0.004
 	canopy.set_meta("flow", fposmod(flow, 1000.0))
-	m.set_shader_parameter("power", field_power(speed_ms, mode))
+	m.set_shader_parameter("power", field_power(speed_ms, mode) + 1.4 * fl)
 	m.set_shader_parameter("tint", Vector3(tint.r, tint.g, tint.b))
 	m.set_shader_parameter("flow", flow)

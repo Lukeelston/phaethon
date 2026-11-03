@@ -84,9 +84,14 @@ const AUTH_H := 24.0
 const RAMP_H := 110.0             # the covered ramps' roof over the ground, clear of the braking boards (~97 m on the banked sweepers)
 const HALL_COL := Color(0.19, 0.20, 0.23)
 const HALL_LIGHT_EVERY := 4       # samples (48 m): a lit bar across the roof
+const HALL_RIB_EVERY := 8         # samples (96 m): a steel rib across the roof and down both walls
+const HALL_STRIP_H := 18.0        # the lit strip down each wall, m up
 var hall_samples := 0             # samples under a ramp's roof (tests read it)
+var hall_ribs := 0
 var pad_marks: MeshInstance3D     # the medical pad's markings (tests read it)
 var shade_sign: Node3D            # on the job: the sign where the shade line's gate decides (tests read it)
+var pad_column: MeshInstance3D    # on the job: the medical pad's light columns, seen from miles out (tests read it)
+var pad_sign: Node3D              # on the job: the sign over the lake town's road before the pad
 var gap_barrier: MeshInstance3D   # the barrier across the loop's gap at the shade line's split (shown while it's shut)
 
 var sim
@@ -269,6 +274,8 @@ func build(s, v) -> void:
 	_floodlights()
 	if sim.pad >= 0:
 		_pad_marks()
+		if not sim.job.is_empty():
+			_pad_beacon()
 	if not sim.branches.is_empty():
 		shade = ShadeLineScript.new()
 		add_child(shade)
@@ -396,6 +403,47 @@ func _pad_marks() -> void:
 	(ch[0] as Node3D).add_child(pad_marks)
 
 
+## On the job, the pad you have to find (Luke flew straight past it): two red light columns 700 m
+## tall at its corners, seen from miles out over the lake town, and a strobing red sign over the
+## road a kilometre before it.
+func _pad_beacon() -> void:
+	var i: int = sim.pad
+	var ch: Array = chunk_of(i)
+	var c := _p(ch[1], ch[2], i, 0.0)
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var n := Vector3(sim.tnx[i], 0.0, -sim.tny[i])
+	for sd in [-1.0, 1.0]:
+		var foot: Vector3 = n * sd * (sim.PAD_HALF + 4.0) + Vector3.UP * 1.0
+		var top: Vector3 = foot + Vector3.UP * 700.0
+		for v in [[foot, Vector2(-1, 0)], [foot, Vector2(1, 0)], [top, Vector2(1, 1)], [foot, Vector2(-1, 0)], [top, Vector2(1, 1)], [top, Vector2(-1, 1)]]:
+			st.set_color(Color(1.0, 0.12, 0.08))
+			st.set_uv(v[1])
+			st.set_normal(Vector3.UP)
+			st.add_vertex(v[0])
+	var m := ShaderMaterial.new()
+	m.shader = preload("res://view/pylon.gdshader")   # the guide never drives it: plain red
+	m.set_shader_parameter("width", 2.5)
+	m.set_shader_parameter("min_ang", 0.007)   # ~0.4 deg: a bar, not a hairline, from miles out
+	m.set_shader_parameter("energy", 2.6)
+	pad_column = MeshInstance3D.new()
+	pad_column.name = "pad_columns"
+	pad_column.mesh = st.commit()
+	pad_column.material_override = m
+	pad_column.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	pad_column.extra_cull_margin = 800.0
+	pad_column.position = c
+	(ch[0] as Node3D).add_child(pad_column)
+	var si: int = posmod(i - 80, sim.N)
+	var sm := ShaderMaterial.new()
+	sm.shader = preload("res://view/authorized.gdshader")
+	sm.set_shader_parameter("col", Vector3(1.0, 0.12, 0.08))
+	var o := _overhead(si, BOARD_W, BOARD_H, sm, si)
+	_sign_text(o, "MEDICAL PAD", 200, 6.0)
+	_sign_text(o, "STOP ON THE CROSS  /  1/2 MI", 110, -6.0)
+	pad_sign = o.face
+
+
 func _in_ramp(i: int) -> bool:
 	return i < sim.tcover.size() and sim.tcover[i] == 1
 
@@ -422,6 +470,27 @@ func _ramp_hall(st: SurfaceTool, lit: SurfaceTool, cx: float, cy: float, i: int,
 	var roof := [Vector3(r0.x, RAMP_H, r0.z), Vector3(l0.x, RAMP_H, l0.z), Vector3(l1.x, RAMP_H, l1.z), Vector3(r1.x, RAMP_H, r1.z)]
 	_quad(st, roof, Vector3.DOWN, HALL_COL.darkened(0.15))
 	_quad(st, roof.map(func(p): return p + Vector3.UP * 4.0), Vector3.UP, Color(0.36, 0.37, 0.39))   # its top, seen from the hills
+	# a lit strip down each wall at HALL_STRIP_H: the line streaming past you
+	for e in edge:
+		var a: Vector3 = e[0]
+		var b: Vector3 = e[1]
+		var inward := (b - a).cross(Vector3.UP).normalized() * (-1.0 if e == edge[0] else 1.0)
+		_quad(lit, [Vector3(a.x, HALL_STRIP_H, a.z) + inward * 0.3, Vector3(b.x, HALL_STRIP_H, b.z) + inward * 0.3,
+			Vector3(b.x, HALL_STRIP_H + 2.4, b.z) + inward * 0.3, Vector3(a.x, HALL_STRIP_H + 2.4, a.z) + inward * 0.3], inward, STRIP_LIGHT)   # 2.4 m: it's 200 m off
+		n += 1
+	# a steel rib every HALL_RIB_EVERY samples: a beam under the roof and a pilaster down each wall
+	if i % HALL_RIB_EVERY == 0:
+		hall_ribs += 1
+		var steel := Color(0.12, 0.13, 0.15)
+		var along := (r1 - r0).normalized() * 3.0
+		var q0 := Vector3(r0.x, RAMP_H - 5.0, r0.z)
+		var q1 := Vector3(l0.x, RAMP_H - 5.0, l0.z)
+		_quad(st, [q0, q1, q1 + along, q0 + along], Vector3.DOWN, steel)
+		_quad(st, [q0, q1, Vector3(q1.x, RAMP_H, q1.z), Vector3(q0.x, RAMP_H, q0.z)], -along.normalized(), steel)
+		for e in [r0, l0]:
+			var p0: Vector3 = e
+			var inward := (Vector3(l0.x, p0.y, l0.z) - Vector3(r0.x, p0.y, r0.z)).normalized() * (1.0 if e == r0 else -1.0) * 1.5
+			_quad(st, [p0 + inward + Vector3.UP * 3.9, p0 + inward + along + Vector3.UP * 3.9, Vector3(p0.x, RAMP_H, p0.z) + inward + along, Vector3(p0.x, RAMP_H, p0.z) + inward], -inward.normalized(), steel)
 	if i % HALL_LIGHT_EVERY == 0:   # a bar across, 92% of the span, a third of the sample long
 		var y := RAMP_H - 0.6
 		var p0 := r0.lerp(l0, 0.04)

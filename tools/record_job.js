@@ -3,7 +3,7 @@
 // one of the routes, ahead of the dawn:
 //   open   the loop all the way home
 //   shade  the loop to the split, then the shade line (under its canopy) into the town
-//   late   the open route with a 6 s longer hold on the pad: the dawn must catch it
+//   late   the open route with a longer hold on the pad (the allowance + 6 s): the dawn must catch it
 // The route is a list of [path, i] samples (main and branch); the speed plan is record_course.js's
 // (each mode's turn-rate and grip limits, STARFIGHTER's speed in the towns, braking distance) over
 // the route, with 0 at the pad and STARFIGHTER speed through the shade line's gate zone (the gate
@@ -20,7 +20,11 @@ const DT = 1 / 480, SUB = 8, MAX_T = 420, G = 9.81, MPH = 2.236936;
 const SF = { omega: 0.95, aLat: 38 * G, top: 1150 / MPH };
 const SP = { aLat: 10 * G, top: 4300 / MPH };
 const SWITCH_V = 1200 / MPH;
-const HOLD = 1.6, LATE_HOLD = 6;
+// The human allowance (Luke's first run, 2026-10-19: a lap 8.5 s off the autopilot's, which corners at
+// 38 g, before any stop on the pad): the dawn is tuned for a pilot this much slower than the
+// autopilot; the late run (which must be caught) is that pilot 6 s slower still.
+const ALLOWANCE = 15;
+const HOLD = 1.6, LATE_HOLD = ALLOWANCE + 6;
 const ASK = [undefined, 'speed', 'starfighter'];
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 const r4 = (v) => Math.round(v * 1e4) / 1e4;
@@ -147,7 +151,7 @@ function run(PS, kind, over, inputs, keepTrack) {
   return { sim, log, events, end, top, hits, track, frames: log.length, job: S.job };
 }
 
-module.exports = { load, buildRoute, plan, run, HOLD, LATE_HOLD };
+module.exports = { load, buildRoute, plan, run, HOLD, LATE_HOLD, ALLOWANCE };
 
 if (require.main === module) {
   const [simPath, outDir, kind] = process.argv.slice(2);

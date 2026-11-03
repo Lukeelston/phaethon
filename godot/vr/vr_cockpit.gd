@@ -4,11 +4,18 @@
 ## the left menu button cycles them, the choice is saved): trigger throttles, throttle + steer,
 ## grab the levers, stick levers. Buttons, every scheme:
 ##   A reignite · B arm ramjet · X repair · thumbstick click recenter (view and seat height)
+##   trigger throttles: right stick flick up / down shifts gear; left stick flick up lights the
+##   burner (top gear), down puts it out (the triggers never do: Luke, "take the afterburners
+##   away from the triggers")
 ##   the MODE switch on the right console: push it up for SPEEDCRAFT, down for STARFIGHTER (live,
 ##   mid-lap; STARFIGHTER takes below 1,250 mph). Y hold 1 s flips it too. Y tap: restart
 ##   menu tap: next control scheme · menu hold 1.5 s: next track (range, grand prix, Eridanus)
-## Haptics: a kick on the sonic boom; a tick in that hand when a lever crosses the burner gate.
+## Haptics: a kick on the sonic boom; a tick in that hand when a lever crosses the burner gate (the
+## stick schemes); a thump in the left hand as the burner lights, a softer one as it goes out, a
+## double tap when it can't (below top gear).
 ## The printed levers / a gamepad win whenever they're moving; the keyboard still works.
+## While the OpenXR session isn't focused (stopping, the Link menu, the headset off) the controllers
+## read as let go: OpenXR holds their last state, and full triggers flew on with nobody aboard.
 ## Logs OpenXR session events and a frame-timing summary every 10 s; writes a CSV on exit.
 extends "res://view/craft_view.gd"
 
@@ -20,6 +27,7 @@ const PREFS := "user://vr_prefs.json"
 const Y_HOLD := 1.0
 const MENU_HOLD := 1.5   # hold the left menu button this long to switch track
 const DashboardScript := preload("res://vr/dashboard.gd")
+const WagMeterScript := preload("res://vr/wag_meter.gd")
 const CockpitInteriorScript := preload("res://vr/cockpit_interior.gd")
 const ModeSwitchScript := preload("res://vr/mode_switch.gd")
 const CanopyScript := preload("res://view/canopy.gd")
@@ -36,16 +44,28 @@ var minimap_panel: Node3D   # vr/minimap_panel.gd
 var _ride := {}   # CraftModel.ride's smoothing state
 var _buzz_hold := {}   # controller -> seconds an event buzz still owns it (the shudder waits)
 const SHAKE_M := 0.004   # cockpit shake per unit of air-brake shudder, metres
+const GRAB_SHAKE_M := 0.007   # the gear's grab: the cockpit's jolt, metres (fore and aft, a little up)
+const GRAB_HZ := 22.0
+const GRAB_DECAY := 0.3       # s
+var _grab := 0.0              # the grab's shudder, 1 at the grab, decaying
+var _grab_t := 0.0
 var origin: XROrigin3D
 var hands := {}
 var lever_pivots: Array[Node3D] = []
 var lever_tips: Array[StandardMaterial3D] = []
 var dashboard   # the instrument panel (vr/dashboard.gd)
+var wag = WagMeterScript.new()        # the nose wag since the last report (a WAG: line every 10 s)
+var wag_all = WagMeterScript.new()    # ... over the whole flight (on exit)
 var fade_mat: StandardMaterial3D
 var fade_v := 0.0
 var edges := {}
 var frame_ms := PackedFloat32Array()
 var report_t := 0.0
+# the report's window: each frame's main-thread work (_process, ms), its parts summed, and the
+# renderer's measured CPU and GPU time for the view (both eyes): the split between CPU and GPU
+var _w_cpu := PackedFloat32Array()
+var _w_gpu := PackedFloat32Array()
+var _w_sum := {}
 var quest
 var _y_held := 0.0
 var _menu_held := 0.0
@@ -54,10 +74,12 @@ var _switch_at := -1     # --switch-track-at=FRAMES: switch track by itself (tes
 var _frames := 0
 var _y_fired := false
 var _scheme_flash := 0.0
+var hands_live := true   # false while the OpenXR session isn't focused (_on_xr_event); never in a flat run
 
 
 func _ready() -> void:
 	quest = QuestControlsScript.new()
+	quest.set_gear(0)   # gears on the right stick (triggers), first gear from the start
 	super()
 	var prefs := _load_prefs()
 	if QuestControlsScript.SCHEMES.has(prefs.get("scheme", "")):
@@ -104,6 +126,20 @@ func recenter() -> void:
 		_buzz(hands.right, 0.3, 0.05)
 
 
+## A restart: back to first gear (the gearbox, if it's on).
+func _respawn() -> void:
+	super()
+	if quest.gear >= 0:
+		quest.set_gear(0)
+
+
+## The forcefield flares round the nose in the headset too.
+func _field_flash(amount: float) -> void:
+	super(amount)
+	if canopy:
+		CanopyScript.flash(canopy, amount)
+
+
 func _buzz(c: XRController3D, amp: float, dur: float, delay := 0.0) -> void:
 	c.trigger_haptic_pulse("haptic", 0.0, amp, dur, delay)
 	_buzz_hold[c] = dur + delay
@@ -117,6 +153,7 @@ func _apply_shudder(delta: float) -> void:
 	for c in _buzz_hold.keys():
 		_buzz_hold[c] = maxf(0.0, _buzz_hold[c] - delta)
 	if not wind_audio:
+		shell.position = _grab_jolt(delta)
 		return
 	var s: Array = wind_audio.shudder
 	var w: Array = wind_audio.shake
@@ -126,7 +163,20 @@ func _apply_shudder(delta: float) -> void:
 			hand.trigger_haptic_pulse("haptic", 0.0, 0.2 + 0.6 * s[k], 0.05, 0.0)
 	var up: float = s[0] * w[0] + s[1] * w[1]
 	var side: float = s[0] * w[0] - s[1] * w[1]
-	shell.position = Vector3(0.6 * side, up, 0.0) * SHAKE_M
+	shell.position = Vector3(0.6 * side, up, 0.0) * SHAKE_M + _grab_jolt(delta)
+
+
+## The gear's grab: the cockpit jolts fore and aft (a little up), GRAB_HZ, dying over GRAB_DECAY.
+func _grab_jolt(delta: float) -> Vector3:
+	if _grab <= 0.0:
+		return Vector3.ZERO
+	_grab_t += delta
+	var a := _grab * exp(-_grab_t / GRAB_DECAY)
+	if a < 0.02:
+		_grab = 0.0
+		return Vector3.ZERO
+	var o := sin(TAU * GRAB_HZ * _grab_t)
+	return Vector3(0.0, 0.35 * o, o) * GRAB_SHAKE_M * a
 
 
 ## Wall contact buzzes the hand that drives the engine that touched (with crossed trigger
@@ -161,9 +211,14 @@ func _make_view() -> void:
 		get_viewport().msaa_3d = Viewport.MSAA_4X
 		# OpenXR paces frames; desktop vsync caps at 60 Hz and judders (Firefly Catcher, 2026-07-27).
 		DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
-		for sig in ["session_begun", "session_visible", "session_focussed", "session_stopping", "pose_recentered"]:
+		for sig in ["session_begun", "session_synchronized", "session_visible", "session_focussed", "session_stopping",
+				"session_loss_pending", "instance_exiting", "pose_recentered"]:
 			if xr.has_signal(sig):
 				xr.connect(sig, _on_xr_event.bind(sig))
+		# a track switch reloads the scene mid-session: already focused, no session_focussed to come
+		var oxr := xr as OpenXRInterface
+		if oxr:
+			_set_hands(oxr.get_session_state() == OpenXRInterface.SESSION_STATE_FOCUSED)
 		if "display_refresh_rate" in xr:
 			xr.set("display_refresh_rate", 90.0)
 		# Sound in the headset, not on the desk: Windows' default output may be the PC speakers.
@@ -175,6 +230,8 @@ func _make_view() -> void:
 		print("OPENXR: initialized, MSAA 4x")
 	else:
 		print("OPENXR: NOT initialized, running flat (is the Quest on and in Link mode?)")
+	# the renderer's own timing of the view, for the report's CPU line (render cpu, gpu: both eyes)
+	RenderingServer.viewport_set_measure_render_time(get_viewport().get_viewport_rid(), true)
 
 	rig = Node3D.new()
 	add_child(rig)
@@ -204,12 +261,44 @@ func _make_view() -> void:
 
 func _on_xr_event(sig: String) -> void:
 	print("OPENXR: ", sig)
+	if sig != "pose_recentered":
+		_set_hands(sig == "session_focussed")
 	if sig == "session_focussed":
 		XRServer.center_on_hmd(XRServer.RESET_BUT_KEEP_TILT, true)
 		var trackers := XRServer.get_trackers(XRServer.TRACKER_CONTROLLER)
 		for name in trackers:
 			var t: XRPositionalTracker = trackers[name]
 			print("DIAG tracker: %s profile=%s" % [name, t.profile])
+
+
+## Focus gone, the controllers are let go: OpenXR keeps reporting their last state, so Luke's log
+## (2026-10-20) flew on at full trigger after session_stopping, 7,991 km/h with nobody aboard. A held
+## lever (sticks, grab, mixed) goes to idle too, and a button held as it went is no tap.
+func _set_hands(on: bool) -> void:
+	if on == hands_live:
+		return
+	hands_live = on
+	print("CONTROLS: Quest controllers ", "live" if on else "let go (the session isn't focused)")
+	if not on:
+		quest.thr_l = 0.0
+		quest.thr_r = 0.0
+		quest.collective = 0.0
+		_y_held = 0.0
+		_menu_held = 0.0
+		_a_held = 0.0
+
+
+## A controller's trigger / grip, stick and button, or let go while the session isn't focused.
+func _axis(c: XRController3D, input: String) -> float:
+	return c.get_float(input) if hands_live else 0.0
+
+
+func _stick(c: XRController3D, input: String) -> Vector2:
+	return c.get_vector2(input) if hands_live else Vector2.ZERO
+
+
+func _button(c: XRController3D, input: String) -> bool:
+	return hands_live and c.is_button_pressed(input)
 
 
 var _diag_t := 0.0
@@ -224,11 +313,11 @@ func _diag(delta: float, l: XRController3D, r: XRController3D, p: Dictionary) ->
 	for d in Input.get_connected_joypads():
 		pads.append("%d:%s known=%s ax0=%.2f ax1=%.2f" % [d, Input.get_joy_name(d), Input.is_joy_known(d),
 			Input.get_joy_axis(d, 0), Input.get_joy_axis(d, 1)])
-	print("DIAG input: pads=%s src=%s | L track=%s stick=%s trig=%.2f | R track=%s stick=%s trig=%.2f | poll thr=%.2f/%.2f | inp thr=%.2f/%.2f | v=%d km/h" % [
+	print("DIAG input: pads=%s src=%s | L track=%s stick=%s trig=%.2f | R track=%s stick=%s trig=%.2f | hands %s | poll thr=%.2f/%.2f | inp thr=%.2f/%.2f | v=%d km/h" % [
 		pads, levers.source,
 		l.get_has_tracking_data(), l.get_vector2("primary"), l.get_float("trigger"),
 		r.get_has_tracking_data(), r.get_vector2("primary"), r.get_float("trigger"),
-		p.thrL, p.thrR, inp.thrL, inp.thrR,
+		"live" if hands_live else "let go", p.thrL, p.thrR, inp.thrL, inp.thrR,
 		int(sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy) * 3.6)])
 	print("DIAG craft: scheme=%s grip=%.2f/%.2f brk=%.2f/%.2f shudder=%.2f/%.2f shake=%.1fmm hp=%.2f/%.2f pod=%.2f heat=%.2f/%.2f flameout=%s/%s mode=%s bat=%.2f btn X=%s Y=%s A=%s B=%s" % [
 		quest.scheme, l.get_float("grip"), r.get_float("grip"), inp.brkL, inp.brkR,
@@ -325,7 +414,7 @@ func _build_cockpit() -> void:
 	shell.add_child(minimap_panel)
 	minimap_panel.transform = MinimapPanelScript.mount(SEAT)
 	minimap_panel.build()
-	minimap_panel.visible = sim.kind == "circuit"
+	minimap_panel.visible = sim.kind == "circuit" or sim.kind == "network"
 
 
 func _build_fade(xr_cam: XRCamera3D) -> void:
@@ -345,6 +434,11 @@ func _build_fade(xr_cam: XRCamera3D) -> void:
 	xr_cam.add_child(m)
 
 
+const A_HOLD := 1.0   # s: the Network's A held this long in a city's zone drops you into its GP
+var _a_held := 0.0
+var _a_fired := false
+
+
 func _pressed_once(key: String, down: bool) -> bool:
 	var fired: bool = down and not edges.get(key, false)
 	edges[key] = down
@@ -355,26 +449,59 @@ func _read_input(delta: float) -> void:
 	var p: Dictionary = levers.poll(delta)
 	var l: XRController3D = hands.left
 	var r: XRController3D = hands.right
-	var c := {"lt": l.get_float("trigger"), "rt": r.get_float("trigger"), "lg": l.get_float("grip"), "rg": r.get_float("grip"),
-		"ls": l.get_vector2("primary"), "rs": r.get_vector2("primary"), "lz": l.position.z, "rz": r.position.z,
-		"speed": sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy), "yaw": (sim.eL.w + sim.eR.w) / 2.0}
+	var c := {"lt": _axis(l, "trigger"), "rt": _axis(r, "trigger"), "lg": _axis(l, "grip"), "rg": _axis(r, "grip"),
+		"ls": _stick(l, "primary"), "rs": _stick(r, "primary"), "lz": l.position.z, "rz": r.position.z,
+		"speed": sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy), "yaw": (sim.eL.w + sim.eR.w) / 2.0,
+		"vtop": lerpf(QuestControlsScript.V_TOP_SPEED, QuestControlsScript.V_TOP_SF, sim.hblend), "sf": sim.hblend}
 	var q: Dictionary = quest.update(c, delta)
+	if q.shift != 0:   # a shift: a click in the right hand (up firmer than down)
+		_buzz(r, 0.8 if q.shift > 0 else 0.5, 0.05 if q.shift > 0 else 0.03)
+	if q.get("grab", 0.0) > 0.0:   # the next gear grabs: a thump in both hands, the cockpit shudders
+		_grab = float(q.grab)
+		_grab_t = 0.0
+		_buzz(l, 0.9 * _grab, 0.09)
+		_buzz(r, 0.9 * _grab, 0.09)
 	if q.tickL:
 		_buzz(l, 0.35, 0.04)
 	if q.tickR:
 		_buzz(r, 0.35, 0.04)
+	if q.get("burner_change", 0) != 0:   # the burner lit (a thump) or out (softer), in the left hand: its stick
+		_buzz(l, 0.85 if q.burner_change > 0 else 0.45, 0.08 if q.burner_change > 0 else 0.05)
+	elif q.get("burner_refused", false):   # not below top gear: a double tap
+		_buzz(l, 0.4, 0.03)
+		_buzz(l, 0.4, 0.03, 0.08)
 	if levers.source.begins_with("Gamepad"):   # printed levers or a gamepad in use: they win
 		inp = {"thrL": p.thrL, "thrR": p.thrR, "brkL": maxf(p.brkL, q.brkL), "brkR": maxf(p.brkR, q.brkR)}
 	else:
 		inp = {"thrL": maxf(p.thrL, q.thrL), "thrR": maxf(p.thrR, q.thrR), "brkL": maxf(p.brkL, q.brkL), "brkR": maxf(p.brkR, q.brkR)}
-	inp.repair = p.repair or l.is_button_pressed("ax_button")
-	inp.reignite = p.reignite or r.is_button_pressed("ax_button")
-	if p.arm or _pressed_once("arm", r.is_button_pressed("by_button")):
+	inp.repair = p.repair or _button(l, "ax_button")
+	inp.reignite = p.reignite or _button(r, "ax_button")
+	if quest.scheme == "triggers" and not levers.source.begins_with("Gamepad"):
+		# the burner's the left stick's (the levers stay under the gate); the keyboard's still lights it
+		inp.burner = bool(q.get("burner", false)) or (p.thrL >= sim.P.gate and p.thrR >= sim.P.gate)
+	if quest.scheme == "triggers" and quest.gear >= 0 and not levers.source.begins_with("Gamepad"):
+		inp.thrMul = q.get("mul", 1.0)   # the gearbox's pull
+		inp.gearRpm = q.get("rpm", 0.0)   # ... and its revs, for the engine sound
+	# the Network: A tapped, the next city as the target; held in a city's STARFIGHTER zone, its GP
+	if sim.kind == "network":
+		if _button(r, "ax_button"):
+			_a_held += delta
+			if _a_held >= A_HOLD and not _a_fired and net_city_gp() != "":
+				_a_fired = true
+				_buzz(r, 0.9, 0.2)
+				enter_city_gp()
+		else:
+			if _a_held > 0.0 and not _a_fired:
+				net_cycle_target()
+				_buzz(r, 0.5, 0.06)
+			_a_held = 0.0
+			_a_fired = false
+	if p.arm or _pressed_once("arm", _button(r, "by_button")):
 		sim.armed = not sim.armed
 	# Y: tap restarts, hold flips the handling (live, as the MODE switch)
 	if p.respawn:
 		_respawn()
-	if l.is_button_pressed("by_button"):
+	if _button(l, "by_button"):
 		_y_held += delta
 		if _y_held >= Y_HOLD and not _y_fired:
 			_y_fired = true
@@ -386,7 +513,7 @@ func _read_input(delta: float) -> void:
 			_respawn()
 		_y_held = 0.0
 		_y_fired = false
-	match _menu(l.is_button_pressed("menu_button"), delta):
+	match _menu(_button(l, "menu_button"), delta):
 		"scheme":
 			quest.next_scheme()
 			_save_prefs()
@@ -401,19 +528,21 @@ func _read_input(delta: float) -> void:
 	if _switch_at > 0 and _frames == _switch_at and track_override == "":   # once
 		switch_track()
 	# the MODE switch: either hand can throw it
-	if mode_switch:
+	if mode_switch and hands_live:
 		for hand in [l, r]:
 			var flip: String = mode_switch.poke(hand, delta)
 			if flip != "" and ask_handling(flip):   # (refused inside the cooldown: the lever springs back)
 				_save_prefs()
 				_buzz(hand, 0.9, 0.06)
 				print("HANDLING: switch to ", flip)
-	if _pressed_once("recenter", l.is_button_pressed("primary_click") or r.is_button_pressed("primary_click")):
+	if _pressed_once("recenter", _button(l, "primary_click") or _button(r, "primary_click")):
 		recenter()
 	_diag(delta, l, r, p)
 
 
-func _track() -> String:   # "range", "gp", "eridanus", "emergency" (Eridanus on the job; or "circuit")
+func _track() -> String:   # "range", "gp", "eridanus", "emergency" (Eridanus on the job), "network" (or "circuit")
+	if sim.kind == "network":
+		return "network"
 	if sim.course and not sim.job.is_empty():
 		return "emergency"
 	return sim.track_name if sim.course else ("range" if sim.kind == "range" else "circuit")
@@ -434,7 +563,7 @@ func _menu(down: bool, delta: float) -> String:
 	return "scheme" if tapped else ""
 
 
-## Range -> grand prix -> Eridanus -> the emergency run -> range, in the headset: reload the scene on
+## Range -> grand prix -> Eridanus -> the emergency run -> the Network -> range, in the headset: reload the scene on
 ## the next track (the OpenXR session carries on; CraftView.track_override and job_override survive
 ## the reload and win over --track and --job).
 func switch_track() -> void:
@@ -452,9 +581,11 @@ static func overrides_for(to: String) -> Array:
 
 
 ## The menu hold's cycle: range -> grand prix -> Eridanus -> the emergency run (Eridanus on the
-## job) -> range (a plain circuit goes to the range).
+## job) -> the Network -> range (a plain circuit goes to the range).
 static func next_track(cur: String) -> String:
-	var order := ["range", "gp", "eridanus", "emergency"]
+	if GP_BIOME.has(cur):
+		return "network"   # a city's GP: back to the Network (at that city)
+	var order := ["range", "gp", "eridanus", "emergency", "network"]
 	return order[(order.find(cur) + 1) % order.size()]
 
 
@@ -468,7 +599,7 @@ func _place_camera(_k: float) -> void:
 	var roll := clampf(craft.bank[2] + r.z, -CraftModelScript.ROLL_MAX, CraftModelScript.ROLL_MAX)   # the cap: the lean only
 	var pitch := r.y   # up and down the banking
 	var head := origin.position + cam.position
-	if sim.pod.path > 0:
+	if sim.pod.path > 0 and sim.kind != "network":
 		# the shade line: the cockpit worked out flat, then carried onto the twisted road, where the
 		# corkscrews roll it right over (CraftModel.onto_road: past 90 deg, upside down under the canopy)
 		var b_flat := Basis.from_euler(Vector3(0.0, yaw, roll))
@@ -477,7 +608,7 @@ func _place_camera(_k: float) -> void:
 			_ride.roll, pitch, org_x, org_y)
 	else:
 		var b_full := Basis.from_euler(Vector3(pitch, yaw, roll))   # lean + the track's banking (capped), and its slope
-		var base := w3(sim.pod.x, sim.pod.y, sim.pod.z - 0.8 + CraftModelScript.POD_LIFT) + Vector3.UP * (r.x - surface(sim.pod.x, sim.pod.y).x)   # floor 0.8 m below the pod body centre, lifted with the pod
+		var base := wz(sim.pod.x, sim.pod.y, sim.pod.z - 0.8 + CraftModelScript.POD_LIFT) + Vector3.UP * (r.x - surface(sim.pod.x, sim.pod.y).x)   # floor 0.8 m below the pod body centre, lifted with the pod
 		rig.basis = b_full
 		rig.position = base + b_yaw * head - b_full * head
 	var thr := [inp.thrL, inp.thrR]
@@ -487,6 +618,7 @@ func _place_camera(_k: float) -> void:
 
 
 func _process(delta: float) -> void:
+	var t_in := Time.get_ticks_usec()
 	super(delta)
 	_apply_shudder(delta)
 	interior.set_mode(sim.mode, sim.hblend)
@@ -504,6 +636,18 @@ func _process(delta: float) -> void:
 	if dawn and dawn.burn > 0.0:   # caught by the dawn: burn to white instead
 		fade_mat.albedo_color = Color(1.0, 0.97, 0.9, dawn.burn)
 	frame_ms.append(delta * 1000.0)
+	_w_cpu.append((Time.get_ticks_usec() - t_in) / 1000.0)
+	var vp := get_viewport().get_viewport_rid()
+	_w_gpu.append(RenderingServer.viewport_get_measured_render_time_gpu(vp))
+	var parts := {"sim": cpu.sim, "world": cpu.world, "hud": cpu.hud, "rcpu": RenderingServer.viewport_get_measured_render_time_cpu(vp),
+		"stream": network_world.sync_ms if network_world else 0.0, "traffic": traffic_net.update_ms if traffic_net else 0.0}
+	for k in parts:
+		_w_sum[k] = _w_sum.get(k, 0.0) + parts[k]
+	var yaw: float = (sim.eL.w + sim.eR.w) / 2.0
+	var spd: float = sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy)
+	var gear_shown: int = quest.gear + 1 if quest.scheme == "triggers" and quest.gear >= 0 else 0
+	wag.add(delta, yaw, spd, gear_shown)
+	wag_all.add(delta, yaw, spd, gear_shown)
 	report_t += delta
 	if report_t >= 10.0:
 		_report()
@@ -537,6 +681,40 @@ func _report() -> void:
 	print("FRAMES: %.1f fps avg, p95 %.2f ms, %.1f%% over %.1f ms (%.0f Hz budget, %s), %d frames total" % [
 		1000.0 * recent.size() / total, sorted[int(sorted.size() * 0.95)], 100.0 * slow / recent.size(),
 		budget, hz, hz_src, n])
+	_report_cpu()
+	if wag.t > 0.0:
+		print(wag.report())
+	wag.reset()
+
+
+## Where the frame went since the last report: the main thread's work (avg, p95; by part) and the
+## renderer's CPU and GPU time. (On the Network: where you are, the traffic, the chunks.)
+func _report_cpu() -> void:
+	var m := _w_cpu.size()
+	if m == 0:
+		return
+	var c := _w_cpu.duplicate()
+	c.sort()
+	var g := _w_gpu.duplicate()
+	g.sort()
+	var avg := {}
+	for k in _w_sum:
+		avg[k] = _w_sum[k] / m
+	var tot := 0.0
+	for x in _w_cpu:
+		tot += x
+	var gt := 0.0
+	for x in _w_gpu:
+		gt += x
+	var at := ""
+	if sim.kind == "network":
+		at = " | %s mile %.0f, %d cars, %d chunks" % [sim.roads[sim.pod.path].name, sim.pod.hint * 24.0 / 1609.344,
+			traffic_net.cars.size() if traffic_net else 0, network_world.chunks.size() if network_world else 0]
+	print("CPU: process avg %.2f p95 %.2f ms (sim %.2f, world %.2f: stream %.2f traffic %.2f; hud %.2f) | render cpu %.2f, gpu avg %.2f p95 %.2f ms%s" % [
+		tot / m, c[int(m * 0.95)], avg.sim, avg.world, avg.stream, avg.traffic, avg.hud, avg.rcpu, gt / m, g[int(m * 0.95)], at])
+	_w_cpu.clear()
+	_w_gpu.clear()
+	_w_sum.clear()
 
 
 func _update_hud() -> void:
@@ -552,12 +730,15 @@ func _update_hud() -> void:
 		"health": [sim.eL.health, sim.eR.health],
 		"flameout": [sim.eL.flameout, sim.eR.flameout], "battery": sim.battery,
 		"burner": sim.mode == "burner", "armed": sim.armed, "ramjet": sim.mode == "ramjet",
+		"gear": quest.gear + 1 if quest.scheme == "triggers" and quest.gear >= 0 else 0,
 		"blink": (Time.get_ticks_msec() / 250) % 2 == 0,
 	})
 
 
 func _exit_tree() -> void:
 	_report()
+	if wag_all.t > 0.0:
+		print(wag_all.report().replace("WAG:", "WAG (the whole flight):"))
 	var path := "user://frames_%s.csv" % Time.get_datetime_string_from_system().replace(":", "-")
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	if f:

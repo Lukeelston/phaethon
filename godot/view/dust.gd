@@ -3,6 +3,7 @@
 ## a wide fan just past Mach 1 that folds into a narrow dart at Mach 6. Both ride on the craft
 ## (no world-space particles, so the floating origin can't strand them) and fade out in the air.
 ##   add_child(dust); dust.build(view)    once
+##   dust.road_spray()                    on paved highways (the Network): a faint grey spray, not sand
 ##   dust.sync(sim, delta)                every frame, after the floating origin moves
 extends Node3D
 
@@ -34,6 +35,18 @@ var arm_mat: ShaderMaterial
 var _scroll := 0.0
 var _arm_scroll := 0.0
 var density := 0.0   # latest plume density (tests and tuning read it)
+var amount := 1.0    # scales both: 1 for sand off the desert; road_spray() makes it a faint spray
+const SPRAY := Color(0.18, 0.185, 0.195)   # what the engines lift off a paved highway: grit and haze, the asphalt's own tone
+
+
+## The Network's highways are paved: the plumes the pilot looks back through (they stream from the
+## engines back over the pod) were sand and veiled the road at speed (Luke: "everything looks like
+## it's whitewashed when at speed": +31% on the road). On them it's a faint grey spray.
+func road_spray() -> void:
+	amount = 0.2
+	for m in plume_mats:
+		m.set_shader_parameter("color", Vector3(SPRAY.r, SPRAY.g, SPRAY.b))
+	arm_mat.set_shader_parameter("color", Vector3(SPRAY.r, SPRAY.g, SPRAY.b))
 
 
 func build(v) -> void:
@@ -106,6 +119,11 @@ static func _trough() -> ArrayMesh:
 
 
 ## How much of the craft is near the ground: 1 skimming, 0 by ~14 m up.
+## The surface's height under (x, y) on the Network (the bodies' heights are their own there), 0 elsewhere.
+func _under(x: float, y: float) -> float:
+	return view.surface(x, y).x if view.sim.kind == "network" else 0.0
+
+
 static func _low(z: float) -> float:
 	return 1.0 - smoothstep(3.0, 14.0, z)
 
@@ -125,7 +143,7 @@ func sync(sim, delta: float) -> void:
 	density = 0.0
 	for k in 2:
 		var e = bodies[k]
-		var d: float = smoothstep(4.0, 60.0, v) * _low(e.z) * (0.35 + 0.65 * minf(e.thrust, 1.0)) * 0.55
+		var d: float = smoothstep(4.0, 60.0, v) * _low(e.z - _under(e.x, e.y)) * (0.35 + 0.65 * minf(e.thrust, 1.0)) * 0.55 * amount
 		d *= 0.0 if (e.flameout or crashed) else 1.0
 		density = maxf(density, d)
 		plumes[k].visible = d > 0.005
@@ -140,7 +158,7 @@ func sync(sim, delta: float) -> void:
 
 	# the shock V: Mach angle half-width, from the engine noses back along the ground
 	var mach := v / 343.0
-	var shock: float = smoothstep(1.05, 1.4, mach) * _low((sim.eL.z + sim.eR.z) / 2.0) * (0.0 if crashed else 1.0)
+	var shock: float = smoothstep(1.05, 1.4, mach) * _low((sim.eL.z + sim.eR.z) / 2.0 - _under(sim.pod.x, sim.pod.y)) * (0.0 if crashed else 1.0)
 	var on := shock > 0.01
 	arms[0].visible = on
 	arms[1].visible = on
@@ -153,7 +171,7 @@ func sync(sim, delta: float) -> void:
 		(sim.eL.y + sim.eR.y) / 2.0 + s * (sim.P.engineLen / 2.0 + 1.0), 0.05)
 	var arm_len := 320.0
 	_arm_scroll += minf(5.0 * 0.4 * v / arm_len, 4.0) * delta
-	arm_mat.set_shader_parameter("density", 0.4 * shock)
+	arm_mat.set_shader_parameter("density", 0.4 * shock * amount)
 	arm_mat.set_shader_parameter("scroll", _arm_scroll)
 	for k in 2:
 		var side := 1.0 if k == 0 else -1.0

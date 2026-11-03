@@ -26,6 +26,9 @@ const RangeWorldScript := preload("res://view/range_world.gd")
 const LandmarkScript := preload("res://view/landmark.gd")
 const EngineAudioScript := preload("res://audio/engine_audio.gd")
 const WindAudioScript := preload("res://audio/wind_audio.gd")
+const CourseAudioScript := preload("res://audio/course_audio.gd")
+const TrafficAudioScript := preload("res://audio/traffic_audio.gd")
+const CanopyFlash := preload("res://view/canopy.gd")
 const SpeedCuesScript := preload("res://view/speed_cues.gd")
 const TrafficScript := preload("res://view/traffic.gd")
 const DustScript := preload("res://view/dust.gd")
@@ -37,12 +40,19 @@ const GpWorldScript := preload("res://view/gp_world.gd")
 const CourseWorldScript := preload("res://view/course_world.gd")
 const DawnScript := preload("res://view/dawn.gd")
 const VerdantWorldScript := preload("res://view/verdant_world.gd")
+const NetworkWorldScript := preload("res://view/network_world.gd")
+const NetworkTrafficScript := preload("res://view/network_traffic.gd")
 const DT := 1.0 / 480.0
 const HAZE := Color(0.78, 0.66, 0.52)
 const GROUND_PERIOD := 4096.0             # view/ground.gdshader's PERIOD
 const SUN_ROT := Vector3(-30, 52, 0)       # the primary sun (DirectionalLight3D rotation, degrees)
 const HORIZON := Color(0.86, 0.74, 0.58)   # fog colour = the sky at the horizon, so they meet seamlessly
 const HORIZON_GREEN := Color(0.72, 0.80, 0.86)   # Eridanus: a soft blue-grey haze over the valley
+# The Network's city GPs (tools/sync_gp_variants.py): the grand prix four ways, one per city, each
+# in its city's landscape, entered from the city's STARFIGHTER zone (hold A; G on the keyboard)
+const CITY_GP := {"DUNES": "gp_dunes", "GLACIER": "gp_glacier", "BASALT": "gp_basalt", "MESA": "gp_mesa"}
+const GP_BIOME := {"gp_dunes": "desert", "gp_glacier": "ice", "gp_basalt": "basalt", "gp_mesa": "mesa"}
+const BIOME_HAZE := {"desert": Color(0.86, 0.74, 0.58), "ice": Color(0.80, 0.87, 0.95), "basalt": Color(0.58, 0.55, 0.56), "mesa": Color(0.88, 0.68, 0.52)}
 const TWILIGHT_HORIZON := Color(0.27, 0.27, 0.38)   # the emergency run, before dawn: a dusky violet haze ...
 const TWILIGHT_TOP := Color(0.04, 0.06, 0.15)       # ... under a deep blue sky
 const TWILIGHT_AMBIENT := 1.6                       # the sky's light carries the ground ...
@@ -53,6 +63,8 @@ var sim
 var levers
 var engine_audio
 var wind_audio
+var course_audio             # the halls' and canopy's acoustics, the emergency run's sounds (audio/course_audio.gd)
+var traffic_audio            # the Network's traffic going by (audio/traffic_audio.gd)
 var replay: Array = []
 var replay_i := 0
 var shot_path := ""
@@ -60,6 +72,7 @@ var shot_frame := 90
 var frames := 0
 var acc := 0.0
 var sub := 0
+var cpu := {"sim": 0.0, "world": 0.0, "hud": 0.0}   # this frame's main-thread work by part, ms (the headset's FRAMES report)
 var inp := {"thrL": 0.0, "thrR": 0.0, "brkL": 0.0, "brkR": 0.0, "repair": false, "reignite": false}
 var start_at := -1   # --at=I: start at track sample I (circuits; screenshots of a given corner)
 var branch_at := -1  # --branch-at=J: start on the shade line at its sample J (with --job=emergency; screenshots)
@@ -100,7 +113,14 @@ var traffic: Node3D
 var horizon: Node3D
 var gp_world: Node3D
 var course_world: Node3D     # Eridanus: the chunked trackside (view/course_world.gd)
+var network_world: Node3D    # the Network: its streamed roads, signs and skylines (view/network_world.gd)
+var net_target := -1         # the Network: the city the dash and the minimap point to
+var net_found := {}          # the Network: the cities found (best_dir + network.json, with the bests)
+var net_best := {}           # the Network: "FROM>TO" -> best time, s
+var net_beaten := {}         # the Network: racer -> times you've beaten them
+var traffic_net: Node3D      # the Network: its traffic and racers (view/network_traffic.gd)
 var dawn: Node3D             # the emergency run: the dawn's front (view/dawn.gd)
+var stars: MeshInstance3D    # the emergency run: the night still over the twilight (view/stars.gdshader)
 var light_preset := "afternoon"   # "afternoon", or "twilight" on a job (the emergency run: before dawn)
 var burn_rect: ColorRect     # the flat view's burn to white when the dawn catches you
 var verdant_world: Node3D    # ... and the green valley round it (view/verdant_world.gd)
@@ -120,12 +140,8 @@ func _ready() -> void:
 			shot_path = a.get_slice("=", 1)
 		elif a.begins_with("--shotframe="):
 			shot_frame = int(a.get_slice("=", 1))
-		elif a == "--track=range":
-			opts["track"] = "range"
-		elif a == "--track=gp":
-			opts["track"] = "gp"
-		elif a == "--track=eridanus":
-			opts["track"] = "eridanus"
+		elif a.begins_with("--track="):   # range, gp, eridanus, network, a city GP (gp_dunes, gp_glacier, gp_basalt, gp_mesa)
+			opts["track"] = a.get_slice("=", 1)
 		elif a.begins_with("--startx="):
 			opts["startX"] = float(a.get_slice("=", 1))
 		elif a.begins_with("--starty="):
@@ -157,9 +173,25 @@ func _ready() -> void:
 		opts.erase("startX")
 		opts.erase("startY")
 	var job := resolve_job(OS.get_cmdline_user_args(), job_override)
-	if job != "":
+	if job != "" and opts.get("track", "") != "network":
 		opts["job"] = job
+	if opts.get("track", "") == "network":   # back where you last arrived; what you've found, your bests
+		var saved = JSON.parse_string(FileAccess.get_file_as_string(_net_path())) if FileAccess.file_exists(_net_path()) else null
+		if saved is Dictionary:
+			for k in saved.get("found", []):
+				net_found[int(k)] = true
+			net_best = saved.get("best", {})
+			net_beaten = saved.get("beaten", {})
+			if int(saved.get("last", -1)) >= 0 and int(saved.get("last", -1)) < CraftSimScript.NET_CITIES.size():
+				opts["startCity"] = int(saved.last)
+	if "--pod=heavy" in OS.get_cmdline_user_args():   # the heavy pod (Luke: "giving the pod some weight"): 1,500 kg, not
+		opts["podMass"] = 1500.0                       # 500, with thrust and drag scaled to the total mass so the
+		opts["forceScale"] = 3900.0 / 2900.0          # speed and acceleration are as before
 	sim = CraftSimScript.new(opts)
+	if sim.kind == "network":
+		for k in sim.net.found:
+			net_found[k] = true
+		net_target = _net_next_target()
 	if start_at >= 0 and sim.kind == "circuit":
 		sim.respawn(-1, start_at)
 	if branch_at >= 0 and not sim.branches.is_empty():
@@ -168,7 +200,9 @@ func _ready() -> void:
 		replay = []
 	levers = LeverInputScript.new()
 	minimap = MiniMapScript.new()
+	minimap.gp_cities = CITY_GP.keys()   # (the whole map marks their GPs)
 	minimap.setup(sim)
+	minimap.target = net_target
 	_load_best()
 	if cruise >= 0.0:
 		inp = {"thrL": cruise, "thrR": cruise, "brkL": hold_brake[0], "brkR": hold_brake[1], "repair": false, "reignite": true}
@@ -181,6 +215,8 @@ func _ready() -> void:
 	dust = DustScript.new()
 	add_child(dust)
 	dust.build(self)
+	if sim.kind == "network":
+		dust.road_spray()
 	if not mute and shot_path == "":
 		engine_audio = EngineAudioScript.new()
 		add_child(engine_audio)
@@ -188,6 +224,21 @@ func _ready() -> void:
 		wind_audio = WindAudioScript.new()
 		add_child(wind_audio)
 		wind_audio.setup(sim)
+		if sim.kind == "network":
+			traffic_audio = TrafficAudioScript.new()
+			add_child(traffic_audio)
+			traffic_audio.setup()
+			course_audio = CourseAudioScript.new()   # the cities' halls ring as Eridanus' do
+			add_child(course_audio)
+			course_audio.setup(sim)
+			if network_world:
+				course_audio.net_halls = network_world.halls
+		if sim.course and (not sim.covered_ramps.is_empty() or not sim.job.is_empty()):
+			var t0 := Time.get_ticks_msec()
+			course_audio = CourseAudioScript.new()
+			add_child(course_audio)
+			course_audio.setup(sim)
+			print("AUDIO: CourseAudio up in %d ms (%s)" % [Time.get_ticks_msec() - t0, "the job" if not sim.job.is_empty() else "the halls"])
 	for i in int(seek / DT):
 		_sim_step()
 	_follow_origin()
@@ -209,12 +260,25 @@ func _sim_step() -> void:
 
 
 func _on_event(e: Dictionary) -> void:
+	if e.type == "bump":   # traffic's forcefield: a shove you feel, not a hit (and see: the field flares)
+		_on_hit(e.who, 0.5)
+		_field_flash(1.0)
+		return
+	if e.type == "hit" or e.type == "scrape":
+		_field_flash(1.0 if e.type == "hit" else 0.45)
+	if e.type == "smash":
+		_flash("SMASHED")
 	if e.type != "land" and e.type != "scrape":   # every hit, crash, flameout, lap... in the log
 		print("EVENT %s %s t=%.2f" % [e.type, e.get("who", ""), sim.time])
 	if e.type == "hit":
 		_on_hit(e.who, 1.0)
 	elif e.type == "scrape":
 		_on_hit(e.who, 0.35)
+	if sim.kind == "network" and e.type == "arrive":
+		_net_arrived(e)
+	if sim.kind == "network":
+		_net_jump_event(e)
+		return
 	if not sim.job.is_empty():   # the emergency run: its best is the run's time, made, never a lap
 		if e.type == "job" and e.stage == "done" and (best_saved < 0.0 or float(sim.job.t) < best_saved):
 			best_saved = sim.job.t
@@ -250,11 +314,15 @@ func _on_event(e: Dictionary) -> void:
 
 ## Sprint bests are kept per handling mode (the speed file keeps its original name).
 func _best_path() -> String:
+	if sim.kind == "network":
+		return _net_path()
 	if not sim.job.is_empty():
 		return best_dir + "%s_emergency_best.json" % sim.track_name
 	var h: String = sim.P.handling
 	if sim.track_name == "gp":
 		return "user://gp_best_%s.json" % h
+	if GP_BIOME.has(sim.track_name):
+		return "user://%s_best_%s.json" % [sim.track_name, h]
 	if sim.course:
 		return "user://%s_best.json" % sim.track_name   # one record: every lap flies both modes
 	return "user://sprint_best.json" if h == "speed" else "user://sprint_best_%s.json" % h
@@ -282,6 +350,27 @@ func set_handling(name: String) -> void:
 ## (the VR cockpit buzzes a controller).
 func _on_hit(_who: String, _strength: float) -> void:
 	pass
+
+
+## What the engine sound hears: the levers, or with the gearbox the gear's revs (they climb through
+## each gear and fall when you shift up: Luke, "rise and fall like actual gears"), eased by how hard
+## you're on each lever (lifting off drops the note toward idle; the revs stay with the speed).
+func _engine_inp() -> Dictionary:
+	if not inp.has("gearRpm"):
+		return inp
+	var gate: float = sim.P.gate
+	var out := inp.duplicate()
+	for k in ["thrL", "thrR"]:
+		var lever := minf(float(inp[k]), gate) / gate
+		var spool: float = preload("res://input/quest_controls.gd").engine_spool(float(inp.gearRpm), lever)
+		out[k] = (spool * gate) if float(inp[k]) < gate else float(inp[k])   # (the burner's detent: as it was)
+	return out
+
+
+## The forcefield flares on a bump or a wall's push (view/canopy.gd flash).
+func _field_flash(amount: float) -> void:
+	if craft and craft.canopy:
+		CanopyFlash.flash(craft.canopy, amount)
 
 
 ## The handling as the pilot sees it: SPEEDCRAFT / STARFIGHTER, and STARFIGHTER waiting for the
@@ -318,6 +407,237 @@ func toggle_handling() -> void:
 func _unhandled_key_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo and (event as InputEventKey).keycode == KEY_M:
 		toggle_handling()
+	if event is InputEventKey and event.pressed and not event.echo and (event as InputEventKey).keycode == KEY_T:
+		net_cycle_target()
+	if event is InputEventKey and event.pressed and not event.echo and (event as InputEventKey).keycode == KEY_G:
+		enter_city_gp()
+
+
+# --- the Network: the target city, arrivals, bests ---
+
+func _net_path() -> String:
+	return best_dir + "network.json"
+
+
+## The nearest city you haven't found (straight line), or once you've found them all the nearest
+## other than the one you're at.
+func _net_next_target() -> int:
+	var best := -1
+	var bd := INF
+	for pass_ in 2:
+		for k in sim.cities.size():
+			if k == int(sim.net.from) or (pass_ == 0 and net_found.has(k)):
+				continue
+			var d := Vector2(sim.cities[k].cx - sim.pod.x, sim.cities[k].cy - sim.pod.y).length()
+			if d < bd:
+				bd = d
+				best = k
+		if best >= 0:
+			return best
+	return best
+
+
+## The city GP you can drop into from here: in a city's STARFIGHTER zone (its road, its mode 0), the
+## city's GP ("" elsewhere, or a city without one).
+func net_city_gp() -> String:
+	if sim.kind != "network":
+		return ""
+	var R = sim.roads[sim.pod.path]
+	if R.mode[clampi(sim.pod.hint, 0, R.N - 1)] != 0:
+		return ""
+	for c in sim.cities:
+		if int(c.road) == sim.pod.path:
+			return CITY_GP.get(c.name, "")
+	return ""
+
+
+## Into the city's GP: the scene again on its track (the menu hold brings you back to the Network).
+func enter_city_gp() -> void:
+	var gp := net_city_gp()
+	if gp == "":
+		return
+	print("TRACK: switching network -> %s" % gp)
+	track_override = gp
+	job_override = "none"
+	get_tree().call_deferred("reload_current_scene")
+
+
+var gp_skyline: Node3D   # a city GP's towers round the circuit
+
+
+## A city GP's towers: a ring of them round the circuit, 1.5-7 km off its bounds, in the city's
+## colours (view/network_world.gd's palette and view/skyline.gdshader).
+func _gp_skyline(biome: String) -> void:
+	var lo := Vector2(INF, INF)
+	var hi := Vector2(-INF, -INF)
+	for i in sim.N:
+		lo = Vector2(minf(lo.x, sim.tpx[i]), minf(lo.y, sim.tpy[i]))
+		hi = Vector2(maxf(hi.x, sim.tpx[i]), maxf(hi.y, sim.tpy[i]))
+	var pal: Array = NetworkWorldScript.PALETTE.get(biome, NetworkWorldScript.PALETTE.verdant)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(biome)
+	var xfs := []
+	var cols := []
+	var tries := 0
+	while xfs.size() < 420 and tries < 6000:
+		tries += 1
+		var x := rng.randf_range(lo.x - 7000.0, hi.x + 7000.0)
+		var y := rng.randf_range(lo.y - 7000.0, hi.y + 7000.0)
+		var out := maxf(maxf(lo.x - x, x - hi.x), maxf(lo.y - y, y - hi.y))   # how far outside the bounds
+		if out < 1500.0:
+			continue
+		var tall := lerpf(900.0, 160.0, clampf((out - 1500.0) / 5500.0, 0.0, 1.0)) * rng.randf_range(0.55, 1.15)
+		var foot := rng.randf_range(70.0, 190.0)
+		xfs.append(Transform3D(Basis.from_scale(Vector3(foot, tall, foot * rng.randf_range(0.6, 1.4))).rotated(Vector3.UP, rng.randf() * PI), Vector3(x, tall / 2.0, -y)))
+		cols.append((pal[0] as Color).lerp(pal[1], rng.randf()))
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.use_colors = true
+	mm.mesh = NetworkWorldScript.Kit.box(Vector3.ONE)
+	mm.instance_count = xfs.size()
+	for k in xfs.size():
+		mm.set_instance_transform(k, xfs[k])
+		mm.set_instance_color(k, cols[k])
+	gp_skyline = Node3D.new()
+	gp_skyline.name = "gp_skyline"
+	add_child(gp_skyline)
+	var mmi := MultiMeshInstance3D.new()
+	mmi.multimesh = mm
+	var m := ShaderMaterial.new()
+	m.shader = preload("res://view/skyline.gdshader")
+	m.set_shader_parameter("crown", Vector3(pal[2].r, pal[2].g, pal[2].b))
+	m.set_shader_parameter("haze_col", Vector3(BIOME_HAZE[biome].r, BIOME_HAZE[biome].g, BIOME_HAZE[biome].b))
+	mmi.material_override = m
+	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mmi.custom_aabb = AABB(Vector3(lo.x - 8000.0, 0.0, -hi.y - 8000.0), Vector3(hi.x - lo.x + 16000.0, 1200.0, hi.y - lo.y + 16000.0))
+	gp_skyline.add_child(mmi)
+
+
+## The next city round as the target (the T key; in the headset the right A button).
+func net_cycle_target() -> void:
+	if sim.kind != "network":
+		return
+	for step in range(1, sim.cities.size() + 1):
+		var k: int = (net_target + step) % sim.cities.size()
+		if k != int(sim.net.from):
+			net_target = k
+			break
+	if minimap:
+		minimap.target = net_target
+	_flash("TARGET  %s" % sim.cities[net_target].name)
+
+
+func _net_arrived(e: Dictionary) -> void:
+	var to: String = sim.cities[int(e.city)].name
+	var from: String = sim.cities[int(e.from)].name
+	var key := "%s>%s" % [from, to]
+	var t := float(e.t)
+	var prev: float = float(net_best.get(key, -1.0))
+	var record := prev < 0.0 or t < prev
+	if record:
+		net_best[key] = t
+	net_found[int(e.city)] = true
+	_flash("ARRIVED %s  %s%s" % [to, _mmss(t, true), "  NEW BEST" if record else "  BEST %s" % _mmss(prev, true)])
+	_net_save(int(e.city))
+	net_target = _net_next_target()
+	if minimap:
+		minimap.target = net_target
+
+
+func _net_save(last: int) -> void:
+	var fj := FileAccess.open(_net_path(), FileAccess.WRITE)
+	if fj:
+		fj.store_string(JSON.stringify({"found": net_found.keys(), "last": last, "best": net_best, "beaten": net_beaten}))
+
+
+## A race's end (the traffic reports it once): the flash, the tally.
+func _net_race_result() -> void:
+	var res: String = traffic_net.race_result
+	traffic_net.race_result = ""
+	var who: String = traffic_net.race_name
+	match res:
+		"won":
+			net_beaten[who] = int(net_beaten.get(who, 0)) + 1
+			_flash("RACE WON  %s  (beaten %dx)" % [who, int(net_beaten[who])])
+			_net_save(int(sim.net.from))
+		"lost":
+			_flash("RACE LOST  %s" % who)
+		"peeled":
+			_flash("%s PEELED OFF" % who)
+
+
+## The dash on the Network: the target city and how far (straight line), where you left and your
+## clock since; a racer's line while one's about.
+func _net_text() -> String:
+	if sim.time < flash_until:
+		return flash_msg
+	if sim.pod.off_road:   # in the air, or down on the open ground
+		if net_air_t0 >= 0.0 and sim.pod.z - sim.P.rideH > 4.0:
+			return "AIRBORNE  %.1f s   %d FT" % [sim.time - net_air_t0, roundi(sim.pod.z / 0.3048)]
+		var k := _net_nearest_ramp()
+		if k != net_ramp:
+			net_ramp = k
+		if k >= 0:
+			var R = sim.roads[int(sim.onramps[k][1])]
+			var city: String = sim.cities[int(sim.onramps[k][0])].name
+			minimap.waypoint = {"name": "%s ON-RAMP" % city, "x": R.px[0], "y": R.py[0]}
+			return "OFF THE ROAD   %s ON-RAMP  %s   (OR RESTART)" % [city, _far(Vector2(R.px[0] - sim.pod.x, R.py[0] - sim.pod.y).length())]
+		return "OFF THE ROAD   RESTART FOR THE LAST CITY"
+	if not minimap.waypoint.is_empty():
+		minimap.waypoint = {}
+	if traffic_net and traffic_net.race_text() != "":
+		return traffic_net.race_text()
+	var line := ""
+	if net_target >= 0:
+		var c: Dictionary = sim.cities[net_target]
+		line = "%s  %s" % [c.name, _far(Vector2(c.cx - sim.pod.x, c.cy - sim.pod.y).length())]
+	var since: String = sim.cities[int(sim.net.from)].name
+	var gp := net_city_gp()
+	if gp != "":
+		line += "   HOLD A: %s GP" % gp.substr(3).to_upper()
+	if float(sim.net.t0) >= 0.0:
+		return "%s   FROM %s  %s" % [line, since, _mmss(sim.time - float(sim.net.t0))]
+	return "%s   AT %s: push the levers" % [line, since]
+
+
+## The jumps and the open ground (phase 3): off a lip, the airtime counts on the dash; caught by a
+## deck, how long you flew; on the open ground, the nearest city's on-ramp on the dash and the map.
+var net_air_t0 := -1.0     # when the pod left a lip (-1: not in the air off one)
+var net_ramp := -1         # the on-ramp the dash points to (off the roads), -1 none
+
+
+func _net_jump_event(e: Dictionary) -> void:
+	if e.type == "airborne":
+		net_air_t0 = sim.time if e.lip else -1.0
+	elif e.type == "catch":
+		if net_air_t0 >= 0.0:
+			_flash("CAUGHT  %.1f s IN THE AIR  %s MPH" % [sim.time - net_air_t0, _grouped_mph()])
+		net_air_t0 = -1.0
+	elif e.type == "ground":
+		net_air_t0 = -1.0
+		_flash("OFF THE ROAD  -  FIND AN ON-RAMP  (OR RESTART)")
+	elif e.type == "onroad":
+		net_ramp = -1
+		minimap.waypoint = {}
+		_flash("BACK ON THE ROAD")
+
+
+func _grouped_mph() -> String:
+	var mph := roundi(sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy) * 2.236936)
+	return ("%d,%03d" % [mph / 1000, mph % 1000]) if mph >= 1000 else str(mph)
+
+
+## Off the roads: the nearest on-ramp's start, set as the minimap's waypoint. -> its index, -1 none.
+func _net_nearest_ramp() -> int:
+	var best := -1
+	var bd := INF
+	for k in sim.onramps.size():
+		var R = sim.roads[int(sim.onramps[k][1])]
+		var d := Vector2(R.px[0] - sim.pod.x, R.py[0] - sim.pod.y).length()
+		if d < bd:
+			bd = d
+			best = k
+	return best
 
 
 func _flash(msg: String) -> void:
@@ -328,7 +648,23 @@ func _flash(msg: String) -> void:
 ## Y: a fresh start. The range restarts the sprint at the start line, a circuit puts you back
 ## on the grid; both with whole engines (wall damage otherwise stays until you repair it).
 func _respawn() -> void:
+	# off the roads (a missed jump), the restart is the nearest start point: the nearest city you've
+	# found (Luke: "reset to the nearest start-point"); on them, the last city as ever
+	var near := -1
+	if sim.kind == "network" and sim.pod.off_road:
+		var bd := INF
+		for k in sim.cities.size():
+			var c: Dictionary = sim.cities[k]
+			var d := Vector2(c.cx - sim.pod.x, c.cy - sim.pod.y).length()
+			if sim.net.found.has(k) and d < bd:
+				bd = d
+				near = k
+	if near >= 0:
+		sim.net.from = near
 	sim.restart()
+	net_air_t0 = -1.0
+	if minimap:
+		minimap.waypoint = {}
 	brake_point = -1.0
 	flash_until = -1.0
 	_job_started = false
@@ -348,26 +684,34 @@ func _process(delta: float) -> void:
 	if replay.is_empty() and cruise < 0.0:
 		_read_input(delta)
 	acc += minf(delta, 0.05)
+	var t_sim := Time.get_ticks_usec()
 	while acc >= DT:
 		_sim_step()
 		acc -= DT
+	cpu.sim = (Time.get_ticks_usec() - t_sim) / 1000.0
 	_track_braking()
 	if not sim.job.is_empty() and not _job_started and sim.job.t0 != null:
 		_job_started = true   # the clock's running: you're an emergency
 		_flash("SPEED AUTHORIZED  /  SHADE LINE OPEN")
 	if engine_audio:
-		engine_audio.update(inp, delta)
+		engine_audio.update(_engine_inp(), delta)
 	if wind_audio:
 		wind_audio.update(inp, delta)
+	if course_audio:
+		course_audio.update(delta, dawn.dist if dawn else INF)
 	_follow_origin()
 	_sync_craft(delta)
 	cues.sync(sim, delta)
 	dust.sync(sim, delta)
 	_place_camera(1.0 - exp(-delta * 6.0))
 	craft.sync_cables(sim, delta)   # after the camera: in VR the cables' pod end rides the cockpit
+	var t_world := Time.get_ticks_usec()
 	_sync_world()   # after the camera: distant anchors scale about its current position
+	cpu.world = (Time.get_ticks_usec() - t_world) / 1000.0
 	top_kmh = maxf(top_kmh, _kmh())
+	var t_hud := Time.get_ticks_usec()
 	_update_hud()
+	cpu.hud = (Time.get_ticks_usec() - t_hud) / 1000.0
 	frames += 1
 	if shot_path != "" and frames == shot_frame:
 		await RenderingServer.frame_post_draw
@@ -423,10 +767,18 @@ func _follow_origin() -> void:
 	org_y = sim.pod.y
 
 
+## A sim body's point -> render position: on the Network a body's height is its own (the roads'
+## heights are real in the sims: the deck lock, the jumps), elsewhere it's over the surface (w3).
+func wz(x: float, y: float, z: float) -> Vector3:
+	if sim and sim.kind == "network":
+		return Vector3(x - org_x, z, -(y - org_y))
+	return w3(x, y, z)
+
+
 ## Sim point -> render position, relative to the floating origin. On the shade line (the pod on a
 ## branch) the point rides its twisted road (CraftModel.road_xf: rolled over, raised).
 func w3(x: float, y: float, h := 0.0) -> Vector3:
-	if sim and sim.pod.path > 0:
+	if sim and sim.pod.path > 0 and sim.kind != "network":
 		return road_xf(x, y) * Vector3(x - org_x, h, -(y - org_y))
 	return Vector3(x - org_x, h + surface(x, y).x, -(y - org_y))
 
@@ -435,6 +787,8 @@ func w3(x: float, y: float, h := 0.0) -> Vector3:
 ## to the left). Everything placed with w3 rides it; (0, 0) off the GP. On the shade line: its
 ## centreline's height (the corkscrews' climb) and no bank (its roll is road_xf's).
 func surface(x: float, y: float) -> Vector2:
+	if sim and sim.kind == "network" and sim.pod.off_road:
+		return Vector2.ZERO   # off the roads: the open ground
 	return sim.surface_at(x, y, sim.pod.hint, sim.pod.path) if sim else Vector2.ZERO
 
 
@@ -484,18 +838,24 @@ func _build_world() -> void:
 	# Sky: dusty blue overhead, washing out to the haze at the horizon. The fog skips the sky
 	# (it would paint it flat) and meets it at the horizon in the same colour.
 	var green: bool = sim.track_name == "eridanus"
+	var lush: bool = green or sim.kind == "network"   # the Network: Eridanus' clear blue-grey air
 	# the emergency run is flown before dawn (Luke: a dim look just for the job; free Eridanus keeps
 	# its afternoon): both suns under the horizon on the dawn's side (view/dawn.gd), the sky's light
 	# carrying the ground so its grain, the asphalt's joints, the dust and the lights still read
 	var tw: bool = not sim.job.is_empty()
 	light_preset = "twilight" if tw else "afternoon"
-	var hz := TWILIGHT_HORIZON if tw else (HORIZON_GREEN if green else HORIZON)
+	var hz := TWILIGHT_HORIZON if tw else (HORIZON_GREEN if lush else HORIZON)
+	if sim.kind == "network" and not tw:
+		hz = Color(0.58, 0.68, 0.80)   # the Network: a deeper blue haze (the pale one fused the horizon into a white band)
+	var gp_biome: String = GP_BIOME.get(sim.track_name, "")
+	if gp_biome != "":
+		hz = BIOME_HAZE[gp_biome]
 	var sky_mat := ProceduralSkyMaterial.new()
-	sky_mat.sky_top_color = Color(0.30, 0.50, 0.80) if green else Color(0.40, 0.55, 0.74)
+	sky_mat.sky_top_color = Color(0.30, 0.50, 0.80) if lush else Color(0.40, 0.55, 0.74)
 	sky_mat.sky_horizon_color = hz
 	sky_mat.sky_curve = 0.09
 	sky_mat.ground_horizon_color = hz
-	sky_mat.ground_bottom_color = Color(0.36, 0.44, 0.28) if green else Color(0.62, 0.5, 0.36)
+	sky_mat.ground_bottom_color = Color(0.36, 0.44, 0.28) if lush else Color(0.62, 0.5, 0.36)
 	sky_mat.sun_angle_max = 1.5
 	sky_mat.sun_curve = 0.05
 	if tw:
@@ -535,8 +895,10 @@ func _build_world() -> void:
 	en.fog_light_color = hz
 	# (the valley's air is clearer than the desert's dust: Eridanus' 12 km boards come up readable)
 	en.fog_density = 0.0012 if sim.kind == "circuit" and not sim.course else (0.0002 if green else 0.00035)
+	if sim.kind == "network":
+		en.fog_density = 0.00016   # the roads stream in 20 km out: the haze takes them there (the skylines carry their own)
 	en.fog_sky_affect = 0.0
-	en.fog_sun_scatter = 0.18   # the haze brightens toward the suns
+	en.fog_sun_scatter = 0.05 if sim.kind == "network" else 0.18   # the haze brightens toward the suns (the Network's, less: no white band)
 	if tw:
 		en.ambient_light_sky_contribution = 1.0
 		en.ambient_light_energy = TWILIGHT_AMBIENT
@@ -601,6 +963,22 @@ func _build_world() -> void:
 		dawn = DawnScript.new()   # the emergency run's dawn (its suns, its wall, the land it lights)
 		add_child(dawn)
 		dawn.build(self)
+		stars = MeshInstance3D.new()   # the night still over it: a dome of stars 110 km out
+		stars.name = "stars"
+		var dome := SphereMesh.new()
+		dome.radius = 110000.0
+		dome.height = 220000.0
+		dome.radial_segments = 48
+		dome.rings = 24
+		stars.mesh = dome
+		var sm := ShaderMaterial.new()
+		sm.shader = preload("res://view/stars.gdshader")
+		var u := Vector2(cos(sim.P.dawnDir), sin(sim.P.dawnDir))
+		sm.set_shader_parameter("dawn_dir", Vector3(-u.x, 0.0, u.y))   # toward where it comes from
+		stars.material_override = sm
+		stars.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		stars.extra_cull_margin = 16384.0
+		add_child(stars)
 
 	if sim.kind == "range":
 		range_world = RangeWorldScript.new()
@@ -615,6 +993,20 @@ func _build_world() -> void:
 		horizon = HorizonScript.new()
 		add_child(horizon)
 		horizon.build(self, HORIZON)
+		return
+
+	if sim.kind == "network":
+		var t0 := Time.get_ticks_msec()
+		network_world = NetworkWorldScript.new()
+		add_child(network_world)
+		network_world.build(sim, self)
+		traffic_net = NetworkTrafficScript.new()
+		add_child(traffic_net)
+		traffic_net.build(sim, self, network_world)
+		horizon = HorizonScript.new()
+		add_child(horizon)
+		horizon.build(self, hz)
+		print("NETWORK: %d roads, %d cities (%d towers) set up in %d ms" % [sim.roads.size(), sim.cities.size(), network_world.towers, Time.get_ticks_msec() - t0])
 		return
 
 	if green:
@@ -641,13 +1033,17 @@ func _build_world() -> void:
 		horizon.build_course(self, hz, c, half * k, true)
 		return
 
-	if sim.track_name == "gp":
+	if sim.track_name == "gp" or gp_biome != "":
 		gp_world = GpWorldScript.new()
 		add_child(gp_world)
 		gp_world.build(sim, self)
 		horizon = HorizonScript.new()
 		add_child(horizon)
-		horizon.build(self, HORIZON)
+		horizon.build(self, hz)
+		if gp_biome != "":   # a city's GP: its landscape underfoot, its towers round the circuit
+			for b in ["ice", "basalt", "mesa"]:
+				ground_mat.set_shader_parameter(b, 1.0 if b == gp_biome else 0.0)
+			_gp_skyline(gp_biome)
 		return
 
 	# Circuit: track surface and kerbed walls, built in absolute coordinates and
@@ -708,14 +1104,60 @@ func _sync_world() -> void:
 		gp_world.sync(org_x, org_y)
 	if course_world:
 		course_world.sync(org_x, org_y)
+	if network_world:
+		network_world.sync(org_x, org_y)
+		_net_biome()
+		if course_audio and course_audio.net_halls.is_empty():
+			course_audio.net_halls = network_world.halls
+	if traffic_net:
+		traffic_net.update(get_process_delta_time())
+		if traffic_audio:   # the whooshes: the vehicles within 3 km going by
+			var pv := Vector2(sim.pod.vx, sim.pod.vy)
+			var cars := []
+			for c in traffic_net.cars:
+				if absf(c.x - sim.pod.x) < 3000.0 and absf(c.y - sim.pod.y) < 3000.0:
+					cars.append([c.id, c.x, c.y, sim.net_height(c.road, c.f) + 2.0, c.v * c.hx, c.v * c.hy])
+			traffic_audio.set_speed(pv.length())
+			traffic_audio.update(Vector2(sim.pod.x, sim.pod.y), pv.normalized() if pv.length() > 1.0 else Vector2.ZERO, cars, wz, get_process_delta_time())
+		if traffic_net.race_result != "":
+			_net_race_result()
+		if minimap:
+			minimap.marks = traffic_net.marks(sim.pod.x, sim.pod.y, 40000.0)
 	if verdant_world:
 		verdant_world.sync(org_x, org_y)
+	if gp_skyline:
+		gp_skyline.position = Vector3(-org_x, 0.0, org_y)
 	if dawn:
 		dawn.sync(sim, get_process_delta_time())
+		if stars:   # the stars fade as the front nears
+			(stars.material_override as ShaderMaterial).set_shader_parameter("fade", clampf(absf(dawn.dist) / 60000.0, 0.15, 1.0))
 		if burn_rect:
 			burn_rect.color = Color(1.0, 0.97, 0.9, dawn.burn)
 	if landmark:
 		landmark.sync(org_x, org_y, sim.time, cam.global_position)
+
+
+## The Network's ground: each city's landscape, weighted by nearness (inverse distance, 4th power),
+## so the land changes from one to the next over tens of km.
+func _net_biome() -> void:
+	var w := {"desert": 0.0, "verdant": 0.0, "ice": 0.0, "basalt": 0.0, "mesa": 0.0}
+	var tot := 0.0
+	for c in sim.cities:
+		var d := maxf(Vector2(c.cx - org_x, c.cy - org_y).length(), 2000.0) / 1000.0
+		var k := 1.0 / (d * d * d * d)
+		w[c.biome] = w.get(c.biome, 0.0) + k
+		tot += k
+	for b in w:
+		w[b] = w[b] / tot
+	biome = w
+	var dv: float = w.desert + w.verdant
+	ground_mat.set_shader_parameter("verdant", w.verdant / maxf(dv, 1e-6))
+	ground_mat.set_shader_parameter("ice", w.ice)
+	ground_mat.set_shader_parameter("basalt", w.basalt)
+	ground_mat.set_shader_parameter("mesa", w.mesa)
+
+
+var biome := {}   # the Network: this frame's landscape weights (tests read it)
 
 
 func _build_craft() -> void:
@@ -739,7 +1181,7 @@ func _make_view() -> void:
 	hud.add_theme_color_override("font_color", Color(0.1, 0.08, 0.06))
 	layer.add_child(hud)
 	minimap_2d = Minimap2DScript.new()
-	minimap_2d.visible = sim.kind == "circuit"
+	minimap_2d.visible = sim.kind == "circuit" or sim.kind == "network"
 	layer.add_child(minimap_2d)
 	if light_preset == "twilight":
 		hud.add_theme_color_override("font_color", Color(0.85, 0.88, 0.95))   # light on the dark sky
@@ -762,14 +1204,14 @@ var cam_th := 0.0
 func _place_camera(k: float) -> void:
 	cam_th = sim.pair_th if k >= 1.0 else cam_th + CraftSimScript.wrap_angle(sim.pair_th - cam_th) * k
 	var fwd := Vector3(cos(cam_th), 0, -sin(cam_th))
-	var pod_p := w3(sim.pod.x, sim.pod.y, sim.pod.z)
+	var pod_p := wz(sim.pod.x, sim.pod.y, sim.pod.z)
 	if eye != Vector3.INF:
 		cam.position = w3(eye.x, eye.y, eye.z)
 		cam.look_at(w3(look.x, look.y, look.z), Vector3.UP)
 		return
 	if cam_offset != Vector3.ZERO:
 		var left := Vector3(-sin(cam_th), 0, -cos(cam_th))
-		var mid := w3((sim.eL.x + sim.eR.x) / 2.0, (sim.eL.y + sim.eR.y) / 2.0, (sim.eL.z + sim.eR.z) / 2.0)
+		var mid := wz((sim.eL.x + sim.eR.x) / 2.0, (sim.eL.y + sim.eR.y) / 2.0, (sim.eL.z + sim.eR.z) / 2.0)
 		cam.position = pod_p + fwd * cam_offset.x + left * cam_offset.y + Vector3.UP * cam_offset.z
 		cam.look_at(mid, Vector3.UP)
 		return
@@ -780,6 +1222,8 @@ func _place_camera(k: float) -> void:
 ## Second HUD line: lap info on the circuit, mileage and top speed on the range; the job's line on
 ## the emergency run.
 func _progress_text() -> String:
+	if sim.kind == "network":
+		return _net_text()
 	if not sim.job.is_empty():
 		return _job_text()
 	if sim.kind == "range":
@@ -824,8 +1268,36 @@ func _job_text() -> String:
 				return "HOLD  %.1f s" % maxf(0.0, CraftSimScript.PAD_HOLD - float(J.held))
 			if sim.time < flash_until:
 				return flash_msg
+			var gap := _pad_gap()
+			if gap != INF:
+				var dx: float = sim.pod.x - sim.tpx[sim.pad]
+				var dy: float = sim.pod.y - sim.tpy[sim.pad]
+				if absf(dx * sim.ttx[sim.pad] + dy * sim.tty[sim.pad]) <= CraftSimScript.PAD_HALF and absf(dx * sim.tnx[sim.pad] + dy * sim.tny[sim.pad]) <= CraftSimScript.PAD_HALF:
+					return "STOP ON THE PAD  %s" % dawn
+				if gap > 0.0 and gap <= PAD_CALL:
+					return "MEDICAL PAD  %s  %s" % [_far(gap), dawn]
+				if gap < 0.0 and gap > -3000.0:
+					return "PAD BEHIND  %s  %s" % [_far(-gap), dawn]
 			return "EMERGENCY  LAKE TOWN MINE  %s" % dawn
 	return "HOME  %s" % dawn
+
+
+const PAD_CALL := 8.0 * 1609.344   # the dash calls the medical pad from this far out (m, along the track)
+
+## How far along the track the medical pad is ahead (m; negative behind), INF off the main road.
+func _pad_gap() -> float:
+	if sim.pod.path != 0 or sim.pad < 0:
+		return INF
+	var s: PackedFloat64Array = minimap.s
+	var g: float = s[sim.pad] - s[sim.pod.hint]
+	var lap: float = s[sim.N]
+	return g - lap if g > lap / 2.0 else (g + lap if g < -lap / 2.0 else g)
+
+
+## A distance as the dash reads it: miles, or feet under 0.2 mi.
+static func _far(m: float) -> String:
+	var mi := m / 1609.344
+	return ("%.1f mi" % mi) if mi >= 0.2 else ("%d ft" % (roundi(m * 3.28084 / 50.0) * 50))
 
 
 ## Seconds as m:ss (or m:ss.s), never negative.

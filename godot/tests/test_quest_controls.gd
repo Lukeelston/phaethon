@@ -35,8 +35,17 @@ func _initialize() -> void:
 		var x := 0.1 * (k + 1)
 		mean_cut += 1.0 - QC.trigger_lever(x) / maxf(0.87 * minf(x / 0.9, 1.0), 1e-6)
 	mean_cut /= 9.0
-	_check("triggers: ~25%% less lever per bit of pull on average (%.0f%%), and still full at a full pull (%.2f)" % [mean_cut * 100.0, QC.trigger_lever(0.95)],
-		mean_cut > 0.18 and mean_cut < 0.32 and is_equal_approx(QC.trigger_lever(0.95), 0.87) and QC.trigger_lever(1.0) == 1.0)
+	_check("triggers: ~25%% less lever per bit of pull on average (%.0f%%), and still full at a full pull (%.3f at 97%%, %.3f at the stop: full lever, never the burner)" % [mean_cut * 100.0, QC.trigger_lever(0.97), QC.trigger_lever(1.0)],
+		mean_cut > 0.18 and mean_cut < 0.32 and is_equal_approx(QC.trigger_lever(0.97), QC.FULL) and QC.trigger_lever(1.0) == QC.FULL)
+	# no dead band at the top (Luke: "100-100% throttle, then afterburner beyond that"): every bit of
+	# pull up to 97% moves the lever, so a finger eased off a full squeeze steers at once
+	var flat := 0
+	for k in 20:
+		var x := 0.8 + 0.0085 * k
+		if QC.trigger_lever(x + 0.0085) - QC.trigger_lever(x) < 0.005:
+			flat += 1
+	_check("triggers: no dead band at the top: from 80%% to 97%% every 0.85%% of pull adds lever (%d flat steps); 95%% gives %.3f, 97%% %.3f" % [flat, QC.trigger_lever(0.95), QC.trigger_lever(0.97)],
+		flat == 0 and QC.trigger_lever(0.95) < QC.trigger_lever(0.97) - 0.01)
 	# the magnet: nearly-together fingers fly straight, a real split still turns hard
 	var raw = QC.new()
 	raw.scheme = "triggers"
@@ -74,7 +83,7 @@ func _initialize() -> void:
 		o = q.update(snap({"rt": 1.0}), DT)
 		far_max = maxf(far_max, o.thrR)
 	_check("triggers: a full right squeeze from idle ramps the left engine (%.3f after one frame, %.2f after 0.4 s) and never stirs the right (max %.3f)" % [first_l, o.thrL, far_max],
-		first_l > 0.0 and first_l < 0.05 and o.thrL > 0.45 and o.thrL < 0.75 and far_max == 0.0)
+		first_l > 0.0 and first_l < 0.05 and o.thrL > 0.24 and o.thrL < 0.40 and far_max == 0.0)   # the 1.3 s ramp: ~0.31 at 0.4 s
 	# Luke's GP wreck: pumping one trigger hard drove him straight on (both engines ~0.15)
 	var qp = QC.new()
 	qp.scheme = "triggers"
@@ -87,19 +96,20 @@ func _initialize() -> void:
 		near_sum += op.thrL / nf
 		far_pump = maxf(far_pump, op.thrR)
 	_check("triggers: pumping the right trigger turns right, never drives straight on (left engine mean %.2f, right engine max %.3f)" % [near_sum, far_pump],
-		near_sum > 0.05 and far_pump == 0.0)
+		near_sum > 0.02 and far_pump == 0.0)   # (the 1.3 s ramp: each 0.12 s pull lifts it ~0.09)
 	o = run(q, snap({"rt": 1.0}), 1.5)
-	_check("triggers: ... and still reaches the full split (left engine %.2f, right %.2f)" % [o.thrL, o.thrR], o.thrL == 1.0 and o.thrR == 0.0)
-	o = run(q, snap({"lt": 0.6, "rt": 0.6}), 0.5)
-	_check("triggers: evening up straightens within 0.5 s (split %.3f)" % (o.thrL - o.thrR), absf(o.thrL - o.thrR) < 0.01)
-	o = run(q, snap({"lt": 1.0, "rt": 1.0}), 0.6)
-	_check("triggers: full pull = burner (%.2f, %.2f)" % [o.thrL, o.thrR], o.thrL == 1.0 and o.thrR == 1.0)
+	_check("triggers: ... and still reaches the full split (left engine %.2f, right %.2f)" % [o.thrL, o.thrR], o.thrL == QC.FULL and o.thrR == 0.0)
+	o = run(q, snap({"lt": 0.6, "rt": 0.6}), 0.85)
+	_check("triggers: evening up straightens within 0.85 s (split %.3f; the lower lever rises at the ramp)" % (o.thrL - o.thrR), absf(o.thrL - o.thrR) < 0.01)
+	o = run(q, snap({"lt": 1.0, "rt": 1.0}), 0.8)
+	_check("triggers: full pull = full lever, not the burner (%.2f, %.2f; burner %s)" % [o.thrL, o.thrR, o.burner], o.thrL == QC.FULL and o.thrR == QC.FULL and o.thrL < QC.GATE and not o.burner)
 	o = run(q, snap(), DT)
 	_check("triggers: letting off is instant (%.2f / %.2f one frame later)" % [o.thrL, o.thrR], o.thrL == 0.0 and o.thrR == 0.0)
 	var r1: Dictionary = run(q, snap({"lt": 1.0, "rt": 1.0}), 0.1)
-	var r2: Dictionary = run(q, snap({"lt": 1.0, "rt": 1.0}), 0.6)
-	_check("triggers: idle to full ramps over ~0.6 s (%.2f at 0.1 s, %.2f at 0.7 s)" % [r1.thrL, r2.thrL],
-		r1.thrL > 0.1 and r1.thrL < 0.2 and r1.thrL == r1.thrR and r2.thrL == 1.0)
+	var r2: Dictionary = run(q, snap({"lt": 1.0, "rt": 1.0}), 1.1)
+	var r3: Dictionary = run(q, snap({"lt": 1.0, "rt": 1.0}), 0.12)
+	_check("triggers: idle to full ramps at the old rate (%.2f at 0.1 s, %.2f at 1.2 s, %.2f at 1.32 s)" % [r1.thrL, r2.thrL, r3.thrL],
+		r1.thrL > 0.06 and r1.thrL < 0.09 and r1.thrL == r1.thrR and r2.thrL == QC.FULL and r3.thrL == QC.FULL)
 	# a finger landing 60 ms early can't spin you off the line
 	var peak := 0.0
 	var peak_raw := 0.0
@@ -138,10 +148,12 @@ func _initialize() -> void:
 	var hold_none: Dictionary = run(QC.new(), snap({"lt": 0.3, "rt": 0.6, "speed": 200.0, "yaw": 0.0}), 1.0)
 	var qb = QC.new()
 	qb.scheme = "triggers"
-	var burner: Dictionary = run(qb, snap({"lt": 1.0, "rt": 1.0, "speed": 400.0, "yaw": -0.2}), 1.0)
-	_check("triggers: straight-hold: fingers level and yawing right, it pushes left (split %.3f); turning on purpose it stays out (%.3f vs %.3f); never on the burner (%.2f / %.2f)" % [
-		hold_on.thrL - hold_on.thrR, hold_off.thrL - hold_off.thrR, hold_none.thrL - hold_none.thrR, burner.thrL, burner.thrR],
-		hold_on.thrL - hold_on.thrR < -0.1 and absf((hold_off.thrL - hold_off.thrR) - (hold_none.thrL - hold_none.thrR)) < 1e-6 and burner.thrL == 1.0 and burner.thrR == 1.0)
+	run(qb, snap({"lt": 0.8, "rt": 0.8, "speed": 400.0}), 1.6)
+	run(qb, snap({"lt": 0.8, "rt": 0.8, "speed": 400.0, "ls": Vector2(0.0, 1.0)}), DT)   # the burner lit
+	var burner: Dictionary = run(qb, snap({"lt": 0.8, "rt": 0.8, "speed": 400.0, "yaw": -0.2}), 1.0)
+	_check("triggers: straight-hold: fingers level and yawing right, it pushes left (split %.3f); turning on purpose it stays out (%.3f vs %.3f); on the burner too (split %.3f, burner %s)" % [
+		hold_on.thrL - hold_on.thrR, hold_off.thrL - hold_off.thrR, hold_none.thrL - hold_none.thrR, burner.thrL - burner.thrR, burner.burner],
+		hold_on.thrL - hold_on.thrR < -0.1 and absf((hold_off.thrL - hold_off.thrR) - (hold_none.thrL - hold_none.thrR)) < 1e-6 and burner.burner and burner.thrL - burner.thrR < -0.1)
 	# the air brakes never fire an engine: triggers let go, one grip squeezed, the pod yawing hard
 	var worst := 0.0
 	for yaw in [-0.6, -0.2, 0.2, 0.6]:
@@ -184,18 +196,31 @@ func _initialize() -> void:
 	run(q, snap({"rg": 1.0, "rz": 0.2}), 0.05)
 	o = run(q, snap({"rg": 1.0, "rz": 0.2 - 0.5}), 0.05)
 	_check("grab: shoving past the end clamps at 1.0 (%.2f)" % o.thrR, o.thrR == 1.0)
-	# gate ticks fire once per crossing
+	# the burner is on the left stick (Luke: "take the afterburners away from the triggers"): a flick
+	# up lights it, a flick down puts it out; a held stick is one flick; letting go of both triggers
+	# puts it out; the triggers never touch it
 	q.scheme = "triggers"
 	run(q, snap(), 0.5)
-	var ticks := [0, 0]
-	var same_frame := false
-	for f in int(1.0 / DT):
-		var tk: Dictionary = q.update(snap({"lt": 1.0, "rt": 1.0}), DT)
-		ticks[0] += int(tk.tickL)
-		ticks[1] += int(tk.tickR)
-		same_frame = same_frame or (tk.tickL and tk.tickR)
-	_check("both hands tick once as the levers cross the burner gate (%d / %d ticks, same frame %s)" % [ticks[0], ticks[1], same_frame],
-		ticks[0] == 1 and ticks[1] == 1 and same_frame)
+	var bq := []
+	var flick := func(y: float, lt: float, rt: float) -> Dictionary:
+		run(q, snap({"lt": lt, "rt": rt, "ls": Vector2(0.0, y)}), 0.2)   # held a while: one flick
+		return run(q, snap({"lt": lt, "rt": rt}), 0.2)
+	var b0: Dictionary = run(q, snap({"lt": 1.0, "rt": 1.0}), 1.5)
+	bq.append(b0.burner)
+	var b1: Dictionary = flick.call(1.0, 1.0, 1.0)
+	bq.append(b1.burner)
+	var b2: Dictionary = run(q, snap({"lt": 0.6, "rt": 1.0}), 1.0)   # steering on it: the triggers still split the engines
+	bq.append(b2.burner)
+	var b3: Dictionary = flick.call(-1.0, 1.0, 1.0)
+	bq.append(b3.burner)
+	flick.call(1.0, 1.0, 1.0)
+	var b4: Dictionary = run(q, snap(), 0.2)   # both let go
+	bq.append(b4.burner)
+	var b5: Dictionary = run(q, snap({"lt": 0.5, "rt": 0.5}), 0.5)   # ... and it stays out
+	bq.append(b5.burner)
+	_check("the burner: full pull %s; left stick up %s (levers %.2f / %.2f, under the gate); steering on it %s (split %.2f); stick down %s; let go %s, pull again %s" % [
+		bq[0], bq[1], b1.thrL, b1.thrR, bq[2], b2.thrL - b2.thrR, bq[3], bq[4], bq[5]],
+		bq == [false, true, true, false, false, false] and b1.thrL < QC.GATE and b2.thrL - b2.thrR > 0.1)
 	# through the sim: each control must turn the craft the way the hand says
 	_turn_check("triggers", snap({"lt": 0.55, "rt": 0.85}), -1.0, "right trigger harder")
 	_turn_check("triggers", snap({"lt": 0.8, "rt": 0.8, "lg": 1.0}), 1.0, "left grip (brake)")
@@ -215,7 +240,7 @@ func _initialize() -> void:
 	for i in 4:
 		seen.append(q.next_scheme())
 	_check("menu cycles all four schemes %s" % [seen], seen.size() == 4 and seen[3] == "sticks" and seen.has("grab"))
-	var good: bool = fails == 0 and passed == 31
+	var good: bool = fails == 0 and passed == 32
 	print("QUEST CONTROLS ", "PASS" if good else "FAIL (%d failed, %d passed)" % [fails, passed])
 	quit(0 if good else 1)
 

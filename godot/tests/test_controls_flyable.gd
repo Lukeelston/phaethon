@@ -59,11 +59,14 @@ func _initialize() -> void:
 	var la_old := _launches(false)
 	# Absolute bars. (It used to be measured against the unassisted mapping too, but much of
 	# that one's launch whirlwind was the tow bar creating energy; since CraftSim's energy
-	# audit it barely spins out, and with no throttle ramp it is faster at 3 s by design.)
-	ok = la[0] < 1.5 and la[1] < 5.0 and la[2] <= 2 and la[3] >= 900.0
+	# audit it barely spins out, and with no throttle ramp it is faster at 3 s by design.) The speed
+	# bar is against a clean full pull through the same mapping: the burner's off the triggers now
+	# (its detent lit it on one of these launches, and the bar was 900 km/h with that in it).
+	var clean: float = _launches(true, [[0.0, 1.0, 1.0]])[3]
+	ok = la[0] < 1.5 and la[1] < 5.0 and la[2] <= 2 and la[3] >= 0.9 * clean
 	fails += int(not ok)
-	print("  %s  launch mash x6: heading swing mean %.1f / worst %.1f deg, %d wall hits, %.0f km/h at 3 s (old: %.1f / %.1f deg, %d hits, %.0f km/h)" % [
-		"ok  " if ok else "FAIL", la[0], la[1], la[2], la[3], la_old[0], la_old[1], la_old[2], la_old[3]])
+	print("  %s  launch mash x6: heading swing mean %.1f / worst %.1f deg, %d wall hits, %.0f km/h at 3 s, a clean full pull %.0f (old: %.1f / %.1f deg, %d hits, %.0f km/h)" % [
+		"ok  " if ok else "FAIL", la[0], la[1], la[2], la[3], clean, la_old[0], la_old[1], la_old[2], la_old[3]])
 	var sk := _stroke(true)
 	var sk_old := _stroke(false)
 	ok = sk[1] < 9.0 and sk[1] < sk_old[1] / 2.0 and sk[0] < sk_old[0] / 2.0 and sk[2] < sk_old[2]
@@ -174,12 +177,12 @@ func _straight(shipped: bool) -> Array:
 
 ## [mean heading swing, worst, wall hits, mean km/h at 3 s] over the launch set. Each launch:
 ## [lag (s, + = left finger late), final left pull, final right pull], both reached in 0.1 s.
-func _launches(shipped: bool) -> Array:
+func _launches(shipped: bool, pats: Array = LAUNCHES) -> Array:
 	var mean := 0.0
 	var worst := 0.0
 	var hits := 0
 	var v3 := 0.0
-	for pat in LAUNCHES:
+	for pat in pats:
 		var q = _qc(shipped)
 		var sim = S.new({"track": "gp"})
 		var th0: float = sim.pair_th
@@ -189,7 +192,7 @@ func _launches(shipped: bool) -> Array:
 			var lt: float = pat[1] * clampf((t - maxf(0.0, pat[0])) / 0.1, 0.0, 1.0)
 			hits += _step(sim, q, lt, rt)
 		var swing := absf(rad_to_deg(S.wrap_angle(sim.pair_th - th0)))
-		mean += swing / LAUNCHES.size()
+		mean += swing / pats.size()
 		worst = maxf(worst, swing)
-		v3 += sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy) * 3.6 / LAUNCHES.size()
+		v3 += sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy) * 3.6 / pats.size()
 	return [mean, worst, hits, v3]

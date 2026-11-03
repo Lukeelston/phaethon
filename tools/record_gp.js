@@ -3,11 +3,13 @@
 // distance, steers at a point ahead on the centreline with the levers (inside brake when it's
 // hard), and reports the lap, top and corner speeds and wall hits. Then the rounded input log is
 // replayed: that replay is the reference godot/tests/test_gp_parity.gd must match.
-// Usage: node tools/record_gp.js <sim-core.js> <out_dir>  -> gp_inputs.json, gp_expected.json
+// Usage: node tools/record_gp.js <sim-core.js> <out_dir> [track]  -> <track>_inputs.json, <track>_expected.json
+// (track: gp, or a city GP: gp_dunes, gp_glacier, gp_basalt, gp_mesa; tools/sync_gp_variants.py)
 'use strict';
 const fs = require('fs');
 const path = require('path');
-const [simPath, outDir] = process.argv.slice(2);
+const [simPath, outDir, trackArg] = process.argv.slice(2);
+const TRACK = trackArg || 'gp';
 global.window = {};
 eval(fs.readFileSync(simPath, 'utf8'));
 const { makeSim } = window.PhaethonSim;
@@ -54,7 +56,7 @@ function autopilot(S, vplan) {
 }
 
 function run(inputsOrNull) {
-  const sim = makeSim({ track: 'gp' }), S = sim.S, log = [];
+  const sim = makeSim({ track: TRACK }), S = sim.S, log = [];
   const vplan = plan(S.T);
   let top = 0, hits = 0;
   const minAt = {};
@@ -86,6 +88,6 @@ if (rec.lap === null) { console.log(`stopped at (${rec.x?.toFixed(0)}, ${rec.y?.
 const rep = run(rec.log);
 const expected = { lap_time: rep.lap, frames: rep.frames, final_pod: [rep.x, rep.y], track_length: rep.T.length, track_samples: rep.T.N, top_mph: rep.top * MPH, hits: rep.hits };
 fs.mkdirSync(outDir, { recursive: true });
-fs.writeFileSync(path.join(outDir, 'gp_inputs.json'), JSON.stringify(rec.log));
-fs.writeFileSync(path.join(outDir, 'gp_expected.json'), JSON.stringify(expected, null, 1));
+fs.writeFileSync(path.join(outDir, `${TRACK}_inputs.json`), JSON.stringify(rec.log));
+fs.writeFileSync(path.join(outDir, `${TRACK}_expected.json`), JSON.stringify(expected, null, 1));
 console.log(`replayed ${rep.lap.toFixed(3)} s (${rec.log.length} input frames) -> ${outDir}`);

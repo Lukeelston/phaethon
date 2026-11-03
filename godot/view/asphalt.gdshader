@@ -18,6 +18,7 @@ uniform float period = 64000.0;
 uniform vec3 base = vec3(0.30, 0.295, 0.29);   // sRGB (converted once, below)
 uniform float lane_half = 20.0;    // the rubber lies within this of the centreline
 uniform float joint_every = 25.0;
+uniform float spec = 0.4;           // the sheen toward the suns (the Network's: 0.2)
 
 varying vec2 tp;
 
@@ -79,5 +80,5 @@ void fragment() {
 
 	ALBEDO = srgb(col);
 	ROUGHNESS = rough;
-	SPECULAR = 0.4;
+	SPECULAR = spec;
 }

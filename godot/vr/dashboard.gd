@@ -75,6 +75,8 @@ func build() -> void:
 	_lamp("burner", "BURNER", Vector2(-0.24, 0.05), ORANGE)
 	_lamp("armed", "ARMED", Vector2(-0.24, 0.0), Color(1.0, 0.9, 0.3))
 	_lamp("ramjet", "RAMJET", Vector2(-0.24, -0.05), RED)
+	_label("gear", Vector2(-0.165, 0.0), 44, Color(0.95, 0.95, 0.9))   # the gear (triggers): G1-G4
+	_label("gear_lbl", Vector2(-0.165, -0.05), 13, Color(0.6, 0.6, 0.58)).text = "GEAR"
 	_label("warn", Vector2(0, 0.088), 17, AMBER, VERTICAL_ALIGNMENT_CENTER, proud)   # the repair hint
 
 
@@ -190,6 +192,10 @@ func show_state(d: Dictionary) -> void:
 	labels.warn.text = "" if hurt.is_empty() else "HOLD X: REPAIR %s" % "+".join(hurt)
 	labels.warn.modulate = RED if minf(d.health[0], d.health[1]) < BADLY else AMBER
 	_set_bar("bat", d.battery, CYAN if d.battery > 0.2 else RED)
+	var g: int = d.get("gear", 0)
+	labels.gear.text = str(g) if g > 0 else ""
+	labels.gear_lbl.visible = g > 0
+	labels.gear.modulate = ORANGE if g == 4 else Color(0.95, 0.95, 0.9)
 	for name in ["burner", "armed", "ramjet"]:
 		var l: Label3D = lamps[name][0]
 		l.modulate = lamps[name][1] if d[name] else DIM

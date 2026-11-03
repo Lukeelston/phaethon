@@ -5,6 +5,9 @@
 //   middle    gravel and drift-sand mottling, and the scrub's shade over the sand
 //   near      grain (the speed cue) and, on the range, the dry lake: a pale playa round the
 //             runway, cracked into mud polygons
+// On the Network the land takes each city's landscape by weight (view/craft_view.gd _net_biome):
+// desert and verdant as above, ice (snowfields, blue ice, wind-carved ridges), basalt (black rock
+// split by glowing ember cracks), mesa (red sandstone in strata).
 // Every detail fades to its average once it's finer than a couple of pixels.
 shader_type spatial;
 render_mode cull_back;
@@ -17,6 +20,9 @@ uniform float pod_y = 0.0;          // the pod's sim y (places the playa band)
 uniform float playa = 0.0;          // 1 on the range: a dry lake round the runway
 uniform float playa_half = 320.0;   // the lake's mean half-width (m); the shore wanders +/-240 m
 uniform float verdant = 0.0;        // 1 on Eridanus: meadows, not sand
+uniform float ice = 0.0;            // the Network's landscapes, by weight (0..1 each)
+uniform float basalt = 0.0;
+uniform float mesa = 0.0;
 uniform float dawn_on = 0.0;        // 1 on the emergency run: the land the dawn has reached warms (view/dawn.gd)
 uniform vec2 dawn_u = vec2(1.0, 0.0);   // the front's travel (render x, z)
 uniform float dawn_f = 0.0;         // the front's line: dot(render xz, dawn_u) == dawn_f (against the floating origin)
@@ -94,6 +100,26 @@ void fragment() {
 		col = mix(col, mix(grass, fcol, flower), verdant);
 	}
 
+	// the Network's other landscapes, by weight over the desert/verdant blend
+	float other = clamp(ice + basalt + mesa, 0.0, 1.0);
+	vec3 glow = vec3(0.0);
+	if (other > 0.001) {
+		vec3 snow = mix(vec3(0.80, 0.85, 0.92), vec3(0.96, 0.97, 1.0), smoothstep(0.25, 0.75, n1));
+		snow = mix(snow, vec3(0.62, 0.74, 0.86), smoothstep(0.6, 0.85, n2) * 0.55);   // blue ice
+		snow *= 0.94 + 0.08 * n3;
+		vec3 rock = mix(vec3(0.07, 0.07, 0.08), vec3(0.22, 0.21, 0.21), smoothstep(0.25, 0.75, n1));
+		rock *= 0.85 + 0.3 * n3;
+		float ember = 0.0;
+		if (basalt > 0.01) {
+			float cd = cracks(p / 48.0, PERIOD / 48.0) * 48.0;   // metres to the nearest crack
+			ember = (1.0 - smoothstep(0.0, 0.45 + fw, cd)) * smoothstep(0.55, 0.8, n2) * detail(1.0, fw);
+		}
+		vec3 red = mix(vec3(0.52, 0.24, 0.13), vec3(0.80, 0.47, 0.27), smoothstep(0.25, 0.75, n1));
+		red *= 0.86 + 0.14 * sin(TAU * p.y / 64.0 + 6.0 * n2) * detail(16.0, fw) + 0.1 * n3;   // strata
+		col = col * (1.0 - other) + snow * ice + rock * basalt + red * mesa;
+		glow = vec3(1.0, 0.32, 0.06) * ember * basalt * 0.8;
+	}
+
 	// near: grain (the speed cue) and the lakebed's mud cracks
 	float g = (pnoise(p / 1.0, PERIOD) - 0.5) * detail(1.0, fw) + (pnoise(p / 0.25, PERIOD * 4.0) - 0.5) * detail(0.25, fw) * 0.7;
 	col *= 1.0 + 0.16 * g;
@@ -108,6 +134,7 @@ void fragment() {
 		col = mix(col, col * vec3(2.3, 1.95, 1.5) + vec3(0.05, 0.035, 0.01), lit * dawn_on);
 	}
 	ALBEDO = srgb(col);
+	EMISSION = glow;
 	ROUGHNESS = 0.95;
 	SPECULAR = 0.25;
 }

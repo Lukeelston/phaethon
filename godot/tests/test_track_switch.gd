@@ -2,7 +2,7 @@
 ## menu button does two things.
 ##   tap         (released before MENU_HOLD) cycles the control scheme, on release, once
 ##   hold 1.5 s  switches track once, and letting go after doesn't also cycle the scheme
-##   cycle       each hold steps range -> grand prix -> Eridanus -> the emergency run -> range
+##   cycle       each hold steps range -> grand prix -> Eridanus -> the emergency run -> the Network -> range
 ##   override    CraftView.track_override (static: it survives the reload that does the switch)
 ##               builds the asked-for track, and wins over --track
 ## The reload itself is exercised end to end by the suite's VR scene run with --switch-track-at.
@@ -44,11 +44,11 @@ func _initialize() -> void:
 	c.free()
 	var seen := []
 	var t := "range"
-	for i in 4:
+	for i in 5:
 		t = Cockpit.next_track(t)
 		seen.append(t)
 	_check("each hold steps to the next track: range -> %s (a plain circuit goes to the %s)" % [" -> ".join(seen), Cockpit.next_track("circuit")],
-		seen == ["gp", "eridanus", "emergency", "range"] and Cockpit.next_track("circuit") == "range")
+		seen == ["gp", "eridanus", "emergency", "network", "range"] and Cockpit.next_track("circuit") == "range")
 	# launched with --job=emergency (launch_vr.ps1 -Job emergency), the cycle's free Eridanus stop
 	# is still free: the switch's override says "no job", which wins over the command line
 	var args := PackedStringArray(["--track=eridanus", "--job=emergency"])
