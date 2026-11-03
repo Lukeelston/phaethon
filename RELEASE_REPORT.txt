@@ -78,12 +78,14 @@ PC VR VERIFICATION
   --quit-after 5400, not by the game. Ordinary customer launch has no timer.
 - Longer actual headset run logged EVENT finish at 113.87 seconds, followed by
   zero speed. Log: evidence/pcvr-headset-full-sprint.log.
+- Both headset test processes exited. Final process check found zero Phaethon
+  or Godot processes; the user's Meta runtime was left running.
 - Initial active-headset sampling was approximately 116.5-120 FPS on RTX 5080;
   this is not a minimum-hardware or universal performance claim.
 
 PC VR RUNTIME LIMITS
 Meta reported an unsupported requested refresh rate and retained its current
-120 Hz timing. The first run exited with code 0 but logged OpenXR interaction-
+120 Hz timing. Both runs exited with code 0 but logged OpenXR interaction-
 profile RID leaks and a spatial signal disconnect error during shutdown, plus
 Meta IPC warnings. The wrapper flags those log errors, so this is not described
 as a clean log. No gameplay interruption preceded the intentional frame limit.
