@@ -1,0 +1,700 @@
+{
+  "source": "v0.2.0 headset 2026-11-03; last 10 Hz sample before K10 capture",
+  "elapsed": 210.31093599997,
+  "mode": "ramjet",
+  "bodies": [
+    {
+      "position": [
+        301278.815363904,
+        502130.656335196,
+        3065.43254773737
+      ],
+      "velocity": [
+        271.573752525164,
+        3047.1308354831,
+        743.350053825525
+      ],
+      "heading": 1.48190677029176,
+      "yaw_rate": -1.19017752236356e-10,
+      "sample": 341
+    },
+    {
+      "position": [
+        301284.79017231,
+        502130.123833895,
+        3065.43254773738
+      ],
+      "velocity": [
+        271.573750801087,
+        3047.13083563887,
+        743.350053825646
+      ],
+      "heading": 1.48190677073857,
+      "yaw_rate": -1.22674082953396e-10,
+      "sample": 341
+    },
+    {
+      "position": [
+        301279.852428654,
+        502108.506749175,
+        3065.43254775161
+      ],
+      "velocity": [
+        271.573728829399,
+        3047.13057945502,
+        743.350053839221
+      ],
+      "heading": 1.48190677051406,
+      "yaw_rate": -1.52160752020677e-10,
+      "sample": 341
+    }
+  ],
+  "inputs": [
+    {
+      "t": 0.0,
+      "input": {
+        "brkL": 0.0,
+        "brkR": 0.0,
+        "burner": true,
+        "gearIndex": 4,
+        "gearOverdrive": true,
+        "gearRpm": 1.43060404414312,
+        "handling": "speed",
+        "reignite": false,
+        "repair": false,
+        "thrL": 0.86999999999058,
+        "thrMul": 1.0,
+        "thrR": 0.87000000000942
+      }
+    },
+    {
+      "t": 0.10001199999999244,
+      "input": {
+        "brkL": 0.0,
+        "brkR": 0.0,
+        "burner": true,
+        "gearIndex": 4,
+        "gearOverdrive": true,
+        "gearRpm": 1.4332581103002,
+        "handling": "speed",
+        "reignite": false,
+        "repair": false,
+        "thrL": 0.870000000119306,
+        "thrMul": 1.0,
+        "thrR": 0.869999999880694
+      }
+    },
+    {
+      "t": 0.20834533333299987,
+      "input": {
+        "brkL": 0.0,
+        "brkR": 0.0,
+        "burner": true,
+        "gearIndex": 4,
+        "gearOverdrive": true,
+        "gearRpm": 1.4361118798467,
+        "handling": "speed",
+        "reignite": false,
+        "repair": false,
+        "thrL": 0.869999999965778,
+        "thrMul": 1.0,
+        "thrR": 0.870000000034222
+      }
+    },
+    {
+      "t": 0.31667866666697364,
+      "input": {
+        "brkL": 0.0,
+        "brkR": 0.0,
+        "burner": true,
+        "gearIndex": 4,
+        "gearOverdrive": true,
+        "gearRpm": 1.43894361871731,
+        "handling": "speed",
+        "reignite": false,
+        "repair": false,
+        "thrL": 0.869999999995322,
+        "thrMul": 1.0,
+        "thrR": 0.870000000004678
+      }
+    },
+    {
+      "t": 0.42501199999998107,
+      "input": {
+        "brkL": 0.0,
+        "brkR": 0.0,
+        "burner": true,
+        "gearIndex": 4,
+        "gearOverdrive": true,
+        "gearRpm": 1.44175362580405,
+        "handling": "speed",
+        "reignite": false,
+        "repair": false,
+        "thrL": 0.870000000007423,
+        "thrMul": 1.0,
+        "thrR": 0.869999999992577
+      }
+    },
+    {
+      "t": 0.5333453333329885,
+      "input": {
+        "brkL": 0.0,
+        "brkR": 0.0,
+        "burner": true,
+        "gearIndex": 4,
+        "gearOverdrive": true,
+        "gearRpm": 1.44454219424706,
+        "handling": "speed",
+        "reignite": false,
+        "repair": false,
+        "thrL": 0.870000000025655,
+        "thrMul": 1.0,
+        "thrR": 0.869999999974345
+      }
+    },
+    {
+      "t": 0.6339776666659986,
+      "input": {
+        "brkL": 0.0,
+        "brkR": 0.0,
+        "burner": true,
+        "gearIndex": 4,
+        "gearOverdrive": true,
+        "gearRpm": 1.44709747779292,
+        "handling": "speed",
+        "reignite": false,
+        "repair": false,
+        "thrL": 0.869999999984172,
+        "thrMul": 1.0,
+        "thrR": 0.870000000015828
+      }
+    },
+    {
+      "t": 0.7423110000000008,
+      "input": {
+        "brkL": 0.169216880313078,
+        "brkR": 0.101237890200342,
+        "burner": true,
+        "gearIndex": 4,
+        "gearOverdrive": true,
+        "gearRpm": 1.44950441030037,
+        "handling": "speed",
+        "reignite": false,
+        "repair": false,
+        "thrL": 0.877119290889003,
+        "thrMul": 1.0,
+        "thrR": 0.862880709110997
+      }
+    },
+    {
+      "t": 0.8506443333329798,
+      "input": {
+        "brkL": 0.620047397385205,
+        "brkR": 0.334797509949639,
+        "burner": true,
+        "gearIndex": 4,
+        "gearOverdrive": true,
+        "gearRpm": 1.43936727891919,
+        "handling": "speed",
+        "reignite": false,
+        "repair": false,
+        "thrL": 0.87,
+        "thrMul": 1.0,
+        "thrR": 0.87
+      }
+    },
+    {
+      "t": 0.9509816666659958,
+      "input": {
+        "brkL": 0.648943418769363,
+        "brkR": 0.349463730552809,
+        "burner": true,
+        "gearIndex": 4,
+        "gearOverdrive": true,
+        "gearRpm": 1.42427198957645,
+        "handling": "speed",
+        "reignite": false,
+        "repair": false,
+        "thrL": 0.87,
+        "thrMul": 1.0,
+        "thrR": 0.87
+      }
+    },
+    {
+      "t": 1.0593149999989748,
+      "input": {
+        "brkL": 0.649971449267014,
+        "brkR": 0.34998550903106,
+        "burner": true,
+        "gearIndex": 4,
+        "gearOverdrive": true,
+        "gearRpm": 1.40785059211461,
+        "handling": "speed",
+        "reignite": false,
+        "repair": false,
+        "thrL": 0.87,
+        "thrMul": 1.0,
+        "thrR": 0.87
+      }
+    },
+    {
+      "t": 1.1596093333329804,
+      "input": {
+        "brkL": 0.649998991425281,
+        "brkR": 0.35,
+        "burner": true,
+        "gearIndex": 4,
+        "gearOverdrive": true,
+        "gearRpm": 1.39270566338538,
+        "handling": "speed",
+        "reignite": false,
+        "repair": false,
+        "thrL": 0.87,
+        "thrMul": 1.0,
+        "thrR": 0.87
+      }
+    },
+    {
+      "t": 1.2597029999989786,
+      "input": {
+        "brkL": 0.0,
+        "brkR": 0.0,
+        "burner": true,
+        "gearIndex": 4,
+        "gearOverdrive": true,
+        "gearRpm": 1.38757607067243,
+        "handling": "speed",
+        "reignite": false,
+        "repair": false,
+        "thrL": 0.853531832191458,
+        "thrMul": 1.0,
+        "thrR": 0.886468167808542
+      }
+    },
+    {
+      "t": 1.368036333331986,
+      "input": {
+        "brkL": 0.0,
+        "brkR": 0.0,
+        "burner": true,
+        "gearIndex": 4,
+        "gearOverdrive": true,
+        "gearRpm": 1.39119467790228,
+        "handling": "speed",
+        "reignite": false,
+        "repair": false,
+        "thrL": 0.872348059648322,
+        "thrMul": 1.0,
+        "thrR": 0.867651940351678
+      }
+    },
+    {
+      "t": 1.4681519999989803,
+      "input": {
+        "brkL": 0.0,
+        "brkR": 0.0,
+        "burner": true,
+        "gearIndex": 4,
+        "gearOverdrive": true,
+        "gearRpm": 1.39416674074021,
+        "handling": "speed",
+        "reignite": false,
+        "repair": false,
+        "thrL": 0.869947964316142,
+        "thrMul": 1.0,
+        "thrR": 0.870052035683858
+      }
+    },
+    {
+      "t": 1.5764853333319877,
+      "input": {
+        "brkL": 0.0,
+        "brkR": 0.0,
+        "burner": true,
+        "gearIndex": 4,
+        "gearOverdrive": true,
+        "gearRpm": 1.39733795222494,
+        "handling": "speed",
+        "reignite": false,
+        "repair": false,
+        "thrL": 0.869988401906991,
+        "thrMul": 1.0,
+        "thrR": 0.870011598093009
+      }
+    },
+    {
+      "t": 1.6848186666649951,
+      "input": {
+        "brkL": 0.0,
+        "brkR": 0.0,
+        "burner": true,
+        "gearIndex": 4,
+        "gearOverdrive": true,
+        "gearRpm": 1.40048055588488,
+        "handling": "speed",
+        "reignite": false,
+        "repair": false,
+        "thrL": 0.8700010473375,
+        "thrMul": 1.0,
+        "thrR": 0.8699989526625
+      }
+    },
+    {
+      "t": 1.7931519999989973,
+      "input": {
+        "brkL": 0.0,
+        "brkR": 0.0,
+        "burner": true,
+        "gearIndex": 4,
+        "gearOverdrive": true,
+        "gearRpm": 1.40359688523008,
+        "handling": "speed",
+        "reignite": false,
+        "repair": false,
+        "thrL": 0.869999992276794,
+        "thrMul": 1.0,
+        "thrR": 0.870000007723206
+      }
+    },
+    {
+      "t": 1.9014853333319763,
+      "input": {
+        "brkL": 0.0,
+        "brkR": 0.0,
+        "burner": true,
+        "gearIndex": 4,
+        "gearOverdrive": true,
+        "gearRpm": 1.40668747621422,
+        "handling": "speed",
+        "reignite": false,
+        "repair": false,
+        "thrL": 0.86999999498344,
+        "thrMul": 1.0,
+        "thrR": 0.87000000501656
+      }
+    },
+    {
+      "t": 2.0098186666649838,
+      "input": {
+        "brkL": 0.0362177637698609,
+        "brkR": 0.0455510322880653,
+        "burner": true,
+        "gearIndex": 4,
+        "gearOverdrive": true,
+        "gearRpm": 1.40962631849206,
+        "handling": "speed",
+        "reignite": false,
+        "repair": false,
+        "thrL": 0.868343509276055,
+        "thrMul": 1.0,
+        "thrR": 0.871656490723945
+      }
+    },
+    {
+      "t": 2.118151999997991,
+      "input": {
+        "brkL": 0.10210209314936,
+        "brkR": 0.155068059303596,
+        "burner": true,
+        "gearIndex": 4,
+        "gearOverdrive": true,
+        "gearRpm": 1.40888961644715,
+        "handling": "speed",
+        "reignite": false,
+        "repair": false,
+        "thrL": 0.856618894896439,
+        "thrMul": 1.0,
+        "thrR": 0.883381105103561
+      }
+    },
+    {
+      "t": 2.219155575755991,
+      "input": {
+        "brkL": 0.0891944338678063,
+        "brkR": 0.129630201513478,
+        "burner": true,
+        "gearIndex": 4,
+        "gearOverdrive": true,
+        "gearRpm": 1.40742861400469,
+        "handling": "speed",
+        "reignite": false,
+        "repair": false,
+        "thrL": 0.861849894348083,
+        "thrMul": 1.0,
+        "thrR": 0.878150105651917
+      }
+    },
+    {
+      "t": 2.3274889090889985,
+      "input": {
+        "brkL": 0.0924550545977662,
+        "brkR": 0.135942835908741,
+        "burner": true,
+        "gearIndex": 4,
+        "gearOverdrive": true,
+        "gearRpm": 1.40620215935559,
+        "handling": "speed",
+        "reignite": false,
+        "repair": false,
+        "thrL": 0.860417519776333,
+        "thrMul": 1.0,
+        "thrR": 0.879582480223667
+      }
+    },
+    {
+      "t": 2.4358222424219775,
+      "input": {
+        "brkL": 0.093919595376971,
+        "brkR": 0.138782980705452,
+        "burner": true,
+        "gearIndex": 4,
+        "gearOverdrive": true,
+        "gearRpm": 1.40476357478809,
+        "handling": "speed",
+        "reignite": false,
+        "repair": false,
+        "thrL": 0.860574083114252,
+        "thrMul": 1.0,
+        "thrR": 0.879425916885748
+      }
+    },
+    {
+      "t": 2.5441555757559797,
+      "input": {
+        "brkL": 0.0934433989340885,
+        "brkR": 0.137856682961657,
+        "burner": true,
+        "gearIndex": 4,
+        "gearOverdrive": true,
+        "gearRpm": 1.40329753188342,
+        "handling": "speed",
+        "reignite": false,
+        "repair": false,
+        "thrL": 0.860392261560475,
+        "thrMul": 1.0,
+        "thrR": 0.879607738439525
+      }
+    },
+    {
+      "t": 2.652488909088987,
+      "input": {
+        "brkL": 0.0916754306760001,
+        "brkR": 0.134426455688072,
+        "burner": true,
+        "gearIndex": 4,
+        "gearOverdrive": true,
+        "gearRpm": 1.40195043506059,
+        "handling": "speed",
+        "reignite": false,
+        "repair": false,
+        "thrL": 0.861019791062506,
+        "thrMul": 1.0,
+        "thrR": 0.878980208937494
+      }
+    },
+    {
+      "t": 2.7608222424219946,
+      "input": {
+        "brkL": 0.0822790880880403,
+        "brkR": 0.116405157990241,
+        "burner": true,
+        "gearIndex": 4,
+        "gearOverdrive": true,
+        "gearRpm": 1.40077762071083,
+        "handling": "speed",
+        "reignite": false,
+        "repair": false,
+        "thrL": 0.864008978552229,
+        "thrMul": 1.0,
+        "thrR": 0.875991021447771
+      }
+    },
+    {
+      "t": 2.8691555757549736,
+      "input": {
+        "brkL": 0.0751530667302541,
+        "brkR": 0.103059943933317,
+        "burner": true,
+        "gearIndex": 4,
+        "gearOverdrive": true,
+        "gearRpm": 1.40018112998348,
+        "handling": "speed",
+        "reignite": false,
+        "repair": false,
+        "thrL": 0.864002191097729,
+        "thrMul": 1.0,
+        "thrR": 0.875997808902271
+      }
+    },
+    {
+      "t": 2.977488909087981,
+      "input": {
+        "brkL": 0.0,
+        "brkR": 0.0,
+        "burner": true,
+        "gearIndex": 4,
+        "gearOverdrive": true,
+        "gearRpm": 1.40161813892258,
+        "handling": "speed",
+        "reignite": false,
+        "repair": false,
+        "thrL": 0.871362585806872,
+        "thrMul": 1.0,
+        "thrR": 0.868637414193128
+      }
+    },
+    {
+      "t": 3.085822242421983,
+      "input": {
+        "brkL": 0.0,
+        "brkR": 0.0,
+        "burner": true,
+        "gearIndex": 4,
+        "gearOverdrive": true,
+        "gearRpm": 1.40477986638656,
+        "handling": "speed",
+        "reignite": false,
+        "repair": false,
+        "thrL": 0.869844432866839,
+        "thrMul": 1.0,
+        "thrR": 0.870155567133161
+      }
+    },
+    {
+      "t": 3.186579818178984,
+      "input": {
+        "brkL": 0.0,
+        "brkR": 0.0,
+        "burner": true,
+        "gearIndex": 4,
+        "gearOverdrive": true,
+        "gearRpm": 1.40762892053531,
+        "handling": "speed",
+        "reignite": false,
+        "repair": false,
+        "thrL": 0.87000146521908,
+        "thrMul": 1.0,
+        "thrR": 0.86999853478092
+      }
+    },
+    {
+      "t": 3.2949131515119916,
+      "input": {
+        "brkL": 0.0,
+        "brkR": 0.0,
+        "burner": true,
+        "gearIndex": 4,
+        "gearOverdrive": true,
+        "gearRpm": 1.41068689261571,
+        "handling": "speed",
+        "reignite": false,
+        "repair": false,
+        "thrL": 0.870000838682575,
+        "thrMul": 1.0,
+        "thrR": 0.869999161317425
+      }
+    },
+    {
+      "t": 3.3950516666639885,
+      "input": {
+        "brkL": 0.057080281836879,
+        "brkR": 0.0750341604080914,
+        "burner": true,
+        "gearIndex": 4,
+        "gearOverdrive": true,
+        "gearRpm": 1.41284999474801,
+        "handling": "speed",
+        "reignite": false,
+        "repair": false,
+        "thrL": 0.864276469019037,
+        "thrMul": 1.0,
+        "thrR": 0.875723530980963
+      }
+    },
+    {
+      "t": 3.4951076666639835,
+      "input": {
+        "brkL": 0.0870292364273682,
+        "brkR": 0.125762672252266,
+        "burner": true,
+        "gearIndex": 4,
+        "gearOverdrive": true,
+        "gearRpm": 1.41247834372734,
+        "handling": "speed",
+        "reignite": false,
+        "repair": false,
+        "thrL": 0.860697665169455,
+        "thrMul": 1.0,
+        "thrR": 0.879302334830545
+      }
+    },
+    {
+      "t": 3.603440999996991,
+      "input": {
+        "brkL": 0.0937517387610243,
+        "brkR": 0.138466607907434,
+        "burner": true,
+        "gearIndex": 4,
+        "gearOverdrive": true,
+        "gearRpm": 1.41109296440191,
+        "handling": "speed",
+        "reignite": false,
+        "repair": false,
+        "thrL": 0.860454480709877,
+        "thrMul": 1.0,
+        "thrR": 0.879545519290123
+      }
+    },
+    {
+      "t": 3.7117743333299984,
+      "input": {
+        "brkL": 0.119044449319997,
+        "brkR": 0.188335377615936,
+        "burner": true,
+        "gearIndex": 4,
+        "gearOverdrive": true,
+        "gearRpm": 1.40904831992314,
+        "handling": "speed",
+        "reignite": false,
+        "repair": false,
+        "thrL": 0.853753357371354,
+        "thrMul": 1.0,
+        "thrR": 0.886246642628646
+      }
+    },
+    {
+      "t": 3.8201076666629774,
+      "input": {
+        "brkL": 0.114109690858344,
+        "brkR": 0.178505883480818,
+        "burner": true,
+        "gearIndex": 4,
+        "gearOverdrive": true,
+        "gearRpm": 1.40612938094512,
+        "handling": "speed",
+        "reignite": false,
+        "repair": false,
+        "thrL": 0.857627709755423,
+        "thrMul": 1.0,
+        "thrR": 0.882372290244577
+      }
+    },
+    {
+      "t": 3.9284409999969796,
+      "input": {
+        "brkL": 0.100274388133177,
+        "brkR": 0.151198756211484,
+        "burner": true,
+        "gearIndex": 4,
+        "gearOverdrive": true,
+        "gearRpm": 1.40396189509342,
+        "handling": "speed",
+        "reignite": false,
+        "repair": false,
+        "thrL": 0.860221017567423,
+        "thrMul": 1.0,
+        "thrR": 0.879778982432577
+      }
+    }
+  ]
+}

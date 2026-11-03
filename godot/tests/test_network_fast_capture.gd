@@ -4,7 +4,7 @@ const Sim := preload("res://sim/craft_sim.gd")
 const DT := 1.0 / 480.0
 const MPH := 2.236936
 
-func trial(sim, jump: int, mph: float) -> Dictionary:
+func trial(sim, jump: int, mph: float, recorded := {}) -> Dictionary:
 	var launch: int = sim.jumps[jump][0]
 	var catcher: int = sim.jumps[jump][1]
 	var road = sim.roads[launch]
@@ -13,11 +13,34 @@ func trial(sim, jump: int, mph: float) -> Dictionary:
 	for b in sim.bodies:
 		b.vx = mph / MPH * road.tx[index]
 		b.vy = mph / MPH * road.ty[index]
-	var result := {"jump": jump, "mph": mph, "airborne": false, "caught": [false, false, false], "settled": [false, false, false], "max_gap": 0.0, "min_gap": INF}
+	if not recorded.is_empty():
+		for k in 3:
+			var b = sim.bodies[k]
+			var r: Dictionary = recorded.bodies[k]
+			b.x = r.position[0]
+			b.y = r.position[1]
+			b.z = r.position[2]
+			b.vx = r.velocity[0]
+			b.vy = r.velocity[1]
+			b.vz = r.velocity[2]
+			b.th = r.heading
+			b.w = r.yaw_rate
+			b.hint = r.sample
+			b.off_road = true
+			b.lock = false
+		sim.armed = recorded.mode == "ramjet"
+	var result := {"jump": jump, "mph": mph, "recorded": not recorded.is_empty(), "airborne": not recorded.is_empty(), "caught": [false, false, false], "settled": [false, false, false], "max_gap": 0.0, "min_gap": INF}
 	var at := [-1.0, -1.0, -1.0]
 	var end := -1.0
+	var input_frame := 0
 	for frame in int(15.0 / DT):
-		sim.step({"thrL": 0.87, "thrR": 0.87, "brkL": 0.0, "brkR": 0.0, "burner": mph >= 5000, "gearOverdrive": true, "thrMul": 1.0, "reignite": true}, DT)
+		var input := {"thrL": 0.87, "thrR": 0.87, "brkL": 0.0, "brkR": 0.0, "burner": mph >= 5000, "gearOverdrive": true, "thrMul": 1.0, "reignite": true}
+		if not recorded.is_empty():
+			# Held 10 Hz inputs reproduce the arrival state, not every original physics tick.
+			while input_frame + 1 < recorded.inputs.size() and recorded.inputs[input_frame + 1].t <= frame * DT:
+				input_frame += 1
+			input = recorded.inputs[input_frame].input
+		sim.step(input, DT)
 		for event in sim.events:
 			if event.type == "airborne" and event.lip:
 				result.airborne = true
@@ -50,6 +73,13 @@ func _initialize() -> void:
 	var failures := []
 	var maximum := 0.0
 	var count := 0
+	var recorded: Dictionary = JSON.parse_string(FileAccess.get_file_as_string("res://tests/replay/fast_capture_recorded.json"))
+	var velocity: Array = recorded.bodies[2].velocity
+	var actual := trial(sim, 10, sqrt(velocity[0]*velocity[0]+velocity[1]*velocity[1])*MPH, recorded)
+	count += 1
+	maximum = actual.max_gap
+	if not actual.caught.all(func(x): return x) or not actual.settled.all(func(x): return x) or actual.max_gap > 45.0 or actual.min_gap < -1e-5:
+		failures.append(actual)
 	for jump in 20:
 		for mph in [float(sim.jumps[jump][2]), 5000.0, 7000.0, 9000.0]:
 			var r := trial(sim, jump, mph)
