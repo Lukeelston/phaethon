@@ -852,3 +852,81 @@ intentionally retained for Luke. The launch log was initially empty, so this
 does not confirm an active OpenXR tracking session. Headset confirmation of jump
 feel, high-speed corkscrew clearance, guidance and traffic behavior was requested.
 Physical obstacle-toggle acceptance remains pending as previously requested.
+
+LOCAL 0.1.8 USER ACCEPTANCE - 2026-11-03
+Luke confirmed the new jumps/high-speed corkscrew were good and answered yes to
+the earlier guidance and faster traffic making room naturally. The populated
+v018-headset.log confirms active left/right controller tracking. The extended
+120 fps reports include stationary time and are not a moving-map performance
+benchmark. The player was closed cleanly before v0.1.9 development. Next feedback:
+shorter central clover, cabin wind intrusion at5-6k mph, realistic binder lightning,
+aircraft cockpit fittings/materials, and sleeker vehicle shape.
+
+LOCAL 0.1.9 VEHICLE AND TRANSFER REFINEMENT - 2026-11-03
+Luke approved the experimental-aircraft cockpit direction. Built batched guarded
+toggles, hex collars, knurled knobs, recessed slotted screws, restrained indicators,
+larger legends, ribbed grips and distinct powder-coat/metal/rubber finishes. Swept
+engine fins, curved intake blades and tapered fairings preserve physics anchors,
+flat nacelles, opening and skeleton footwell. The binder now uses irregular
+branching white-hot cores and soft additive coronas; bounded channel updates are
+independent of render refresh. Final arc benchmark and real-render screenshots
+are in evidence/v019-binder_arc.log and evidence/v019-after/.
+
+Dust/vapor protection follows the drawn cabin after camera placement, with
+shader camera clearance for head movement. GPU regression: 72 expected red
+failures plus 18 exterior controls, then 90/90 green. It proves cabin exclusion
+and external visibility, not that the precise original headset symptom has been
+reproduced: straight/level 6000 mph was clear; widening dust and slope geometry
+can intrude. Original symptom and headset appearance need Luke's confirmation.
+
+Central transfer routes retain 45 km radii and catches. K0/K1/K2/K3 shorten from
+315.40/314.35/314.82/322.89 km to 200.39/201.15/200.80/200.94 km, 36-38% less. Merges
+approach from outside the receiving lane and are level. Support clearance found
+by independent review is handled in the shared render/collision specification.
+Decoration cache keys retain per-row support membership. Actual mesh regression
+passed 44/44 after both failures were reproduced. Final world setup was 1308 ms,
+maximum streaming chunk 3.4 ms, with no missing chunks after 40 frames.
+
+Validation includes actual Vulkan exterior/console/binder views, GPU exclusion,
+craft/cable/canopy/dashboard/mode/Quest/shudder/menu gates, generated data parity,
+road mesh/junction checks and jump matrices. Exact results are in v019 logs and
+JSON under evidence/. The cable test's old v018 floating-HUD containment assumption
+was replaced by a narrow above-hull clearance check for those two display objects;
+physical fittings retain the strict hull test. Nine old broad JS jump assumptions
+also failed on pristine v018; migrated to geometric captures and physical timing
+bounds alongside the existing 60-flight/full-transfer matrix. Shudder harness has
+the same 93 exit ObjectDB warning as v018; no process remains after the run.
+The shaft mesh/traffic gate passes 237/237 under Vulkan. Its headless run failed
+48 transform-readback assertions because the dummy renderer returns identity
+for MultiMesh transforms; a minimal write/read control confirmed that difference.
+No traffic or shaft logic was changed to accommodate that renderer limitation.
+
+Original 297 source files and Claude checkout are unchanged. Both v018 ZIP hashes
+match the recorded release. Atlas memory-index warning was checked against the
+live guard: no orphan/dead links, 131 lines, 17015 bytes; no memory edit was needed.
+
+LOCAL 0.1.9 ARCHIVES AND EXTRACTED PLAYERS
+Both exports and archive integrity/extraction checks passed. Each archive has
+42 allowlisted files. Fresh-player diagnostics and screenshots are
+in evidence/v019-desktop/ and evidence/v019-pcvr/; XR is off for those diagnostics.
+Desktop: 61369401 bytes; SHA256 2d88707be8e2578271ae43f61e4bd25ddbd7299e27b5896d2e9581e587224686
+PC VR: 61453932 bytes; SHA256 ae6882c9bca604b1b32be6ee8267e344cc8d7567589aaeae650ee744dcf45165
+This is a local build; the live store download is not updated by this iteration.
+
+LOCAL 0.1.9 FINAL CHECKS AND INTERACTIVE HANDOFF
+Fresh desktop: 168 checks, zero failures. Fresh PC VR with XR off: 284 checks,
+zero failures; saved preferences restored. Packaged menus and cockpit screenshots
+were inspected. The final closeup exposed a partly obscured STAR legend; it was
+moved above its lamp, re-rendered, and the mode switch/cockpit clearance gates
+passed again (71465 points, zero parts clipping). Rendered exterior, seated,
+profile, binder and hardware closeup views were inspected. No code changes
+followed these checks.
+
+The freshly extracted 0.1.9 PC VR player was launched with Network selected as
+PID 76088. Its executable path matches the verified extraction. No engine, export
+or test helpers remained before launch; only the intended interactive player
+remains for Luke. The log was initially empty, so this does not establish active
+OpenXR tracking. Headset checks were requested for wind intrusion at5-6k mph
+through turns/leaning, and the binder/cockpit/vehicle appearance. Physical results
+remain unverified - needs user confirmation. Prior obstacle-toggle acceptance
+also remains pending, as Luke previously requested.

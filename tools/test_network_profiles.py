@@ -69,6 +69,60 @@ class NetworkProfiles(unittest.TestCase):
             self.assertAlmostEqual(r.h(first), r.h(last), places=6)
             self.assertGreater(r.h(first), r.width / 2.0 + 100.0)
 
+    def test_central_transfers_use_short_open_bends(self):
+        # A nearby merge previously made the broad-radius solver choose a 300+
+        # degree circle. Keep the radius and reject that long detour explicitly.
+        for k in dn.TRANSFER_JUMPS:
+            road = self.roads[self.jumps[k][1]]
+            with self.subTest(road=road.name):
+                self.assertLess(float(road.len[:-1].sum()), 210000.0)
+                for kind, radius, angle, _ in road.segs:
+                    if kind != 'S':
+                        self.assertGreaterEqual(radius, 45000.0)
+                        self.assertLess(angle, 180.0)
+
+    def test_central_transfer_entry_and_destination_are_preserved(self):
+        targets = [('N2', -1, 600.0), ('N2', 1, 600.0),
+                   ('E2', 1, 0.0), ('E2', -1, 0.0)]
+        for k, (name, direction, level) in enumerate(targets):
+            launch, catch, speed, *_ = self.jumps[k]
+            L, C = self.roads[launch], self.roads[catch]
+            parent = next(p for c, end, p in self.joins if c == catch and end == 1)
+            P = self.roads[parent]
+            with self.subTest(road=C.name):
+                self.assertEqual(P.name, name)
+                self.assertEqual(C.segs[0][0], 'S')
+                self.assertGreaterEqual(C.segs[0][1], 6000.0)
+                self.assertAlmostEqual(C.hdeg, L.hdeg, places=8)
+                expected_gap = [3218.7, 4693.9375, 4023.375, 4291.6][k]
+                self.assertAlmostEqual(math.hypot(*(C.p[0] - L.p[-1])), expected_gap, places=5)
+                self.assertEqual(speed, [3000.0, 3500.0, 2500.0, 4000.0][k])
+                end_heading = C.end[2]
+                along = math.cos(end_heading) * P.t[0, 0] + math.sin(end_heading) * P.t[0, 1]
+                self.assertAlmostEqual(along, direction, places=8)
+                self.assertAlmostEqual(C.h(C.N - 1), level, places=8)
+
+    def test_central_transfers_overfly_then_merge_from_outside(self):
+        # Dropping an open RSL curve onto the highway crosses opposing traffic.
+        # An overflight must stay high; the real merge must stay on the outside
+        # of its destination lane and coplanar throughout the shared pavement.
+        for k in dn.TRANSFER_JUMPS:
+            catch = self.jumps[k][1]
+            C = self.roads[catch]
+            parent = next(p for c, end, p in self.joins if c == catch and end == 1)
+            P = self.roads[parent]
+            j = dn.junction(self.roads, catch, 1, parent)
+            lateral = (C.p[:, 0] - P.x0) * -P.t[0, 1] + (C.p[:, 1] - P.y0) * P.t[0, 0]
+            side = 1 if lateral[-1] > 0 else -1
+            level = C.h(C.N - 1)
+            crossings = [i for i in range(j[4]) if abs(lateral[i]) < 400.0]
+            with self.subTest(road=C.name):
+                self.assertTrue(crossings, 'open transfer should overfly its destination before merging')
+                self.assertGreater(min(C.h(i) - level for i in crossings), 100.0)
+                for i in range(j[4], j[5] + 1):
+                    self.assertGreaterEqual(lateral[i] * side, 99.9)
+                    self.assertAlmostEqual(C.h(i), level, places=6)
+
 
 if __name__ == "__main__":
     unittest.main()

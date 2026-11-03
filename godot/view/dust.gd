@@ -8,22 +8,31 @@
 extends Node3D
 
 const SAND := Color(0.80, 0.66, 0.47)
+const EffectExclusion := preload("res://view/effect_exclusion.gd")
 const SHADER := """
 shader_type spatial;
 render_mode unshaded, cull_disabled, depth_draw_never, blend_mix;
+#include "res://view/effect_exclusion.gdshaderinc"
 uniform vec3 color = vec3(0.8, 0.66, 0.47);
 uniform float density = 0.0;
 uniform float scroll = 0.0;
 uniform float tiles = 3.0;
 uniform sampler2D noise_tex : repeat_enable, filter_linear_mipmap;
+void vertex() {
+	effect_world_position = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+}
 void fragment() {
+	float exterior = exterior_effect_visibility(effect_world_position, CAMERA_POSITION_WORLD);
+	if (exterior <= 0.0) {
+		discard;
+	}
 	float u = UV.x;               // 0 at the source, 1 at the tail
 	float s = UV.y * 2.0 - 1.0;   // across the plume
 	float n = texture(noise_tex, vec2(u * tiles - scroll, UV.y * 1.3)).r;
 	float n2 = texture(noise_tex, vec2(u * tiles * 2.3 - scroll * 1.6, UV.y * 2.7 + 0.37)).r;
 	float a = density * smoothstep(0.0, 0.06, u) * pow(1.0 - u, 1.4) * (1.0 - s * s) * (0.3 + 1.1 * n * n2);
 	ALBEDO = color * (0.85 + 0.3 * n);
-	ALPHA = clamp(a, 0.0, 1.0);
+	ALPHA = clamp(a, 0.0, 1.0) * exterior;
 }
 """
 
@@ -51,6 +60,7 @@ func road_spray() -> void:
 
 func build(v) -> void:
 	view = v
+	process_priority = 1   # after the owner has placed its current VR rig/camera and shell
 	var noise := FastNoiseLite.new()
 	noise.frequency = 0.02
 	noise.fractal_octaves = 3
@@ -89,6 +99,11 @@ func build(v) -> void:
 		mi.visible = false
 		add_child(mi)
 		arms.append(mi)
+	EffectExclusion.apply(view, plume_mats + [arm_mat])
+
+
+func _process(_delta: float) -> void:
+	EffectExclusion.apply(view, plume_mats + [arm_mat])
 
 
 ## Unit plume: runs from the origin back along -X to x = -1, an arch (half-ellipse) across Z

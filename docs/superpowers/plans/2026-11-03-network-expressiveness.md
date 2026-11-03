@@ -93,5 +93,7 @@ render/road-corridor verification.
 
 Final evidence is in RELEASE_REPORT.txt. Both extracted players passed. The
 interactive PC VR executable was launched with Network selected; its process and
-exact extracted path were verified. Its launch log was initially empty, so active
-headset tracking and physical acceptance remain unverified pending Luke's check.
+exact extracted path were verified. Luke subsequently confirmed the jumps,
+high-speed corkscrew, earlier guidance and traffic yielding were good. The populated
+runtime log confirms active left/right controllers. His next requested iteration
+is vehicle detail, wind exclusion and a shorter central clover (v0.1.9).

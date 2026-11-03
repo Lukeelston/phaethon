@@ -5,22 +5,29 @@
 extends Node3D
 
 const SOUND := 343.0   # m/s, sea level
+const EffectExclusion := preload("res://view/effect_exclusion.gd")
 
 const CONE_SHADER := """
 shader_type spatial;
 render_mode unshaded, cull_disabled, depth_draw_never, fog_disabled;
+#include "res://view/effect_exclusion.gdshaderinc"
 uniform float strength = 0.0;
 varying float along;
 void vertex() {
+	effect_world_position = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	along = 0.5 - VERTEX.y;   // 0 at the apex (engine noses), 1 at the open end (behind the pod)
 }
 void fragment() {
+	float exterior = exterior_effect_visibility(effect_world_position, CAMERA_POSITION_WORLD);
+	if (exterior <= 0.0) {
+		discard;
+	}
 	// a condensation shroud reads at glancing angles: edge-on rings, nearly clear face-on
 	float edge = 1.0 - abs(dot(normalize(NORMAL), normalize(VIEW)));
 	float fade = smoothstep(0.0, 0.2, along) * (1.0 - smoothstep(0.55, 1.0, along));
 	float ripple = 0.85 + 0.15 * sin(along * 22.0 - TIME * 30.0);
 	ALBEDO = vec3(0.97, 0.98, 1.0);
-	ALPHA = clamp(strength * fade * ripple * pow(edge, 1.5), 0.0, 1.0);
+	ALPHA = clamp(strength * fade * ripple * pow(edge, 1.5), 0.0, 1.0) * exterior;
 }
 """
 
@@ -35,6 +42,7 @@ var cone_mat: ShaderMaterial
 
 func build(v) -> void:
 	view = v
+	process_priority = 1   # the current cockpit transform exists only after _place_camera
 	cone = MeshInstance3D.new()
 	var m := CylinderMesh.new()   # unit length along +Y; scaled to the craft each frame
 	m.top_radius = 0.04
@@ -53,6 +61,11 @@ func build(v) -> void:
 	cone.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	cone.visible = false
 	add_child(cone)
+	EffectExclusion.apply(view, [cone_mat])
+
+
+func _process(_delta: float) -> void:
+	EffectExclusion.apply(view, [cone_mat])
 
 
 func sync(sim, delta: float) -> void:

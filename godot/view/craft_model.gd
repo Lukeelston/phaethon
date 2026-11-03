@@ -24,6 +24,8 @@
 extends Node3D
 
 const Kit := preload("res://view/mesh_kit.gd")
+const Fairings := preload("res://view/craft_fairings.gd")
+const Finishes := preload("res://view/craft_materials.gd")
 const STEEL := Color(0.60, 0.65, 0.70)
 const HOT := Color(1.0, 0.54, 0.16)
 const WHITE := Color(1.0, 0.96, 0.86)
@@ -36,7 +38,7 @@ const SILVER := Color(0.80, 0.82, 0.86)
 const HULL := [[-2.22, 0.06, -0.19, -0.11], [-2.12, 0.30, -0.28, -0.05], [-1.90, 0.62, -0.40, -0.01],
 	[-1.50, 0.90, -0.50, 0.00], [-1.00, 1.06, -0.56, -0.02], [-0.40, 1.13, -0.58, -0.05],
 	[0.40, 1.15, -0.58, -0.06], [1.05, 1.11, -0.56, 0.04], [1.45, 0.98, -0.51, 0.17],
-	[1.80, 0.76, -0.42, 0.15], [2.02, 0.48, -0.31, 0.06], [2.15, 0.18, -0.18, -0.04]]
+	[1.80, 0.68, -0.42, 0.12], [2.02, 0.42, -0.31, 0.03], [2.15, 0.18, -0.18, -0.04]]
 const HULL_N := 2.6
 const PAINT := Color(0.95, 0.42, 0.08)    # the top decks' and nose's candy orange (clear-coated)
 const STRIPE := Color(0.11, 0.12, 0.14)   # the flanks' racing stripe: gunmetal
@@ -112,7 +114,9 @@ var cable_strain := [0.0, 0.0]       # each cable's tension / CABLE_F_MAX
 var _wob := [Vector3.ZERO, Vector3.ZERO]     # each cable's flex: offset of its middle ...
 var _wob_v := [Vector3.ZERO, Vector3.ZERO]   # ... and how fast it's moving
 var _prev_f := [0.0, 0.0]
+const BinderArc := preload("res://view/binder_arc.gd")
 var arc: ImmediateMesh
+var binder_arc: MeshInstance3D
 var pod_frame: Node3D = null          # VR: the cockpit rig stands in for the hidden pod
 const POD_FRAME_UP := 0.6             # pod mesh centre above the rig floor
 const POD_LIFT := 1.3                 # the pod rides this much higher than the sim's body (looks only:
@@ -179,16 +183,23 @@ func build(v) -> void:
 			fan.add_child(rotor)
 			rotors[k].append(rotor)
 			var parts := [[Kit.cyl(0.03, 0.15, 0.24, 12), Kit.at(Vector3(0, 0, -0.08), Vector3(-PI / 2.0, 0, 0)), Color(0.85, 0.85, 0.82)]]
-			for b in 8:
-				var a := TAU * b / 8.0
-				var radial := Vector3(sin(a), cos(a), 0.0)
-				parts.append([Kit.box(Vector3(0.1, 0.3, 0.02)),
-					Transform3D(Basis(Vector3.BACK, -a) * Basis(Vector3.UP, 0.55), radial * 0.2),
-					LIVERY if b == 0 else Color(0.72, 0.74, 0.77)])
+			for b in 12:
+				var a := TAU * b / 12.0
+				parts.append([Fairings.fan_blade(), Transform3D(Basis(Vector3.BACK, -a), Vector3.ZERO),
+					LIVERY if b == 0 else Color(0.43, 0.46, 0.50)])
 			var fm := MeshInstance3D.new()
 			fm.mesh = Kit.compound(parts)
-			fm.material_override = shaded
+			fm.material_override = Kit.polished(0.88, 0.31)
 			rotor.add_child(fm)
+		var legend := Label3D.new()
+		legend.text = "PHAETHON  /  " + ("L" if k == 0 else "R")
+		legend.font_size = 48
+		legend.pixel_size = 0.0018
+		legend.outline_size = 0
+		legend.modulate = Color(0.12, 0.14, 0.17)
+		legend.rotation.x = -PI / 2.0
+		legend.position = Vector3(0, ENG_H / 2.0 + 0.036, -0.15)
+		eng.add_child(legend)
 		# split air brakes, two on top and two underneath: hinged at the front edge, the trailing
 		# edge swings up (or down) into the airflow
 		var flap_mesh := Kit.compound([
@@ -239,7 +250,7 @@ func build(v) -> void:
 		var strobe := MeshInstance3D.new()
 		strobe.mesh = Kit.ball(0.08, 10)
 		strobe.material_override = view._mat(Color(1.0, 1.0, 1.0), true)
-		strobe.position = Vector3(0, 1.5, 1.05)
+		strobe.position = Vector3(0, 1.08, 1.35)
 		strobe.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		eng.add_child(strobe)
 		strobes.append(strobe)
@@ -332,13 +343,9 @@ func build(v) -> void:
 		add_child(c)
 		cables.append(c)
 		cable_mats.append(cm)
-	arc = ImmediateMesh.new()
-	var ami := MeshInstance3D.new()
-	ami.mesh = arc
-	var am: StandardMaterial3D = view._mat(Color.WHITE, true)
-	am.vertex_color_use_as_albedo = true
-	ami.material_override = am
-	add_child(ami)
+	binder_arc = BinderArc.new()
+	arc = binder_arc.mesh
+	add_child(binder_arc)
 
 
 ## Engine shell, forward -Z, 8 m, a flat rounded slab: intake lip and twin-intake face, nacelle,
@@ -349,15 +356,15 @@ static func _engine_body(out: float) -> ArrayMesh:
 	var top := ENG_H / 2.0
 	var side := ENG_W / 2.0
 	var parts := [
-		[Kit.rounded_box(Vector3(ENG_W, ENG_H, 6.0), 5.0), Kit.at(Vector3(0, 0, -0.55)), STEEL],                  # nacelle
+		[Fairings.nacelle(), Transform3D.IDENTITY, STEEL],
 		[Kit.rounded_box(Vector3(ENG_W + 0.1, ENG_H + 0.1, 0.45), 6.0), Kit.at(Vector3(0, 0, -3.6)), DARK.lightened(0.15)],   # intake lip
 		[Kit.box(Vector3(ENG_W - 0.3, ENG_H - 0.22, 0.04)), Kit.at(Vector3(0, 0, -3.84)), Color(0.05, 0.05, 0.06)],   # intake throat
 		[Kit.box(Vector3(0.08, ENG_H - 0.22, 0.06)), Kit.at(Vector3(0, 0, -3.85)), DARK.lightened(0.3)],         # splitter between the twin intakes
 		[Kit.rounded_box(Vector3(ENG_W + 0.06, ENG_H + 0.06, 0.6), 6.0), Kit.at(Vector3(0, 0, -2.5)), LIVERY],    # band
 		[Kit.rounded_box(Vector3(ENG_W + 0.04, ENG_H + 0.04, 0.25), 6.0), Kit.at(Vector3(0, 0, 0.6)), LIVERY],    # pinstripe
-		[Kit.box(Vector3(0.09, 1.05, 1.7)), Kit.at(Vector3(0, top + 0.47, 0.2), Vector3(-0.35, 0, 0)), STEEL],    # dorsal fin
-		[Kit.box(Vector3(0.06, 0.2, 1.5)), Kit.at(Vector3(0, top + 0.92, 0.42), Vector3(-0.35, 0, 0)), LIVERY],
-		[Kit.rounded_box(Vector3(1.1, 0.07, 1.3), 6.0), Kit.at(Vector3(out * (side + 0.5), -0.1, 0.5), Vector3(0, 0, -out * 0.12)), STEEL],   # outboard stabiliser
+		[Fairings.fin(PackedVector2Array([Vector2(0,-0.65), Vector2(0.64,0.95), Vector2(0.59,1.45), Vector2(0,1.15)]), 0.07), Kit.at(Vector3(0, top, 0)), STEEL],
+		[Fairings.fin(PackedVector2Array([Vector2(0.49,0.65), Vector2(0.64,0.95), Vector2(0.59,1.45), Vector2(0.49,1.35)]), 0.075), Kit.at(Vector3(0, top, 0)), LIVERY],
+		[Fairings.fin(PackedVector2Array([Vector2(0,-0.3),Vector2(1.05,0.95),Vector2(0.99,1.38),Vector2(0,1.05)]), 0.065), Kit.at(Vector3(out*side,-0.1,0), Vector3(0,0,-out*PI/2)), STEEL],
 		[Kit.rounded_box(Vector3(0.18, 0.72, 1.1), 5.0), Kit.at(Vector3(-out * (side - 0.02), 0.0, -2.9)), DARK.lightened(0.25)],   # binder housing
 		[Kit.box(Vector3(0.3, 0.5, 0.7)), Kit.at(Vector3(0, -0.66, 3.0)), DARK.lightened(0.25)],                  # cable lug pylon
 		[Kit.cyl(0.11, 0.11, 0.08, 10), Kit.at(Vector3(0, -0.95, 3.4), Vector3(0, 0, PI / 2.0)), Color(0.75, 0.77, 0.8)],   # cable eye
@@ -396,7 +403,7 @@ static func _engine_body(out: float) -> ArrayMesh:
 static func _engine_lights(out: float) -> ArrayMesh:
 	var nav := NAV_L if out < 0.0 else NAV_R
 	return Kit.compound([
-		[Kit.ball(0.1, 10), Kit.at(Vector3(out * (ENG_W / 2.0 + 1.06), -0.04, 0.5)), nav],
+		[Kit.ball(0.065, 10), Kit.at(Vector3(out * (ENG_W / 2.0 + 1.02), -0.1, 1.1)), nav],
 		[Kit.box(Vector3(0.5, 0.06, 0.05)), Kit.at(Vector3(0, ENG_H / 2.0 - 0.08, 4.0)), Color(1.0, 0.1, 0.08)],
 		[Kit.box(Vector3(0.22, 0.08, 0.03)), Kit.at(Vector3(-0.8, -0.38, -3.84)), Color(1.0, 0.97, 0.88)],
 		[Kit.box(Vector3(0.22, 0.08, 0.03)), Kit.at(Vector3(0.8, -0.38, -3.84)), Color(1.0, 0.97, 0.88)],
@@ -553,10 +560,7 @@ static func pod_hull() -> ArrayMesh:
 				_tri(st, a, b, ti, pts[a], pts[b], tip, axis)
 		st.generate_normals()
 		st.commit(mesh)
-	var trim := StandardMaterial3D.new()
-	trim.vertex_color_use_as_albedo = true
-	trim.vertex_color_is_srgb = true
-	trim.roughness = 0.85
+	var trim := Finishes.powder_coat()
 	mesh.surface_set_material(1, trim)
 
 	# lip: a padded leather coaming round the opening, laid on the hull top, orange piping along its
@@ -603,10 +607,7 @@ static func pod_hull() -> ArrayMesh:
 		var up := tan.cross(Vector3.UP).normalized().cross(tan).normalized()
 		crest.append(pk + up * (r + 0.002))
 	_tube(pins, crest, 0.007, PAINT, 6)
-	var rubber := StandardMaterial3D.new()
-	rubber.vertex_color_use_as_albedo = true
-	rubber.vertex_color_is_srgb = true
-	rubber.roughness = 0.62
+	var rubber := Finishes.rubber()
 	mesh.surface_set_material(2, rubber)
 
 	# fittings
@@ -1236,28 +1237,8 @@ func sync_cables(sim, delta := 1.0 / 72.0) -> void:
 		cable_mats[k].emission_energy_multiplier = energy
 		cable_mats[k].emission = strain_color(glow[1], cable_strain[k])
 
-	arc.clear_surfaces()
-	if sim.binder_broken:
-		return
-	# the upgraded binder: a bright core beam between the emitters and three crackling strands
-	# round it, drawn as thin tubes; toward violet as the binder strains
+	# Emitter attachment updates every frame; the channel restrikes independently.
 	var p0: Vector3 = engines[0].transform * Vector3(ENG_W / 2.0 + 0.1, 0.0, -2.9)
 	var p1: Vector3 = engines[1].transform * Vector3(-ENG_W / 2.0 - 0.1, 0.0, -2.9)
 	var strain := clampf(absf(sim.binder_stretch) / maxf(sim.P.binderBreak, 0.01), 0.0, 1.0)
-	var hue := BINDER_COL.lerp(Color(0.8, 0.45, 1.0), strain)
-	arc.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
-	_beam(arc, [p0, p1], 0.045, Color(0.85, 0.97, 1.0))
-	var axis := (p1 - p0).normalized()
-	var up := axis.cross(Vector3.FORWARD).normalized()
-	if up.length() < 0.1:
-		up = Vector3.UP
-	var side := axis.cross(up)
-	for strand in 3:
-		var pts := [p0]
-		for sgm in range(1, 10):
-			var t := sgm / 10.0
-			var amp := sin(t * PI) * 0.35
-			pts.append(p0.lerp(p1, t) + up * randf_range(-amp, amp) + side * randf_range(-amp, amp))
-		pts.append(p1)
-		_beam(arc, pts, 0.018, hue.lerp(Color.WHITE, 0.25 * strand))
-	arc.surface_end()
+	binder_arc.update_arc(p0, p1, strain, sim.binder_broken, delta)

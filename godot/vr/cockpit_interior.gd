@@ -18,6 +18,7 @@ extends Node3D
 
 const CM := preload("res://view/craft_model.gd")
 const Kit := preload("res://view/mesh_kit.gd")
+const Finish := preload("res://view/craft_materials.gd")
 const UP := CM.POD_FRAME_UP
 const MODE_LIGHT := {"normal": Color(0.25, 0.6, 1.0), "burner": Color(1.0, 0.55, 0.12), "ramjet": Color(0.7, 0.3, 1.0)}
 
@@ -41,7 +42,9 @@ func build() -> void:
 	var steel := Color(0.62, 0.64, 0.68)
 	var solid := []   # [mesh, transform, colour] for the matte parts
 	var metal := []   # ... the polished ones
-	var lit := []     # ... the backlit ones
+	var rubber := []
+	var paint := []
+	var lit := []     # ... small indicator lenses
 
 	# floor: a deck plate with raised treads, under the seat and the feet (to the cage's edge)
 	var floor_y := UP - 0.47
@@ -51,49 +54,58 @@ func build() -> void:
 	# footrest bar and pedals, out over the open cage
 	metal.append([Kit.cyl(0.022, 0.022, 0.86, 12), Kit.at(Vector3(0, UP - 0.4, -0.95), Vector3(0, 0, PI / 2.0)), steel])
 	for s in [-1.0, 1.0]:
-		metal.append([Kit.rounded_box(Vector3(0.13, 0.03, 0.26), 6.0), Kit.at(Vector3(0.2 * s, UP - 0.36, -0.86), Vector3(-0.6, 0, 0)), gunmetal])
-		solid.append([Kit.box(Vector3(0.11, 0.008, 0.2)), Kit.at(Vector3(0.2 * s, UP - 0.34, -0.865), Vector3(-0.6, 0, 0)), Color(0.15, 0.15, 0.16)])
+		metal.append([Finish.beveled_plate(Vector3(0.13, 0.03, 0.26), 0.005), Kit.at(Vector3(0.2 * s, UP - 0.36, -0.86), Vector3(-0.6, 0, 0)), gunmetal])
+		rubber.append([Kit.box(Vector3(0.11, 0.008, 0.2)), Kit.at(Vector3(0.2 * s, UP - 0.34, -0.865), Vector3(-0.6, 0, 0)), Color(0.15, 0.15, 0.16)])
 
-	# console down each side, beside the levers
+	# Narrow service consoles beside the working levers. The front of the right console is
+	# deliberately spare: the existing physical MODE switch lives above it at z = 0.08.
 	for s in [-1.0, 1.0]:
 		var cx: float = 0.615 * s
-		solid.append([Kit.rounded_box(Vector3(0.13, 0.26, 0.95), 7.0), Kit.at(Vector3(cx, UP - 0.36, 0.42)), Color(0.14, 0.14, 0.16)])
-		solid.append([Kit.box(Vector3(0.11, 0.012, 0.9)), Kit.at(Vector3(cx, UP - 0.226, 0.42)), Color(0.05, 0.05, 0.06)])   # top plate
-		for k in 6:   # toggle switches
-			var z := 0.05 + k * 0.075
-			metal.append([Kit.cyl(0.008, 0.008, 0.045, 8), Kit.at(Vector3(cx, UP - 0.2, z), Vector3(0.45, 0, 0)), steel])
-			metal.append([Kit.ball(0.012, 8), Kit.at(Vector3(cx, UP - 0.18, z - 0.01)), steel])
-		var leds := [Color(0.2, 1.0, 0.3), Color(1.0, 0.7, 0.1), Color(1.0, 0.15, 0.1), Color(0.2, 0.6, 1.0)]
-		for k in 4:   # backlit buttons
-			lit.append([Kit.box(Vector3(0.05, 0.012, 0.035)), Kit.at(Vector3(cx, UP - 0.218, 0.58 + k * 0.06)), leds[k]])
-		_placard(Vector3(cx - 0.066 * s, UP - 0.33, 0.42), "AUX PWR    TRIM    COMMS" if s < 0.0 else "BINDER    ARC    HOVER", s)
+		solid.append([Kit.rounded_box(Vector3(0.13, 0.26, 0.95), 7.0, 6), Kit.at(Vector3(cx, UP - 0.36, 0.42)), Color(0.12, 0.13, 0.145)])
+		# Separate black gasket, machined edge, and powder-coated removable faceplate.
+		rubber.append([Finish.beveled_plate(Vector3(0.116, 0.008, 0.866)), Kit.at(Vector3(cx, UP - 0.226, 0.435)), Color(0.022, 0.025, 0.028)])
+		metal.append([Finish.beveled_plate(Vector3(0.113, 0.005, 0.858)), Kit.at(Vector3(cx, UP - 0.22, 0.435)), Color(0.37, 0.39, 0.42)])
+		solid.append([Finish.beveled_plate(Vector3(0.108, 0.004, 0.852), 0.0015), Kit.at(Vector3(cx, UP - 0.216, 0.435)), Color(0.065, 0.077, 0.09)])
+		var face_y := UP - 0.214
+		for dx in [-0.043, 0.043]:
+			for z in [0.026, 0.844]:
+				_fastener(Vector3(cx + dx, face_y, z), metal, rubber)
+		var names: Array = ["AUX PWR", "COMMS", "TRIM"] if s < 0.0 else ["BINDER", "COOLANT", "STAB"]
+		for k in 3:
+			var z := 0.28 + k * 0.14
+			_toggle(Vector3(cx, face_y, z), metal, rubber, paint)
+			_top_legend(Vector3(cx, face_y + 0.001, z - 0.045), names[k])
+			# Tiny inset status lens, with a metal socket: no luminous button slabs.
+			metal.append([Finish.washer(0.0028, 0.0042, 0.0018, 10), Kit.at(Vector3(cx + 0.042 * s, face_y + 0.001, z)), gunmetal])
+			lit.append([Kit.cyl(0.0027, 0.0027, 0.0018, 10), Kit.at(Vector3(cx + 0.042 * s, face_y + 0.0015, z)), Color(0.25, 0.58, 0.34) if k < 2 else Color(0.68, 0.4, 0.15)])
+		for k in 2:
+			var z := 0.70 + k * 0.135
+			_knob(Vector3(cx, face_y, z), metal, rubber, paint)
+			_top_legend(Vector3(cx, face_y + 0.001, z - 0.042), ("CABIN" if k == 0 else "DIMMER") if s < 0.0 else ("SENS" if k == 0 else "BALANCE"))
+		_placard(Vector3(cx - 0.066 * s, UP - 0.31, 0.48), "AUXILIARY  /  01" if s < 0.0 else "PROPULSION  /  02", s)
 
 	# throttle quadrant: a gate plate round each lever, slot and burner gate
 	for s in [-1.0, 1.0]:
 		var q := Vector3(0.46 * s, 0.125, 0.2)   # just above the lever pivots (the floor curves up out here)
-		solid.append([Kit.rounded_box(Vector3(0.09, 0.05, 0.36), 6.0), Kit.at(q + Vector3(0, -0.01, 0)), Color(0.12, 0.12, 0.13)])
+		solid.append([Finish.beveled_plate(Vector3(0.09, 0.05, 0.36), 0.004), Kit.at(q + Vector3(0, -0.01, 0)), Color(0.12, 0.12, 0.13)])
 		solid.append([Kit.box(Vector3(0.022, 0.01, 0.3)), Kit.at(q + Vector3(0, 0.016, 0)), Color(0.02, 0.02, 0.02)])   # the slot
-		lit.append([Kit.box(Vector3(0.07, 0.006, 0.012)), Kit.at(q + Vector3(0, 0.02, -0.105)), Color(1.0, 0.5, 0.1)])   # burner gate
+		paint.append([Kit.box(Vector3(0.07, 0.006, 0.012)), Kit.at(q + Vector3(0, 0.02, -0.105)), Color(1.0, 0.5, 0.1)])   # burner gate
+		for z in [-0.155, 0.155]:
+			for dx in [-0.032, 0.032]:
+				_fastener(q + Vector3(dx, 0.016, z), metal, rubber)
 
 	# harness on the seat: shoulder straps down the seat back, a lap belt across the cushion
 	var strap := Color(0.6, 0.08, 0.06)
 	for s in [-1.0, 1.0]:
-		solid.append([Kit.box(Vector3(0.05, 0.62, 0.012)), Transform3D(Basis.from_euler(Vector3(-0.12, 0, 0.05 * s)), Vector3(0.11 * s, 0.6, 1.025)), strap])
-		solid.append([Kit.box(Vector3(0.25, 0.05, 0.012)), Transform3D(Basis.from_euler(Vector3(-PI / 2.0, 0.35 * s, 0)), Vector3(0.14 * s, 0.215, 0.76)), strap])
-	metal.append([Kit.rounded_box(Vector3(0.08, 0.06, 0.02), 5.0), Kit.at(Vector3(0, 0.222, 0.72), Vector3(-PI / 2.0, 0, 0)), steel])
+		rubber.append([Kit.box(Vector3(0.05, 0.62, 0.012)), Transform3D(Basis.from_euler(Vector3(-0.12, 0, 0.05 * s)), Vector3(0.11 * s, 0.6, 1.025)), strap])
+		rubber.append([Kit.box(Vector3(0.25, 0.05, 0.012)), Transform3D(Basis.from_euler(Vector3(-PI / 2.0, 0.35 * s, 0)), Vector3(0.14 * s, 0.215, 0.76)), strap])
+	metal.append([Kit.rounded_box(Vector3(0.08, 0.06, 0.02), 5.0, 5), Kit.at(Vector3(0, 0.222, 0.72), Vector3(-PI / 2.0, 0, 0)), steel])
 
-	var m1 := MeshInstance3D.new()
-	m1.mesh = Kit.compound(solid)
-	m1.material_override = Kit.vertex_colors()
-	add_child(m1)
-	var m2 := MeshInstance3D.new()
-	m2.mesh = Kit.compound(metal)
-	m2.material_override = Kit.polished(0.8, 0.3)
-	add_child(m2)
-	var m3 := MeshInstance3D.new()
-	m3.mesh = Kit.compound(lit)
-	m3.material_override = Kit.vertex_colors(true)
-	add_child(m3)
+	_batch(solid, Finish.powder_coat(), "PowderCoatedPanels")
+	_batch(metal, Finish.machined(), "MachinedHardware")
+	_batch(rubber, Finish.rubber(), "RubberAndHarness")
+	_batch(paint, Finish.painted_metal(), "GuardAndGatePaint")
+	_batch(lit, Finish.indicator(), "InsetIndicators")
 
 	# frames and hoses: tubes along the inner walls, the lower half (below the deck line)
 	var st := SurfaceTool.new()
@@ -114,7 +126,7 @@ func build() -> void:
 		CM._tube(st, run, 0.011, hs[1])
 	var tubes := MeshInstance3D.new()
 	tubes.mesh = st.commit()
-	tubes.material_override = Kit.polished(0.5, 0.4)
+	tubes.material_override = Finish.rubber()
 	add_child(tubes)
 
 	# rim light: just under the cockpit rim, inset into the opening, all the way round
@@ -125,8 +137,8 @@ func build() -> void:
 		var ph := TAU * k / 96.0
 		var x := (CM.OPEN_AX - 0.05) * cos(ph)
 		var z := CM.OPEN_ZC + (CM.OPEN_AZ - 0.05) * sin(ph)
-		ring.append(Vector3(x, CM.hull_top(x, z) - 0.11 + UP, z))
-	CM._tube(rim, ring, 0.008, Color.WHITE, 6)
+		ring.append(Vector3(x, CM.hull_top(x, z) - 0.16 + UP, z))
+	CM._tube(rim, ring, 0.0035, Color.WHITE, 6)
 	var rmi := MeshInstance3D.new()
 	rmi.mesh = rim.commit()
 	rim_mat = StandardMaterial3D.new()
@@ -134,7 +146,56 @@ func build() -> void:
 	rim_mat.albedo_color = MODE_LIGHT.normal
 	rmi.material_override = rim_mat
 	add_child(rmi)
-	parts_built = solid.size() + metal.size() + lit.size() + 5 + hoses.size() + 1
+	parts_built = solid.size() + metal.size() + rubber.size() + paint.size() + lit.size() + 5 + hoses.size() + 1
+
+
+func _batch(parts: Array, material: Material, node_name: String) -> void:
+	var mi := MeshInstance3D.new()
+	mi.name = node_name
+	mi.mesh = Kit.compound(parts)
+	mi.material_override = material
+	add_child(mi)
+
+
+func _fastener(at: Vector3, metal: Array, rubber: Array) -> void:
+	rubber.append([Kit.cyl(0.0045, 0.0045, 0.0007, 12), Kit.at(at), Color(0.015, 0.018, 0.022)])
+	metal.append([Finish.slotted_screw(), Kit.at(at + Vector3(0, 0.0006, 0), Vector3(0, 0.4, 0)), Color(0.57, 0.6, 0.63)])
+
+
+func _toggle(at: Vector3, metal: Array, rubber: Array, paint: Array) -> void:
+	metal.append([Finish.washer(0.005, 0.0115, 0.0022, 14), Kit.at(at + Vector3(0, 0.0011, 0)), Color(0.5, 0.53, 0.57)])
+	metal.append([Finish.washer(0.0044, 0.008, 0.0045, 6), Kit.at(at + Vector3(0, 0.004, 0)), Color(0.72, 0.74, 0.77)])
+	rubber.append([Kit.cyl(0.0045, 0.006, 0.008, 10), Kit.at(at + Vector3(0, 0.009, 0)), Color(0.025, 0.028, 0.03)])
+	metal.append([Kit.cyl(0.0035, 0.003, 0.027, 10), Kit.at(at + Vector3(0, 0.023, -0.003), Vector3(-0.3, 0, 0)), Color(0.7, 0.73, 0.77)])
+	metal.append([Kit.ball(0.0048, 8), Kit.at(at + Vector3(0, 0.036, -0.007)), Color(0.7, 0.73, 0.77)])
+	for s in [-1.0, 1.0]:
+		for z in [-0.02, 0.02]:
+			paint.append([Kit.cyl(0.0022, 0.0022, 0.034, 8), Kit.at(at + Vector3(s * 0.024, 0.019, z)), Color(0.49, 0.11, 0.055)])
+		paint.append([Kit.cyl(0.0022, 0.0022, 0.04, 8), Kit.at(at + Vector3(s * 0.024, 0.036, 0), Vector3(PI / 2.0, 0, 0)), Color(0.62, 0.16, 0.065)])
+
+
+func _knob(at: Vector3, metal: Array, rubber: Array, paint: Array) -> void:
+	metal.append([Finish.washer(0.013, 0.022, 0.002, 24), Kit.at(at + Vector3(0, 0.001, 0)), Color(0.38, 0.41, 0.44)])
+	rubber.append([Finish.knurled_knob(0.018, 0.023), Kit.at(at + Vector3(0, 0.014, 0)), Color(0.08, 0.09, 0.10)])
+	metal.append([Kit.cyl(0.014, 0.015, 0.002, 24), Kit.at(at + Vector3(0, 0.0265, 0)), Color(0.45, 0.48, 0.51)])
+	paint.append([Kit.box(Vector3(0.0022, 0.0005, 0.009)), Kit.at(at + Vector3(0, 0.0277, -0.006)), Color(0.88, 0.86, 0.72)])
+	for k in 7:
+		var angle := -PI * 0.75 + k * PI / 4.0
+		var pos := at + Vector3(sin(angle) * 0.027, 0.0005, -cos(angle) * 0.027)
+		paint.append([Kit.box(Vector3(0.0012, 0.0005, 0.003)), Kit.at(pos, Vector3(0, -angle, 0)), Color(0.55, 0.56, 0.53)])
+
+
+func _top_legend(at: Vector3, text: String) -> void:
+	var label := Label3D.new()
+	label.text = text
+	label.font_size = 40
+	label.pixel_size = 0.00030
+	label.modulate = Color(0.72, 0.75, 0.72)
+	label.outline_size = 0
+	label.shaded = true
+	label.position = at
+	label.rotation.x = -PI / 2.0
+	add_child(label)
 
 
 ## The rim light follows the mode: "normal", "burner" or "ramjet".
@@ -151,9 +212,10 @@ func _placard(pos: Vector3, text: String, side: float) -> void:
 	var l := Label3D.new()
 	l.text = text
 	l.font_size = 40
-	l.pixel_size = 0.0007
-	l.modulate = Color(0.85, 0.85, 0.8)
+	l.pixel_size = 0.00036
+	l.modulate = Color(0.7, 0.73, 0.71)
 	l.outline_size = 0
+	l.shaded = true
 	l.position = pos
 	l.rotation.y = -PI / 2.0 * side   # facing in, toward the seat
 	add_child(l)

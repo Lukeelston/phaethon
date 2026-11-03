@@ -22,7 +22,8 @@ miles and 1500' up to the entrance of the next ramp"):
   deck. The release's nine minimum speeds (2,000-4,000 mph) and lip angles (5-14 degrees)
   remain varied. Three ascent profiles add terraces, crests and saddles, with 400-1,000 m of
   added rise and gaps up to 50% longer. Catch decks pull out level before their recovery;
-- four central catch roads transfer to the perpendicular highway through tangent 45 km arcs.
+- four central catch roads transfer to the perpendicular highway through open 45 km arcs,
+  overfly it, then descend outside its traffic lanes before a gentle S-shaped merge.
   The other catches merge 44 km beyond their crossing; four carry full recovery rolls in the
   view through NET_TWISTS while retaining the level, drivable simulation path;
 - an on-ramp from the open ground for each city: it starts ON_OUT out on the city's side, short of
@@ -90,6 +91,7 @@ JUMP_PROFILES = [
 ]
 TWIST_JUMPS = (4, 8, 12, 16)
 TRANSFER_JUMPS = (0, 1, 2, 3)
+TRANSFER_MERGE, TRANSFER_OUT, TRANSFER_FINAL = 160 * KM, 1 * KM, 2 * KM
 # At each selected crossing the exit ramp on your right forks: it curves to the other highway,
 # while its launch spur runs straight on. The first four jumps are true highway transfers.
 JUMP_AT = [(1, 1), (1, 0), (1, 2), (0, 1), (2, 1)]
@@ -477,18 +479,26 @@ def build():
             destination_h = baseline
             if jump_id in TRANSFER_JUMPS:
                 # These land on a dedicated elevated interchange, then transfer to
-                # the perpendicular highway. The first six kilometres remain straight.
+                # the perpendicular highway. A distant merge permits open bends;
+                # the old 40-50 km endpoints forced 300+ degree clover loops.
+                # Keep the first six kilometres straight for ballistic capture.
                 turn_dir = -d if axis == "E" else d
                 dx, dy = (0.0, float(turn_dir)) if axis == "E" else (float(turn_dir), 0.0)
                 destination = ns[ci] if axis == "E" else ew[cj]
                 destination_h = EXPRESS_H if axis == "E" else 0.0
-                merge_distance = 50000.0 if jump_id == 3 else 40000.0
-                gx = X + dx * merge_distance + dy * OFF
-                gy = Y + dy * merge_distance - dx * OFF
+                gx = X + dx * TRANSFER_MERGE + dy * OFF
+                gy = Y + dy * TRANSFER_MERGE - dx * OFF
+                # Overfly the highway while high, then finish outside its correct
+                # lane. This small S enters from the shoulder, without crossing
+                # opposing traffic at grade or needing altitude-aware junctions.
+                merge_angle = math.acos(1.0 - TRANSFER_OUT / (2 * Rs))
+                merge_lead = 2 * Rs * math.sin(merge_angle) + TRANSFER_FINAL
                 segs = [("S", 6000.0, 0, "sp")]
                 segs += dubins((cx0 + ux * 6000.0, cy0 + uy * 6000.0, hdg),
-                               (gx - dx * 10000.0, gy - dy * 10000.0, heading_deg(dx, dy)), Rs)
-                segs.append(("S", 10000.0, 0, "sp"))
+                               (gx - dx * merge_lead + dy * TRANSFER_OUT,
+                                gy - dy * merge_lead - dx * TRANSFER_OUT, heading_deg(dx, dy)), Rs)
+                segs += [("L", Rs, math.degrees(merge_angle), "sp"),
+                         ("R", Rs, math.degrees(merge_angle), "sp"), ("S", TRANSFER_FINAL, 0, "sp")]
                 C = Road(f"K{jump_id}", "jump", cx0, cy0, hdg, JC_W, segs)
             C.role = "catch"
             C.profile = profile_name
@@ -498,7 +508,9 @@ def build():
             i_down = round((JC_DOWN - uc) / STEP)
             if jump_id in TRANSFER_JUMPS:
                 i_flat = C.N - 1 - round(35000.0 / STEP)
-                i_down = C.N - 1 - round(20000.0 / STEP)
+                # Remain above the highway and nearby side-road mouths until the
+                # outside approach, then level before the shared merge pavement.
+                i_down = C.N - 1 - round(12000.0 / STEP)
             middle = round((i_flat + i_down) / 2)
             C.keys = [[0, hc, mc], [ip, top, 0.0], [i_flat, top, 0.0],
                       [middle, destination_h + (top - destination_h) * (0.55 if profile != 1 else 0.82), 0.0],

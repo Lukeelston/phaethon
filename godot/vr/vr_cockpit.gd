@@ -393,6 +393,7 @@ func _rbox(parent: Node3D, size: Vector3, pos: Vector3, c: Color, rot_x := 0.0, 
 
 func _build_cockpit() -> void:
 	var leather := Color(0.13, 0.12, 0.12)
+	var finishes := preload("res://view/craft_materials.gd")
 	# You sit in the pod itself: the same polished hull the flat view shows, open cockpit,
 	# rubber lip, matte trim inside, the nose and its cable hardpoints out ahead.
 	shell = Node3D.new()
@@ -423,11 +424,13 @@ func _build_cockpit() -> void:
 		shaft.position = Vector3(0, 0.16, 0)
 		pivot.add_child(shaft)
 		var knob := MeshInstance3D.new()
-		knob.mesh = Kit.ball(0.04, 16)
-		knob.scale = Vector3(1.0, 1.35, 1.0)
-		var km := StandardMaterial3D.new()
+		var grip_parts := [[Kit.rounded_box(Vector3(0.064, 0.108, 0.078), 3.2, 10), Transform3D.IDENTITY, Color.WHITE]]
+		for rib in 5:
+			grip_parts.append([Kit.rounded_box(Vector3(0.067, 0.006, 0.080), 3.5, 6), Kit.at(Vector3(0, -0.035 + rib * 0.017, 0)), Color(0.67, 0.68, 0.70)])
+		grip_parts.append([Kit.rounded_box(Vector3(0.039, 0.018, 0.046), 4.0, 6), Kit.at(Vector3(-s * 0.021, 0.044, -0.012)), Color(0.55, 0.58, 0.61)])
+		knob.mesh = Kit.compound(grip_parts)
+		var km: StandardMaterial3D = finishes.rubber().duplicate()
 		km.albedo_color = Color(0.16, 0.17, 0.19)
-		km.roughness = 0.4
 		knob.material_override = km
 		knob.position = Vector3(0, 0.36, 0)
 		pivot.add_child(knob)

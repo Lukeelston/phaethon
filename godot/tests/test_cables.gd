@@ -129,9 +129,12 @@ func _fittings_clear(rig: Node3D) -> void:
 			for k in 8:
 				pts.append(box.get_endpoint(k))
 		var path := str(rig.get_path_to(vi))
+		# The ascent display added in v0.1.8 floats above the nose, outside the
+		# cockpit opening. It must clear the top of the hull, not fit inside it.
+		var floating_hud: bool = vi == v._jump_guidance or vi == v._jump_guidance_backing
 		for q in pts:
 			var pod: Vector3 = to_rig * (vi.global_transform * q) - Vector3(0, CM.POD_FRAME_UP, 0)
-			var why: String = CM.hull_clearance(pod)
+			var why: String = ("" if pod.y > 0.25 else "floating HUD below hull clearance") if floating_hud else CM.hull_clearance(pod)
 			n += 1
 			if why != "":
 				parts[path] = parts.get(path, 0) + 1

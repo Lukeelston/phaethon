@@ -9,9 +9,10 @@
 //   walls      steered into a highway's wall at 3,000 mph: pushed back onto the road, no health lost,
 //              no crash
 //   crash      a crash puts you back at the last city's terminal, on its road
-//   jumps      every launch spur at 4,000 mph: off its lip (airborne), caught by its deck two miles on
-//              and 1,500 ft up, on along the deck and back down onto the highway; at 3,000 mph still
-//              caught; at 2,500 mph under the deck's lip: turned down, onto the open ground (free)
+//   jumps      every launch spur at 4,000 mph: off its lip, caught inside its actual landing straight,
+//              then safely on that recovery or a connected road; full transfers and minimum/low/high
+//              flights are driven by network_jump_test.js. At 3,000 mph J0 still catches; at 2,500 it
+//              misses and settles to ground within a height-derived free-fall/hover time budget.
 //   edges      angled at a highway's edge and left alone, the craft drifts up its ramp and is turned
 //              back before the wall
 //   ground     on the open ground the roads' walls hold you off from outside; an on-ramp's open
@@ -207,37 +208,70 @@ function legal(changes) {
 
 // jumps: on launch spur k, 300 samples (7.2 km) short of its lip at `mph`, the levers at `lev`,
 // for `secs`: the events, the pod's road at the end, free or not, the highest it got
-function jump(k, mph, lev, secs) {
+function jump(k, mph, lev, secs, landMiss = false) {
   const s = PS.makeSim({ track: 'network', handling: 'speed' });
   const [l] = s.T.jumps[k], L = s.T.roads[l];
   s.respawnOn(l, L.N - 1 - 300, 1);
   const a = L.pts[L.N - 1 - 300];
   for (const b of s.S.bodies) { b.vx = mph / MPH * a.tx; b.vy = mph / MPH * a.ty; }
   const ev = [];
-  let top = 0, crash = false;
+  let top = 0, crash = false, flying = false, flightMin = Infinity, flightMax = 0, groundBudget = 0;
   for (let f = 0; f < secs / DT; f++) {
     s.step({ thrL: lev, thrR: lev, brkL: 0, brkR: 0, repair: false, reignite: true }, DT);
     top = Math.max(top, s.S.pod.z);
     crash = crash || s.S.crashT > 0;
-    while (s.S.events.length) { const e = s.S.events.shift(); if (e.type !== 'scrape' && e.type !== 'hit') ev.push(Object.assign({ t: f * DT }, e)); }
+    if (flying) {
+      const speed = Math.hypot(s.S.pod.vx, s.S.pod.vy);
+      flightMin = Math.min(flightMin, speed); flightMax = Math.max(flightMax, speed);
+    }
+    while (s.S.events.length) {
+      const e = s.S.events.shift();
+      if (e.type === 'airborne' && e.lip) {
+        flying = true;
+        flightMin = flightMax = e.v;
+        if (landMiss) {
+          // A ground-to-apex-to-ground flight bounds this elevated launch. Add
+          // four hover time constants for the repulsor's final settling phase.
+          const apex = s.S.pod.z - s.P.rideH + e.vz * e.vz / (2 * 9.81);
+          groundBudget = 2 * Math.sqrt(2 * apex / 9.81) + 4 / s.P.hoverOmega;
+          secs = f * DT + groundBudget;
+        }
+      }
+      if (['catch', 'onroad', 'ground'].includes(e.type)) flying = false;
+      if (e.type !== 'scrape' && e.type !== 'hit') ev.push(Object.assign({ t: f * DT, x: s.S.pod.x, y: s.S.pod.y }, e));
+    }
+    if (landMiss && ev.some(e => e.type === 'ground' || e.type === 'onroad')) break;
   }
-  return { s, ev, top, crash, road: s.T.roads[s.S.pod.path].name, offRoad: s.S.pod.offRoad };
+  return { s, ev, top, crash, road: s.T.roads[s.S.pod.path].name, offRoad: s.S.pod.offRoad,
+    flightMin, flightMax, groundBudget };
 }
 for (let k = 0; k < T.jumps.length; k++) {
   const [l, c] = T.jumps[k], L = T.roads[l], C = T.roads[c];
   const r = jump(k, 4000, 0.87, 40);
   const air = r.ev.find((e) => e.type === 'airborne'), cat = r.ev.find((e) => e.type === 'catch');
-  const home = r.s.T.junctions.some((J) => (J.a === c || J.b === c)) && r.road !== C.name && r.road !== L.name;
+  const lip = L.pts[L.N - 1], entry = C.pts[0], gap = Math.hypot(entry.x - lip.x, entry.y - lip.y);
+  const pull = C.pts[C.hk[1][0]].s, sample = Math.max(lip.len, entry.len);
+  const along = cat ? (cat.x - entry.x) * entry.tx + (cat.y - entry.y) * entry.ty : -Infinity;
+  // Timing follows the real gap, capture pull-out and observed flight speeds;
+  // the old fixed 2.5 s limit rejected valid 5 km gaps. One sample allows for
+  // the event's discrete end-of-step position and the lip endpoint rounding.
+  const flight = cat && air ? cat.t - air.t : Infinity;
+  const inLanding = along >= -sample && along <= pull + sample;
+  const inTime = flight >= (gap - sample) / r.flightMax && flight <= (gap + pull + sample) / r.flightMin;
+  const destination = T.junctions.find(J => J.b === c && J.b1 === C.N - 1).a;
+  const final = r.s.S.pod.path;
+  const recovery = final === c || final === destination || T.junctions.some(J =>
+    (J.a === destination && J.b === final) || (J.b === destination && J.a === final));
   check(`jumps: ${L.name} at 4,000 mph: off the lip at ${air ? (air.v * MPH).toFixed(0) : '-'} mph, ${air ? air.vz.toFixed(0) : '-'} m/s up; caught by ${C.name} ${cat ? (cat.t - air.t).toFixed(2) + ' s later, ' + cat.dz.toFixed(1) + ' m over it closing ' + cat.v.toFixed(0) + ' m/s' : '(never)'}; up to ${r.top.toFixed(0)} m; ${r.road} after 40 s, crash ${r.crash}`,
-    air && air.lip && cat && cat.road === c && cat.t - air.t < 2.5 && home && !r.crash && !r.offRoad);
+    air && air.lip && cat && cat.road === c && inLanding && inTime && recovery && !r.crash && !r.offRoad);
 }
 {
   const r = jump(0, 3000, 0.5, 12), cat = r.ev.find((e) => e.type === 'catch');
   check(`jumps: at 3,000 mph still caught (${cat ? cat.dz.toFixed(1) + ' m over the deck' : 'missed'})`, !!cat && !r.crash);
-  const m = jump(0, 2500, 0.3, 30), air = m.ev.find((e) => e.type === 'airborne');
+  const m = jump(0, 2500, 0.3, 30, true), air = m.ev.find((e) => e.type === 'airborne');
   const cat2 = m.ev.find((e) => e.type === 'catch'), gr = m.ev.find((e) => e.type === 'ground');
   check(`jumps: at 2,500 mph off the lip (${!!air}), never caught (${!cat2}), down on the open ground ${gr ? (gr.t - air.t).toFixed(1) + ' s later' : '(not yet)'}; free ${m.offRoad}, crash ${m.crash}`,
-    air && !cat2 && gr && m.offRoad && !m.crash);
+    air && !cat2 && gr && gr.t - air.t <= m.groundBudget && m.offRoad && !m.crash);
 }
 // the open ground: free, steered at a highway's side at 400 mph (held off from outside); then
 // straight into Eridanus' on-ramp's open start (on it), and on to the city by the autopilot

@@ -22,6 +22,7 @@ extends Node3D
 const Kit := preload("res://view/mesh_kit.gd")
 const ShaftScript := preload("res://view/network_shaft.gd")
 const SceneryScript := preload("res://view/network_scenery.gd")
+const SupportClearance := preload("res://view/network_support_clearance.gd")
 const CH := 40                    # samples (~960 m), aligned with highway masts and the furniture cycle
 const CELL := 8000.0              # the grid's cells, m
 const VIS := 20000.0              # build chunks this close (m, to the nearest point of their circle)
@@ -146,6 +147,8 @@ var _join_cache_road := -1
 var scenery: Node3D
 var _pillar_cells := {} # fixed scenery, queried near the craft rather than scanning the whole map
 var _pillars_indexed := false
+var _pillar_specs_cache := {}   # immutable road/sample -> already cleared render/collision supports
+var _support_clearance: RefCounted
 const PILLAR_CELL := 512.0
 
 
@@ -153,6 +156,10 @@ func build(s, v) -> void:
 	var t0 := Time.get_ticks_msec()
 	sim = s
 	view = v
+	_pillar_specs_cache.clear()
+	_pillar_cells.clear()
+	_pillars_indexed = false
+	_support_clearance = null
 	shaft = ShaftScript.new()
 	shaft.setup(sim)
 	for r in shaft.maps:
@@ -590,8 +597,20 @@ func _deco_template_key(J: Dictionary, R: CraftSim.TrackPath) -> String:
 			return ""
 		if J.joins and (_open(J.r, i, -1.0) != left_open or _open(J.r, i, 1.0) != right_open):
 			return ""
+	# Supports are baked into the reused furniture. Equal deck shapes can cross different
+	# roads underneath, so include the surviving sides at every support row in this chunk.
+	var support_mask := 0
+	if height > DECK + 2.0:
+		var spacing := 40 if height > 150.0 else PILLAR_EVERY
+		var first := start + posmod(-start,spacing)
+		var slot := 0
+		for i in range(first,finish,spacing):
+			for pillar in pillar_specs(J.r,i):
+				var side := posmod(-int(pillar.id)-1,2)
+				support_mask |= 1 << (slot*2+side)
+			slot += 1
 	# All discrete furniture periods divide 120 (6/8/40); colour phase divides8.
-	return "%.10f:%.10f:%.10f:%s:%s:%s:%s:%s:%s" % [R.tx[start], R.ty[start], R.len[start], R.w[start], R.mode[start], height, start % 120, left_open, right_open]
+	return "%.10f:%.10f:%.10f:%s:%s:%s:%s:%s:%s:%s" % [R.tx[start], R.ty[start], R.len[start], R.w[start], R.mode[start], height, start % 120, left_open, right_open, support_mask]
 
 
 ## Build on the chunk in hand until `end` (usec): its samples, then its meshes, then its boards one at
@@ -625,6 +644,9 @@ func _work(end: int) -> bool:
 
 ## One source for the rendered support boxes and their optional collision footprints.
 func pillar_specs(r: int, i: int) -> Array:
+	var key := Vector2i(r,i)
+	if _pillar_specs_cache.has(key):
+		return _pillar_specs_cache[key]
 	for roll in sim.twists:
 		if int(roll[0]) == r and i >= int(roll[1]) and i <= int(roll[2]):
 			return [] # no physical support may pierce the rolled deck, even before build()
@@ -638,12 +660,18 @@ func pillar_specs(r: int, i: int) -> Array:
 		return []
 	var R: CraftSim.TrackPath = sim.roads[r]
 	var thick := 20.0 + h * 0.02 if high else 14.0
+	if _support_clearance == null:
+		_support_clearance = SupportClearance.new()
+		_support_clearance.setup(sim, shaft, grid, _heights)
 	var out := []
 	for side in 2:
 		var off: float = (-1.0 if side == 0 else 1.0) * (R.w[i] / 2.0 - 30.0)
-		out.append({"id": -(r * 1000000 + i * 2 + side + 1), "r": 0.0, "halfSize": thick / 2.0,
+		var pillar := {"id": -(r * 1000000 + i * 2 + side + 1), "r": 0.0, "halfSize": thick / 2.0,
 			"x": R.px[i] + R.nx[i] * off, "y": R.py[i] + R.ny[i] * off,
-			"zMin": 0.0, "zMax": h - DECK, "vx": 0.0, "vy": 0.0})
+			"zMin": 0.0, "zMax": h - DECK, "vx": 0.0, "vy": 0.0}
+		if not _support_clearance.blocks(r,pillar):
+			out.append(pillar)
+	_pillar_specs_cache[key] = out
 	return out
 
 func _index_pillars() -> void:
