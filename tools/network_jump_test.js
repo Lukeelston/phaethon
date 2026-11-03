@@ -53,7 +53,7 @@ function finishTransfer(r) {
     if (!s.S.pod.offRoad && s.S.pod.path === join.a && (s.S.pod.hint - end) * direction > 50) break;
   }
   assert(!crash && !s.S.pod.offRoad && s.S.pod.path === join.a,
-    `${C.name} completes its interchange onto ${s.T.roads[join.a].name} with throttle/brake controls`);
+    `${C.name} completes its interchange onto ${s.T.roads[join.a].name} with throttle/brake controls: crash=${crash}, offRoad=${s.S.pod.offRoad}, final=${s.T.roads[s.S.pod.path].name}:${s.S.pod.hint}, speed=${Math.hypot(s.S.pod.vx,s.S.pod.vy)*MPH}`);
   console.log(`TRANSFER ${C.name} -> ${s.T.roads[join.a].name} PASS`);
 }
 
@@ -72,6 +72,7 @@ function main() {
       if (kind === 'low') assert(!cat && (ground || r.events.some(e => e.type === 'onroad')), `J${k} under speed misses the raised catch and settles onto ground or a lower road`);
       else {
         assert(cat && cat.road === r.catcher, `J${k} ${kind} catches its intended deck`);
+        assert(r.s.S.bodies.every(b => !b.offRoad), `J${k} ${kind} receives the entire linked craft, not only the pod`);
         if (k < 4) {
           assert(!r.s.S.pod.offRoad && r.s.S.pod.path === r.catcher, `J${k} ${kind} settles on its transfer deck`);
           if (kind === 'minimum') finishTransfer(r);

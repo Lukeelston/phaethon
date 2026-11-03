@@ -1020,9 +1020,15 @@
       const h = roadH(T, b.path, f) + netEdge(a.w, lat)[0], vs = b.vx * a.tx + b.vy * a.ty;
       const dhdt = (roadH(T, b.path, f + vs * dt / a.len) + netEdge(a.w, lat + vl * dt)[0] - h) / dt;
       if (b.lock) {
-        const acc = clamp(LOCK_W * LOCK_W * (h + P.rideH - b.z) - 2 * LOCK_W * (b.vz - dhdt), -LOCK_A, LOCK_A);
-        b.vz += acc * dt; b.z += b.vz * dt;
-        if (Math.abs(b.z - h - P.rideH) < 0.05 && Math.abs(b.vz - dhdt) < 0.5) b.lock = false;
+        if (!afterMove) {
+          const acc = clamp(LOCK_W * LOCK_W * (h + P.rideH - b.z) - 2 * LOCK_W * (b.vz - dhdt), -LOCK_A, LOCK_A);
+          b.vz += acc * dt; b.z += b.vz * dt;
+        }
+        // Soft capture above, hard support at touchdown. The spring alone lets
+        // fast arrivals tunnel; afterMove checks the new surface without a second integration.
+        if (b.z <= h + P.rideH || (Math.abs(b.z - h - P.rideH) < 0.05 && Math.abs(b.vz - dhdt) < 0.5)) {
+          b.z = h + P.rideH; b.vz = dhdt; b.lock = false;
+        }
         b.grip = clamp(1 - (b.z - h - P.rideH - 0.5) / 1.5, 0, 1);
         return;
       }
@@ -1078,8 +1084,14 @@
         const h = roadH(T, n.r, n.i + u) + netEdge(n.w, n.lat)[0], dz = b.z - h - P.rideH;
         // a catch deck only takes what's flying along it: crossing another way's deck you fly on through
         if (R.role === 'catch' && Math.abs(b.vx * a.tx + b.vy * a.ty) < 0.7 * Math.hypot(b.vx, b.vy)) continue;
-        if (dz >= -3 && dz <= (R.role === 'catch' ? JC_REACH : 2.5)) {
-          const vs = b.vx * a.tx + b.vy * a.ty, dhdt = (roadH(T, n.r, n.i + u + vs * dt / a.len) - h) / dt;
+        // A genuine landing supports the nearby linked bodies on this same deck.
+        // It cannot grant an entirely below-lip or transverse craft its first catch.
+        const linkedCatch = R.role === 'catch' && !S.binderBroken && S.bodies.some(other =>
+          other !== b && !other.offRoad && other.path === n.r && Math.abs(other.z-b.z) <= JC_REACH &&
+          (other.x-b.x)**2 + (other.y-b.y)**2 <= 2500);
+        if (dz >= (linkedCatch ? -JC_REACH : -3) && dz <= (R.role === 'catch' ? JC_REACH : 2.5)) {
+          const vs = b.vx * a.tx + b.vy * a.ty, vl = b.vx * a.nx + b.vy * a.ny;
+          const dhdt = (roadH(T, n.r, n.i + u + vs * dt / a.len) + netEdge(n.w, n.lat + vl * dt)[0] - h) / dt;
           b.offRoad = false; b.path = n.r; b.hint = n.i; b.contact = [false, false];
           b.lock = Math.abs(dz) > 0.05 || Math.abs(b.vz - dhdt) > 0.5;
           if (b === S.pod) {
@@ -1089,7 +1101,8 @@
           return;
         }
         if (R.role === 'catch' && dz < -3 && dz > -80) {   // under the deck's lip: turned down
-          const vs = b.vx * a.tx + b.vy * a.ty, dhdt = (roadH(T, n.r, n.i + u + vs * dt / a.len) - h) / dt;
+          const vs = b.vx * a.tx + b.vy * a.ty, vl = b.vx * a.nx + b.vy * a.ny;
+          const dhdt = (roadH(T, n.r, n.i + u + vs * dt / a.len) + netEdge(n.w, n.lat + vl * dt)[0] - h) / dt;
           if (dz > -8) b.z = h + P.rideH - 8;
           if (b.vz > dhdt - 2) b.vz = dhdt - 2;
         }
@@ -1402,8 +1415,8 @@
         if (kt) { const vs = b.vx * kt.tx + b.vy * kt.ty; b.x += reach * vs * kt.tx * dt; b.y += reach * vs * kt.ty * dt; }
         if (carry !== 0) { const c = Math.cos(carry / 2), s = Math.sin(carry / 2), u = b.vx; b.vx = c * u - s * b.vy; b.vy = s * u + c * b.vy; }
         // Match the moved position: a pre-move deck height sinks a climbing craft by speed * dt.
-        // Catch springs and free flight already advanced above; never integrate them twice.
-        if (T.kind === 'network' && !b.offRoad && !b.lock) railHover(b, dt, true);
+        // Catch springs already advanced above; afterMove projects their contact only.
+        if (T.kind === 'network' && !b.offRoad) railHover(b, dt, true);
       }
       if (Pd.health <= 0 && S.crashT <= 0) { S.events.push({ type: 'wreck' }); S.crashT = 1.6; Pd.health = 0; }
       if (T.kind === 'network') { netStep(inp); return; }

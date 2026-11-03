@@ -738,10 +738,16 @@ func _rail_hover(b: Body, dt: float, after_move := false) -> void:
 	var vs := b.vx * R.tx[i] + b.vy * R.ty[i]
 	var dhdt := (road_h(b.path, f + vs * dt / R.len[i]) + net_edge(R.w[i], lat + vl * dt).x - h) / dt
 	if b.lock:
-		var acc := clampf(LOCK_W * LOCK_W * (h + P.rideH - b.z) - 2.0 * LOCK_W * (b.vz - dhdt), -LOCK_A, LOCK_A)
-		b.vz += acc * dt
-		b.z += b.vz * dt
-		if absf(b.z - h - P.rideH) < 0.05 and absf(b.vz - dhdt) < 0.5:
+		if not after_move:
+			var acc := clampf(LOCK_W * LOCK_W * (h + P.rideH - b.z) - 2.0 * LOCK_W * (b.vz - dhdt), -LOCK_A, LOCK_A)
+			b.vz += acc * dt
+			b.z += b.vz * dt
+		# Soft capture above the deck, hard support on contact. A capped spring
+		# alone cannot arrest a fast arrival before it tunnels through the ramp.
+		# Recheck at the moved position without integrating vertical motion twice.
+		if b.z <= h + P.rideH or (absf(b.z - h - P.rideH) < 0.05 and absf(b.vz - dhdt) < 0.5):
+			b.z = h + P.rideH
+			b.vz = dhdt
 			b.lock = false
 		b.grip = clampf(1.0 - (b.z - h - P.rideH - 0.5) / 1.5, 0.0, 1.0)
 		return
@@ -824,9 +830,20 @@ func _free_contact(b: Body, circles: Array, dt: float) -> void:
 		# a catch deck only takes what's flying along it: crossing another way's deck you fly on through
 		if R.role == "catch" and absf(b.vx * R.tx[i] + b.vy * R.ty[i]) < 0.7 * sqrt(b.vx * b.vx + b.vy * b.vy):
 			continue
-		if dz >= -3.0 and dz <= (JC_REACH if R.role == "catch" else 2.5):
+		# The three linked bodies reach the lip at different times. Once one has
+		# genuinely landed, support its nearby companions on that same deck;
+		# otherwise the pod can be riding it with both engines rejected underneath.
+		# This never grants an entirely below-lip or transverse craft a first catch.
+		var linked_catch := false
+		if R.role == "catch" and not binder_broken:
+			for other: Body in bodies:
+				if other != b and not other.off_road and other.path == int(n[0]) and absf(other.z - b.z) <= JC_REACH and (other.x - b.x) * (other.x - b.x) + (other.y - b.y) * (other.y - b.y) <= 2500.0:
+					linked_catch = true
+					break
+		if dz >= (-JC_REACH if linked_catch else -3.0) and dz <= (JC_REACH if R.role == "catch" else 2.5):
 			var vs := b.vx * R.tx[i] + b.vy * R.ty[i]
-			var dhdt := (road_h(n[0], float(i) + u + vs * dt / R.len[i]) - h) / dt
+			var vl := b.vx * R.nx[i] + b.vy * R.ny[i]
+			var dhdt := (road_h(n[0], float(i) + u + vs * dt / R.len[i]) + net_edge(float(n[3]), float(n[2]) + vl * dt).x - h) / dt
 			b.off_road = false
 			b.path = n[0]
 			b.hint = i
@@ -838,7 +855,8 @@ func _free_contact(b: Body, circles: Array, dt: float) -> void:
 			return
 		if R.role == "catch" and dz < -3.0 and dz > -80.0:   # under the deck's lip: turned down
 			var vs2 := b.vx * R.tx[i] + b.vy * R.ty[i]
-			var dhdt2 := (road_h(n[0], float(i) + u + vs2 * dt / R.len[i]) - h) / dt
+			var vl2 := b.vx * R.nx[i] + b.vy * R.ny[i]
+			var dhdt2 := (road_h(n[0], float(i) + u + vs2 * dt / R.len[i]) + net_edge(float(n[3]), float(n[2]) + vl2 * dt).x - h) / dt
 			if dz > -8.0:
 				b.z = h + P.rideH - 8.0
 			if b.vz > dhdt2 - 2.0:
@@ -2286,8 +2304,9 @@ func step(inp: Dictionary, dt: float) -> void:
 			b.vy = cs * cu + cc * b.vy
 		# The renderer uses the moved position. Refresh the hard deck lock there too: keeping
 		# the pre-move height buries a climbing craft by speed * dt (metres at highway speed).
-		# A catch's spring and free flight already advanced above; never integrate them twice.
-		if kind == "network" and not b.off_road and not b.lock:
+		# A catch's spring already advanced above; after_move only projects its
+		# contact onto the moved surface, never integrates it a second time.
+		if kind == "network" and not b.off_road:
 			_rail_hover(b, dt, true)
 	if Pd.health <= 0.0 and crash_t <= 0.0:
 		events.append({"type": "wreck"})
