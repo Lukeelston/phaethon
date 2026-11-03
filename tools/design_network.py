@@ -22,8 +22,8 @@ miles and 1500' up to the entrance of the next ramp"):
   deck. The release's nine minimum speeds (2,000-4,000 mph) and lip angles (5-14 degrees)
   remain varied. Three ascent profiles add terraces, crests and saddles, with 400-1,000 m of
   added rise and gaps up to 50% longer. Catch decks pull out level before their recovery;
-- four central catch roads transfer to the perpendicular highway through short 35 km-radius
-  bends and acceleration straights, overfly it, then descend outside its traffic lanes to merge.
+- four central catch roads transfer to the perpendicular highway through alternating bends,
+  acceleration straights and rolling crests/dips, then descend outside its traffic lanes to merge.
   The other catches merge 44 km beyond their crossing; four carry full recovery rolls in the
   view through NET_TWISTS while retaining the level, drivable simulation path;
 - an on-ramp from the open ground for each city: it starts ON_OUT out on the city's side, short of
@@ -92,7 +92,7 @@ JUMP_PROFILES = [
 TWIST_JUMPS = (4, 8, 12, 16)
 TRANSFER_JUMPS = (0, 1, 2, 3)
 TRANSFER_MERGE, TRANSFER_OUT, TRANSFER_FINAL = 160 * KM, 1 * KM, 2 * KM
-TRANSFER_BEND_R, TRANSFER_BEND_SECONDS = 35 * KM, 11.0
+TRANSFER_BEND_R, TRANSFER_BEND_SECONDS = 25 * KM, 11.0
 # At each selected crossing the exit ramp on your right forks: it curves to the other highway,
 # while its launch spur runs straight on. The first four jumps are true highway transfers.
 JUMP_AT = [(1, 1), (1, 0), (1, 2), (0, 1), (2, 1)]
@@ -215,26 +215,41 @@ class Road:
         return i, lat, float(d[i])
 
 
-def transfer_rhythm(segs, mph):
-    """Replace a wide arc by tangent bends/straights with the same endpoint pose.
+def varied_arc(kind, radius, angle, mode, inner, count):
+    """A forward/reverse/forward bend with exactly the original arc's endpoint.
 
-    For angle a, two radius-r half-arcs plus a straight of
-    2*(R-r)*sin(a/2) have the same displacement as the original radius-R arc.
-    Adjacent half-arcs count together: each continuous bend stays below the
-    driving-time budget; the inserted straights are genuine throttle windows.
+    Symmetry about the half-angle puts the displacement on the original chord.
+    Two forward arcs plus a reverse arc contribute 2*r*sin(a/2)+4*r*sin(w);
+    the remaining chord is a straight at the midpoint of the reverse bend.
     """
+    out = []
+    part = angle / count
+    wiggle = 0.14 * (radius - inner) / inner * part
+    reverse = 'R' if kind == 'L' else 'L'
+    straight = 2 * (radius-inner) * math.sin(math.radians(part/2)) - 4 * inner * math.sin(math.radians(wiggle))
+    assert straight > 0, 'reverse bend must leave positive throttle space'
+    for _ in range(count):
+        out.extend([(kind, inner, part/2+wiggle, mode),
+                    (reverse, inner, wiggle, mode), ('S', straight, 0, mode),
+                    (reverse, inner, wiggle, mode), (kind, inner, part/2+wiggle, mode)])
+    return out
+
+
+def transfer_rhythm(segs, mph):
+    """Alternate steering through wide sweeps, retaining entry/exit poses."""
     out = []
     for kind, radius, angle, mode in segs:
         if kind == 'S':
             out.append((kind, radius, angle, mode))
             continue
-        count = max(1, math.ceil(math.radians(angle) * TRANSFER_BEND_R /
+        # Short final merge curves retain their original smooth shoulder entry.
+        if angle < 20:
+            out.append((kind, radius, angle, mode))
+            continue
+        factor = 1 + 2 * 0.14 * (radius-TRANSFER_BEND_R) / TRANSFER_BEND_R
+        count = max(1, math.ceil(math.radians(angle) * TRANSFER_BEND_R * factor /
                                  (mph * MPH * TRANSFER_BEND_SECONDS)))
-        part = angle / count
-        straight = 2 * (radius - TRANSFER_BEND_R) * math.sin(math.radians(part / 2))
-        for _ in range(count):
-            out.extend([(kind, TRANSFER_BEND_R, part / 2, mode),
-                        ('S', straight, 0, mode), (kind, TRANSFER_BEND_R, part / 2, mode)])
+        out += varied_arc(kind, radius, angle, mode, TRANSFER_BEND_R, count)
     return out
 
 
@@ -539,6 +554,15 @@ def build():
             C.keys = [[0, hc, mc], [ip, top, 0.0], [i_flat, top, 0.0],
                       [middle, destination_h + (top - destination_h) * (0.55 if profile != 1 else 0.82), 0.0],
                       [i_down, destination_h, 0.0], [C.N - 1, destination_h, 0.0]]
+            if jump_id in TRANSFER_JUMPS:
+                first = round(6000.0 / STEP)
+                count = max(4, round((i_flat-first)*STEP/18000.0))
+                amplitude = (420.0, 600.0, 480.0, 700.0)[jump_id]
+                waves = [[first, top, 0.0]]
+                for q in range(1, count):
+                    waves.append([round(first+(i_flat-first)*q/count),
+                                  top + amplitude * (1.0 if q % 2 else -0.3), 0.0])
+                C.keys = C.keys[:2] + waves + C.keys[2:]
             joins.append((len(roads), 1, destination))
             roads.append(C)
             jumps.append((len(roads) - 2, len(roads) - 1, ref, h_lip, top))
@@ -553,6 +577,15 @@ def build():
                 return ("S", q[1], 0, "sp")
             return (out_ if q[0] == "O" else in_, q[1], q[2], "sp")
         segs = [seg(q) for q in half] + [seg(q) for q in reversed(half)]
+        varied = []
+        for kind, radius, angle, mode in segs:
+            if kind == 'S' or angle < 50 or radius <= 6000.0:
+                varied.append((kind, radius, angle, mode))
+            else:
+                # Keep side-road bends above 6 km radius (their existing second-
+                # gear floor), but interrupt hairpins/crooks with counter-steering.
+                varied += varied_arc(kind, radius, angle, mode, max(6000.0, radius*0.70), math.ceil(angle/50.0))
+        segs = varied
         # its length along the highway, walked from nothing: start so its middle lands at mid
         pts, end = walk(segs, 0.0, 0.0, 0.0)
         along = end[0]
@@ -627,8 +660,16 @@ def heights(roads, ew, ns):
             flat = round(RAMP_LEVEL / STEP)
             R.keys = [[0, 0.0, 0.0], [flat, 0.0, 0.0],
                       [R.N - 1 - flat, EXPRESS_H, 0.0], [R.N - 1, EXPRESS_H, 0.0]]
-        elif R.kind == "side" and abs(R.hdeg - 90.0) < 0.01:
-            R.keys = [[0, EXPRESS_H, 0.0], [R.N - 1, EXPRESS_H, 0.0]]
+        elif R.kind == "side":
+            base = EXPRESS_H if abs(R.hdeg - 90.0) < 0.01 else 0.0
+            first = round(12000.0 / STEP)
+            last = R.N - 1 - first
+            # A series of broad crests and low saddles, with level mouths on the
+            # same highway tier. Even ground-tier dips stay above terrain.
+            R.keys = [[0, base, 0.0]]
+            for q, rise in enumerate([0.0, 360.0, 60.0, 430.0, 100.0, 0.0]):
+                R.keys.append([round(first+(last-first)*q/5), base+rise, 0.0])
+            R.keys.append([R.N-1, base, 0.0])
     return [[r, R.keys] for r, R in enumerate(roads) if R.keys]
 
 

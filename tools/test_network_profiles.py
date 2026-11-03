@@ -79,7 +79,7 @@ class NetworkProfiles(unittest.TestCase):
                 self.assertLess(float(road.len[:-1].sum()), 210000.0)
                 for kind, radius, angle, _ in road.segs:
                     if kind != 'S':
-                        self.assertGreaterEqual(radius, 35000.0)
+                        self.assertGreaterEqual(radius, 25000.0)
                         self.assertLess(angle, 180.0)
 
     def test_central_transfer_entry_and_destination_are_preserved(self):

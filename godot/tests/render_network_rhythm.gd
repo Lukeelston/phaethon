@@ -6,9 +6,13 @@ var frame := 0
 var shot := 0
 var output := ""
 var names := ["receiving_deck", "acceleration_straight", "next_bend"]
+var variety := false
 
 func _initialize() -> void:
 	for arg in OS.get_cmdline_user_args():
+		if arg == "--variety":
+			variety = true
+			names = ["transfer_counterbend", "transfer_crest", "transfer_dip", "side_crest"]
 		if arg.begins_with("--out="):
 			output = arg.trim_prefix("--out=")
 	if output.is_empty():
@@ -32,8 +36,12 @@ func _process(_delta: float) -> bool:
 			if child is CanvasLayer:
 				child.hide()
 		var road: int = v.sim.jumps[0][1]
+		if variety:
+			for index in v.sim.roads.size():
+				if v.sim.roads[index].name == ("S5" if shot == 3 else "K1"):
+					road = index
 		var r = v.sim.roads[road]
-		var sample: int = [80, 640, 820][shot]
+		var sample: int = [650, 900, 1600, 1000][shot] if variety else [80, 640, 820][shot]
 		v.sim.respawn_on(road, sample, 1)
 		v.craft.visible = false
 		var x: float = r.px[sample]
