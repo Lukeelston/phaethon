@@ -1,5 +1,5 @@
 PHAETHON
-Experimental Desktop Racer - Windows x64 - v0.1.9
+Experimental Desktop Racer - Windows x64 - v0.2.0
 ElstonWorks
 
 Two engines. One cockpit. We know it's a little fucky.
@@ -88,9 +88,11 @@ copyright. Third-party components and the CC BY engine audio retain their
 own licenses and permissions. See THIRD_PARTY_NOTICES.txt and licenses/.
 Adapted engine audio is also supplied separately in audio/engines/.
 
-Build: 0.1.9-experimental | 2026-11-03
+Build: 0.2.0-experimental | 2026-11-03
 
 IN THIS LOCAL BUILD
-Swept engine fins and tapered fairings, branching electric binder arcs, and
-shorter central highway transfers with the same broad turn radius. Exterior
-dust/vapor is excluded from the cabin volume at high speed.
+Central highway transfers alternate shorter bends with acceleration straights.
+Receiving decks support the complete craft on imperfect angled approaches,
+including fast downward arrivals and the raised pavement edges. Genuine
+below-lip misses still fall through. Aircraft-style cockpit detailing, swept
+engine fairings and branching electric binder arcs remain from the prior build.

@@ -1,5 +1,5 @@
 PHAETHON - EXPERIMENTAL PC VR EDITION
-Windows x64 / OpenXR - v0.1.9 - ElstonWorks
+Windows x64 / OpenXR - v0.2.0 - ElstonWorks
 
 Two engines. One cockpit. We know it's a little fucky.
 
@@ -138,10 +138,11 @@ copyright. Third-party components and the CC BY engine audio retain their
 own licenses and permissions. See THIRD_PARTY_NOTICES.txt and licenses/.
 Adapted engine audio is supplied separately in audio/engines/.
 
-Build: 0.1.9-experimental | 2026-11-03
+Build: 0.2.0-experimental | 2026-11-03
 
 IN THIS LOCAL BUILD
-Aircraft-style console panels, guarded toggles, knurled knobs, machined fittings
-and ribbed grips; swept engine fins and tapered fairings; branching binder arcs.
-Exterior dust/vapor is excluded from the cabin and tracked head. Central highway
-transfers are shorter while retaining the same broad turn radius.
+Central highway transfers alternate shorter bends with acceleration straights.
+Receiving decks support the complete craft on imperfect angled approaches,
+including fast downward arrivals and the raised pavement edges. Genuine
+below-lip misses still fall through. Aircraft-style cockpit detailing, swept
+engine fairings and branching electric binder arcs remain from the prior build.
