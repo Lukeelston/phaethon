@@ -54,15 +54,15 @@ func _run() -> void:
 			secondary[gear].rate < secondary[gear - 1].rate * 0.85)
 		_check("gear %d leaves the airspeed-driven rotor pitch alone" % (gear + 1),
 			absf(rotor_pitch[gear] - rotor_pitch[0]) < 0.001)
-	_check("the gearbox exposes five gears to the audio path", Controls.GEARS.size() == 5)
-	for gear in mini(4, Controls.GEARS.size() - 1):
+	# Starfighter uses profile 0; Speedcraft shifts only between profiles 1-4.
+	for gear in range(1, 4):
 		_reset()
 		await _trace(gear, 0.95, 1440)
 		var before: float = audio.voices[0].at.v8
 		var second_before: float = audio.voices[0].at.second
 		var next_revs: float = 0.95 * Controls.GEARS[gear][2] / Controls.GEARS[gear + 1][2]
 		await _trace(gear + 1, next_revs, 120)
-		_check("upshift %d -> %d drops both engine notes within a second" % [gear + 1, gear + 2],
+		_check("Speedcraft upshift %d -> %d drops both engine notes within a second" % [gear, gear + 1],
 			audio.voices[0].at.v8 < before * 0.98 and audio.voices[0].at.second < second_before * 0.98)
 	_reset()
 	var legacy: Array = await _trace(-1, 1.0, 120, float(sim.P.gate))
@@ -77,7 +77,7 @@ func _run() -> void:
 	var normal: float = audio.voices[0].spool
 	sim.mode = "burner"
 	await _trace(4, 1.0, 360)
-	_check("afterburner still raises RPM beyond fifth gear's normal ceiling",
+	_check("afterburner still raises RPM beyond Speedcraft fourth's normal ceiling",
 		audio.voices[0].spool > normal + 0.1 and audio.voices[0].burn > 0.99)
 	sim.mode = "ramjet"
 	await _trace(4, 1.0, 360)

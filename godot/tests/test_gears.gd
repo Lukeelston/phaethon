@@ -3,7 +3,7 @@
 ## responsiveness in the corners"; then "the gears should rise and fall like actual gears - not just
 ## operate at lower or higher frequencies"):
 ##   shifting    a flick of the right stick up shifts up once (held, no more), back under SHIFT_OFF
-##               re-arms; down shifts down; 1 and 5 are the ends
+##               re-arms; down shifts down; SPEEDCRAFT 1 and 4 are the ends
 ##   box         a full pull is full lever in every gear, the burner only in top; at the same revs the
 ##               low gears pull harder (their ratios); no gearbox is exactly as before
 ##   sawtooth    full levers from a standstill on SPEEDCRAFT, shifting up at the redline: the revs climb
@@ -16,8 +16,8 @@
 ##               late) changing lanes at 3,000 mph on SPEEDCRAFT: top gear overshoots under half as
 ##               far as no gearbox (his flight's wag log: top gear 0.2-0.9 deg/s, first 3.5-8.9)
 ##   corners     top gear at 4,000 mph: a held drop still turns the path faster than the Network's
-##               tightest highway bend needs (2.3 deg/s); the GP on STARFIGHTER in top gear (where its
-##               revs put it) laps without a wall
+##               tightest highway bend needs (2.3 deg/s); the GP on STARFIGHTER in its sole gear
+##               laps without a wall; STARFIGHTER first reaches the full ordinary 443 m/s range
 ## Prints GEARS PASS.
 ## Run: Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_gears.gd
 extends SceneTree
@@ -30,10 +30,6 @@ var fails := 0
 
 
 func _initialize() -> void:
-	if QC.GEARS.size() != 5:
-		_check("five selectable forward gears exist", false)
-		quit(1)
-		return
 	# shifting
 	var q = QC.new()
 	q.scheme = "triggers"
@@ -41,15 +37,15 @@ func _initialize() -> void:
 	var seen := []
 	for y in [0.0, 0.9, 0.95, 0.9, 0.5, 0.2, 0.9, 0.1, 0.9, 0.1, 0.9, 0.1, 0.9, 0.1, -0.9, -0.9, 0.0, -0.9]:
 		q.update(_c(0.5, 0.5, Vector2(0.0, y)), DT)
-		seen.append(q.gear + 1)
-	var want := [1, 2, 2, 2, 2, 2, 3, 3, 4, 4, 5, 5, 5, 5, 4, 4, 4, 3]
+		seen.append(q.display_gear())
+	var want := [1, 2, 2, 2, 2, 2, 3, 3, 4, 4, 4, 4, 4, 4, 3, 3, 3, 2]
 	_check("shifting: right stick flicks %s -> gears %s" % ["up x5, down x2", seen], seen == want)
 	# the box
 	var levers := []
 	var pulls := []
 	var burner_low := false
 	var burner_top := false
-	for g in 5:
+	for g in range(1, 5):
 		var qg = _q(g)
 		var o: Dictionary = {}
 		var vg := 0.5 * float(QC.GEARS[g][2]) * QC.V_TOP_SPEED   # at half its revs
@@ -64,7 +60,7 @@ func _initialize() -> void:
 			burner_low = true
 		if g == 4:
 			burner_top = bool(o.burner)
-		_check("only fifth engages overdrive (gear %d)" % (g + 1), bool(o.get("overdrive", false)) == (g == 4))
+		_check("only Speedcraft fourth engages overdrive (gear %d)" % g, bool(o.get("overdrive", false)) == (g == 4))
 	var q0 = QC.new()
 	q0.scheme = "triggers"
 	var q1 = QC.new()
@@ -78,17 +74,17 @@ func _initialize() -> void:
 		same = same and a.thrL == b.thrL and a.thrR == b.thrR and float(a.get("mul", 1.0)) == 1.0
 	_check("box: a full pull's lever by gear %s, the burner below top gear %s, in top %s; the pull at half revs %s; no gearbox as before %s" % [levers, burner_low, burner_top, pulls, same],
 		levers.all(func(x): return absf(x - QC.FULL) < 0.01) and burner_top and not burner_low
-		and pulls[0] > pulls[1] and pulls[1] > pulls[2] and pulls[2] > pulls[3] and pulls[3] > pulls[4] and same)
+		and pulls[0] > pulls[1] and pulls[1] > pulls[2] and pulls[2] > pulls[3] and same)
 	# the sawtooth
 	var saw := _sawtooth()
 	_check("sawtooth: shifts at %s mph, the engine's spool before each %s and after %s; %.0f mph at the end (top gear)" % [saw[0], saw[1], saw[2], saw[3]],
-		saw[0].size() == 4 and saw[1].all(func(x): return x >= 0.95) and saw[2].all(func(x): return x < 0.82) and saw[3] > 4000.0)
+		saw[0].size() == 3 and saw[1].all(func(x): return x >= 0.95) and saw[2].all(func(x): return x < 0.82) and saw[3] > 4000.0)
 	var lim := _limited()
 	_check("limiter: held in first at full levers, %.0f mph after 20 s (first's redline %.0f), the revs %.2f" % [lim[0], lim[1], lim[2]],
 		absf(lim[0] - lim[1]) < lim[1] * 0.06 and lim[2] > 0.93 and lim[2] < 1.03)
 	# the grab
-	var qg = _q(0)
-	var vg := 0.8 * float(QC.GEARS[1][2]) * QC.V_TOP_SPEED   # in second's band
+	var qg = _q(1)
+	var vg := 0.8 * float(QC.GEARS[2][2]) * QC.V_TOP_SPEED   # in second's band
 	for k in 10:
 		qg.update(_c(0.9, 0.9, Vector2.ZERO, vg), DT)
 	qg.update(_c(0.9, 0.9, Vector2(0.0, 0.9), vg), DT)   # shift up
@@ -111,9 +107,12 @@ func _initialize() -> void:
 		top < none / 2.0)
 	# corners
 	var tr := _turn(4)
-	var gp := _gp(4)
-	_check("corners: top gear at 4,000 mph, a held drop turns the path %.2f deg/s (the highways' tightest bend: 2.28); the ideal pilot on the GP in top gear (STARFIGHTER): %d wall hits, %.1f km in 60 s" % [tr, gp[0], gp[1]],
+	var gp := _gp(0)
+	_check("corners: Speedcraft fourth at 4,000 mph, a held drop turns the path %.2f deg/s (the highways' tightest bend: 2.28); the ideal pilot on the GP in Starfighter first: %d wall hits, %.1f km in 60 s" % [tr, gp[0], gp[1]],
 		tr > 2.8 and gp[0] == 0 and gp[1] > 12.0)
+	var sf_speed := _starfighter_speed()
+	_check("Starfighter first reaches its ordinary full range without unlimited drag: %.2f m/s after 30 s" % sf_speed,
+		sf_speed > 430.0 and sf_speed < 450.0)
 	print("GEARS ", "PASS" if fails == 0 else "FAIL (%d failed)" % fails)
 	quit(0 if fails == 0 else 1)
 
@@ -149,7 +148,7 @@ func _fly(sim, q, lt: float, rt: float) -> Dictionary:
 ## reach 0.95 (where the limiter starts): [mph at each shift, revs just before, revs just after, mph after 45 s].
 func _sawtooth() -> Array:
 	var sim = S.new({"track": "range", "handling": "speed"})
-	var q = _q(0)
+	var q = _q(1)
 	var at := []
 	var before := []
 	var after := []
@@ -169,10 +168,18 @@ func _sawtooth() -> Array:
 ## Held in first at full levers on the range for 20 s: [mph, first's redline mph, revs].
 func _limited() -> Array:
 	var sim = S.new({"track": "range", "handling": "speed"})
-	var q = _q(0)
+	var q = _q(1)
 	for f in int(20.0 / DT):
 		_fly(sim, q, 0.95, 0.95)
-	return [sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy) * MPH, float(QC.GEARS[0][2]) * QC.V_TOP_SPEED * MPH, q.rpm]
+	return [sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy) * MPH, 795.36 * MPH, q.rpm]
+
+
+func _starfighter_speed() -> float:
+	var sim = S.new({"track": "range", "handling": "starfighter"})
+	var q = _q(0)
+	for frame in int(30.0 / DT):
+		_fly(sim, q, 1.0, 1.0)
+	return sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy)
 
 
 ## Luke's corrections: both triggers near full; when the nose looks more than ~1 deg off the way

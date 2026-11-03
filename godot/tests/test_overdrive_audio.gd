@@ -1,4 +1,4 @@
-## Fifth gear must keep rising through the real controls -> view -> engine audio path.
+## Speedcraft fourth keeps rising; Starfighter first stays bounded through the real audio path.
 extends SceneTree
 
 const Sim := preload("res://sim/craft_sim.gd")
@@ -48,7 +48,7 @@ func _run() -> void:
 			await _capture()
 		await _finish()
 		return
-	for handling in ["speed", "starfighter"]:
+	for handling in ["speed"]:
 		sf = 1.0 if handling == "starfighter" else 0.0
 		reference = Controls.V_TOP_SF if sf > 0.0 else Controls.V_TOP_SPEED
 		controls = Controls.new()
@@ -60,10 +60,10 @@ func _run() -> void:
 			await _advance(x, 35.0)
 			targets.append([float(audio.voices[0].at.v8), float(audio.voices[0].at.v12)])
 			played.append(_played_rpm())
-		_check(handling + " full triggers stay at .87 while fifth reaches the audio path",
+		_check(handling + " full triggers stay at .87 while fourth reaches the audio path",
 			absf(view.inp.thrL - 0.87) < 0.001 and absf(view.inp.thrR - 0.87) < 0.001 and view.inp.gearOverdrive and view.inp.gearIndex == 4)
 		for k in range(1, SPEEDS.size()):
-			_check("%s fifth target and played V8/V12 pitch rise at %.1fx reference speed" % [handling, SPEEDS[k]],
+			_check("%s fourth target and played V8/V12 pitch rise at %.1fx reference speed" % [handling, SPEEDS[k]],
 				targets[k][0] > targets[k - 1][0] * 1.01 and targets[k][1] > targets[k - 1][1] * 1.01 and
 				played[k][0] > played[k - 1][0] * 1.01 and played[k][1] > played[k - 1][1] * 1.01)
 		var equal_steps := []
@@ -82,25 +82,25 @@ func _run() -> void:
 		controls.set_gear(3)
 		await _advance(4.0, 2.0)
 		_check(handling + " downshift restores the lower gear's bounded note", _played_rpm()[0] < high[0] * 0.8 and _played_rpm()[1] < high[1] * 0.8 and not view.inp.gearOverdrive)
-		for gear in 4:
+		for gear in range(1, 4):
 			controls.set_gear(gear)
 			await _advance(2.0, 4.0)
 			var lower := _played_rpm()
 			await _advance(8.0, 4.0)
-			_check("%s gear %d keeps its original ceiling" % [handling, gear + 1], absf(_played_rpm()[0] - lower[0]) < 2.0 and absf(_played_rpm()[1] - lower[1]) < 2.0)
+			_check("%s gear %d keeps its original ceiling" % [handling, gear], absf(_played_rpm()[0] - lower[0]) < 2.0 and absf(_played_rpm()[1] - lower[1]) < 2.0)
 		controls.set_gear(4)
 		await _advance(4.0, 20.0)
 		var normal_spool: float = audio.voices[1].spool
 		sim.mode = "burner"
 		await _advance(4.0, 3.0)
-		_check(handling + " afterburner still adds above the uncapped fifth-gear note", audio.voices[1].spool > normal_spool + 0.1)
+		_check(handling + " afterburner still adds above the uncapped fourth-gear note", audio.voices[1].spool > normal_spool + 0.1)
 		sim.mode = "ramjet"
 		await _advance(4.0, 3.0)
 		_check(handling + " ramjet still adds above afterburner", audio.voices[1].spool > normal_spool + 0.25)
 		sim.mode = "normal"
 		repairing = true
 		await _advance(4.0, 2.0)
-		_check(handling + " repair limits even an uncapped fifth-gear target", audio.voices[0].spool < 0.65 and audio.voices[1].spool < 0.65)
+		_check(handling + " repair limits even an uncapped fourth-gear target", audio.voices[0].spool < 0.65 and audio.voices[1].spool < 0.65)
 		repairing = false
 		sim.eL.flameout = true
 		await _advance(4.0, 8.0)
@@ -109,6 +109,15 @@ func _run() -> void:
 		await _advance(4.0, 1.0)
 		_check(handling + " relight still brings the failed side back", audio.voices[0].spool > 0.0 and audio.voices[0].fire > 0.1)
 		print("OVERDRIVE AUDIO METRICS ", handling, ": targets_rpm=", targets, " played_rpm=", played, " equal_speed_steps=", equal_steps)
+	sf = 1.0
+	reference = Controls.V_TOP_SF
+	controls.sync_handling(sf)
+	await _advance(1.2, 20.0)
+	var sf_note := _played_rpm()
+	await _advance(8.0, 20.0)
+	_check("Starfighter first keeps a bounded note and never forwards overdrive", view.inp.gearIndex == 0 and not view.inp.gearOverdrive and absf(_played_rpm()[0] - sf_note[0]) < 2.0 and absf(_played_rpm()[1] - sf_note[1]) < 2.0)
+	await _advance(8.0, 2.0, 0.0)
+	_check("Starfighter throttle lift drops both engine notes", _played_rpm()[0] < sf_note[0] * 0.8 and _played_rpm()[1] < sf_note[1] * 0.8)
 	if capture_dir != "":
 		await _capture()
 	await _finish()

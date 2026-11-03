@@ -88,14 +88,11 @@ const BRAKE_FLOOR_FAST := 0.2    # ... rising to this from 2,000 to 2,500 mph: a
                                  # turns you ~6 deg in 3 s, not ~3 (Luke: "they need a bit more pull - just
                                  # a few degrees on this course"); the grand prix (~1,000 mph) is untouched
 const HOLD_FULL_AT := 0.15  # triggers: the hold is at full strength from this much throttle (lever)
-const GEARS := [[1.5, 1.0, 0.22], [1.3, 0.75, 0.40], [1.16, 0.4, 0.62], [1.06, 0.25, 0.84], [1.0, 0.18, 1.0]]   # [pull, steering, reference speed fraction], gears 1-5; fifth is unlimited
-	# steering: second is the grand prix's (a pilot needs 75% to make its corners); in third a lane
-	# change at ~950 mph overshoots under half as far; in top a dropped trigger at 4,000 mph still
-	# turns the path 4.2 deg/s, where the highways' tightest bend needs 2.3 (tests/test_gears.gd)
-const STEER_SF := [1.0, 1.0, 1.0, 1.0, 1.0]   # STARFIGHTER's steering by gear: whole. The grand prix is raced in third and
-	# top (its redlines are a quarter of SPEEDCRAFT's) at full speed, where its corners need all of it
-	# (75% hit the walls 10 times a minute; tests/test_gears.gd); the gears give it their revs and pull
-const V_TOP_SPEED := 1988.4      # m/s (4,448 mph): SPEEDCRAFT's original reference speed; fifth has no limiter
+const GEARS := [[1.0, 1.0, 1.0], [1.3, 0.75, 0.40], [1.16, 0.4, 0.62], [1.06, 0.25, 0.84], [1.0, 0.18, 1.0]]
+	# [pull, steering, reference speed fraction]. Audio profile 0 is STARFIGHTER's sole gear;
+	# profiles 1-4 are SPEEDCRAFT gears 1-4 (formerly 2-5). Its fourth alone is unlimited.
+	# STARFIGHTER keeps full steering and ordinary drag across its whole speed range.
+const V_TOP_SPEED := 1988.4      # m/s (4,448 mph): SPEEDCRAFT's reference speed; fourth has no limiter
 const V_TOP_SF := 443.0          # m/s (991 mph): STARFIGHTER's
 const LIMIT_X := 0.96            # the limiter starts cutting the pull here (of the redline), all gone at it
 const CLUTCH_T := 0.12           # s: after a shift the clutch is out (the pull dips to CLUTCH_DIP) ...
@@ -129,8 +126,9 @@ var steer_k := 1.0          # triggers: steering bite (the gear's), times the sp
 var thrust_cap := 1.0       # triggers: the most lever a full squeeze gives (the gear's; under 1, no burner)
 var split_rate := 0.0       # triggers: the engines' difference builds at most this fast (per second; 0 = at once)
 var _dif := 0.0             # triggers: the difference as delivered (built at split_rate)
-var gear := -1              # triggers: the gear (0-4, shown 1-5), or -1: no gearbox (full thrust, full steering)
-var rpm := 0.0              # triggers: 0 idle .. 1 reference revs; fifth keeps climbing logarithmically
+var gear := -1              # audio/physics profile: 0 STARFIGHTER, 1-4 SPEEDCRAFT, -1 no gearbox
+var starfighter := false    # the engaged handling, not a queued request above the engagement speed
+var rpm := 0.0              # triggers: 0 idle .. 1 reference revs; SPEEDCRAFT fourth keeps climbing logarithmically
 var pull := 1.0             # triggers: the gearbox's pull now (its ratio, at its revs, under the limiter): the sims' thrMul
 var _shift_t := INF         # s since the last shift (the clutch, then the grab)
 var _shift_dir := 0         # its way: 1 up, -1 down
@@ -139,16 +137,36 @@ var burner := false         # triggers: the burner, lit from the left stick (the
 var _flick_l := false       # the left stick is out from a flick: no more till it's back
 
 
-## Into gear g (0-4; -1: no gearbox); below top gear no burner. (Its steering: _gearbox.)
+## Into profile g (-1 disables the gearbox), constrained to the engaged handling's gears.
 func set_gear(g: int) -> void:
-	gear = clampi(g, -1, GEARS.size() - 1)
-	thrust_cap = 1.0 if gear < 0 or gear == GEARS.size() - 1 else FULL_NO_BURNER
+	gear = -1 if g < 0 else (0 if starfighter else clampi(g, 1, GEARS.size() - 1))
+	thrust_cap = 1.0 if gear < 0 or starfighter or gear == GEARS.size() - 1 else FULL_NO_BURNER
 	if thrust_cap < 1.0:
 		burner = false   # (out of top gear: out)
 	steer_k = 1.0 if gear < 0 else GEARS[gear][1] / GEARS[gear][0]
 	if gear < 0:
 		pull = 1.0
 		rpm = 0.0
+
+
+## Use the simulation's engaged blend (the same midpoint as P.handling). A mode change
+## selects its first gear and requires a fresh stick flick, without a stale clutch kick.
+func sync_handling(sf: float, restart := false) -> void:
+	var next_sf := sf >= 0.5
+	if next_sf == starfighter and not restart:
+		return
+	starfighter = next_sf
+	if gear >= 0:
+		set_gear(0)
+	_shift_t = INF
+	_shift_dir = 0
+	_flick = true
+	_flick_l = true
+	burner = false
+
+
+func display_gear() -> int:
+	return 0 if scheme != "triggers" or gear < 0 else (1 if starfighter else gear)
 
 
 ## The clutch after a shift: out for CLUTCH_T (the pull dips), then it grabs, a surge settling over
@@ -177,21 +195,22 @@ static func engine_spool(revs: float, lever: float, overdrive := false) -> float
 	return rev * (0.35 + 0.65 * clampf(lever, 0.0, 1.0))
 
 
-## The gearbox at speed v (m/s), the handling's top speed v_top and its STARFIGHTER share sf: the
+## The gearbox at speed v (m/s), using the engaged handling's reference speed: the
 ## revs, the pull (the ratio, a torque curve that builds over the first 40% of the revs, the limiter
 ## at the redline), and the steering (SPEEDCRAFT's or STARFIGHTER's for the gear, against the ratio).
-func _gearbox(v: float, v_top: float, sf: float) -> void:
+func _gearbox(v: float) -> void:
 	if gear < 0:
 		return
 	var g: Array = GEARS[gear]
-	steer_k = lerpf(float(g[1]), float(STEER_SF[gear]), clampf(sf, 0.0, 1.0)) / float(g[0])
+	steer_k = float(g[1]) / float(g[0])
+	var v_top := V_TOP_SF if starfighter else V_TOP_SPEED
 	var x: float = v / maxf(1.0, float(g[2]) * v_top)
 	var top := gear == GEARS.size() - 1
-	# Fifth keeps winding beyond its reference speed, with progressively less pitch
+	# SPEEDCRAFT fourth keeps winding beyond its reference speed, with progressively less pitch
 	# change per extra mph. The curve meets the ordinary rev ramp smoothly at x=1.
 	rpm = (x if x <= 1.0 else 1.0 + log(x)) if top else minf(x, 1.08)
 	var torque := 0.8 + 0.2 * smoothstep(0.0, 0.4, x)
-	var limiter := 1.0 if top else 1.0 - smoothstep(LIMIT_X, 1.0, x)
+	var limiter := 1.0 if top or starfighter else 1.0 - smoothstep(LIMIT_X, 1.0, x)
 	pull = float(g[0]) * torque * limiter
 
 
@@ -242,6 +261,7 @@ static func _grip_brake(g: float) -> float:
 ## are HANDS: true on the frame the lever that hand drives crosses the burner gate either way
 ## (the cockpit buzzes that hand), so with crossed triggers the right hand ticks for the left engine.
 func update(c: Dictionary, delta: float) -> Dictionary:
+	sync_handling(float(c.get("sf", 0.0)))
 	var out := {"thrL": 0.0, "thrR": 0.0, "brkL": 0.0, "brkR": 0.0, "shift": 0}
 	match scheme:
 		"triggers":
@@ -250,7 +270,7 @@ func update(c: Dictionary, delta: float) -> Dictionary:
 				if not _flick and absf(sy) > SHIFT_ON:
 					_flick = true
 					var g0 := gear
-					set_gear(gear + (1 if sy > 0.0 else -1))
+					set_gear(maxi(0 if starfighter else 1, gear + (1 if sy > 0.0 else -1)))
 					out.shift = gear - g0
 					if out.shift != 0:
 						_shift_t = 0.0
@@ -270,7 +290,7 @@ func update(c: Dictionary, delta: float) -> Dictionary:
 					burner = false
 			elif absf(ly) < SHIFT_OFF:
 				_flick_l = false
-			_gearbox(float(c.get("speed", 0.0)), float(c.get("vtop", V_TOP_SPEED)), float(c.get("sf", 0.0)))
+			_gearbox(float(c.get("speed", 0.0)))
 			out.grab = _clutch(delta)
 			out.mul = pull if gear >= 0 else 1.0
 			out.rpm = rpm

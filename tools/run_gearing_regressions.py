@@ -1,4 +1,4 @@
-"""Bounded regression set for the five-gear release; keep per-test evidence."""
+"""Bounded regression set for the release; keep per-test evidence."""
 from pathlib import Path
 import json
 import subprocess
@@ -12,6 +12,7 @@ TESTS = [
     'test_quest_controls', 'test_controls_flyable', 'test_xr_focus',
     'test_mode_switch', 'test_track_switch', 'test_dashboard',
     'test_release_input', 'test_release_menu', 'test_release_vr', 'test_vr_menu',
+    'test_mode_gears',
 ]
 results = []
 for name in TESTS:

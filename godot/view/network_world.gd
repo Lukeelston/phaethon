@@ -104,6 +104,9 @@ var _board_mat: ShaderMaterial
 var _end_mat: ShaderMaterial
 var _city_mat: ShaderMaterial
 var _job := {}            # the chunk being built, a slice a frame (_start_chunk, _work)
+var _join_surface_cache := {}     # Vector2(sample, offset), for the current chunk's road
+var _join_hints := {}             # sample -> joining roads and their nearest centreline hints
+var _join_cache_road := -1
 
 
 func build(s, v) -> void:
@@ -239,7 +242,46 @@ func _p(R, ox: float, oy: float, i: int, off: float, h: float) -> Vector3:
 ## Is the wall on side sgn of road r's sample i open (another road joins there: the edge point is
 ## inside its corridor)?
 func _open(r: int, i: int, sgn: float) -> bool:
+	return _joined_surface(r, i, sgn * sim.roads[r].w[i] / 2.0).x < INF
+
+
+## The lowest adjoining surface at an offset across this road. Only declared junctions
+## participate: a highway passing under a flyover must keep its own shoulders.
+## (height, normal.x, normal.y, normal.z), or INF when outside every joining corridor.
+func _joined_surface(r: int, i: int, off: float) -> Vector4:
+	if _join_cache_road != r:
+		_join_surface_cache.clear()
+		_join_hints.clear()
+		_join_cache_road = r
+	var joins := _joining_at(r, i)
+	if joins.is_empty():
+		return Vector4(INF, 0.0, 1.0, 0.0)
+	var key := Vector2(i, off)
+	if _join_surface_cache.has(key):
+		return _join_surface_cache[key]
 	var R = sim.roads[r]
+	var out := Vector4(INF, 0.0, 1.0, 0.0)
+	for join in joins:
+		var q: int = join[0]
+		# Project the lateral offset along the joining road from its exact centre
+		# hint. Its adjacent samples cover the curvature remainder across the road.
+		var m := int(join[1]) + roundi(off * float(join[2]))
+		sim._nearest_on(q, R.px[i] + R.nx[i] * off, R.py[i] + R.ny[i] * off, m, 1)
+		if not sim._n_off and absf(sim._n_lat) < sim._n_w / 2.0 - 1.0:
+			var edge := CraftSim.net_edge(sim._n_w, sim._n_lat)
+			var h: float = sim.net_height(q, sim._n_i + sim._n_t) + edge.x
+			if h < out.x:
+				var bank := signf(sim._n_lat) * sin(edge.y)
+				out = Vector4(h, -sim._n_nx * bank, cos(edge.y), sim._n_ny * bank)
+	_join_surface_cache[key] = out
+	return out
+
+
+func _joining_at(r: int, i: int) -> Array:
+	if _join_hints.has(i):
+		return _join_hints[i]
+	var R = sim.roads[r]
+	var joins := []
 	for k in R.jx:
 		var J: Array = sim.junctions[k]
 		var on_a: bool = int(J[0]) == r
@@ -252,11 +294,10 @@ func _open(r: int, i: int, sgn: float) -> bool:
 		var t1: int = int(J[5]) if on_a else int(J[2])
 		var u := clampf(float(i - z0) / maxf(1.0, float(z1 - z0)), 0.0, 1.0)
 		var m := roundi(t0 + u * (t1 - t0) if int(J[6]) > 0 else t1 - u * (t1 - t0))
-		var hw: float = R.w[i] / 2.0
-		sim._nearest_on(q, R.px[i] + R.nx[i] * sgn * hw, R.py[i] + R.ny[i] * sgn * hw, m, 16)
-		if not sim._n_off and absf(sim._n_lat) < sim._n_w / 2.0 - 1.0:
-			return true
-	return false
+		sim._nearest_on(q, R.px[i], R.py[i], m, 16)
+		joins.append([q, sim._n_i, (R.nx[i] * sim._n_tx + R.ny[i] * sim._n_ty) / sim.roads[q].len[sim._n_i]])
+	_join_hints[i] = joins
+	return joins
 
 
 ## A whole chunk now (tests; the stream builds them a slice at a time, _start_chunk and _work).
@@ -267,9 +308,20 @@ func _build_chunk(r: int, k: int) -> void:
 
 ## The chunk's node, in place (empty) and in `chunks`, and its build in hand.
 func _start_chunk(r: int, k: int) -> void:
+	_join_surface_cache.clear()
+	_join_hints.clear()
+	_join_cache_road = r
 	var R = sim.roads[r]
 	var c0 := k * CH
 	var c1 := mini((k + 1) * CH, R.N - 1)
+	var joins := false
+	for ji in R.jx:
+		var join: Array = sim.junctions[ji]
+		var start := int(join[1]) if int(join[0]) == r else int(join[4])
+		var finish := int(join[2]) if int(join[0]) == r else int(join[5])
+		if c0 <= finish + 4 and c1 >= start - 4:
+			joins = true
+			break
 	var ox: float = R.px[c0]
 	var oy: float = R.py[c0]
 	var node := Node3D.new()
@@ -283,7 +335,7 @@ func _start_chunk(r: int, k: int) -> void:
 		var t := SurfaceTool.new()
 		t.begin(Mesh.PRIMITIVE_TRIANGLES)
 		st.append(t)
-	_job = {"key": key, "r": r, "c0": c0, "c1": c1, "i": c0, "ox": ox, "oy": oy, "node": node, "st": st,
+	_job = {"key": key, "r": r, "c0": c0, "c1": c1, "i": c0, "ox": ox, "oy": oy, "node": node, "st": st, "joins": joins,
 		"n_lamps": 0, "made": false, "signs": _signs.get(key, []), "si": 0, "us": 0, "d": 0.0,
 		"rv": PackedVector3Array(), "rn": PackedVector3Array(), "ru": PackedVector2Array(), "rows": 0, "cols": 0,
 		"u0": fposmod(_s[r][c0], ASPHALT_PERIOD) - _s[r][c0]}   # (the asphalt's u, continuous along the chunk)
@@ -339,11 +391,24 @@ func _sample(J: Dictionary, R, i: int) -> void:
 	if i == int(J.c0):
 		_road_row(J, R, sec, i, hi)
 	_road_row(J, R, sec, j, hj)
+	var open_i := [false, false]
+	var open_j := [false, false]
+	if J.joins and not _joining_at(r, i).is_empty():
+		open_i = [_open(r, i, -1.0), _open(r, i, 1.0)]
+	if J.joins and not _joining_at(r, j).is_empty():
+		open_j = [_open(r, j, -1.0), _open(r, j, 1.0)]
 	for ln in sec.lines:   # the edge lines on the ramps' tops, a dim one at each ramp's foot
+		# An internal shoulder is the junction's drivable opening, not a lane edge.
+		var side := 0 if ln[0] < 0.0 else 1
+		if open_i[side] or open_j[side]:
+			continue
 		_strip(deco, R, ox, oy, i, ln[0], ln[1], hi + 0.04, hj + 0.04, ln[4], ln[2], ln[3])
 	# a flyover's deck: its edges, its underside, its pillars
 	if hi > 4.0 or hj > 4.0:
 		for sgn in [-1.0, 1.0]:
+			var side := 0 if sgn < 0.0 else 1
+			if open_i[side] or open_j[side]:
+				continue
 			var ea := _p(R, ox, oy, i, sgn * hw, hi)
 			var eb := _p(R, ox, oy, j, sgn * hw, hj)
 			_quad(deco, [ea + Vector3.DOWN * DECK, eb + Vector3.DOWN * DECK, eb + Vector3.UP * te, ea + Vector3.UP * te], Color(0.55, 0.55, 0.53))
@@ -359,7 +424,8 @@ func _sample(J: Dictionary, R, i: int) -> void:
 		_hall(J, R, i, hw, hi + te, hj + te)
 	# the walls, the strip on top, the masts
 	for sgn in [-1.0, 1.0]:
-		if _open(r, i, sgn):
+		var side := 0 if sgn < 0.0 else 1
+		if open_i[side]:
 			walls_open += 1
 			continue
 		var wa := _p(R, ox, oy, i, sgn * hw, hi + te)   # (on the ramp's top)
@@ -852,10 +918,23 @@ func _road_row(J: Dictionary, R, sec: Dictionary, s: int, h: float) -> void:
 	var rv: PackedVector3Array = J.rv
 	var rn: PackedVector3Array = J.rn
 	var ru: PackedVector2Array = J.ru
-	for k in o.size():
-		rv.append(mid + left * o[k] + Vector3.UP * hh[k])
-		rn.append(Vector3.UP * cc[k] - left * ss[k])
-		ru.append(Vector2(u, o[k]))
+	if not J.joins or _joining_at(int(J.r), s).is_empty():
+		for k in o.size():
+			rv.append(mid + left * o[k] + Vector3.UP * hh[k])
+			rn.append(Vector3.UP * cc[k] - left * ss[k])
+			ru.append(Vector2(u, o[k]))
+	else:
+		for k in o.size():
+			var height := h + hh[k]
+			var normal := Vector3.UP * cc[k] - left * ss[k]
+			if hh[k] > 0.0:
+				var joined := _joined_surface(int(J.r), s, o[k])
+				if joined.x < height:
+					height = joined.x
+					normal = Vector3(joined.y, joined.z, joined.w)
+			rv.append(mid + left * o[k] + Vector3.UP * (height - h))
+			rn.append(normal)
+			ru.append(Vector2(u, o[k]))
 	J.rv = rv
 	J.rn = rn
 	J.ru = ru

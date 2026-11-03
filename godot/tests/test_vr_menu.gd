@@ -4,8 +4,11 @@
 extends SceneTree
 
 const View := preload("res://view/craft_view.gd")
+const Cockpit := preload("res://vr/vr_cockpit.gd")
 var checks := 0
 var failures := 0
+var prefs_existed := false
+var prefs_before := PackedByteArray()
 
 func _initialize() -> void:
 	_run.call_deferred()
@@ -16,6 +19,9 @@ func check(label: String, ok: bool) -> void:
 	print(("PASS " if ok else "FAIL ") + label)
 
 func _run() -> void:
+	prefs_existed = FileAccess.file_exists(Cockpit.PREFS)
+	if prefs_existed:
+		prefs_before = FileAccess.get_file_as_bytes(Cockpit.PREFS)
 	check("VR main menu scene exists", ResourceLoader.exists("res://release/vr_menu.tscn"))
 	if failures:
 		finish()
@@ -71,7 +77,7 @@ func _run() -> void:
 		var craft = current_scene
 		check(course + " opens requested VR course", craft._track() == course)
 		check(course + " has correct mission", not craft.sim.job.is_empty() if course == "emergency" else craft.sim.job.is_empty())
-		check(course + " starts at idle in first gear", craft.quest.gear == 0 and craft.inp.thrL == 0.0 and craft.inp.thrR == 0.0)
+		check(course + " starts at idle in its handling's first gear", craft.quest.gear == (0 if craft.sim.P.handling == "starfighter" else 1) and craft.inp.thrL == 0.0 and craft.inp.thrR == 0.0)
 		for i in 6:
 			await process_frame
 		check(course + " Start trigger cannot propel the craft", craft.inp.thrL == 0.0 and craft.inp.thrR == 0.0)
@@ -93,6 +99,14 @@ func _run() -> void:
 	finish()
 
 func finish() -> void:
+	if prefs_existed:
+		var prefs := FileAccess.open(Cockpit.PREFS, FileAccess.WRITE)
+		if prefs:
+			prefs.store_buffer(prefs_before)
+			prefs.close()
+		check("VR menu test restores saved preferences", prefs != null and FileAccess.get_file_as_bytes(Cockpit.PREFS) == prefs_before)
+	elif FileAccess.file_exists(Cockpit.PREFS):
+		check("VR menu test removes only preferences it created", DirAccess.remove_absolute(ProjectSettings.globalize_path(Cockpit.PREFS)) == OK)
 	print("VR MENU %s (%d checks, %d failures)" % ["PASS" if failures == 0 else "FAIL", checks, failures])
 	quit(int(failures > 0))
 

@@ -327,3 +327,87 @@ Network, TRACK: network, RECENTER, and menu inputs released. Both controllers
 then reported tracking and trigger-driven flight. This verifies a live
 menu-to-Network transition, alongside Luke's confirmation of the full flow.
 Evidence: evidence/menu-headset.log and Luke's headset acceptance response.
+
+LOCAL 0.1.4 HANDLING GEARS / NETWORK JUNCTIONS - 2026-11-02
+Luke confirmed the progression: one Starfighter gear and four Speedcraft
+gears using former gears 2-5, with the last still unlimited.
+Starfighter now spans its full ordinary speed range with full steering and
+afterburner available. Speedcraft starts in displayed first using the former
+second gear's pull, steering, reference speed and audio profile. Fourth keeps
+the unlimited logarithmic acceleration and rising engine note. Actual handling
+engagement selects first; a Starfighter request above its engagement speed
+leaves the Speedcraft gearbox engaged. Transitions clear stale clutch/burner
+state and require a fresh stick flick before shifting. HUD and telemetry show
+the mode's displayed number. The gear change applies to VR trigger controls.
+
+Network ramp shoulders previously protruded across connected highway lanes.
+Opening the vertical walls alone left the raised shoulder mesh, edge strips
+and deck fascia visible through the craft and across the exit. The renderer
+now lowers overlapping shoulders to the adjoining road surface and omits
+internal edge strips/fascia. Outer shoulders and unrelated flyovers remain.
+Cached centreline projections keep this work within the existing streaming
+budget; the initial unoptimized fix failed that gate and was not packaged.
+
+Source verification:
+- New actual-cockpit mode test reproduced 11 failures before the change;
+  final 13/13 checks pass, including HUD, audio metadata, actual vs queued
+  mode, single-gear Starfighter, respawn and held-stick transition guard.
+- Physical simulation: Starfighter reaches 443.13 m/s in 30 seconds; ideal GP
+  pilot travels 15.0 km in 60 seconds with zero wall hits. Speedcraft first
+  settles at 1,764 mph against a 1,779 mph reference. Shifts at 1,699 / 2,626 /
+  3,554 mph; fourth reaches 6,201 mph after 45 seconds. These are automated
+  simulations, not physical headset reports. Evidence: mode-test-gears.log.
+- Gear audio 32 checks; overdrive audio 21 checks, including bounded
+  Starfighter note/lift and continuing Speedcraft fourth pitch. These verify
+  the existing audio chain; no new PCM listening/capture pass was performed.
+- All 20 combined regression scripts pass with no reported errors:
+  evidence/gearing-regressions.json. VR menu now has 56 passing checks.
+  Both VR menu diagnostics restore saved preference bytes on normal exit.
+- Network regression first found 20,716 raised vertices and up to 3.919 m
+  intrusion. Final: 33,685 vertices and 5,220 asphalt/decorative triangle
+  probes, zero obstructing; worst height 0.020 m (the asphalt render offset).
+  153 real simulated body placements through junctions: zero wall contacts
+  and zero centreline surface mismatch. 28,712 narrow-search offsets agree
+  exactly with the wide reference across all joins.
+  Evidence: evidence/junction_triangles_drive_valid.log.
+- Existing network-world streaming test passes unchanged: zero missing
+  chunks after its 40-frame checks, worst chunk 5.2 ms against the 8 ms limit.
+  Unmodified renderer baseline was 3.5 ms. Evidence:
+  network_world_junction_tight_search.log / network_world_junction_baseline_clean.log.
+- Before/after cockpit renders inspected for highway approach, branch exit
+  and on-ramp merge: evidence/junctions/{before_final,after_final}_*.png.
+  The raised mesh formerly covering the view is gone in the after images.
+- Independent review found no important issues. Its additional 274,610
+  projected search windows found no invalid nearest-search endpoints.
+  Evidence: evidence/reviewer-projection.log.
+
+Physical headset acceptance of these changes: unverified - needs user
+confirmation. Stan still serves v0.1.0; v0.1.4 is a local tuning build.
+
+LOCAL 0.1.4 ARCHIVES
+Desktop: build/Phaethon-Experimental-0.1.4-Windows.zip
+Bytes: 61263034
+SHA256: b16e4d25343b7ef8c520ac1aca0c83c99e0ab79c068c6195b0e0a91c6a4afc9d
+PC VR: build/Phaethon-Experimental-0.1.4-Windows-PCVR.zip
+Bytes: 61335387
+SHA256: fe457274aec5caba7525d949b1890b07e0b10ea989c3b343cb7eb79a327e17a1
+Each archive has 42 allowlisted files; ZIP integrity and fresh-extraction
+hashes passed. Fresh extracted desktop player: 84 checks, zero failures,
+exit 0, no reported errors (v014-desktop-extracted.log). Fresh extracted VR
+player with XR explicitly off: 142 checks, zero failures, exit 0, no reported
+errors (v014-pcvr-extracted.log). The VR diagnostic restored original saved
+preference bytes. Exported menu-panel screenshot inspected; actions fit.
+All 297 original development source files still match their snapshot.
+
+The first source-project menu test ran before preference restoration was
+added, and may have changed that source project's saved handling. The PC VR
+player uses a separate user-data directory and its preferences were restored
+by the packaged diagnostic. No pre-task source preference snapshot was
+available, so its former value was not guessed.
+
+Live launch: extracted v0.1.4 PC VR player replaced the v0.1.3 process, with
+Network preselected and no automatic shutdown timer. Evidence/v014-headset.log
+records OpenXR initialized on the Oculus runtime, xr_ready=true, startup menu,
+and menu ready. The stereo object-picking warning is logged; menu controller
+input uses the existing explicit XR handling. A process check found only the
+intentionally open v0.1.4 player (PID 84796), with no Godot/test processes.

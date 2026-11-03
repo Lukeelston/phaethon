@@ -11,6 +11,8 @@ var failures := 0
 var evidence := ""
 var _started_ms := 0
 var _finished := false
+var _prefs_existed := false
+var _prefs_before := PackedByteArray()
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
@@ -54,6 +56,9 @@ func shot(name: String) -> void:
 	check(name + " VR scene screenshot saved", image.save_png(evidence.path_join("pcvr-" + name + ".png")) == OK)
 
 func _run() -> void:
+	_prefs_existed = FileAccess.file_exists(Cockpit.PREFS)
+	if _prefs_existed:
+		_prefs_before = FileAccess.get_file_as_bytes(Cockpit.PREFS)
 	var xr := XRServer.find_interface("OpenXR")
 	var xr_live := xr != null and xr.is_initialized()
 	if OS.has_feature("template"):
@@ -110,7 +115,7 @@ func _run() -> void:
 		check(stop + " controller trackers are assigned", view.hands.left.tracker == &"left_hand" and view.hands.right.tracker == &"right_hand")
 		check(stop + " cockpit instruments are constructed", view.interior != null and view.dashboard != null and view.mode_switch != null and view.canopy != null and view.minimap_panel != null)
 		check(stop + " uses default or saved control scheme", view.quest.scheme == expected_scheme)
-		check(stop + " starts in first gear", view.quest.gear == 0)
+		check(stop + " starts in its handling's first gear", view.quest.gear == (0 if view.sim.P.handling == "starfighter" else 1))
 		check(stop + " remains an explicitly flat diagnostic", not get_viewport().use_xr)
 		var before: float = view.sim.time
 		var start := Vector2(view.sim.pod.x, view.sim.pod.y)
@@ -121,7 +126,8 @@ func _run() -> void:
 		if view.quest.scheme == "triggers":
 			view.quest.set_gear(4)
 			await frames(2)
-			check(stop + " fifth reaches physics and audio", bool(view.inp.get("gearOverdrive", false)) and view._engine_inp().get("gearIndex", -1) == 4)
+			var speed_mode: bool = view.sim.P.handling == "speed"
+			check(stop + " top gear reaches physics and audio for the actual handling", bool(view.inp.get("gearOverdrive", false)) == speed_mode and view._engine_inp().get("gearIndex", -1) == (4 if speed_mode else 0))
 			view.quest.set_gear(3)
 			await frames(2)
 			check(stop + " downshift disables overdrive", not bool(view.inp.get("gearOverdrive", true)))
@@ -158,6 +164,14 @@ func _finish() -> void:
 	_finished = true
 	for code in [KEY_E, KEY_X, KEY_ESCAPE]:
 		key(code, false)
+	if _prefs_existed:
+		var prefs := FileAccess.open(Cockpit.PREFS, FileAccess.WRITE)
+		if prefs:
+			prefs.store_buffer(_prefs_before)
+			prefs.close()
+		check("VR diagnostic restores saved preferences", prefs != null and FileAccess.get_file_as_bytes(Cockpit.PREFS) == _prefs_before)
+	elif FileAccess.file_exists(Cockpit.PREFS):
+		check("VR diagnostic removes only preferences it created", DirAccess.remove_absolute(ProjectSettings.globalize_path(Cockpit.PREFS)) == OK)
 	print("EXPORTED VR RELEASE %s (%d checks, %d failures)" % ["PASS" if failures == 0 else "FAIL", checks, failures])
 	print("PHYSICAL VR UNVERIFIED: headset tracking, stereo rendering, controller feel and comfort still need a headset session.")
 	get_tree().quit(0 if failures == 0 else 1)

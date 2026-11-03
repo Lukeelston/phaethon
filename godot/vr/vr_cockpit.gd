@@ -95,6 +95,7 @@ func _ready() -> void:
 	if not forced and not sim.course and prefs.get("handling", "speed") != sim.P.handling:
 		set_handling(prefs.handling)
 	handling_ask = sim.P.handling
+	quest.sync_handling(sim.hblend)
 	_scheme_flash = 6.0
 	if wind_audio:
 		wind_audio.boomed.connect(_on_boom)
@@ -134,7 +135,7 @@ func recenter() -> void:
 func _respawn() -> void:
 	super()
 	if quest.gear >= 0:
-		quest.set_gear(0)
+		quest.sync_handling(sim.hblend, true)
 
 
 ## The forcefield flares round the nose in the headset too.
@@ -479,7 +480,7 @@ func _read_input(delta: float) -> void:
 	var c := {"lt": _axis(l, "trigger"), "rt": _axis(r, "trigger"), "lg": _axis(l, "grip"), "rg": _axis(r, "grip"),
 		"ls": _stick(l, "primary"), "rs": _stick(r, "primary"), "lz": l.position.z, "rz": r.position.z,
 		"speed": sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy), "yaw": (sim.eL.w + sim.eR.w) / 2.0,
-		"vtop": lerpf(QuestControlsScript.V_TOP_SPEED, QuestControlsScript.V_TOP_SF, sim.hblend), "sf": sim.hblend}
+		"sf": sim.hblend}
 	var q: Dictionary = quest.update(c, delta)
 	if q.shift != 0:   # a shift: a click in the right hand (up firmer than down)
 		_buzz(r, 0.8 if q.shift > 0 else 0.5, 0.05 if q.shift > 0 else 0.03)
@@ -679,7 +680,7 @@ func _process(delta: float) -> void:
 		_w_sum[k] = _w_sum.get(k, 0.0) + parts[k]
 	var yaw: float = (sim.eL.w + sim.eR.w) / 2.0
 	var spd: float = sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy)
-	var gear_shown: int = quest.gear + 1 if quest.scheme == "triggers" and quest.gear >= 0 else 0
+	var gear_shown: int = quest.display_gear()
 	wag.add(delta, yaw, spd, gear_shown)
 	wag_all.add(delta, yaw, spd, gear_shown)
 	report_t += delta
@@ -764,7 +765,7 @@ func _update_hud() -> void:
 		"health": [sim.eL.health, sim.eR.health],
 		"flameout": [sim.eL.flameout, sim.eR.flameout], "battery": sim.battery,
 		"burner": sim.mode == "burner", "armed": sim.armed, "ramjet": sim.mode == "ramjet",
-		"gear": quest.gear + 1 if quest.scheme == "triggers" and quest.gear >= 0 else 0,
+		"gear": quest.display_gear(), "overdrive": bool(inp.get("gearOverdrive", false)),
 		"blink": (Time.get_ticks_msec() / 250) % 2 == 0,
 	})
 

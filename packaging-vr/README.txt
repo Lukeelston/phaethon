@@ -1,5 +1,5 @@
 PHAETHON - EXPERIMENTAL PC VR EDITION
-Windows x64 / OpenXR - v0.1.3 - ElstonWorks
+Windows x64 / OpenXR - v0.1.4 - ElstonWorks
 
 Two engines. One cockpit. We know it's a little fucky.
 
@@ -33,8 +33,8 @@ Both triggers       Squeeze gently to accelerate; release to ease off
 Right harder        Steer right (it drives the opposite engine)
 Left harder         Steer left
 Both grip buttons   Air brakes; individual grips brake their own side
-Right stick up/down Shift through gears 1-5 (starts in first)
-Left stick up/down  Afterburner on/off; needs fifth gear
+Right stick up/down Speedcraft gears 1-4; Starfighter stays in its single gear
+Left stick up/down  Afterburner on/off; Starfighter or Speedcraft fourth gear
 A                   Reignite engines
 B                   Arm ramjet
 X                   Hold to repair
@@ -44,13 +44,14 @@ Either stick click  Recenter view and seat height
 Left menu tap       Cycle control schemes
 Left menu hold 1.5s  Return to main menu / map selection (ends this run)
 
-Each higher gear winds up more slowly and reaches a higher engine note.
-Upshifts drop the revs before the next climb. Gears 1-4 have limiters; fifth
-keeps gaining speed at full throttle, with progressively smaller gains.
-Speed grows logarithmically instead of hitting a fixed top speed. Air brakes
-still work; plan the stop earlier as speed rises.
-Fifth's engine note also keeps climbing beyond its old redline, with gradually
-smaller pitch gains as speed increases.
+Starfighter has one gear covering its full normal speed range. Switching into
+Speedcraft selects first gear, which starts where the old second gear did.
+Speedcraft has four gears. Each higher gear winds up more slowly and reaches
+a higher engine note. Upshifts drop the revs before the next climb.
+Speedcraft gears 1-3 have limiters; fourth keeps gaining speed at full throttle,
+with progressively smaller gains. Its engine note also keeps rising.
+Air brakes still work; plan the stop earlier as speed rises.
+Starfighter retains ordinary aerodynamic drag and does not use overdrive.
 
 Above 1,500 mph the speed shield powers up and muffles the wind. Its low
 reverberation holds its pitch; a separate tone rises with your actual speed.
@@ -108,4 +109,4 @@ copyright. Third-party components and the CC BY engine audio retain their
 own licenses and permissions. See THIRD_PARTY_NOTICES.txt and licenses/.
 Adapted engine audio is supplied separately in audio/engines/.
 
-Build: 0.1.2-experimental | 2026-11-02
+Build: 0.1.4-experimental | 2026-11-02
