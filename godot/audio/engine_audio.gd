@@ -22,8 +22,9 @@
 ## like twin engines that never quite sync. Lifting off at high revs spits pops and crackle
 ## for a moment. The spool is a spring: a lever stab revs up in ~0.15 s, flares ~11% past the
 ## lever and barks (+3 dB for a moment); lifting settles clean, with no undershoot.
-## With a gearbox, each higher gear has a higher note ceiling and a slower rise. Only the
-## upward spool speed is limited: lifts and upshifts still drop the note on the same spring.
+## With a gearbox, each higher gear has a higher reference note and a slower rise. Fifth
+## continues beyond that note with speed. Only upward spool speed is limited: lifts and
+## upshifts still drop the note on the same spring.
 ## flat (tests) switches all three off: it isolates the crossfader.
 ##   add_child(audio); audio.setup(sim)    once, inside the tree
 ##   audio.update(inp, delta)              every frame, after the sim steps
@@ -43,8 +44,9 @@ const TUNE := {
 	# The spool is a spring: [rising, falling]. Rising is snappy and flares ~11% past the lever
 	# (90% of a stab in 0.14 s); falling is critically damped, so a lift settles clean.
 	"rev_w": [16.0, 7.0], "rev_z": [0.65, 1.0],
-	# Audio only: progressively higher ceilings and longer wind-ups in gears 1-5. Inputs
-	# without gearIndex keep the original spring. Boost adds above the gear's normal ceiling.
+	# Audio only: progressively higher reference notes and longer wind-ups in gears 1-5.
+	# Fifth accepts an uncapped gearSpool target. Inputs without gearIndex keep the original
+	# spring. Boost adds above the gear's current rev target.
 	"gear_spool": [0.60, 0.70, 0.80, 0.90, 1.0],
 	"gear_rise": [0.55, 0.38, 0.27, 0.19, 0.13],   # maximum positive spool change per second
 	"bark_db": 3.0, "bark_s": 0.15,  # a quick stab barks: up to +3 dB, gone in 0.15 s
@@ -279,6 +281,7 @@ func update(inp: Dictionary, delta: float) -> void:
 		gear = mini(gear, TUNE.gear_spool.size() - 1)
 		ceiling = TUNE.gear_spool[gear]
 		rise_rate = TUNE.gear_rise[gear]
+	var overdrive := bool(inp.get("gearOverdrive", false)) and gear == TUNE.gear_spool.size() - 1
 	var duck := 0.0 if sim.crash_t > 0.0 else 1.0   # crash: the engines go with the picture
 	var bodies := [sim.eL, sim.eR]
 	var thr := [inp.thrL, inp.thrR]
@@ -291,9 +294,11 @@ func update(inp: Dictionary, delta: float) -> void:
 		var v: Dictionary = voices[k]
 		var e = bodies[k]
 		var lever := minf(thr[k], gate) / gate
+		var rev_target: float = float(inp.get("gearSpoolL" if k == 0 else "gearSpoolR", lever)) if overdrive else lever
 		if inp.get("repair", false):
 			lever = minf(lever, 0.6)
-		var running_target: float = lever * ceiling + boost
+			rev_target = minf(rev_target, 0.6)
+		var running_target: float = rev_target * ceiling + boost
 		var target: float = -0.33 if e.flameout else running_target
 		if e.flameout or v.spool < 0.0:
 			# winding down from a flameout, or relighting from below idle: no flare
@@ -379,7 +384,7 @@ func update(inp: Dictionary, delta: float) -> void:
 				_:
 					at = layer_at(layer, s)
 			v.at[layer] = at
-			_drive(v.players[layer], layer, at, g)
+			_drive(v.players[layer], layer, at, g, overdrive and layer in ["v8", "v12", "second", "turbine"])
 
 
 ## One side of the second engine: off, waiting its turn (the right side lights a beat after the
@@ -518,12 +523,13 @@ static func crossfade(ats: PackedFloat64Array, rhos: PackedFloat64Array, at: flo
 
 ## Every level of the layer is pitched every frame, audible or not. A master's levels all get
 ## the identical pitch, which is what keeps them in lockstep.
-func _drive(players: Array, layer: String, at: float, gain: float) -> void:
+func _drive(players: Array, layer: String, at: float, gain: float, overdrive := false) -> void:
 	var ats: PackedFloat64Array = _bands[layer]
 	var w := crossfade(ats, _rho[layer], at)
 	var rate_at: float = _rate_at[layer]
 	for i in ats.size():
 		var p: AudioStreamPlayer = players[i]
-		p.pitch_scale = clampf(at / (rate_at if rate_at > 0.0 else ats[i]), 0.01, 16.0)
+		var pitch := at / (rate_at if rate_at > 0.0 else ats[i])
+		p.pitch_scale = maxf(pitch, 0.01) if overdrive else clampf(pitch, 0.01, 16.0)
 		var lin := w[i] * gain
 		p.volume_db = linear_to_db(lin) if lin > 1e-4 else -80.0

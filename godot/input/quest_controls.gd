@@ -130,7 +130,7 @@ var thrust_cap := 1.0       # triggers: the most lever a full squeeze gives (the
 var split_rate := 0.0       # triggers: the engines' difference builds at most this fast (per second; 0 = at once)
 var _dif := 0.0             # triggers: the difference as delivered (built at split_rate)
 var gear := -1              # triggers: the gear (0-4, shown 1-5), or -1: no gearbox (full thrust, full steering)
-var rpm := 0.0              # triggers: the gearbox's revs, 0 idle .. 1 redline (a little past it over-revved, or on the burner in top)
+var rpm := 0.0              # triggers: 0 idle .. 1 reference revs; fifth keeps climbing logarithmically
 var pull := 1.0             # triggers: the gearbox's pull now (its ratio, at its revs, under the limiter): the sims' thrMul
 var _shift_t := INF         # s since the last shift (the clutch, then the grab)
 var _shift_dir := 0         # its way: 1 up, -1 down
@@ -172,8 +172,9 @@ func _clutch(delta: float) -> float:
 ## The engine sound's spool with the gearbox (view: CraftView._engine_inp): the gear's revs, eased by
 ## how hard you're on that lever (0..1): lifting off drops the note toward idle, the revs stay with
 ## the speed. Climbs through each gear, falls at each upshift.
-static func engine_spool(revs: float, lever: float) -> float:
-	return clampf(revs, 0.0, 1.08) * (0.35 + 0.65 * clampf(lever, 0.0, 1.0))
+static func engine_spool(revs: float, lever: float, overdrive := false) -> float:
+	var rev := maxf(revs, 0.0) if overdrive else clampf(revs, 0.0, 1.08)
+	return rev * (0.35 + 0.65 * clampf(lever, 0.0, 1.0))
 
 
 ## The gearbox at speed v (m/s), the handling's top speed v_top and its STARFIGHTER share sf: the
@@ -186,7 +187,9 @@ func _gearbox(v: float, v_top: float, sf: float) -> void:
 	steer_k = lerpf(float(g[1]), float(STEER_SF[gear]), clampf(sf, 0.0, 1.0)) / float(g[0])
 	var x: float = v / maxf(1.0, float(g[2]) * v_top)
 	var top := gear == GEARS.size() - 1
-	rpm = minf(x, 1.08)
+	# Fifth keeps winding beyond its reference speed, with progressively less pitch
+	# change per extra mph. The curve meets the ordinary rev ramp smoothly at x=1.
+	rpm = (x if x <= 1.0 else 1.0 + log(x)) if top else minf(x, 1.08)
 	var torque := 0.8 + 0.2 * smoothstep(0.0, 0.4, x)
 	var limiter := 1.0 if top else 1.0 - smoothstep(LIMIT_X, 1.0, x)
 	pull = float(g[0]) * torque * limiter

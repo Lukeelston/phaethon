@@ -1,5 +1,5 @@
 PHAETHON - EXPERIMENTAL PC VR EDITION
-Windows x64 / OpenXR - v0.1.1 - ElstonWorks
+Windows x64 / OpenXR - v0.1.2 - ElstonWorks
 
 Two engines. One cockpit. We know it's a little fucky.
 
@@ -46,6 +46,8 @@ Upshifts drop the revs before the next climb. Gears 1-4 have limiters; fifth
 keeps gaining speed at full throttle, with progressively smaller gains.
 Speed grows logarithmically instead of hitting a fixed top speed. Air brakes
 still work; plan the stop earlier as speed rises.
+Fifth's engine note also keeps climbing beyond its old redline, with gradually
+smaller pitch gains as speed increases.
 
 Above 1,500 mph the speed shield powers up and muffles the wind. Its low
 reverberation holds its pitch; a separate tone rises with your actual speed.
@@ -100,4 +102,4 @@ copyright. Third-party components and the CC BY engine audio retain their
 own licenses and permissions. See THIRD_PARTY_NOTICES.txt and licenses/.
 Adapted engine audio is supplied separately in audio/engines/.
 
-Build: 0.1.1-experimental | 2026-11-02
+Build: 0.1.2-experimental | 2026-11-02

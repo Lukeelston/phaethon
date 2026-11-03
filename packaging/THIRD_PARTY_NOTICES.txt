@@ -16,7 +16,7 @@ License: https://godotengine.org/license/
 
 Engine audio - Salamander Grand Piano
 ------------------------------------
-The 24 engine-loop and one-shot WAV files in audio/engines are adaptations of
+The 33 engine-loop and one-shot WAV files in audio/engines are adaptations of
 Salamander Grand Piano V3 (Yamaha C5), recorded by Alexander Holm, from the
 FreePats SFZ+FLAC V3+20200602 edition assembled by Roberto for FreePats.
 
@@ -33,6 +33,8 @@ combustion pulses and pops; sustained notes become turbine and rotor tones;
 damper releases become noise and crackle. The adaptations include band-limited
 copies for pitch shifting. They are engine sound effects, not the original
 playable piano instrument. No endorsement by the original authors is implied.
+tools/extend_overdrive_audio.py adds further filtered copies for higher pitches
+and extends the filtering of the previous highest copies across new crossfades.
 
 These adapted audio files are provided under CC BY 3.0. Any general terms for
 the game do not restrict the rights granted by that license for this material.

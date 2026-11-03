@@ -204,3 +204,61 @@ remained and the user's Meta runtime was left running. Log: evidence/shield-head
 New shield/gear subjective feel: unverified - needs user confirmation.
 All 297 original development source files still match the snapshot.
 Version 0.1.1 is packaged locally; the live Stan attachments remain v0.1.0.
+
+VERSION 0.1.2 - FIFTH-GEAR ENGINE NOTE
+Luke's subsequent headset feedback identified a real defect in v0.1.1: fifth
+kept accelerating but its engine note plateaued. The earlier audio test ended
+at the reference redline and did not exercise this path beyond it.
+
+Fixed the three-layer rev clamp: fifth's gearbox revs now continue as 1+log(x)
+above reference speed x=1; the view passes separate uncapped audio spool targets;
+EngineAudio accepts those targets only for fifth overdrive and removes its 16x
+playback clamp for the four tonal engine layers in that case. Normalized gain
+and load inputs remain bounded. Repair, lift, downshift, boost, and flameout
+responses remain active. Physics and the speed-shield implementation are unchanged.
+
+Extended anti-alias sample levels to 64x playback for V8/V12, 16x for the second
+engine, and 20x for the turbine. These are filter-design ranges, not playback
+limits. Refiltered the previous final levels too, so they remain safe throughout
+their fade into new levels. The generator measures correlated mixed transitions;
+worst energy above the 20 kHz playback margin was 1.15e-8 of total. Nine new WAVs
+are included, with updated attribution. Eight early levels remain byte-identical.
+All 33 WAV imports are PCM16; actual loaded tonal resources were checked for
+mono format, forward looping, and identical frame lengths within each layer.
+
+Verification: initial regression reproduced the plateau; final behavioral checks
+32/32 passed in both handling modes, plus 17 final capture/import checks. Ten
+fresh solo V8/V12 recordings passed actual PCM pitch analysis with ~0.01% error.
+At 1.2 / 2 / 3 / 4 / 8 times reference speed, captured V8 notes were respectively
+584.8 / 813.0 / 994.1 / 1122.6 / 1432.3 Hz; V12 notes were
+1365.8 / 1908.4 / 2339.1 / 2644.6 / 3380.8 Hz. No plateau or clipping occurred.
+Equal-speed pitch increments decrease. The new test also verifies lower-gear
+ceilings, throttle lift, downshift, repair, flameout/relight, burner and ramjet.
+Existing gear-audio checks 34/34 and gear/control checks 12/12 passed.
+Legacy engine capture: 26/26 PCM16 loops, 30.5 seconds, peak -1.0 dBFS,
+RMS -15.8 dBFS, no clipping. The legacy harness logged 107 ObjectDB cleanup
+warnings; the new capture harness logged 78. Behavioral checks exited cleanly.
+Independent review found no remaining material defects after the filter and
+import fixes. Captures: evidence/overdrive-audio-final/; analysis is reproduced
+with tools/check_overdrive_audio.py and that directory's captures.json.
+
+Version 0.1.2 headset listening: unverified - needs user confirmation.
+Secondary-engine/turbine pitch extensions were checked through code, imported
+resources and filter analysis, without separate new solo PCM captures.
+Filter behavior beyond the extended ranges above was not validated.
+All 297 original development files still match their pre-release snapshot.
+
+LOCAL 0.1.2 ARCHIVES
+Desktop: build/Phaethon-Experimental-0.1.2-Windows.zip
+Bytes: 61258889
+SHA256: 6e336b170723c5b0cf7cedc2255e19d4cc23e0efc73b1b5bb6299b0ce98c783d
+PC VR: build/Phaethon-Experimental-0.1.2-Windows-PCVR.zip
+Bytes: 61320743
+SHA256: 4b624685a9463cab9eac2cd58edc76c1f746f07820f02ea903fce6041fc1a97f
+Each archive contains 42 allowlisted files and passes ZIP integrity plus
+fresh-extraction hashes. Earlier versioned ZIPs are preserved.
+Stan still serves v0.1.0; these are local tuning builds.
+Fresh extracted v0.1.2 desktop player: 54 checks, 0 failures, exit 0.
+Fresh extracted v0.1.2 PC VR player: 109 checks, 0 failures, exit 0; its diagnostic
+logged 91 ObjectDB cleanup warnings. No Godot/Phaethon test processes remained
+after validation. No new headset run was performed for v0.1.2.

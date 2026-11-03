@@ -22,3 +22,16 @@
 
 ## Review focus
 No fifth-gear ceiling hidden in drag; no free acceleration with throttles released; physical brakes still overpower thrust; no burner in gears 1–4; no audio-rate change to desktop or other VR control schemes; stable high-speed simulation and no falsely claimed listening test.
+
+## Follow-up: fifth's engine note also keeps climbing
+Luke's headset feedback exposed an incomplete requirement: speed kept rising, but the final
+gear's engine note still plateaued. Trace and remove the final-gear clamps from the gearbox,
+audio mapping and playback pitch, preserving limits in the first four gears and legacy input.
+Fifth's rev signal is linear through its reference speed, then grows logarithmically beyond it.
+Use a separate audio spool target so high revs cannot inflate normalized loudness/load inputs.
+Keep repair, lift, flameout, boost, and shift-down behavior.
+
+- [x] Reproduce plateau through actual controls -> view -> audio path.
+- [x] Remove all fifth-gear pitch ceilings; verify actual recorded pitch past the old maximum.
+- [x] Check high-pitch anti-alias levels and preserve lower-gear/legacy behavior.
+- [x] Rebuild/package v0.1.2 and verify extracted players; record limitations and commit.

@@ -360,10 +360,14 @@ func _engine_inp() -> Dictionary:
 		return inp
 	var gate: float = sim.P.gate
 	var out := inp.duplicate()
+	var overdrive := bool(inp.get("gearOverdrive", false)) and int(inp.get("gearIndex", -1)) == 4
 	for k in ["thrL", "thrR"]:
 		var lever := minf(float(inp[k]), gate) / gate
-		var spool: float = preload("res://input/quest_controls.gd").engine_spool(float(inp.gearRpm), lever)
+		var spool: float = preload("res://input/quest_controls.gd").engine_spool(float(inp.gearRpm), lever, overdrive)
 		out[k] = (spool * gate) if float(inp[k]) < gate else float(inp[k])   # (the burner's detent: as it was)
+		if overdrive and float(inp[k]) < gate:
+			# Audio-only rev target: normalized levers still govern gains/load and repair.
+			out["gearSpoolL" if k == "thrL" else "gearSpoolR"] = spool
 	return out
 
 

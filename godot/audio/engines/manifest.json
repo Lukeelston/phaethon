@@ -20,16 +20,26 @@
     {
      "file": "v8_mip2.wav",
      "at": 3200.0,
-     "rho_next": 0.9989
+     "rho_next": 0.9938
     },
     {
      "file": "v8_mip3.wav",
      "at": 6400.0,
-     "rho_next": 1.0
+     "rho_next": 0.9578
     },
     {
      "file": "v8_mip4.wav",
-     "at": 12800.0
+     "at": 12800.0,
+     "rho_next": 0.7908
+    },
+    {
+     "file": "v8_mip5.wav",
+     "at": 25600.0,
+     "rho_next": 1.0
+    },
+    {
+     "file": "v8_mip6.wav",
+     "at": 51200.0
     }
    ],
    "cyl": 8,
@@ -53,16 +63,26 @@
     {
      "file": "v12_mip2.wav",
      "at": 4000.0,
-     "rho_next": 0.9497
+     "rho_next": 0.9452
     },
     {
      "file": "v12_mip3.wav",
      "at": 8000.0,
-     "rho_next": 1.0
+     "rho_next": 0.845
     },
     {
      "file": "v12_mip4.wav",
-     "at": 16000.0
+     "at": 16000.0,
+     "rho_next": 0.8864
+    },
+    {
+     "file": "v12_mip5.wav",
+     "at": 32000.0,
+     "rho_next": 1.0
+    },
+    {
+     "file": "v12_mip6.wav",
+     "at": 64000.0
     }
    ],
    "cyl": 12,
@@ -85,7 +105,17 @@
     },
     {
      "file": "second_mip2.wav",
-     "at": 12000.0
+     "at": 12000.0,
+     "rho_next": 0.9992
+    },
+    {
+     "file": "second_mip3.wav",
+     "at": 24000.0,
+     "rho_next": 1.0
+    },
+    {
+     "file": "second_mip4.wav",
+     "at": 48000.0
     }
    ],
    "cyl": 4,
@@ -98,7 +128,22 @@
    "bands": [
     {
      "file": "turbine_mip0.wav",
-     "at": 0.25
+     "at": 0.25,
+     "rho_next": 0.9975
+    },
+    {
+     "file": "turbine_mip1.wav",
+     "at": 1.25,
+     "rho_next": 0.9859
+    },
+    {
+     "file": "turbine_mip2.wav",
+     "at": 2.5,
+     "rho_next": 1.0
+    },
+    {
+     "file": "turbine_mip3.wav",
+     "at": 5.0
     }
    ],
    "blade_hz": 2400.0
