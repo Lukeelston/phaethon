@@ -133,8 +133,12 @@ func _run() -> void:
 		check(stop + " remains an explicitly flat diagnostic", not get_viewport().use_xr)
 		var before: float = view.sim.time
 		var start := Vector2(view.sim.pod.x, view.sim.pod.y)
-		key(KEY_E, true)
-		await frames(45)
+		# This is synthetic input in an XR-off window. Windows can clear a held
+		# key on a focus change while the new scene opens; reassert the requested
+		# test input each frame so that the movement check actually receives it.
+		for frame in 45:
+			key(KEY_E, true)
+			await frames(1)
 		key(KEY_E, false)
 		check(stop + " simulation advances", view.sim.time > before)
 		if view.quest.scheme == "triggers":
