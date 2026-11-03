@@ -371,9 +371,36 @@ func _spawn(px: float, py: float, first: bool) -> void:
 	_next_switch(c)
 	_decide(c)
 	c.v = _speed_cap(c, 0.0)
+	if not _spawn_clear(c):
+		return
 	_place(c)
 	cars.append(c)
 	spawned += 1
+
+
+## Admission happens in the haze: never insert a car into a gap that already
+## needs impossible braking. Include approaching followers and freight tails.
+func _spawn_clear(c: Car) -> bool:
+	var nearby: Array = cars.duplicate()
+	var pod := _pod_as_car()
+	if pod:
+		nearby.append(pod)
+	for o: Car in nearby:
+		if o.road != c.road or o.dir != c.dir:
+			continue
+		var committed := o.lat if o.id == 0 else _lane_lat(o, o.lane)
+		if c.lat < minf(o.lat, committed) - 25.0 or c.lat > maxf(o.lat, committed) + 25.0:
+			continue
+		var gap := (o.f - c.f) * c.dir * 24.0
+		var leader: Car = o if gap >= 0.0 else c
+		var follower: Car = c if gap >= 0.0 else o
+		var closing := maxf(0.0, follower.v - leader.v)
+		var tail := (TRAIN - 1) * TRAIN_GAP if leader.kind == TRANSPORT else 0.0
+		var space := 40.0 + tail + maxf(100.0, follower.v * follower.headway * 0.5)
+		space += closing * closing / (2.0 * BRAKE)
+		if absf(gap) < space:
+			return false
+	return true
 
 
 ## The speed it can hold here: its grip in the curve, a city's STARFIGHTER cap.
@@ -425,8 +452,11 @@ func _drive(c: Car, arr: Array, idx: int, delta: float) -> void:
 	# the one ahead in its lane
 	var lead: Car = null
 	var gap := INF
-	for k in range(idx + 1, mini(idx + 10, arr.size())):
+	# A busy adjacent lane must not hide the actual leader beyond nine entries.
+	for k in range(idx + 1, arr.size()):
 		var o: Car = arr[k]
+		if o.road != c.road or o.dir != c.dir or (o.f - c.f) * c.dir <= 0.0:
+			continue
 		if absf(o.lat - c.lat) < 22.0:
 			lead = o
 			gap = (o.f - c.f) * c.dir * 24.0 - 20.0 * SCALE

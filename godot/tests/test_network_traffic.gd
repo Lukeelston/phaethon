@@ -142,6 +142,7 @@ func _process(_d: float) -> bool:
 			var b = arr[k + 1]
 			if absf(a.lat - b.lat) < 15.0 and (b.f - a.f) * 24.0 < 30.0:
 				close += 1
+				print("    headway witness %s dir%d ids %d/%d: gap %.2fm, speeds %.1f/%.1f mph, lat %.1f/%.1f, target lanes %d/%d" % [sim.roads[a.road].name, a.dir, a.id, b.id, (b.f-a.f)*24.0, a.v*MPH, b.v*MPH, a.lat, b.lat, a.lane, b.lane])
 	_check("headway: %d pairs inside 30 m in their lane (a merge from a ramp can land beside one: at most 2)" % close, close <= 2)
 	# speeds by kind, and the cities' zones
 	var mean := {0: [0.0, 0], 1: [0.0, 0], 2: [0.0, 0]}

@@ -96,3 +96,4 @@ Receiving decks support the complete craft on imperfect angled approaches,
 including fast downward arrivals and the raised pavement edges. Genuine
 below-lip misses still fall through. Aircraft-style cockpit detailing, swept
 engine fairings and branching electric binder arcs remain from the prior build.
+Traffic leaves safer gaps when spawning and sees farther ahead in dense lanes.
