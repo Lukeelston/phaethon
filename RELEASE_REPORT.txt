@@ -109,3 +109,76 @@ the native cockpit. The PC VR diagnostic cannot run in a live headset session.
 
 Source lives in this isolated release repository. Original development tree
 C:/Users/Luke/Projects/phaethon was preserved and is still independent.
+
+VERSION 0.1.1 TUNING UPDATE - 2026-11-02
+The v0.1.0 publication record above remains historical. The following records
+the local successor build, not a claim that Stan has been updated.
+
+Five trigger-control gears replace four. Each successive gear winds up more
+slowly to a higher engine note. At normal full trigger the V8 audio ceilings
+are approximately 4,870 / 5,540 / 6,210 / 6,880 / 7,550 RPM; time to 90% of each
+audio target is 0.975 / 1.650 / 2.650 / 4.233 / 6.875 seconds. Every upshift
+still drops both engine voices. Desktop without a gearbox retains its prior
+rev response. Fifth alone enables afterburner and overdrive.
+
+Fifth has no programmed speed limiter. Baseline aerodynamic drag approaches
+nominal full-throttle thrust exponentially, producing logarithmic speed growth.
+Air-brake drag remains unchanged. Releasing the triggers, partial throttle,
+or failed engines still slow the craft. Both handling modes and boost states
+were exercised in the real simulation. Overdrive is scoped to geared trigger
+controls, so legacy desktop and other VR control schemes keep their drive model.
+
+Five-second speed gains starting at 2,000 / 4,000 / 6,000 m/s were respectively
+231.843 / 52.937 / 11.444 m/s. A two-minute straight run starting at 2,000 m/s
+reached 3,006.621 / 3,565.599 / 3,954.545 / 4,253.125 m/s at 30-second intervals.
+The long-run test translates the rigid bodies back along the finite range
+without altering velocity, so it tests drive behavior without hitting the
+course's finish boundary. It is not an end-to-end sprint finish test.
+
+Initial verification: gear checks 12/12, overdrive checks 15/15, gear-audio
+checks 34/34, and all 18 input/UI/simulation regression scripts passed.
+Engine audio capture: 30.5 seconds, 17/17 PCM16 loops, peak -1.0 dBFS,
+RMS -15.9 dBFS, no clipping. That harness logged 78 ObjectDB cleanup warnings;
+the full multi-profile engine_audio_check.py gate was not completed.
+Read-only independent review found no material defects in the five-gear change.
+Prolonged steering beyond 6,000 m/s and new headset listening remain unverified
+until separately recorded below.
+
+SPEED SHIELD
+The original field was a 120 Hz buzz with a startup pitch sweep and only a 4%
+airspeed pitch change. It now has a fixed 36 Hz low layer (supporting harmonics
+at 72/108/144 Hz), reverberating on FieldRumble, and a separate dry speed tone
+feeding Field. Keeping reverb off that second voice removed a captured octave
+jump caused by an overtone becoming dominant. The broad spectral check was
+retained, not narrowed to hide the jump.
+
+Captured strongest speed-tone peaks: 180 / 297 / 414 / 531 Hz at respectively
+1,500 / 3,000 / 6,000 / 12,000 mph; bass peak remained 36 Hz at all four speeds.
+Field RMS -23.0 dBFS. After stopping the sources, the reverb tail declined from
+-27.6 to -40.6 dBFS over roughly 0.6 seconds. Shield tests 29/29 passed; an
+independent run passed all 28 checks without the optional capture-save check.
+RPM/gear/throttle independence, actual deceleration, 1,500/1,300 mph hysteresis,
+seal timing, wind muffling, source release and effect reuse were verified.
+The existing wind-audio capture passed unchanged, with 15 ObjectDB cleanup
+warnings at exit. The new shield test completed without errors or warnings.
+Read-only review found no remaining material defects. These are captured-audio
+results; headset listening and the new mix's subjective balance need confirmation.
+
+LOCAL 0.1.1 ARCHIVES
+Desktop: build/Phaethon-Experimental-0.1.1-Windows.zip
+Bytes: 53725019
+SHA256: 511a62128d49c28956f13c58b39bffee273e2a96a0095b7c4d80caf5a977092e
+PC VR: build/Phaethon-Experimental-0.1.1-Windows-PCVR.zip
+Bytes: 53786850
+SHA256: f108dbc319fc70192d4d4e9e9a32b7ce9690214dabc3d4516c09ee0078801291
+Both exports completed without logged errors; both ZIPs have 33 allowlisted
+files and passed archive integrity and per-file fresh-extraction hash checks.
+The v0.1.0 ZIPs and their inventories are preserved.
+
+Fresh extracted desktop player: 54 checks, 0 failures, exit 0; it logged 64
+ObjectDB cleanup warnings. Fresh extracted PC VR player: 109 checks, 0 failures,
+exit 0, no logged errors. The VR diagnostic explicitly exercised fifth's input
+metadata reaching physics/audio and downshift disabling overdrive on all six
+course stops. Rendered screenshots are in evidence/shield-desktop and
+evidence/shield-pcvr; the sprint cockpit screenshot was visually inspected.
+These checks ran outside the headset and do not establish subjective audio feel.

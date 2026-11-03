@@ -88,14 +88,14 @@ const BRAKE_FLOOR_FAST := 0.2    # ... rising to this from 2,000 to 2,500 mph: a
                                  # turns you ~6 deg in 3 s, not ~3 (Luke: "they need a bit more pull - just
                                  # a few degrees on this course"); the grand prix (~1,000 mph) is untouched
 const HOLD_FULL_AT := 0.15  # triggers: the hold is at full strength from this much throttle (lever)
-const GEARS := [[1.5, 1.0, 0.30], [1.3, 0.75, 0.55], [1.12, 0.4, 0.78], [1.0, 0.18, 1.0]]   # [pull (the ratio), steering, redline (share of the top speed)], gears 1-4
+const GEARS := [[1.5, 1.0, 0.22], [1.3, 0.75, 0.40], [1.16, 0.4, 0.62], [1.06, 0.25, 0.84], [1.0, 0.18, 1.0]]   # [pull, steering, reference speed fraction], gears 1-5; fifth is unlimited
 	# steering: second is the grand prix's (a pilot needs 75% to make its corners); in third a lane
 	# change at ~950 mph overshoots under half as far; in top a dropped trigger at 4,000 mph still
 	# turns the path 4.2 deg/s, where the highways' tightest bend needs 2.3 (tests/test_gears.gd)
-const STEER_SF := [1.0, 1.0, 1.0, 1.0]   # STARFIGHTER's steering by gear: whole. The grand prix is raced in third and
+const STEER_SF := [1.0, 1.0, 1.0, 1.0, 1.0]   # STARFIGHTER's steering by gear: whole. The grand prix is raced in third and
 	# top (its redlines are a quarter of SPEEDCRAFT's) at full speed, where its corners need all of it
 	# (75% hit the walls 10 times a minute; tests/test_gears.gd); the gears give it their revs and pull
-const V_TOP_SPEED := 1988.4      # m/s (4,448 mph): SPEEDCRAFT's top on full lever, top gear's redline
+const V_TOP_SPEED := 1988.4      # m/s (4,448 mph): SPEEDCRAFT's original reference speed; fifth has no limiter
 const V_TOP_SF := 443.0          # m/s (991 mph): STARFIGHTER's
 const LIMIT_X := 0.96            # the limiter starts cutting the pull here (of the redline), all gone at it
 const CLUTCH_T := 0.12           # s: after a shift the clutch is out (the pull dips to CLUTCH_DIP) ...
@@ -129,7 +129,7 @@ var steer_k := 1.0          # triggers: steering bite (the gear's), times the sp
 var thrust_cap := 1.0       # triggers: the most lever a full squeeze gives (the gear's; under 1, no burner)
 var split_rate := 0.0       # triggers: the engines' difference builds at most this fast (per second; 0 = at once)
 var _dif := 0.0             # triggers: the difference as delivered (built at split_rate)
-var gear := -1              # triggers: the gear (0-3, shown 1-4), or -1: no gearbox (full thrust, full steering)
+var gear := -1              # triggers: the gear (0-4, shown 1-5), or -1: no gearbox (full thrust, full steering)
 var rpm := 0.0              # triggers: the gearbox's revs, 0 idle .. 1 redline (a little past it over-revved, or on the burner in top)
 var pull := 1.0             # triggers: the gearbox's pull now (its ratio, at its revs, under the limiter): the sims' thrMul
 var _shift_t := INF         # s since the last shift (the clutch, then the grab)
@@ -139,7 +139,7 @@ var burner := false         # triggers: the burner, lit from the left stick (the
 var _flick_l := false       # the left stick is out from a flick: no more till it's back
 
 
-## Into gear g (0-3; -1: no gearbox); below top gear no burner. (Its steering: _gearbox.)
+## Into gear g (0-4; -1: no gearbox); below top gear no burner. (Its steering: _gearbox.)
 func set_gear(g: int) -> void:
 	gear = clampi(g, -1, GEARS.size() - 1)
 	thrust_cap = 1.0 if gear < 0 or gear == GEARS.size() - 1 else FULL_NO_BURNER
@@ -271,6 +271,7 @@ func update(c: Dictionary, delta: float) -> Dictionary:
 			out.grab = _clutch(delta)
 			out.mul = pull if gear >= 0 else 1.0
 			out.rpm = rpm
+			out.overdrive = gear == GEARS.size() - 1
 			var rt: float = c.rt
 			var lt: float = c.lt
 			var mid := (rt + lt) / 2.0

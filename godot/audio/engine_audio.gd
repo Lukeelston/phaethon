@@ -22,6 +22,8 @@
 ## like twin engines that never quite sync. Lifting off at high revs spits pops and crackle
 ## for a moment. The spool is a spring: a lever stab revs up in ~0.15 s, flares ~11% past the
 ## lever and barks (+3 dB for a moment); lifting settles clean, with no undershoot.
+## With a gearbox, each higher gear has a higher note ceiling and a slower rise. Only the
+## upward spool speed is limited: lifts and upshifts still drop the note on the same spring.
 ## flat (tests) switches all three off: it isolates the crossfader.
 ##   add_child(audio); audio.setup(sim)    once, inside the tree
 ##   audio.update(inp, delta)              every frame, after the sim steps
@@ -41,6 +43,10 @@ const TUNE := {
 	# The spool is a spring: [rising, falling]. Rising is snappy and flares ~11% past the lever
 	# (90% of a stab in 0.14 s); falling is critically damped, so a lift settles clean.
 	"rev_w": [16.0, 7.0], "rev_z": [0.65, 1.0],
+	# Audio only: progressively higher ceilings and longer wind-ups in gears 1-5. Inputs
+	# without gearIndex keep the original spring. Boost adds above the gear's normal ceiling.
+	"gear_spool": [0.60, 0.70, 0.80, 0.90, 1.0],
+	"gear_rise": [0.55, 0.38, 0.27, 0.19, 0.13],   # maximum positive spool change per second
 	"bark_db": 3.0, "bark_s": 0.15,  # a quick stab barks: up to +3 dB, gone in 0.15 s
 	"crank": 0.3,                    # pistons bottom out at this fraction of idle RPM
 	"burner_spool": 0.15, "ramjet_spool": 0.3,
@@ -266,6 +272,13 @@ func update(inp: Dictionary, delta: float) -> void:
 	_t += dt
 	var gate: float = sim.P.gate
 	var boost: float = {"burner": TUNE.burner_spool, "ramjet": TUNE.ramjet_spool}.get(sim.mode, 0.0)
+	var ceiling := 1.0
+	var rise_rate := INF
+	var gear := int(inp.get("gearIndex", -1))
+	if gear >= 0:
+		gear = mini(gear, TUNE.gear_spool.size() - 1)
+		ceiling = TUNE.gear_spool[gear]
+		rise_rate = TUNE.gear_rise[gear]
 	var duck := 0.0 if sim.crash_t > 0.0 else 1.0   # crash: the engines go with the picture
 	var bodies := [sim.eL, sim.eR]
 	var thr := [inp.thrL, inp.thrR]
@@ -280,13 +293,14 @@ func update(inp: Dictionary, delta: float) -> void:
 		var lever := minf(thr[k], gate) / gate
 		if inp.get("repair", false):
 			lever = minf(lever, 0.6)
-		var target: float = -0.33 if e.flameout else lever + boost
+		var running_target: float = lever * ceiling + boost
+		var target: float = -0.33 if e.flameout else running_target
 		if e.flameout or v.spool < 0.0:
 			# winding down from a flameout, or relighting from below idle: no flare
 			v.spool = _follow(v.spool, target, TUNE.windmill if e.flameout else TUNE.relight, dt)
 			v.spool_v = 0.0
 		else:
-			_rev(v, "spool", "spool_v", target, dt)
+			_rev(v, "spool", "spool_v", target, dt, rise_rate)
 		# a quick stab barks; the bark dies away in bark_s
 		var stab: float = clampf((lever - v.lever_prev) / maxf(dt, 1e-4) * 0.12, 0.0, 1.0)
 		v.lever_prev = lever
@@ -335,7 +349,7 @@ func update(inp: Dictionary, delta: float) -> void:
 			"roar": turb * lerpf(TUNE.roar_gain[0], TUNE.roar_gain[1], n_spool) * (0.4 + 0.6 * burning),
 			"burner": TUNE.burner_gain * v.burn * burning,
 		}
-		var sec_gain := _second(v, k, lever + boost, dt, duck)
+		var sec_gain := _second(v, k, running_target, dt, duck, rise_rate)
 		gains["second"] = sec_gain * bark
 		gains["rotor"] = _rotor(v, lever, mph, dt, duck)
 		if flat:
@@ -370,7 +384,7 @@ func update(inp: Dictionary, delta: float) -> void:
 
 ## One side of the second engine: off, waiting its turn (the right side lights a beat after the
 ## left), cranking in coughs, running on its lever, or stopping. Returns its gain, level included.
-func _second(v: Dictionary, k: int, target_run: float, dt: float, duck: float) -> float:
+func _second(v: Dictionary, k: int, target_run: float, dt: float, duck: float, rise_rate := INF) -> float:
 	var sc: Dictionary = v.sec
 	match sc.state:
 		"off":
@@ -420,7 +434,7 @@ func _second(v: Dictionary, k: int, target_run: float, dt: float, duck: float) -
 			target = target_run
 			fire = 1.0
 	if sc.state == "run" and sc.spool >= 0.0:
-		_rev(sc, "spool", "vel", target, dt)
+		_rev(sc, "spool", "vel", target, dt, rise_rate)
 	else:
 		sc.spool = _follow(sc.spool, target, tau, dt)
 		sc.vel = 0.0
@@ -446,7 +460,8 @@ func _rotor(v: Dictionary, lever: float, mph: float, dt: float, duck: float) -> 
 ## The spool spring: snappy and flaring a touch past the lever on the way up, settling clean
 ## on the way down. Fixed 240 Hz substeps: stepped once per frame, the flare shrank with the
 ## frame rate (10% at 144 fps, 5% at 45, none at 20) and one long frame kicked the revs.
-func _rev(d: Dictionary, key: String, vkey: String, target: float, dt: float) -> void:
+## Gearing limits positive velocity only; falling remains as quick as the original spring.
+func _rev(d: Dictionary, key: String, vkey: String, target: float, dt: float, rise_rate := INF) -> void:
 	var n := maxi(1, ceili(dt * 240.0))
 	var h := dt / n
 	for i in n:
@@ -454,6 +469,7 @@ func _rev(d: Dictionary, key: String, vkey: String, target: float, dt: float) ->
 		var w: float = TUNE.rev_w[0] if up else TUNE.rev_w[1]
 		var z: float = TUNE.rev_z[0] if up else TUNE.rev_z[1]
 		d[vkey] += (w * w * (target - d[key]) - 2.0 * z * w * d[vkey]) * h
+		d[vkey] = minf(d[vkey], rise_rate)
 		d[key] += d[vkey] * h
 
 

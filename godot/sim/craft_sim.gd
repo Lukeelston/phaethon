@@ -1706,6 +1706,18 @@ func step(inp: Dictionary, dt: float) -> void:
 	var speed := sqrt(Pd.vx * Pd.vx + Pd.vy * Pd.vy)
 
 	var gm: float = float(inp.get("thrMul", 1.0))   # the gearbox's pull (its ratio, at its revs; 1 without one)
+	var cruise_drag := 1.0
+	if bool(inp.get("gearOverdrive", false)):
+		# Fifth's normal aero drag approaches full-throttle thrust exponentially.
+		# Thus dv/dt ~ exp(-v/scale), giving logarithmic speed growth rather than
+		# a terminal speed. Only baseline drag changes: brake drag stays intact.
+		var drive_mult: float = P.ramjetMult if ramjet else (P.burnerMult if burner else 1.0)
+		var nominal_thrust: float = 2.0 * P.thrustMax * (0.87 / P.gate) * drive_mult * gm
+		var total_cd: float = 2.0 * P.engineCd + P.podCd
+		var reference_speed := sqrt(maxf(1.0, nominal_thrust / total_cd))
+		var blend := smoothstep(0.6, 0.8, speed / reference_speed)
+		var shaped_drag := nominal_thrust * (1.0 - exp(-speed / (0.65 * reference_speed)))
+		cruise_drag = lerpf(1.0, shaped_drag / maxf(1.0, total_cd * speed * speed), blend)
 	for side in [[L, inp.thrL, inp.brkL], [R, inp.thrR, inp.brkR]]:
 		var e: Body = side[0]
 		var thr: float = side[1]
@@ -1740,7 +1752,7 @@ func step(inp: Dictionary, dt: float) -> void:
 		var v := sqrt(e.vx * e.vx + e.vy * e.vy)
 		# A constant term keeps the brakes biting across a 100x speed range (smoothed below 2 m/s).
 		e.front = brk * smoothstep(P.frontBrakeV0, P.frontBrakeV1, v) if P.frontBrakeCd > 0.0 else 0.0
-		var cd: float = (P.engineCd + P.brakeCd * brk + P.frontBrakeCd * e.front) * P.forceScale
+		var cd: float = (P.engineCd * cruise_drag + P.brakeCd * brk + P.frontBrakeCd * e.front) * P.forceScale
 		var bl: float = (P.brakeLin * brk + P.brakeConst * brk / maxf(v, 2.0)) * P.forceScale
 		e.fx -= cd * v * e.vx + bl * e.vx
 		e.fy -= cd * v * e.vy + bl * e.vy
@@ -1833,7 +1845,7 @@ func step(inp: Dictionary, dt: float) -> void:
 
 	var pb := minf(inp.brkL, inp.brkR)
 	var pv := sqrt(Pd.vx * Pd.vx + Pd.vy * Pd.vy)
-	var pcd: float = (P.podCd + 0.5 * P.brakeCd * pb) * P.forceScale
+	var pcd: float = (P.podCd * cruise_drag + 0.5 * P.brakeCd * pb) * P.forceScale
 	var pbl: float = 0.5 * (P.brakeLin * pb + P.brakeConst * pb / maxf(pv, 2.0)) * P.forceScale
 	Pd.fx -= pcd * pv * Pd.vx + pbl * Pd.vx
 	Pd.fy -= pcd * pv * Pd.vy + pbl * Pd.vy

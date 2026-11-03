@@ -3,10 +3,14 @@ from pathlib import Path
 import argparse, hashlib, json, shutil, zipfile
 parser=argparse.ArgumentParser()
 parser.add_argument('--edition',choices=['desktop','pcvr'],default='desktop')
-edition=parser.parse_args().edition
+parser.add_argument('--version',default='0.1.1')
+args=parser.parse_args()
+edition=args.edition
+if not args.version or any(c not in '0123456789.' for c in args.version):
+    parser.error('--version must contain only digits and dots')
 root=Path(__file__).resolve().parents[1]
 build=root/'build'
-version='Phaethon-Experimental-0.1.0-Windows' + ('-PCVR' if edition=='pcvr' else '')
+version='Phaethon-Experimental-'+args.version+'-Windows' + ('-PCVR' if edition=='pcvr' else '')
 stage=build/version
 stage.mkdir(exist_ok=True)
 binary='PhaethonVR' if edition=='pcvr' else 'Phaethon'
@@ -40,5 +44,7 @@ for row in inventory:
 sha=hashlib.sha256(archive.read_bytes()).hexdigest()
 (build/(archive.name+'.sha256')).write_text(sha+'  '+archive.name+'\n',encoding='ascii')
 inventory_name='package-inventory-pcvr.json' if edition=='pcvr' else 'package-inventory.json'
+if args.version != '0.1.0':
+    inventory_name=inventory_name.removesuffix('.json')+'-'+args.version+'.json'
 (root/'evidence'/inventory_name).write_text(json.dumps({'archive':str(archive),'bytes':archive.stat().st_size,'sha256':sha,'files':inventory},indent=2),encoding='utf-8')
 print(json.dumps({'archive':str(archive),'bytes':archive.stat().st_size,'sha256':sha,'file_count':len(inventory),'extracted_exe':str(clean/version/(binary+'.exe'))}))

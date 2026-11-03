@@ -104,6 +104,14 @@ func _run() -> void:
 		await frames(45)
 		key(KEY_E, false)
 		check(stop + " simulation advances", view.sim.time > before)
+		if view.quest.scheme == "triggers":
+			view.quest.set_gear(4)
+			await frames(2)
+			check(stop + " fifth reaches physics and audio", bool(view.inp.get("gearOverdrive", false)) and view._engine_inp().get("gearIndex", -1) == 4)
+			view.quest.set_gear(3)
+			await frames(2)
+			check(stop + " downshift disables overdrive", not bool(view.inp.get("gearOverdrive", true)))
+			view.quest.set_gear(0)
 		if stop == "emergency":
 			check("emergency job remains in a valid stage", view.sim.job.has("stage") and str(view.sim.job.stage) != "")
 		else:

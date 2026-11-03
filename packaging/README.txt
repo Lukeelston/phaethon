@@ -1,5 +1,5 @@
 PHAETHON
-Experimental Desktop Racer - Windows x64 - v0.1.0
+Experimental Desktop Racer - Windows x64 - v0.1.1
 ElstonWorks
 
 Two engines. One cockpit. We know it's a little fucky.
@@ -68,4 +68,4 @@ copyright. Third-party components and the CC BY engine audio retain their
 own licenses and permissions. See THIRD_PARTY_NOTICES.txt and licenses/.
 Adapted engine audio is also supplied separately in audio/engines/.
 
-Build: 0.1.0-experimental | 2026-11-02
+Build: 0.1.1-experimental | 2026-11-02

@@ -3,11 +3,11 @@
 ## responsiveness in the corners"; then "the gears should rise and fall like actual gears - not just
 ## operate at lower or higher frequencies"):
 ##   shifting    a flick of the right stick up shifts up once (held, no more), back under SHIFT_OFF
-##               re-arms; down shifts down; 1 and 4 are the ends
+##               re-arms; down shifts down; 1 and 5 are the ends
 ##   box         a full pull is full lever in every gear, the burner only in top; at the same revs the
 ##               low gears pull harder (their ratios); no gearbox is exactly as before
 ##   sawtooth    full levers from a standstill on SPEEDCRAFT, shifting up at the redline: the revs climb
-##               through each gear and drop at each shift (to the ratio of the redlines), to top speed;
+##               through each gear and drop at each shift (to the ratio of the reference speeds);
 ##               the engine sound's spool follows them (it's what EngineAudio pitches its voices by)
 ##   limiter     held in first, the speed stops at first's redline (the revs on it)
 ##   grab        a shift: the clutch out (the pull dips), then the next gear grabs (a surge, once, a
@@ -30,6 +30,10 @@ var fails := 0
 
 
 func _initialize() -> void:
+	if QC.GEARS.size() != 5:
+		_check("five selectable forward gears exist", false)
+		quit(1)
+		return
 	# shifting
 	var q = QC.new()
 	q.scheme = "triggers"
@@ -38,14 +42,14 @@ func _initialize() -> void:
 	for y in [0.0, 0.9, 0.95, 0.9, 0.5, 0.2, 0.9, 0.1, 0.9, 0.1, 0.9, 0.1, 0.9, 0.1, -0.9, -0.9, 0.0, -0.9]:
 		q.update(_c(0.5, 0.5, Vector2(0.0, y)), DT)
 		seen.append(q.gear + 1)
-	var want := [1, 2, 2, 2, 2, 2, 3, 3, 4, 4, 4, 4, 4, 4, 3, 3, 3, 2]
+	var want := [1, 2, 2, 2, 2, 2, 3, 3, 4, 4, 5, 5, 5, 5, 4, 4, 4, 3]
 	_check("shifting: right stick flicks %s -> gears %s" % ["up x5, down x2", seen], seen == want)
 	# the box
 	var levers := []
 	var pulls := []
 	var burner_low := false
 	var burner_top := false
-	for g in 4:
+	for g in 5:
 		var qg = _q(g)
 		var o: Dictionary = {}
 		var vg := 0.5 * float(QC.GEARS[g][2]) * QC.V_TOP_SPEED   # at half its revs
@@ -56,10 +60,11 @@ func _initialize() -> void:
 		var cl := _c(1.0, 1.0, Vector2.ZERO, vg)   # the burner's flick (the left stick)
 		cl.ls = Vector2(0.0, 1.0)
 		o = qg.update(cl, DT)
-		if g < 3 and (bool(o.burner) or maxf(o.thrL, o.thrR) >= QC.GATE):
+		if g < 4 and (bool(o.burner) or maxf(o.thrL, o.thrR) >= QC.GATE):
 			burner_low = true
-		if g == 3:
+		if g == 4:
 			burner_top = bool(o.burner)
+		_check("only fifth engages overdrive (gear %d)" % (g + 1), bool(o.get("overdrive", false)) == (g == 4))
 	var q0 = QC.new()
 	q0.scheme = "triggers"
 	var q1 = QC.new()
@@ -73,11 +78,11 @@ func _initialize() -> void:
 		same = same and a.thrL == b.thrL and a.thrR == b.thrR and float(a.get("mul", 1.0)) == 1.0
 	_check("box: a full pull's lever by gear %s, the burner below top gear %s, in top %s; the pull at half revs %s; no gearbox as before %s" % [levers, burner_low, burner_top, pulls, same],
 		levers.all(func(x): return absf(x - QC.FULL) < 0.01) and burner_top and not burner_low
-		and pulls[0] > pulls[1] and pulls[1] > pulls[2] and pulls[2] > pulls[3] and same)
+		and pulls[0] > pulls[1] and pulls[1] > pulls[2] and pulls[2] > pulls[3] and pulls[3] > pulls[4] and same)
 	# the sawtooth
 	var saw := _sawtooth()
 	_check("sawtooth: shifts at %s mph, the engine's spool before each %s and after %s; %.0f mph at the end (top gear)" % [saw[0], saw[1], saw[2], saw[3]],
-		saw[0].size() == 3 and saw[1].all(func(x): return x >= 0.95) and saw[2].all(func(x): return x < 0.8) and saw[3] > 4000.0)
+		saw[0].size() == 4 and saw[1].all(func(x): return x >= 0.95) and saw[2].all(func(x): return x < 0.82) and saw[3] > 4000.0)
 	var lim := _limited()
 	_check("limiter: held in first at full levers, %.0f mph after 20 s (first's redline %.0f), the revs %.2f" % [lim[0], lim[1], lim[2]],
 		absf(lim[0] - lim[1]) < lim[1] * 0.06 and lim[2] > 0.93 and lim[2] < 1.03)
@@ -101,12 +106,12 @@ func _initialize() -> void:
 		dip < base * 0.4 and surge > base * 1.2 and grabs.size() == 1 and grabs[0][1] == 1.0 and absf(trace[-1] - trace[-2]) < 1e-6)
 	# overshoot
 	var none := _lanes(-1)
-	var top := _lanes(3)
+	var top := _lanes(4)
 	_check("overshoot: changing lanes at 3,000 mph on SPEEDCRAFT, correcting all or nothing a beat late: %.1f m past the line in top gear, %.1f with no gearbox" % [top, none],
 		top < none / 2.0)
 	# corners
-	var tr := _turn(3)
-	var gp := _gp(3)
+	var tr := _turn(4)
+	var gp := _gp(4)
 	_check("corners: top gear at 4,000 mph, a held drop turns the path %.2f deg/s (the highways' tightest bend: 2.28); the ideal pilot on the GP in top gear (STARFIGHTER): %d wall hits, %.1f km in 60 s" % [tr, gp[0], gp[1]],
 		tr > 2.8 and gp[0] == 0 and gp[1] > 12.0)
 	print("GEARS ", "PASS" if fails == 0 else "FAIL (%d failed)" % fails)
@@ -135,7 +140,7 @@ func _fly(sim, q, lt: float, rt: float) -> Dictionary:
 	var v: float = sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy)
 	var o: Dictionary = q.update(_c(lt, rt, Vector2.ZERO, v, (sim.eL.w + sim.eR.w) / 2.0, sim.hblend), DT)
 	for k in 480 / 72:
-		sim.step({"thrL": o.thrL, "thrR": o.thrR, "brkL": 0.0, "brkR": 0.0, "repair": false, "reignite": true, "thrMul": o.get("mul", 1.0)}, 1.0 / 480.0)
+		sim.step({"thrL": o.thrL, "thrR": o.thrR, "brkL": 0.0, "brkR": 0.0, "repair": false, "reignite": true, "thrMul": o.get("mul", 1.0), "gearOverdrive": o.get("overdrive", false)}, 1.0 / 480.0)
 	sim.events.clear()
 	return o
 
@@ -153,7 +158,7 @@ func _sawtooth() -> Array:
 		_fly(sim, q, 0.95, 0.95)
 		if shifted >= 0 and f == shifted + 1:
 			after.append(snappedf(QC.engine_spool(q.rpm, 1.0), 0.01))
-		if q.gear < 3 and q.rpm >= 0.95:
+		if q.gear < 4 and q.rpm >= 0.95:
 			at.append(roundi(sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy) * MPH))
 			before.append(snappedf(QC.engine_spool(q.rpm, 1.0), 0.01))
 			q.set_gear(q.gear + 1)
@@ -252,7 +257,7 @@ func _gp(g: int) -> Array:
 		var c := 0.62 if v < 300.0 else 0.45   # (the flyability test's pilot)
 		var o: Dictionary = q.update(_c(c - d / 2.0, c + d / 2.0, Vector2.ZERO, v, (sim.eL.w + sim.eR.w) / 2.0, sim.hblend), DT)
 		for k in 480 / 72:
-			sim.step({"thrL": o.thrL, "thrR": o.thrR, "brkL": 0.0, "brkR": 0.0, "repair": false, "reignite": true, "thrMul": o.get("mul", 1.0)}, 1.0 / 480.0)
+			sim.step({"thrL": o.thrL, "thrR": o.thrR, "brkL": 0.0, "brkR": 0.0, "repair": false, "reignite": true, "thrMul": o.get("mul", 1.0), "gearOverdrive": o.get("overdrive", false)}, 1.0 / 480.0)
 			for e in sim.events:
 				if e.type == "hit":
 					hits += 1

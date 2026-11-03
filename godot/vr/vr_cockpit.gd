@@ -482,6 +482,8 @@ func _read_input(delta: float) -> void:
 	if quest.scheme == "triggers" and quest.gear >= 0 and not levers.source.begins_with("Gamepad"):
 		inp.thrMul = q.get("mul", 1.0)   # the gearbox's pull
 		inp.gearRpm = q.get("rpm", 0.0)   # ... and its revs, for the engine sound
+		inp.gearIndex = quest.gear
+		inp.gearOverdrive = bool(q.get("overdrive", false))
 	# the Network: A tapped, the next city as the target; held in a city's STARFIGHTER zone, its GP
 	if sim.kind == "network":
 		if _button(r, "ax_button"):

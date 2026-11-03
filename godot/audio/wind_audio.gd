@@ -13,6 +13,8 @@
 ## and `boomed` fires so the cockpit can kick the controllers. From the second engine's lighting
 ## speed you're sealed in: the field's hum powers up on its own "Field" bus, then the wind shuts
 ## out behind it, quieter and muffled (`_seal`); under its off speed the air comes back.
+## The field has a fixed, deep reverberation and a separate tone that rises with actual airspeed.
+## Gear changes, throttle and engine RPM never retune either layer.
 ## Silent at rest, ducked with the picture on a crash. Same bus pattern as EngineAudio: the
 ## layers feed a "Wind" bus with a hard limiter, so wind can never clip the mix.
 ##   add_child(wind); wind.setup(sim)    once, inside the tree
@@ -56,7 +58,9 @@ const TUNE := {
 	"seal_close": 0.22, "seal_open": 0.3,   # the seal shutting, opening (s)
 	"hum_db": [-20.0, -14.0],           # the field's hum at second_on_mph -> 4,000 mph
 	"hum_attack": 0.35, "hum_release": 0.5,
-	"hum_rise": [0.72, 1.0], "hum_rise_s": 0.9,   # powering up: its pitch climbs over this long
+	"speed_tone_db": [-27.0, -21.0],    # separate from the deep layer, behind the engines
+	"speed_tone_per_double": 0.65,     # pitch ratio added for each doubling of airspeed; no top-speed cap
+	"speed_tone_tau": 0.25,            # smooth real acceleration/deceleration without a power-up sweep
 }
 
 var sim
@@ -84,6 +88,7 @@ var sealed := false     # past the second engine's lighting speed (with its hyst
 var seal := 0.0         # the wind's seal, 0 open .. 1 shut (tests read this)
 var hum := 0.0          # the field hum's level, 0..1 (tests read this)
 var hum_player: AudioStreamPlayer
+var speed_player: AudioStreamPlayer   # the shield's separate airspeed tone
 var _seal_age := 0.0    # since `sealed` last changed, s
 var _seal_fx := 0       # the Wind bus's seal low-pass
 
@@ -136,13 +141,35 @@ func setup(craft_sim) -> void:
 		add_child(p)
 		p.play(randf() * LOOP_S)
 		players[layer] = p
-	_bus("Field", "Master")   # the hum on its own bus: the seal doesn't muffle it
+	_bus("Field", "Master")   # the field bypasses the sealed wind's low-pass
+	var rumble_bus := _bus("FieldRumble", "Field")
+	# Buses outlive scenes. Reuse the reverb after a course restart instead of stacking tails.
+	# Only the low layer reverberates: comb filtering must not obscure the speed tone's pitch.
+	var has_reverb := false
+	for k in AudioServer.get_bus_effect_count(rumble_bus):
+		has_reverb = has_reverb or AudioServer.get_bus_effect(rumble_bus, k) is AudioEffectReverb
+	if not has_reverb:
+		var reverb := AudioEffectReverb.new()
+		reverb.room_size = 0.8
+		reverb.damping = 0.75
+		reverb.hipass = 0.0   # preserve the36Hz foundation
+		reverb.predelay_msec = 35.0
+		reverb.predelay_feedback = 0.2
+		reverb.dry = 0.85
+		reverb.wet = 0.32
+		AudioServer.add_bus_effect(rumble_bus, reverb)
 	hum_player = AudioStreamPlayer.new()
 	hum_player.stream = make_hum()
-	hum_player.bus = "Field"
+	hum_player.bus = "FieldRumble"
 	hum_player.volume_db = -80.0
 	add_child(hum_player)
 	hum_player.play()
+	speed_player = AudioStreamPlayer.new()
+	speed_player.stream = make_speed_tone()
+	speed_player.bus = "Field"
+	speed_player.volume_db = -80.0
+	add_child(speed_player)
+	speed_player.play()
 	var boom_bus := _bus("Boom", "Master")
 	if AudioServer.get_bus_effect_count(boom_bus) == 0:
 		var blim := AudioEffectHardLimiter.new()
@@ -301,9 +328,9 @@ static func make_loop(kind: String, seed: int) -> AudioStreamWAV:
 	return w
 
 
-## The field's hum: an electrical 120 Hz buzz with its harmonics, soft-clipped, the two ears half a
-## hertz apart so it beats slowly, a faint high shimmer over it. Every partial fits a whole number
-## of cycles in LOOP_S, so the loop is seamless. All of it above ~100 Hz: the Quest's speakers play it.
+## A fixed, deep field resonance: 36 Hz with gentle harmonics at 72/108/144 Hz so the headset's
+## small speakers still carry its weight. The ears beat slowly; FieldRumble supplies the tail.
+## Every partial and the slow heave fit whole cycles in LOOP_S, keeping the loop seamless.
 static func make_hum() -> AudioStreamWAV:
 	var n := int(RATE * LOOP_S)
 	var data := PackedByteArray()
@@ -311,11 +338,33 @@ static func make_hum() -> AudioStreamWAV:
 	for i in n:
 		var t := float(i) / RATE
 		for c in 2:
-			var f := 120.0 + 0.5 * c
-			var x := 0.5 * sin(TAU * f * t) + 0.35 * sin(TAU * 2.0 * f * t + 0.3) + 0.18 * sin(TAU * 3.0 * f * t + 1.1) \
-				+ 0.12 * sin(TAU * 4.0 * f * t + 2.0) + 0.06 * sin(TAU * 5.0 * f * t + 0.7)
-			x = tanh(1.4 * x) + 0.035 * sin(TAU * 1800.0 * t) * (0.5 + 0.5 * sin(TAU * 3.0 * t + c))
-			data.encode_s16(i * 4 + c * 2, int(clampf(x * 0.78, -1.0, 1.0) * 32767.0))
+			var f := 36.0 + 0.5 * c
+			var x := 0.68 * sin(TAU * f * t) + 0.24 * sin(TAU * 2.0 * f * t + 0.3) \
+				+ 0.18 * sin(TAU * 3.0 * f * t + 1.1) + 0.08 * sin(TAU * 4.0 * f * t + 2.0)
+			x *= 0.72 * (0.92 + 0.08 * sin(TAU * 0.5 * t + c * 0.4))
+			data.encode_s16(i * 4 + c * 2, int(clampf(x, -1.0, 1.0) * 32767.0))
+	var w := AudioStreamWAV.new()
+	w.format = AudioStreamWAV.FORMAT_16_BITS
+	w.stereo = true
+	w.mix_rate = RATE
+	w.data = data
+	w.loop_mode = AudioStreamWAV.LOOP_FORWARD
+	w.loop_end = n
+	return w
+
+
+## A separate, restrained tone above the rumble. Its playback pitch follows airspeed only.
+static func make_speed_tone() -> AudioStreamWAV:
+	var n := int(RATE * LOOP_S)
+	var data := PackedByteArray()
+	data.resize(n * 4)
+	for i in n:
+		var t := float(i) / RATE
+		for c in 2:
+			var phase := c * 0.3
+			var x := 0.68 * sin(TAU * 180.0 * t + phase) + 0.16 * sin(TAU * 360.0 * t + phase + 0.4) \
+				+ 0.05 * sin(TAU * 540.0 * t + phase + 1.0)
+			data.encode_s16(i * 4 + c * 2, int(x * 0.7 * 32767.0))
 	var w := AudioStreamWAV.new()
 	w.format = AudioStreamWAV.FORMAT_16_BITS
 	w.stereo = true
@@ -484,8 +533,13 @@ func _seal(mph: float, dt: float, duck: float) -> void:
 	seal = _follow(seal, 1.0 if shut else 0.0, TUNE.seal_close if shut else TUNE.seal_open, dt)
 	var lvl: float = hum * duck * db_to_linear(lerpf(TUNE.hum_db[0], TUNE.hum_db[1], smoothstep(on_mph, 4000.0, mph)))
 	hum_player.volume_db = linear_to_db(lvl) if lvl > 1e-4 else -80.0
-	var rise: float = clampf((_seal_age - TUNE.seal_catch_s) / TUNE.hum_rise_s, 0.0, 1.0) if sealed else 1.0
-	hum_player.pitch_scale = lerpf(TUNE.hum_rise[0], TUNE.hum_rise[1], smoothstep(0.0, 1.0, rise)) * (1.0 + 0.04 * smoothstep(on_mph, 4500.0, mph))
+	hum_player.pitch_scale = 1.0
+	var tone_level: float = hum * duck * db_to_linear(lerpf(TUNE.speed_tone_db[0], TUNE.speed_tone_db[1], smoothstep(on_mph, 4000.0, mph)))
+	speed_player.volume_db = linear_to_db(tone_level) if tone_level > 1e-4 else -80.0
+	# Use the pod's measured speed, never the gearbox's RPM or the levers. Logarithmic growth
+	# remains audible beyond fifth gear's old top speed without quickly turning into a shriek.
+	var pitch: float = 1.0 + TUNE.speed_tone_per_double * log(maxf(mph, on_mph) / on_mph) / log(2.0)
+	speed_player.pitch_scale = _follow(speed_player.pitch_scale, pitch, TUNE.speed_tone_tau, dt)
 	var lp := AudioServer.get_bus_effect(AudioServer.get_bus_index("Wind"), _seal_fx) as AudioEffectLowPassFilter
 	if lp:
 		lp.cutoff_hz = TUNE.seal_hz[0] * pow(TUNE.seal_hz[1] / TUNE.seal_hz[0], seal)

@@ -1,5 +1,5 @@
 PHAETHON - EXPERIMENTAL PC VR EDITION
-Windows x64 / OpenXR - v0.1.0 - ElstonWorks
+Windows x64 / OpenXR - v0.1.1 - ElstonWorks
 
 Two engines. One cockpit. We know it's a little fucky.
 
@@ -30,8 +30,8 @@ Both triggers       Squeeze gently to accelerate; release to ease off
 Right harder        Steer right (it drives the opposite engine)
 Left harder         Steer left
 Both grip buttons   Air brakes; individual grips brake their own side
-Right stick up/down Shift up/down (starts in first gear)
-Left stick up/down  Afterburner on/off; needs top gear
+Right stick up/down Shift through gears 1-5 (starts in first)
+Left stick up/down  Afterburner on/off; needs fifth gear
 A                   Reignite engines
 B                   Arm ramjet
 X                   Hold to repair
@@ -40,6 +40,17 @@ Y hold 1 second     Switch Speedcraft / Starfighter handling
 Either stick click  Recenter view and seat height
 Left menu tap       Cycle control schemes
 Left menu hold 1.5s  Next course/mode
+
+Each higher gear winds up more slowly and reaches a higher engine note.
+Upshifts drop the revs before the next climb. Gears 1-4 have limiters; fifth
+keeps gaining speed at full throttle, with progressively smaller gains.
+Speed grows logarithmically instead of hitting a fixed top speed. Air brakes
+still work; plan the stop earlier as speed rises.
+
+Above 1,500 mph the speed shield powers up and muffles the wind. Its low
+reverberation holds its pitch; a separate tone rises with your actual speed.
+Shifting gears changes the engine note, without resetting the shield tone.
+The shield opens again below 1,300 mph.
 
 The physical MODE switch in the cockpit also changes handling. Starfighter
 handling engages below 1,250 mph. The dashboard shows mode, gear and controls.
@@ -89,4 +100,4 @@ copyright. Third-party components and the CC BY engine audio retain their
 own licenses and permissions. See THIRD_PARTY_NOTICES.txt and licenses/.
 Adapted engine audio is supplied separately in audio/engines/.
 
-Build: 0.1.0-experimental | 2026-11-02
+Build: 0.1.1-experimental | 2026-11-02
