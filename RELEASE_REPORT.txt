@@ -744,3 +744,12 @@ this launch has not independently established OpenXR session readiness.
 Headset confirmation of the partner and readable quick-menu/resume behavior
 has been requested. Physical acceptance remains unverified - needs user
 confirmation.
+
+LOCAL 0.1.7 HEADSET ACCEPTANCE - 2026-11-03
+Luke confirmed the partner and quick-menu playtest: "yeah this is running well."
+The previously empty v017-headset.log now records active left/right tracking,
+120.0 fps average and 8.33 ms p95 over the recorded headset run. This supersedes
+the pending launch-readiness note above. Luke also identified high-speed shaft
+ground clipping and remaining road overlap impressions for the next iteration;
+this acceptance does not establish that those geometry cases are correct.
+Physical obstacle-toggle testing remains pending as previously requested.

@@ -64,7 +64,9 @@ Owner: parent. Files: README/player instructions/release report, version and pac
 - [x] Record package hashes, limitations and original-source checks; commit the merge with both parents.
 - [x] Relaunch the merged PC VR build on Network for physical confirmation; check processes and remove all owned helpers.
 
-Physical acceptance is pending Luke's headset confirmation. PID 82808 is the
-only retained interactive player; runtime readiness could not be inferred from
-its empty launch log. Full verification and package hashes are in
+Luke confirmed the headset partner/quick-menu playtest on 2026-11-03: "yeah this
+is running well." The launch log subsequently recorded active tracking and a
+120 fps average. His new high-speed shaft/road geometry feedback is tracked in
+the next iteration; physical obstacle-toggle testing remains pending.
+Full verification and package hashes are in
 `../../../RELEASE_REPORT.txt` and `../../../evidence/v017-release-verification.json`.
