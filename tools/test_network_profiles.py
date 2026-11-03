@@ -71,14 +71,15 @@ class NetworkProfiles(unittest.TestCase):
 
     def test_central_transfers_use_short_open_bends(self):
         # A nearby merge previously made the broad-radius solver choose a 300+
-        # degree circle. Keep the radius and reject that long detour explicitly.
+        # degree circle. Retain broad corners and reject that long detour;
+        # test_network_rhythm also limits continuous steering time between straights.
         for k in dn.TRANSFER_JUMPS:
             road = self.roads[self.jumps[k][1]]
             with self.subTest(road=road.name):
                 self.assertLess(float(road.len[:-1].sum()), 210000.0)
                 for kind, radius, angle, _ in road.segs:
                     if kind != 'S':
-                        self.assertGreaterEqual(radius, 45000.0)
+                        self.assertGreaterEqual(radius, 35000.0)
                         self.assertLess(angle, 180.0)
 
     def test_central_transfer_entry_and_destination_are_preserved(self):

@@ -403,6 +403,13 @@ traffic and racers, jumps and the open ground, and the cities' GPs.
   crosses a gap onto a raised catch deck, then descends back to the highway. Underspeed
   approaches can miss the deck. Catch decks and on-ramps accept travel in their intended
   direction, preventing a reverse highway merge from dragging the craft up the ramp.
+  Central transfers K0-K3 use short 35 km-radius bends separated by acceleration
+  straights: the longest continuous turns take 9.5-11 seconds at their advertised
+  entrance speeds. Their six-kilometre receiving straights and highway destinations
+  stay in place. Landing capture cushions the approach above the deck, then holds
+  every supported body above the pavement at its moved position. An intact craft's
+  nearby engines and pod share a valid catch; below-lip and transverse misses remain
+  misses. Surface velocity includes the raised edges as well as the road's slope.
 - **Driving partner and flight menus:** an optional teal craft follows your speed and heading,
   usually about 50 m off your wing, through ordinary roads, jumps and shafts. It provides
   a moving reference without collisions or a separate physics participant. Toggle Driving

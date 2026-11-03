@@ -41,6 +41,20 @@ function finishTransfer(r) {
   const end = NR.across(join, false, C.N - 1), direction = join.sense;
   const legs = NR.find(s.T, { road: catcher, i: s.S.pod.hint, dir: 1 }, [{ road: join.a, i: end + direction * 160 }]);
   const route = NR.points(s.T, legs), pilot = NR.makePilot(s.S, route, NR.plan(route));
+  // Actual pavement curvature, so splitting an arc's data records cannot fake a respite.
+  const straightRuns = [];
+  let straightStart = -1;
+  for (let i = 1; i < C.N - 1; i++) {
+    const a = C.pts[i-1], b = C.pts[i];
+    const straight = Math.abs(a.tx*b.ty-a.ty*b.tx) < 1e-9;
+    if (straight && straightStart < 0) straightStart = i;
+    if ((!straight || i === C.N-2) && straightStart >= 0) {
+      const length = (i-straightStart)*24;
+      if (straightStart > 251 && length >= 2500 && length < 10000)
+        straightRuns.push({first:straightStart,last:i-1,entry:null,exit:null,peak:0,seconds:0});
+      straightStart = -1;
+    }
+  }
   let input = null, crash = false;
   for (let step = 0; step < 420 / DT; step++) {
     if (step % 8 === 0) {
@@ -49,12 +63,27 @@ function finishTransfer(r) {
       input = { thrL: u[0], thrR: u[1], brkL: u[2], brkR: u[3], repair: false, reignite: true };
     }
     s.step(input, DT);
+    if (s.S.pod.path === catcher && !s.S.pod.offRoad) {
+      const run = straightRuns.find(r => s.S.pod.hint >= r.first && s.S.pod.hint <= r.last);
+      if (run) {
+        const mph = Math.hypot(s.S.pod.vx,s.S.pod.vy)*MPH;
+        if (run.entry === null) run.entry = mph;
+        run.exit = mph; run.peak = Math.max(run.peak,mph); run.seconds += DT;
+      }
+    }
     crash ||= s.S.crashT > 0;
     if (!s.S.pod.offRoad && s.S.pod.path === join.a && (s.S.pod.hint - end) * direction > 50) break;
   }
   assert(!crash && !s.S.pod.offRoad && s.S.pod.path === join.a,
     `${C.name} completes its interchange onto ${s.T.roads[join.a].name} with throttle/brake controls: crash=${crash}, offRoad=${s.S.pod.offRoad}, final=${s.T.roads[s.S.pod.path].name}:${s.S.pod.hint}, speed=${Math.hypot(s.S.pod.vx,s.S.pod.vy)*MPH}`);
   console.log(`TRANSFER ${C.name} -> ${s.T.roads[join.a].name} PASS`);
+  const acceleration = straightRuns.filter(r => r.entry !== null).map(r => ({
+    seconds:+r.seconds.toFixed(2), gainMph:+(r.peak-r.entry).toFixed(1), entryMph:Math.round(r.entry), peakMph:Math.round(r.peak), exitMph:Math.round(r.exit)
+  }));
+  console.log(`RHYTHM ${C.name} ${JSON.stringify(acceleration)}`);
+  // The pilot accelerates, then brakes before the next corner; compare the peak
+  // with entry speed rather than requiring a net gain after that braking.
+  assert(acceleration.filter(r => r.gainMph > 50).length >= 3, `${C.name} has multiple straight acceleration opportunities under real controls`);
 }
 
 function main() {

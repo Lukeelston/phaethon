@@ -22,8 +22,8 @@ miles and 1500' up to the entrance of the next ramp"):
   deck. The release's nine minimum speeds (2,000-4,000 mph) and lip angles (5-14 degrees)
   remain varied. Three ascent profiles add terraces, crests and saddles, with 400-1,000 m of
   added rise and gaps up to 50% longer. Catch decks pull out level before their recovery;
-- four central catch roads transfer to the perpendicular highway through open 45 km arcs,
-  overfly it, then descend outside its traffic lanes before a gentle S-shaped merge.
+- four central catch roads transfer to the perpendicular highway through short 35 km-radius
+  bends and acceleration straights, overfly it, then descend outside its traffic lanes to merge.
   The other catches merge 44 km beyond their crossing; four carry full recovery rolls in the
   view through NET_TWISTS while retaining the level, drivable simulation path;
 - an on-ramp from the open ground for each city: it starts ON_OUT out on the city's side, short of
@@ -92,6 +92,7 @@ JUMP_PROFILES = [
 TWIST_JUMPS = (4, 8, 12, 16)
 TRANSFER_JUMPS = (0, 1, 2, 3)
 TRANSFER_MERGE, TRANSFER_OUT, TRANSFER_FINAL = 160 * KM, 1 * KM, 2 * KM
+TRANSFER_BEND_R, TRANSFER_BEND_SECONDS = 35 * KM, 11.0
 # At each selected crossing the exit ramp on your right forks: it curves to the other highway,
 # while its launch spur runs straight on. The first four jumps are true highway transfers.
 JUMP_AT = [(1, 1), (1, 0), (1, 2), (0, 1), (2, 1)]
@@ -212,6 +213,29 @@ class Road:
         n = (-self.t[i, 1], self.t[i, 0])
         lat = (q[0] - self.p[i, 0]) * n[0] + (q[1] - self.p[i, 1]) * n[1]
         return i, lat, float(d[i])
+
+
+def transfer_rhythm(segs, mph):
+    """Replace a wide arc by tangent bends/straights with the same endpoint pose.
+
+    For angle a, two radius-r half-arcs plus a straight of
+    2*(R-r)*sin(a/2) have the same displacement as the original radius-R arc.
+    Adjacent half-arcs count together: each continuous bend stays below the
+    driving-time budget; the inserted straights are genuine throttle windows.
+    """
+    out = []
+    for kind, radius, angle, mode in segs:
+        if kind == 'S':
+            out.append((kind, radius, angle, mode))
+            continue
+        count = max(1, math.ceil(math.radians(angle) * TRANSFER_BEND_R /
+                                 (mph * MPH * TRANSFER_BEND_SECONDS)))
+        part = angle / count
+        straight = 2 * (radius - TRANSFER_BEND_R) * math.sin(math.radians(part / 2))
+        for _ in range(count):
+            out.extend([(kind, TRANSFER_BEND_R, part / 2, mode),
+                        ('S', straight, 0, mode), (kind, TRANSFER_BEND_R, part / 2, mode)])
+    return out
 
 
 def s_bend(D, deg):
@@ -499,7 +523,7 @@ def build():
                                 gy - dy * merge_lead - dx * TRANSFER_OUT, heading_deg(dx, dy)), Rs)
                 segs += [("L", Rs, math.degrees(merge_angle), "sp"),
                          ("R", Rs, math.degrees(merge_angle), "sp"), ("S", TRANSFER_FINAL, 0, "sp")]
-                C = Road(f"K{jump_id}", "jump", cx0, cy0, hdg, JC_W, segs)
+                C = Road(f"K{jump_id}", "jump", cx0, cy0, hdg, JC_W, transfer_rhythm(segs, ref))
             C.role = "catch"
             C.profile = profile_name
             ip = round(JC_PULL / STEP)
