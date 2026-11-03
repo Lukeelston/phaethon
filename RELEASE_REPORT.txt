@@ -182,3 +182,25 @@ metadata reaching physics/audio and downshift disabling overdrive on all six
 course stops. Rendered screenshots are in evidence/shield-desktop and
 evidence/shield-pcvr; the sprint cockpit screenshot was visually inspected.
 These checks ran outside the headset and do not establish subjective audio feel.
+
+LIVE 0.1.1 QUEST RUN
+Fresh extracted PC VR build launched with --max-fps 120 and --quit-after 36000,
+bounded by the runner at 340 seconds. This timer applies only to this diagnostic
+launch; ordinary customer launch has no timer. The process exited with code 0
+after 307.12 seconds. Meta/OpenXR connected, WASAPI routed to the Oculus Virtual
+Audio Device at 48000 Hz, and both controllers later reported live tracking.
+The log records normal, afterburner and ramjet flight, trigger/brake input,
+EVENT finish at simulation time 279.21, followed by zero speed with brakes held.
+This simulation timestamp includes time waiting at the start; it is not claimed
+as a race-time measurement. Active later frame samples were about 117.5-120 FPS
+on this RTX 5080, not a minimum-hardware claim.
+
+The run reproduced the existing unsupported-refresh-rate notice, Meta IPC
+shutdown warning, two OpenXR interaction-profile RID leaks, and a nonexistent
+spatial signal-disconnect error at exit. The wrapper therefore returned failure
+despite player exit code 0. These are recorded limitations, not a clean log.
+The process was verified absent after exit; no Godot/Phaethon test process
+remained and the user's Meta runtime was left running. Log: evidence/shield-headset.log.
+New shield/gear subjective feel: unverified - needs user confirmation.
+All 297 original development source files still match the snapshot.
+Version 0.1.1 is packaged locally; the live Stan attachments remain v0.1.0.

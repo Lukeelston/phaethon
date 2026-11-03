@@ -17,7 +17,8 @@
 - [x] Verify high-speed gain, decreasing increments, braking, throttle lift, engine failure, shift-down, both handling modes and boost.
 - [x] Add requested speed-shield sound: fixed low reverberation plus a distinct airspeed-driven tone; prove RPM and shifts cannot change its pitch at fixed speed.
 - [x] Run affected input/audio/simulation/UI regressions, export both editions and test fresh archives.
-- [ ] Produce version 0.1.1 local builds and a headset tuning run; record verification and commit.
+- [x] Produce version 0.1.1 local builds and a headset tuning run; record verification and commit.
+- [ ] Luke confirms the new audio balance and gear feel in the headset (automated capture and live sprint finish verified; subjective confirmation pending).
 
 ## Review focus
 No fifth-gear ceiling hidden in drag; no free acceleration with throttles released; physical brakes still overpower thrust; no burner in gears 1–4; no audio-rate change to desktop or other VR control schemes; stable high-speed simulation and no falsely claimed listening test.
