@@ -7,6 +7,23 @@ const MUTED := Color("a3adb5")
 const AMBER := Color("efb15d")
 const MENU_SCENE := "res://release/menu.tscn"
 const GAME_SCENE := "res://main.tscn"
+const VR_MENU_SCENE := "res://release/vr_menu.tscn"
+const COURSES := [
+	{"id": "range", "name": "100-mile Sprint", "detail": "A straight run into absurd speed.\nStop inside the finish box. Brake early."},
+	{"id": "gp", "name": "Grand Prix", "detail": "A tighter 29 km circuit.\nStarts in Starfighter handling."},
+	{"id": "eridanus", "name": "Eridanus", "detail": "A 199 km course with a fast loop\nand two Starfighter towns."},
+	{"id": "emergency", "name": "Emergency Run", "detail": "An emergency delivery on Eridanus.\nAn additional experimental mode."},
+	{"id": "network", "name": "The Network", "detail": "Explore linked roads and cities.\nAn additional experimental map."},
+]
+
+static func course_index(id: String) -> int:
+	for i in COURSES.size():
+		if COURSES[i].id == id:
+			return i
+	return -1
+
+static func course_overrides(id: String) -> Array:
+	return ["eridanus", "emergency"] if id == "emergency" else [id, "none"]
 
 static func box(color: Color, border: Color = Color.TRANSPARENT) -> StyleBoxFlat:
 	var style := StyleBoxFlat.new()

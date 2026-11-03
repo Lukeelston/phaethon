@@ -1,8 +1,8 @@
 ## Track-switch gate (Luke: "can we get a way to switch to gp mode"): in the headset, the left
 ## menu button does two things.
 ##   tap         (released before MENU_HOLD) cycles the control scheme, on release, once
-##   hold 1.5 s  switches track once, and letting go after doesn't also cycle the scheme
-##   cycle       each hold steps range -> grand prix -> Eridanus -> the emergency run -> the Network -> range
+##   hold 1.5 s  opens map selection once, and letting go doesn't also cycle the scheme
+##   legacy cycle helper remains available for diagnostics and internal scene reloads
 ##   override    CraftView.track_override (static: it survives the reload that does the switch)
 ##               builds the asked-for track, and wins over --track
 ## The reload itself is exercised end to end by the suite's VR scene run with --switch-track-at.
@@ -30,7 +30,7 @@ func _initialize() -> void:
 	var after: String = c._menu(false, dt)
 	_check("a %.2f s tap cycles the scheme once, on release (held: %s, release: '%s', then '%s')" % [20 * dt, during, on_release, after],
 		during.is_empty() and on_release == "scheme" and after == "")
-	# a long hold: the track switches once at MENU_HOLD; the release doesn't cycle the scheme
+	# a long hold: the menu opens once at MENU_HOLD; release doesn't cycle the scheme
 	var acts := []
 	var at := -1.0
 	for i in 160:
@@ -39,15 +39,15 @@ func _initialize() -> void:
 			acts.append(a)
 			at = (i + 1) * dt
 	var rel: String = c._menu(false, dt)
-	_check("holding it switches track once at %.2f s (wanted %.1f s; actions %s), and letting go does nothing ('%s')" % [at, Cockpit.MENU_HOLD, acts, rel],
-		acts == ["track"] and absf(at - Cockpit.MENU_HOLD) < 2.0 * dt and rel == "")
+	_check("holding it opens the map menu once at %.2f s (wanted %.1f s; actions %s), and letting go does nothing ('%s')" % [at, Cockpit.MENU_HOLD, acts, rel],
+		acts == ["menu"] and absf(at - Cockpit.MENU_HOLD) < 2.0 * dt and rel == "")
 	c.free()
 	var seen := []
 	var t := "range"
 	for i in 5:
 		t = Cockpit.next_track(t)
 		seen.append(t)
-	_check("each hold steps to the next track: range -> %s (a plain circuit goes to the %s)" % [" -> ".join(seen), Cockpit.next_track("circuit")],
+	_check("legacy cycle helper: range -> %s (a plain circuit goes to the %s)" % [" -> ".join(seen), Cockpit.next_track("circuit")],
 		seen == ["gp", "eridanus", "emergency", "network", "range"] and Cockpit.next_track("circuit") == "range")
 	# launched with --job=emergency (launch_vr.ps1 -Job emergency), the cycle's free Eridanus stop
 	# is still free: the switch's override says "no job", which wins over the command line

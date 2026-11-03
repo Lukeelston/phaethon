@@ -9,7 +9,7 @@
 ##   away from the triggers")
 ##   the MODE switch on the right console: push it up for SPEEDCRAFT, down for STARFIGHTER (live,
 ##   mid-lap; STARFIGHTER takes below 1,250 mph). Y hold 1 s flips it too. Y tap: restart
-##   menu tap: next control scheme · menu hold 1.5 s: next track (range, grand prix, Eridanus)
+##   menu tap: next control scheme · menu hold 1.5 s: main menu / map selection
 ## Haptics: a kick on the sonic boom; a tick in that hand when a lever crosses the burner gate (the
 ## stick schemes); a thump in the left hand as the burner lights, a softer one as it goes out, a
 ## double tap when it can't (below top gear).
@@ -25,7 +25,7 @@ const FLOOR_H := 0.7                    # pod floor above the ground
 const QuestControlsScript := preload("res://input/quest_controls.gd")
 const PREFS := "user://vr_prefs.json"
 const Y_HOLD := 1.0
-const MENU_HOLD := 1.5   # hold the left menu button this long to switch track
+const MENU_HOLD := 1.5   # hold the left menu button this long to return to map selection
 const DashboardScript := preload("res://vr/dashboard.gd")
 const WagMeterScript := preload("res://vr/wag_meter.gd")
 const CockpitInteriorScript := preload("res://vr/cockpit_interior.gd")
@@ -33,6 +33,8 @@ const ModeSwitchScript := preload("res://vr/mode_switch.gd")
 const CanopyScript := preload("res://view/canopy.gd")
 const MinimapPanelScript := preload("res://vr/minimap_panel.gd")
 const Kit := preload("res://view/mesh_kit.gd")
+static var require_neutral_on_entry := false
+var _await_neutral_controls := false
 
 var xr: XRInterface
 var rig: Node3D
@@ -78,6 +80,8 @@ var hands_live := true   # false while the OpenXR session isn't focused (_on_xr_
 
 
 func _ready() -> void:
+	_await_neutral_controls = require_neutral_on_entry
+	require_neutral_on_entry = false
 	quest = QuestControlsScript.new()
 	quest.set_gear(0)   # gears on the right stick (triggers), first gear from the start
 	super()
@@ -257,6 +261,10 @@ func _make_view() -> void:
 	_build_fade(xr_cam)
 	pod_mesh.visible = false   # you are sitting inside it
 	craft.pod_frame = rig      # so the cables hook to the cockpit's own nose
+	# Entering from the menu preserves an already-focused OpenXR session, so
+	# session_focussed will not fire again to place the player in the new seat.
+	if live and hands_live:
+		recenter.call_deferred()
 
 
 func _on_xr_event(sig: String) -> void:
@@ -290,15 +298,33 @@ func _set_hands(on: bool) -> void:
 
 ## A controller's trigger / grip, stick and button, or let go while the session isn't focused.
 func _axis(c: XRController3D, input: String) -> float:
-	return c.get_float(input) if hands_live else 0.0
+	return c.get_float(input) if hands_live and not _await_neutral_controls else 0.0
 
 
 func _stick(c: XRController3D, input: String) -> Vector2:
-	return c.get_vector2(input) if hands_live else Vector2.ZERO
+	return c.get_vector2(input) if hands_live and not _await_neutral_controls else Vector2.ZERO
 
 
 func _button(c: XRController3D, input: String) -> bool:
-	return hands_live and c.is_button_pressed(input)
+	return hands_live and not _await_neutral_controls and c.is_button_pressed(input)
+
+
+func _release_menu_controls() -> void:
+	if not _await_neutral_controls or not hands_live:
+		return
+	var tracked := false
+	for hand: XRController3D in hands.values():
+		if not hand.get_has_tracking_data():
+			continue
+		tracked = true
+		if hand.get_float("trigger") > 0.2 or hand.get_float("grip") > 0.2 or hand.get_vector2("primary").length() > 0.3:
+			return
+		for button in ["ax_button", "by_button", "menu_button", "primary_click"]:
+			if hand.is_button_pressed(button):
+				return
+	if tracked:
+		_await_neutral_controls = false
+		print("CONTROLS: menu inputs released; flight controls ready")
 
 
 var _diag_t := 0.0
@@ -446,6 +472,7 @@ func _pressed_once(key: String, down: bool) -> bool:
 
 
 func _read_input(delta: float) -> void:
+	_release_menu_controls()
 	var p: Dictionary = levers.poll(delta)
 	var l: XRController3D = hands.left
 	var r: XRController3D = hands.right
@@ -522,10 +549,10 @@ func _read_input(delta: float) -> void:
 			_scheme_flash = 4.0
 			_buzz(l, 0.5, 0.08)
 			print("CONTROLS: ", quest.scheme)
-		"track":
+		"menu":
 			_buzz(l, 0.9, 0.2)
 			_buzz(r, 0.9, 0.2)
-			switch_track()
+			return_to_menu()
 	_frames += 1
 	if _switch_at > 0 and _frames == _switch_at and track_override == "":   # once
 		switch_track()
@@ -551,13 +578,13 @@ func _track() -> String:   # "range", "gp", "eridanus", "emergency" (Eridanus on
 
 
 ## The left menu button: a tap (released before MENU_HOLD) cycles the control scheme; holding it
-## MENU_HOLD switches track. Returns "scheme", "track" or "".
+## MENU_HOLD returns to map selection. Returns "scheme", "menu" or "".
 func _menu(down: bool, delta: float) -> String:
 	if down:
 		_menu_held += delta
 		if _menu_held >= MENU_HOLD and not _menu_fired:
 			_menu_fired = true
-			return "track"
+			return "menu"
 		return ""
 	var tapped := _menu_held > 0.0 and not _menu_fired
 	_menu_held = 0.0
@@ -565,9 +592,14 @@ func _menu(down: bool, delta: float) -> String:
 	return "scheme" if tapped else ""
 
 
-## Range -> grand prix -> Eridanus -> the emergency run -> the Network -> range, in the headset: reload the scene on
-## the next track (the OpenXR session carries on; CraftView.track_override and job_override survive
-## the reload and win over --track and --job).
+## End flight and return to the headset menu; keep the nearest selectable destination.
+func return_to_menu() -> void:
+	var menu_script = load("res://release/vr_menu.gd")
+	menu_script.remembered_course = "network" if GP_BIOME.has(_track()) else _track()
+	_save_prefs()
+	get_tree().call_deferred("change_scene_to_file", "res://release/vr_menu.tscn")
+
+
 func switch_track() -> void:
 	var to := next_track(_track())
 	print("TRACK: switching %s -> %s" % [_track(), to])
@@ -582,7 +614,7 @@ static func overrides_for(to: String) -> Array:
 	return ["eridanus", "emergency"] if to == "emergency" else [to, "none"]
 
 
-## The menu hold's cycle: range -> grand prix -> Eridanus -> the emergency run (Eridanus on the
+## The legacy diagnostic cycle: range -> grand prix -> Eridanus -> the emergency run (Eridanus on the
 ## job) -> the Network -> range (a plain circuit goes to the range).
 static func next_track(cur: String) -> String:
 	if GP_BIOME.has(cur):

@@ -30,15 +30,15 @@ func _run() -> void:
 	_check("Escape cannot pause the menu", not paused and not overlay.is_paused)
 	menu.start_course("missing")
 	_check("an unknown course keeps the menu open", current_scene == menu)
-	for course in ["range", "gp", "eridanus"]:
+	for course in ["range", "gp", "eridanus", "emergency", "network"]:
 		menu = current_scene
 		menu.start_course(course)
 		await scene_changed
 		var view = current_scene
 		_check("%s opens a playable CraftView" % course, view is View)
 		_check("%s routes to the selected course" % course,
-			view.sim.kind == "range" if course == "range" else view.sim.track_name == course)
-		_check("%s is free flight even with --job=emergency" % course, view.sim.job.is_empty())
+			view.sim.kind == course if course in ["range", "network"] else view.sim.track_name == ("eridanus" if course == "emergency" else course))
+		_check("%s has only its selected mission even with --job=emergency" % course, not view.sim.job.is_empty() if course == "emergency" else view.sim.job.is_empty())
 		if course == "gp":
 			_check("Grand Prix starts with starfighter handling", view.sim.P.handling == "starfighter")
 		await process_frame

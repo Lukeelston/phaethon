@@ -11,7 +11,7 @@ TESTS = [
     'test_network_parity', 'test_brakes', 'test_energy',
     'test_quest_controls', 'test_controls_flyable', 'test_xr_focus',
     'test_mode_switch', 'test_track_switch', 'test_dashboard',
-    'test_release_input', 'test_release_menu', 'test_release_vr',
+    'test_release_input', 'test_release_menu', 'test_release_vr', 'test_vr_menu',
 ]
 results = []
 for name in TESTS:

@@ -78,13 +78,27 @@ func _run() -> void:
 		var prefs = JSON.parse_string(FileAccess.get_file_as_string(Cockpit.PREFS))
 		if prefs is Dictionary and Cockpit.QuestControlsScript.SCHEMES.has(prefs.get("scheme", "")):
 			expected_scheme = prefs.scheme
-	View.track_override = "range"
-	View.job_override = "none"
-	get_tree().change_scene_to_file("res://vr.tscn")
+	get_tree().change_scene_to_file("res://release/vr_menu.tscn")
 	await get_tree().scene_changed
+	await frames(3)
+	await shot("main-menu")
+	if DisplayServer.get_name() != "headless":
+		var menu = get_tree().current_scene
+		check("VR menu panel screenshot saved", menu.panel_view.get_texture().get_image().save_png(evidence.path_join("pcvr-menu-panel.png")) == OK)
 	var overlay = get_tree().root.get_node("ReleasePause")
 	for index in Stops.size():
 		var stop: String = Stops[index]
+		var menu = get_tree().current_scene
+		check(stop + " starts at the VR menu", menu.scene_file_path == "res://release/vr_menu.tscn")
+		menu.set_process(false) # Explicitly XR-off diagnostic supplies controller samples below.
+		menu.choose_course(stop)
+		check(stop + " selection keeps menu open", get_tree().current_scene == menu and menu.selected_course == stop)
+		menu.focus_row(5)
+		menu.consume_controller(0.0, true, true)
+		check(stop + " held entry trigger cannot launch", not menu.launching)
+		menu.consume_controller(0.0, false, true)
+		menu.consume_controller(0.0, true, true)
+		await get_tree().scene_changed
 		var view = get_tree().current_scene
 		if not check(stop + " opens the real VR cockpit scene", view is Cockpit and view.scene_file_path == "res://vr.tscn"):
 			_finish()
@@ -129,11 +143,12 @@ func _run() -> void:
 		check(stop + " desktop pause cannot reroute VR", get_tree().current_scene == view and not get_tree().paused and not overlay.is_paused)
 		if index < Stops.size() - 1:
 			await shot(stop)
-			view.switch_track()
-			await get_tree().scene_changed
-	# Leave gameplay through normal scene teardown before exiting the diagnostic.
-	get_tree().change_scene_to_file("res://release/menu.tscn")
-	await get_tree().scene_changed
+		var old: WeakRef = weakref(view)
+		view.return_to_menu()
+		await get_tree().scene_changed
+		await frames(2)
+		check(stop + " returns to VR menu and unloads flight", get_tree().current_scene.scene_file_path == "res://release/vr_menu.tscn" and old.get_ref() == null)
+		check(stop + " menu remembers selection", get_tree().current_scene.selected_course == stop)
 	await frames(3)
 	_finish()
 

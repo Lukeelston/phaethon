@@ -1,5 +1,5 @@
 PHAETHON
-Experimental Desktop Racer - Windows x64 - v0.1.2
+Experimental Desktop Racer - Windows x64 - v0.1.3
 ElstonWorks
 
 Two engines. One cockpit. We know it's a little fucky.
@@ -11,10 +11,12 @@ GET IN
 No Godot editor, account, headset, or online connection is required to play.
 
 WHAT YOU BOUGHT
-An offline, single-player physics experiment with three courses:
+An offline, single-player physics experiment with five destinations:
 - 100-mile sprint: build speed, survive, then stop in the finish box.
 - Grand Prix: a circuit with tighter Starfighter handling.
 - Eridanus: a long course to explore and push your luck on.
+- Emergency Run: an experimental delivery mission on Eridanus.
+- The Network: experimental linked roads and cities to explore.
 You steer using the difference between your left and right engine thrust.
 This is a small experimental build, not a finished campaign. Expect strange
 handling, sparse scenery, rough collisions, and the occasional spectacular

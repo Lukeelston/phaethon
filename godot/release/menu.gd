@@ -26,19 +26,22 @@ func _ready() -> void:
 	columns.add_theme_constant_override("separation", 52)
 	margin.add_child(columns)
 	var left := VBoxContainer.new()
+	left.add_theme_constant_override("separation", 8)
 	left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	columns.add_child(left)
 	left.add_child(UI.label("EXPERIMENTAL DESKTOP BUILD", 15, UI.AMBER))
-	left.add_child(UI.label("PHAETHON", 68))
+	left.add_child(UI.label("PHAETHON", 56))
 	left.add_child(UI.label("Two engines. One cockpit.\nWe know it’s a little fucky.", 25))
 	var breathing_room := Control.new()
 	breathing_room.custom_minimum_size.y = 6
 	left.add_child(breathing_room)
 	left.add_child(UI.label("CHOOSE YOUR BAD IDEA", 14, UI.MUTED))
-	var sprint := UI.button("01    100-mile sprint  ·  Start here", start_course.bind("range"), 64)
-	left.add_child(sprint)
-	left.add_child(UI.button("02    Grand Prix  ·  Starfighter circuit", start_course.bind("gp"), 64))
-	left.add_child(UI.button("03    Eridanus  ·  Explore the long course", start_course.bind("eridanus"), 64))
+	var sprint: Button
+	for course in UI.COURSES:
+		var button := UI.button(course.name, start_course.bind(course.id), 52)
+		left.add_child(button)
+		if course.id == "range":
+			sprint = button
 	var spacer := Control.new()
 	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	left.add_child(spacer)
@@ -51,8 +54,9 @@ func _ready() -> void:
 	sprint.grab_focus()
 
 func start_course(course: String) -> void:
-	if course not in ["range", "gp", "eridanus"]:
+	if UI.course_index(course) < 0:
 		return
-	View.track_override = course
-	View.job_override = "none"
+	var overrides := UI.course_overrides(course)
+	View.track_override = overrides[0]
+	View.job_override = overrides[1]
 	get_tree().change_scene_to_file(UI.GAME_SCENE)

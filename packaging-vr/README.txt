@@ -1,5 +1,5 @@
 PHAETHON - EXPERIMENTAL PC VR EDITION
-Windows x64 / OpenXR - v0.1.2 - ElstonWorks
+Windows x64 / OpenXR - v0.1.3 - ElstonWorks
 
 Two engines. One cockpit. We know it's a little fucky.
 
@@ -9,8 +9,11 @@ START HERE
    enter Quest Link or Air Link first. Set the matching PC software as your
    active OpenXR runtime through that software's own settings.
 3. Sit down, put on the headset, and double-click PhaethonVR.exe on the PC.
-4. You start on the 100-mile sprint. Click either thumbstick to recenter your
-   view and seat height. Gently squeeze both triggers to begin.
+4. The main menu appears inside the headset. Release the triggers, then flick
+   either stick up/down to highlight a map. Press A or squeeze a trigger to
+   select it, then press again on Start flight. Click either stick to recenter.
+5. In the cockpit, release triggers/buttons and center the sticks once, then
+   gently squeeze both triggers to begin. The Start press cannot accelerate you.
 No Godot editor is needed. The game runs locally; it has no online account.
 If no OpenXR headset session is available, the desktop window explains setup.
 Connect the headset and relaunch the game. Close the window or use Alt+F4 to
@@ -39,7 +42,7 @@ Y tap               Restart
 Y hold 1 second     Switch Speedcraft / Starfighter handling
 Either stick click  Recenter view and seat height
 Left menu tap       Cycle control schemes
-Left menu hold 1.5s  Next course/mode
+Left menu hold 1.5s  Return to main menu / map selection (ends this run)
 
 Each higher gear winds up more slowly and reaches a higher engine note.
 Upshifts drop the revs before the next climb. Gears 1-4 have limiters; fifth
@@ -56,7 +59,7 @@ The shield opens again below 1,300 mph.
 
 The physical MODE switch in the cockpit also changes handling. Starfighter
 handling engages below 1,250 mph. The dashboard shows mode, gear and controls.
-Let go of the menu button after a track switch before pressing it again.
+Release the triggers and center the sticks when entering the main menu.
 Release triggers before restarting. Keyboard X clears keyboard throttle only;
 it cannot cancel a still-squeezed Quest trigger.
 Opening your headset's system menu neutralizes controller inputs; it is not
@@ -73,9 +76,12 @@ Stick Levers: each stick adjusts its engine throttle; triggers brake; both
 grips equalize the throttles to their lower setting.
 Other schemes and custom printed lever hardware remain experimental.
 
-FIVE STOPS IN THE VR COURSE CYCLE
-100-mile sprint -> Grand Prix -> Eridanus -> Emergency run -> Network
-Then back to the sprint. The last two are additional experimental modes.
+FIVE DESTINATIONS IN THE MAIN MENU
+100-mile sprint, Grand Prix, Eridanus, Emergency run, and Network.
+The last two are additional experimental modes. Returning to the menu ends
+the current run; it remembers the last selected destination during this session.
+Menu keyboard fallback: Up/Down highlights, Enter selects. Use Quit to desktop
+to close the game. The menu stays still; stick-click brings it in front of you.
 - Sprint: survive the run and stop in the finish box. Brake early.
 - Grand Prix: tighter Starfighter circuit.
 - Eridanus: a long course with Speedcraft and Starfighter areas.

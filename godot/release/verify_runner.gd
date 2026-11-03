@@ -4,7 +4,7 @@ extends Node
 
 const View := preload("res://view/craft_view.gd")
 const MENU_SCENE := "res://release/menu.tscn"
-const COURSES := ["range", "gp", "eridanus"]
+const COURSES := ["range", "gp", "eridanus", "emergency", "network"]
 
 var failures := 0
 var checks := 0
@@ -89,8 +89,8 @@ func _run() -> void:
 		if not check(course + " opens CraftView", view is View):
 			_finish()
 			return
-		check(course + " scene loaded", view.sim.kind == "range" if course == "range" else view.sim.track_name == course)
-		check(course + " opens free flight", view.sim.job.is_empty())
+		check(course + " scene loaded", view.sim.kind == course if course in ["range", "network"] else view.sim.track_name == ("eridanus" if course == "emergency" else course))
+		check(course + " opens its selected mission", not view.sim.job.is_empty() if course == "emergency" else view.sim.job.is_empty())
 		if course == "gp":
 			check("Grand Prix starts in starfighter mode", view.sim.P.handling == "starfighter")
 		var start := Vector2(view.sim.pod.x, view.sim.pod.y)
@@ -130,7 +130,7 @@ func _run() -> void:
 		await get_tree().scene_changed
 		view = get_tree().current_scene
 		check(course + " restart restores playable scene", not get_tree().paused and view is View and view.get_instance_id() != old_id)
-		check(course + " restart keeps selected course", view.sim.kind == "range" if course == "range" else view.sim.track_name == course)
+		check(course + " restart keeps selected course", view.sim.kind == course if course in ["range", "network"] else view.sim.track_name == ("eridanus" if course == "emergency" else course))
 		check(course + " restart clears throttle", view.inp.thrL == 0.0 and view.inp.thrR == 0.0)
 		await frames(2)
 		overlay.set_paused(true)

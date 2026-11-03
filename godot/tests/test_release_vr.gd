@@ -18,16 +18,16 @@ func _run() -> void:
 	var empty := PackedStringArray()
 	var diagnostic := PackedStringArray(["--verify-vr-release"])
 	var acknowledged := PackedStringArray(["--verify-vr-release", "--verify-xr-off"])
-	_check("initialized OpenXR enters VR", boot.startup_route(true, empty) == "vr")
+	_check("initialized OpenXR opens the VR menu", boot.startup_route(true, empty) == "menu")
 	_check("missing OpenXR shows setup instead of flat gameplay", boot.startup_route(false, empty) == "setup")
 	_check("XR off acknowledgment alone never bypasses the setup guard", boot.startup_route(false, PackedStringArray(["--verify-xr-off"])) == "setup")
 	_check("diagnostic flag alone never bypasses the setup guard", boot.startup_route(false, diagnostic) == "setup")
 	_check("diagnostic with explicit XR off acknowledgment permits the scene check", boot.startup_route(false, acknowledged) == "diagnostic")
 	_check("diagnostic cannot take over a live headset", boot.startup_route(true, acknowledged) == "setup")
 	_check("default start is the range", boot.selected_track(empty) == "range")
-	for course in ["range", "gp", "eridanus"]:
+	for course in ["range", "gp", "eridanus", "emergency", "network"]:
 		_check("CLI can start on " + course, boot.selected_track(PackedStringArray(["--track=" + course])) == course)
-	_check("unsupported track falls back to range", boot.selected_track(PackedStringArray(["--track=network"])) == "range")
+	_check("unsupported track falls back to range", boot.selected_track(PackedStringArray(["--track=missing"])) == "range")
 	change_scene_to_file("res://release/vr_boot.tscn")
 	await scene_changed
 	await process_frame

@@ -11,7 +11,7 @@ static func selected_track(args: PackedStringArray) -> String:
 	for arg in args:
 		if arg.begins_with("--track="):
 			var course := arg.trim_prefix("--track=")
-			return course if course in ["range", "gp", "eridanus"] else "range"
+			return course if UI.course_index(course) >= 0 else "range"
 	return "range"
 
 static func startup_route(xr_ready: bool, args: PackedStringArray) -> String:
@@ -19,7 +19,7 @@ static func startup_route(xr_ready: bool, args: PackedStringArray) -> String:
 		# Godot consumes --xr-mode before GDScript sees its argument list. Require
 		# an explicit user acknowledgment as well as a non-initialized interface.
 		return "diagnostic" if "--verify-xr-off" in args and not xr_ready else "setup"
-	return "vr" if xr_ready else "setup"
+	return "menu" if xr_ready else "setup"
 
 func _start() -> void:
 	var xr := XRServer.find_interface("OpenXR")
@@ -38,7 +38,9 @@ func _start() -> void:
 		var runner = load("res://release/verify_vr_runner.gd").new()
 		get_tree().root.add_child.call_deferred(runner)
 	else:
-		get_tree().change_scene_to_file("res://vr.tscn")
+		var menu_script = load("res://release/vr_menu.gd")
+		menu_script.remembered_course = selected_track(args)
+		get_tree().change_scene_to_file(UI.VR_MENU_SCENE)
 
 func _show_setup(diagnostic_requested: bool) -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
