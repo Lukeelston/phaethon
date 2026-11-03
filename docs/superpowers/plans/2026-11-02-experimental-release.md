@@ -27,7 +27,20 @@
 - [x] Independent review of release changes and license/package omissions; fix material findings and rerun relevant checks.
 - [x] Storefront: create concrete page, upload tested ZIP and authentic screenshots, set $3 experimental classification and visible known limits; publish.
 - [x] Verify public page, price and hosted download hash; do not claim a customer sale or successful payment without one. Cleanup all launched game/test processes.
-- [ ] Buyer checkout: Chrome's reCAPTCHA service fails in this session; phone check requested. No payment transaction attempted.
+- [x] Buyer checkout: Luke confirms Phaethon appears fine on phone. Chrome's reCAPTCHA service fails in this session. No payment transaction attempted.
+
+## User-requested VR addition
+Luke confirmed phone checkout and requested including the existing VR build.
+- [x] Separate pcvr-feature Windows export defaults to VR boot and OpenXR enabled.
+- [x] Preserve native five-stop VR cycle, Touch controls and cockpit.
+- [x] Clear setup screen without OpenXR; desktop pause never routes VR to flat game.
+- [x] Source control/focus/boot checks and actual exported VR scene diagnostics.
+- [x] Extracted PC VR ZIP includes standalone executable, PCK, instructions, credits.
+- [x] Attach second download at the same $3 price and update storefront scope.
+- [x] Verify hosted VR ZIP hash and live desktop + VR listing.
+- [x] Live Quest PC VR: Luke confirmed cockpit, looking around, triggers and audio.
+      Longer headset run logged a finish at 113.87 seconds and zero speed.
+      Initial short exit was the launch command's test timer, not the product.
 
 ## Review focus
 No installed editor required; raw resource availability after export; cold-start imports and shaders; pause state after returning to menu; controllers plugged in at idle; first-run controls; private paths in package; truthful screenshots and requirements.

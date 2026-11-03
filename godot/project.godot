@@ -4,10 +4,13 @@ config_version=5
 [application]
 
 config/name="Phaethon"
+config/name.pcvr="Phaethon PC VR"
 config/version="0.1.0-experimental"
 run/main_scene="res://release/menu.tscn"
+run/main_scene.pcvr="res://release/vr_boot.tscn"
 config/use_custom_user_dir=true
 config/custom_user_dir_name="ElstonWorks/Phaethon"
+config/custom_user_dir_name.pcvr="ElstonWorks/Phaethon-VR"
 
 [autoload]
 
@@ -23,7 +26,8 @@ window/stretch/mode="canvas_items"
 
 [xr]
 
-; OpenXR stays off for the flat view and tests; launch_vr.ps1 passes --xr-mode on.
+; Desktop remains flat; the separate pcvr export starts OpenXR automatically.
 openxr/enabled=false
+openxr/enabled.pcvr=true
 openxr/reference_space=0
 shaders/enabled=true

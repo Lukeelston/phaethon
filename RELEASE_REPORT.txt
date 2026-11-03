@@ -2,12 +2,13 @@ PHAETHON 0.1.0 EXPERIMENTAL - RELEASE RECORD
 2026-11-02
 
 Public product: https://stan.store/ElstonWorks/p/phaethon--experimental-desktop-racer
-Price: USD 3, one-time Windows download
+Price: USD 3, one-time purchase including Windows desktop and PC VR downloads
+Title: Phaethon — Experimental Desktop + PC VR
 Store: ElstonWorks (existing Stan account)
 Stan product ID: 5600204
 Tagline: Two engines. One cockpit. We know it's a little fucky.
 
-ARCHIVE
+DESKTOP ARCHIVE
 build/Phaethon-Experimental-0.1.0-Windows.zip
 Bytes: 53722639
 SHA256: 574126451de99bd436c363f4bd9eca8b88e0c79c9b249170e280741ecc16e582
@@ -15,7 +16,7 @@ SHA256: 574126451de99bd436c363f4bd9eca8b88e0c79c9b249170e280741ecc16e582
 five license/source documents, 24 separately licensed adapted audio WAVs.
 Downloaded back from Stan's uploaded-file control; hash matched exactly.
 
-VERIFIED
+DESKTOP VERIFICATION
 - Exported Windows player: rendered 54 checks, 0 failures.
 - Same ZIP extracted into fresh directory: rendered 54 checks, 0 failures.
 - All three course buttons, keyboard movement and throttle cut, Escape pause
@@ -32,7 +33,7 @@ Evidence logs and screenshot PNGs are in evidence/ (not customer ZIP).
 Exact package inventory and per-file hashes: evidence/package-inventory.json.
 
 KNOWN LIMITS
-Windows x64 flat-screen, keyboard first. Physical controllers unverified.
+Desktop edition: Windows x64 flat-screen, keyboard first. Physical gamepads unverified.
 Minimum hardware and other-platform performance not established.
 Rendered tests used Vulkan on NVIDIA GeForce RTX 5080.
 Audio verified by captured output; physical speaker listening not performed.
@@ -40,10 +41,54 @@ One diagnostic run showed existing ObjectDB cleanup warnings at exit; fresh
 extracted run completed cleanly. No persistent test processes remained.
 No paid transaction or customer sale was made; publication does not prove one.
 The public page shows the correct title, USD 3 total, gameplay image and copy.
-This Chrome session's payment form reports a reCAPTCHA connection error and
-Currently Unavailable, also observed on existing store products. A phone check
-has been requested to distinguish browser failure from buyer-facing outage.
-Paid checkout remains unverified pending that check; no test charge attempted.
+Luke confirmed the Phaethon checkout appears fine on his phone. This Chrome
+session separately reports a reCAPTCHA connection error. Card-form rendering
+is user-confirmed on phone; no paid transaction or test charge was attempted.
+
+PC VR ARCHIVE AND PUBLICATION
+Luke requested the existing PC VR edition alongside the desktop download.
+build/Phaethon-Experimental-0.1.0-Windows-PCVR.zip
+Bytes: 53783869
+SHA256: 4968dd80f0ebd2a9c55ce1976ed5782262d37595f2e9323e01724d696162cc80
+33 files: PhaethonVR.exe/PCK, VR README, common notices and license/source
+documents, and 24 separately licensed adapted audio WAVs.
+Uploaded as a second file on the same Stan product, preserving the desktop ZIP
+and USD 3 price. Reopened the saved editor and confirmed both attachments.
+Downloaded the hosted PC VR ZIP; SHA256 exactly matches the tested package.
+Public title and description now state desktop + PC VR, two downloads, OpenXR
+requirements, and that this is not a standalone Quest APK. URL unchanged.
+Public proof screenshot: evidence/store-live-vr.png.
+
+PC VR VERIFICATION
+- Actual exported player diagnostics: 97 checks, 0 failures.
+- Fresh extracted ZIP diagnostics: 97 checks, 0 failures.
+- Export feature pcvr, VR boot main scene, separate Phaethon-VR user data.
+- Native course cycle range -> gp -> eridanus -> emergency -> network -> range.
+- Cockpit, XR camera/controllers, input movement/cut, controls and first gear.
+- No-headset normal launch presents the setup screen without starting flat play.
+- Desktop pause/menu cannot redirect the PC VR edition into desktop gameplay.
+- Boot policy 17/17; native scene checks 89/89; desktop menu regression 38/38.
+- Existing Quest controls 32/32, track switch 5/5, MODE switch 6/6,
+  XR focus 7/7, gears 7/7. Independent review found no important defects.
+- Live Quest PC session used Oculus OpenXR 1.208.0 and reached focused state.
+- Both controllers tracked; recenter, triggers, gears and brakes produced live
+  input. Audio routed to Oculus Virtual Audio Device at 48000 Hz.
+- Luke explicitly confirmed cockpit view, looking around, trigger control and
+  engine audio all worked. His first run was truncated by the test command's
+  --quit-after 5400, not by the game. Ordinary customer launch has no timer.
+- Longer actual headset run logged EVENT finish at 113.87 seconds, followed by
+  zero speed. Log: evidence/pcvr-headset-full-sprint.log.
+- Initial active-headset sampling was approximately 116.5-120 FPS on RTX 5080;
+  this is not a minimum-hardware or universal performance claim.
+
+PC VR RUNTIME LIMITS
+Meta reported an unsupported requested refresh rate and retained its current
+120 Hz timing. The first run exited with code 0 but logged OpenXR interaction-
+profile RID leaks and a spatial signal disconnect error during shutdown, plus
+Meta IPC warnings. The wrapper flags those log errors, so this is not described
+as a clean log. No gameplay interruption preceded the intentional frame limit.
+Only Quest/Meta PC VR was physically exercised; other headset/controller
+layouts and standalone Quest execution are not claimed.
 
 REPRODUCTION
 Godot 4.7.1 stable, matching official Windows x64 release template.
@@ -53,6 +98,12 @@ tools/run_export.py wraps bounded actual-player runs.
 Player user arguments: --verify-release --evidence=<absolute directory>
 Use engine flags --audio-driver Dummy --max-fps 60 before the separating --.
 The diagnostic is opt-in; ordinary launch opens the player menu.
+For PC VR use tools/package_release.py --edition pcvr. Its diagnostic arguments:
+--xr-mode off --audio-driver Dummy --max-fps 60 -- --verify-vr-release
+--verify-xr-off --evidence=<absolute directory>. This checks scene construction
+outside the headset; the separate live-headset tests establish hardware use.
+Normal PhaethonVR.exe startup requires an initialized OpenXR session and opens
+the native cockpit. The PC VR diagnostic cannot run in a live headset session.
 
 Source lives in this isolated release repository. Original development tree
 C:/Users/Luke/Projects/phaethon was preserved and is still independent.

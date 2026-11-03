@@ -10,6 +10,10 @@ var _screen: Control
 var _resume: Button
 
 func _ready() -> void:
+	if OS.has_feature("pcvr"):
+		process_mode = Node.PROCESS_MODE_DISABLED
+		set_process_input(false)
+		return
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	layer = 100
 	_screen = Control.new()
@@ -46,16 +50,18 @@ func _ready() -> void:
 		add_child.call_deferred(runner)
 
 func _input(event: InputEvent) -> void:
-	if not get_tree().current_scene is View:
+	if not _desktop_gameplay():
 		return
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
 		set_paused(not is_paused)
 		get_viewport().set_input_as_handled()
 
 func set_paused(value: bool) -> void:
+	if OS.has_feature("pcvr"):
+		return
 	if value == is_paused:
 		return
-	if value and not get_tree().current_scene is View:
+	if value and not _desktop_gameplay():
 		return
 	is_paused = value
 	if value:
@@ -75,12 +81,14 @@ func resume_game() -> void:
 	set_paused(false)
 
 func restart_game() -> void:
-	if not get_tree().current_scene is View:
+	if not _desktop_gameplay():
 		return
 	resume_game()
 	get_tree().reload_current_scene()
 
 func return_to_menu() -> void:
+	if not _desktop_gameplay():
+		return
 	resume_game()
 	get_tree().change_scene_to_file(UI.MENU_SCENE)
 
@@ -91,3 +99,7 @@ func quit_game() -> void:
 func _scene_changed() -> void:
 	# Scene changes can also originate from existing game controls.
 	resume_game()
+
+func _desktop_gameplay() -> bool:
+	var scene := get_tree().current_scene
+	return not OS.has_feature("pcvr") and scene is View and scene.scene_file_path != "res://vr.tscn"
