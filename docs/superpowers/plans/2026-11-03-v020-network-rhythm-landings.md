@@ -53,7 +53,7 @@
 
 - [x] Run affected physics, geometry, launch approach, guidance, traffic, shaft and export gates. Review changes against the five failure modes above.
 - [x] Version and export a local PC VR build, preserving earlier archives. Smoke-check the actual exported player and record evidence. Package desktop only if needed for this release's normal paired delivery; never silently publish a store update.
-- [ ] Commit the build/documentation checkpoint, launch with Network selected, verify OpenXR ready, and request focused feedback on turn rhythm and imperfect receiving-ramp landings. Mark subjective feel unverified until Luke confirms.
+- [x] Commit the build/documentation checkpoint, launch with Network selected, verify OpenXR ready, and request focused feedback on turn rhythm and imperfect receiving-ramp landings. Mark subjective feel unverified until Luke confirms.
 
 ## Decisions
 

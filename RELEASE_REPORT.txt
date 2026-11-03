@@ -1010,3 +1010,4 @@ Desktop: 61370740 bytes; SHA256 4bcca18b33fc3218be340da9528c577a03dafa6f7657aa55
 PCVR: 61459170 bytes; SHA256 f55e1b75705311a895c67fd6aa876c01c1923eb6289dfb9720d013d2dece8cbf
 Logs/screenshots: evidence/v020-desktop*, evidence/v020-pcvr*.
 The v0.1.9 archives are preserved. This local iteration does not update the store.
+Live OpenXR startup probe passed: Oculus runtime1.208.0, xr_ready=true, VR menu ready. Gracefully closed the probe to flush its buffered log (evidence/v020-headset-startup.log), then relaunched the identical verified PCVR executable with Network selected and opt-in local trace. Physical feel remains unverified pending Luke. Automatic approval review blocked deletion of the temporary baseline copy with only blocked-by-policy; it remains as ignored scratch and no baseline/test process is running.
