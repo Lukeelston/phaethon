@@ -30,9 +30,25 @@ func _initialize() -> void:
 				queries += 1
 	for enabled in [false, true]:
 		var s = Sim.new({"track": "network", "handling": "speed", "obstacleCollisions": enabled})
-		var catcher := int(s.jumps[0][1])
+		# Some recovery roads now end on the upper express level. Find a real
+		# level ground interval rather than stepping beyond a profile's last key.
+		var catcher := -1
+		var i := -1
+		for jump in s.jumps:
+			var r := int(jump[1])
+			var keys: Array = s._net_h[r]
+			for k in range(keys.size() - 1):
+				if keys[k][1] == 0.0 and keys[k + 1][1] == 0.0 and keys[k][2] == 0.0 and keys[k + 1][2] == 0.0 and int(keys[k + 1][0]) - int(keys[k][0]) > 60:
+					catcher = r
+					i = int(keys[k][0]) + 30
+					break
+			if catcher >= 0:
+				break
+		if catcher < 0 or absf(s.net_height(catcher, float(i))) > 0.001:
+			print("FAIL no ground-level catcher interval available for guardrail test")
+			quit(1)
+			return
 		var road = s.roads[catcher]
-		var i := int(s._net_h[catcher][-1][0]) + 30
 		s.respawn_on(catcher, i, 1)
 		for body in s.bodies:
 			body.x += road.nx[i] * (road.w[i] / 2.0 + 1.0)

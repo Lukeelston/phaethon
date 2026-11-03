@@ -23,6 +23,48 @@ func setup(s) -> void:
 	sim = s
 	for sh in sim.shafts:
 		_build(int(sh[0]), int(sh[1]), int(sh[2]), float(sh[3]), float(sh[4]))
+	var twists = sim.get("twists")
+	if twists != null:
+		for twist in twists:
+			_build_twist(int(twist[0]), int(twist[1]), int(twist[2]), float(twist[3]))
+
+
+## A recovery deck's full roll. The centerline remains the generated road and its
+## real altitude; only its cross-section rotates. The existing shaft transport
+## API then carries mesh, craft, headset, partner and traffic through one frame.
+## This is visual road transport, not the shaft bulb's automatic planar steering.
+func _build_twist(r: int, i0: int, i1: int, turns: float) -> void:
+	var R = sim.roads[r]
+	var xs := PackedFloat64Array()
+	var ys := PackedFloat64Array()
+	var zs := PackedFloat64Array()
+	var ts := PackedVector3Array()
+	var ls := PackedVector3Array()
+	var ns := PackedVector3Array()
+	var total := 0.0
+	for i in range(i0, i1):
+		total += R.len[i]
+	var distance := 0.0
+	for i in range(i0, i1 + 1):
+		var before := maxi(0, i - 1)
+		var after := mini(R.N - 1, i + 1)
+		var run: float = R.len[before] + R.len[i]
+		var slope: float = (sim.net_height(r, after) - sim.net_height(r, before)) / maxf(run, 0.01)
+		var tangent := Vector3(R.tx[i], slope, -R.ty[i]).normalized()
+		var left := Vector3(R.nx[i], 0.0, -R.ny[i]).normalized()
+		var normal := tangent.cross(left).normalized()
+		left = normal.cross(tangent).normalized()
+		var fraction := clampf(distance / maxf(total, 1.0), 0.0, 1.0)
+		var rotation := TAU * turns * fraction * fraction * (3.0 - 2.0 * fraction)
+		xs.append(R.px[i])
+		ys.append(R.py[i])
+		zs.append(sim.net_height(r, i))
+		ts.append(tangent)
+		ls.append(left.rotated(tangent, rotation))
+		ns.append(normal.rotated(tangent, rotation))
+		if i < i1:
+			distance += R.len[i]
+	maps[r] = {"i0": i0, "i1": i1, "x": xs, "y": ys, "z": zs, "t": ts, "l": ls, "n": ns}
 
 
 ## The shape at d m past the pull-up: [u out, w up, t (u, w), n (u, w), roll toward the landing's way up].

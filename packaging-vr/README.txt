@@ -1,5 +1,5 @@
 PHAETHON - EXPERIMENTAL PC VR EDITION
-Windows x64 / OpenXR - v0.1.7 - ElstonWorks
+Windows x64 / OpenXR - v0.1.8 - ElstonWorks
 
 Two engines. One cockpit. We know it's a little fucky.
 
@@ -96,12 +96,18 @@ to close the game. The menu stays still; stick-click brings it in front of you.
   eligible city's Starfighter zone to enter its Grand Prix.
 
 NETWORK JUMPS AND OBSTACLES
-Twenty interchange ascent ramps have different heights and minimum launch speeds from
-2,000 to 4,000 mph. Follow the ramp signs and approach display. The marked
-minimum applies at the launch lip; keep enough throttle through the climb.
+Twenty ascent ramps include staged climbs, longer gaps, four jumps that
+transfer onto another highway, and four twisting recovery decks.
+Minimum launch speeds range from 2,000 to 4,000 mph. Follow the ramp signs
+and approach display. The minimum applies at the lip; keep throttle through
+the climb. Early directions show the turn, destination level and distance.
 If you miss the catch deck, look for a recovery on-ramp or restart.
 Twelve side roads add corners; vertical shafts turn you over and back onto
 the same highway at its ends. Arrow boards identify the jump spur at each fork.
+North/south expressways rise above the lower east/west roads. Lower roads
+carry more slow traffic; upper roads have faster commuters and more hot rods.
+Traffic makes room for faster vehicles when it has time and a safe lane.
+Five vehicle silhouettes and regional landmarks give the roads more character.
 
 DRIVING PARTNER
 Enable Driving partner in the startup menu or left-Menu quick menu for a teal
@@ -132,4 +138,4 @@ copyright. Third-party components and the CC BY engine audio retain their
 own licenses and permissions. See THIRD_PARTY_NOTICES.txt and licenses/.
 Adapted engine audio is supplied separately in audio/engines/.
 
-Build: 0.1.7-experimental | 2026-11-02
+Build: 0.1.8-experimental | 2026-11-03

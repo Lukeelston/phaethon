@@ -3,7 +3,7 @@ from pathlib import Path
 import argparse, hashlib, json, shutil, zipfile
 parser=argparse.ArgumentParser()
 parser.add_argument('--edition',choices=['desktop','pcvr'],default='desktop')
-parser.add_argument('--version',default='0.1.7')
+parser.add_argument('--version',default='0.1.8')
 args=parser.parse_args()
 edition=args.edition
 if not args.version or any(c not in '0123456789.' for c in args.version):

@@ -26,8 +26,21 @@ for (const [launch, catcher] of sim.T.jumps) {
 // permeable to sideways ground traffic, with either obstacle-collision setting.
 for (const obstacleCollisions of [false, true]) {
   const s = PS.makeSim({track: 'network', handling: 'speed', obstacleCollisions});
-  const catcher = s.T.jumps[0][1], road = s.T.roads[catcher];
-  const i = road.hk.at(-1)[0] + 30, p = road.pts[i];
+  // Recovery roads can end on the upper express level. Use an actual flat
+  // ground interval, without relying on samples beyond the last height key.
+  let catcher = -1, i = -1;
+  for (const [, r] of s.T.jumps) {
+    const keys = s.T.roads[r].hk;
+    for (let k = 0; k + 1 < keys.length; k++) {
+      const a = keys[k], b = keys[k + 1];
+      if (a[1] === 0 && b[1] === 0 && a[2] === 0 && b[2] === 0 && b[0] - a[0] > 60) {
+        catcher = r; i = a[0] + 30; break;
+      }
+    }
+    if (catcher >= 0) break;
+  }
+  assert(catcher >= 0, 'a ground-level catcher interval exists for the guardrail test');
+  const road = s.T.roads[catcher], p = road.pts[i];
   s.respawnOn(catcher, i, 1);
   for (const b of s.S.bodies) {
     b.x += p.nx * (road.width / 2 + 1);

@@ -21,7 +21,8 @@ extends Node3D
 
 const Kit := preload("res://view/mesh_kit.gd")
 const ShaftScript := preload("res://view/network_shaft.gd")
-const CH := 64                    # samples a chunk (~1.5 km): one builds well inside a 72 Hz frame
+const SceneryScript := preload("res://view/network_scenery.gd")
+const CH := 40                    # samples (~960 m), aligned with highway masts and the furniture cycle
 const CELL := 8000.0              # the grid's cells, m
 const VIS := 20000.0              # build chunks this close (m, to the nearest point of their circle)
 const DROP := 28000.0             # free them past this
@@ -49,6 +50,7 @@ const HALL_STRIP_H := 18.0        # the lit strip down each wall
 const DECK := 5.0                 # a deck's thickness, m
 const LINE_W := 0.6
 const EDGE_SEGS := 4              # facets across each edge's ramp (CraftSim.net_edge: the sims' quarter-pipe)
+const JOIN_EDGE_SEGS := 6         # finer at launch/highway overlaps; ordinary junctions retain their normal density
 const EDGE_FOOT := Color(0.5, 0.52, 0.56)   # a dim line where each ramp starts up
 const STRIP_LIGHT := Color(0.9, 0.94, 1.0)
 const WALL_STRIP := Color(0.42, 0.68, 1.0)    # the walls' lit strips: sky blue (white ones lay along the horizon as a white line)
@@ -92,7 +94,7 @@ const PALETTE := {
 	"mesa": [Color(0.78, 0.45, 0.30), Color(0.52, 0.28, 0.18), Color(1.0, 0.55, 0.3)],
 }
 
-var sim
+var sim: CraftSim
 var view
 var shaft                 # the shafts' shapes (view/network_shaft.gd)
 var _up := Vector3.UP     # the road's up at the sample being built (a shaft's goes round with it)
@@ -113,9 +115,13 @@ var towers := 0
 var skylines := []        # [node, cx, cy]
 var far_shafts := []      # [node, ox, oy]: each shaft's shape from far off, before its chunks stream in
 var _signs := {}
+var _approaches := {}     # road -> [first, last, direction, lateral centre] for amber exit guidance
 var halls := {}            # road -> [first, last sample] of its hall (the cities' terminals; CourseAudio reads it)
 var hall_samples := 0      # samples built under a hall's roof (tests)          # Vector2i(road, chunk) -> Array of sign specs
 var _s := []              # per road: distance along it at each sample (PackedFloat64Array)
+var _heights := []        # immutable exact sample heights, shared by all streamed decoration
+var _height_curves := {}  # current Hermite interval per road for fractional junction queries
+var _deco_templates := {} # repeated straight, flat road furniture; asphalt UVs remain per chunk
 var _asph: ShaderMaterial
 var _mat: StandardMaterial3D
 var _lit: StandardMaterial3D
@@ -132,8 +138,12 @@ var _arrow_mat: ShaderMaterial
 var _fork_mat: ShaderMaterial
 var _job := {}            # the chunk being built, a slice a frame (_start_chunk, _work)
 var _join_surface_cache := {}     # Vector2(sample, offset), for the current chunk's road
+var _join_projections := {}       # one nearest-road query shared by exact walls and the shaping apron
 var _join_hints := {}             # sample -> joining roads and their nearest centreline hints
+var _prepared_join_hints := {}    # road -> centreline projections in the immutable junction intervals
+var _physical_join_cache := {}    # road -> exact immutable shoulder results in physical overlap intervals
 var _join_cache_road := -1
+var scenery: Node3D
 var _pillar_cells := {} # fixed scenery, queried near the craft rather than scanning the whole map
 var _pillars_indexed := false
 const PILLAR_CELL := 512.0
@@ -145,8 +155,8 @@ func build(s, v) -> void:
 	view = v
 	shaft = ShaftScript.new()
 	shaft.setup(sim)
-	for sh in sim.shafts:
-		_smap[sim.roads[int(sh[0])]] = int(sh[0])
+	for r in shaft.maps:
+		_smap[sim.roads[int(r)]] = int(r)
 	_mat = Kit.vertex_colors()
 	_lit = Kit.vertex_colors(true)
 	_bright = Kit.vertex_colors(true)
@@ -186,14 +196,18 @@ func build(s, v) -> void:
 	_asph.set_shader_parameter("spec", 0.2)
 	_asph.set_shader_parameter("lane_half", 60.0)
 	for r in sim.roads.size():
-		var R = sim.roads[r]
+		var R: CraftSim.TrackPath = sim.roads[r]
 		var acc := PackedFloat64Array()
 		acc.resize(R.N)
+		var heights := PackedFloat64Array()
+		heights.resize(R.N)
 		var d := 0.0
 		for i in R.N:
 			acc[i] = d
+			heights[i] = sim.net_height(r, float(i))
 			d += R.len[i]
 		_s.append(acc)
+		_heights.append(heights)
 		var k := 0
 		while k * CH < R.N - 1:
 			var c0 := k * CH
@@ -215,13 +229,109 @@ func build(s, v) -> void:
 						grid[key] = []
 					grid[key].append([r, k, cx, cy, rad])
 			k += 1
+	_warm_join_hints()
+	_warm_physical_joins()
 	_plan_signs()
 	for c in sim.cities:   # a hall over each city's terminal: the Network's tunnels
 		halls[int(c.road)] = [int(c.i) - HALL_HALF, int(c.i) + HALL_HALF]
 	_build_skylines()
 	_build_far_shafts()
+	scenery = SceneryScript.new()
+	add_child(scenery)
+	scenery.build(sim, self)
 	_warm_fonts()
+	_warm_deco_templates()
 	setup_ms = Time.get_ticks_msec() - t0
+
+
+## Junction centreline projections are static and reused by each shoulder offset.
+## Prepare every declared interval, merging its padding to visit each row once.
+## This avoids repeating the same nearest-segment search in adjacent chunks.
+func _warm_join_hints() -> void:
+	for r in sim.roads.size():
+		var R: CraftSim.TrackPath = sim.roads[r]
+		var intervals := []
+		for ji in R.sjx:
+			var join: Array = sim.surface_junctions[ji]
+			var side := 0 if int(join[0]) == r else 3
+			intervals.append(Vector2i(maxi(0, int(join[side + 1]) - 4), mini(R.N - 1, int(join[side + 2]) + 4)))
+		intervals.sort_custom(func(a, b): return a.x < b.x)
+		_join_hints = {}
+		var last := -1
+		for interval in intervals:
+			for i in range(maxi(last + 1, interval.x), interval.y + 1):
+				_joining_at(r, i)
+			last = maxi(last, interval.y)
+		_prepared_join_hints[r] = _join_hints
+	_join_hints = {}
+	_join_cache_road = -1
+
+
+## Shared launch/highway shoulders never move. Prepare their exact projections
+## while the map loads instead of spending the stream budget rediscovering them.
+## Only the declared physical intervals are cached; no meshes or chunk nodes exist
+## here. Curves and endpoint semantics use the same simulation search as before.
+func _warm_physical_joins() -> void:
+	for ji in range(sim.junctions.size(), sim.surface_junctions.size()):
+		var join: Array = sim.surface_junctions[ji]
+		for side in [0, 3]:
+			var r := int(join[side])
+			var R: CraftSim.TrackPath = sim.roads[r]
+			if not _physical_join_cache.has(r):
+				_physical_join_cache[r] = {}
+			var cache: Dictionary = _physical_join_cache[r]
+			for i in range(maxi(0, int(join[side + 1]) - 4), mini(R.N - 1, int(join[side + 2]) + 4) + 1):
+				var sec := _section(R.w[i], true)
+				for k in (sec.o as PackedFloat32Array).size():
+					if float(sec.h[k]) <= 0.0:
+						continue
+					var off := float(sec.o[k])
+					cache[Vector3(i, off, 24.0)] = _joined_surface(r, i, off, 24.0)
+				for sgn in [-1.0, 1.0]:
+					var off: float = sgn * R.w[i] / 2.0
+					cache[Vector3(i, off, 0.0)] = _joined_surface(r, i, off)
+
+
+## Prime reusable furniture while the map is loading, like the sign glyph cache.
+## Temporary nodes are freed immediately; no live road chunks are preinstalled.
+func _warm_deco_templates() -> void:
+	var seen := {}
+	var candidates := []
+	var here := Vector2(sim.pod.x, sim.pod.y)
+	for cell in grid:
+		for entry in grid[cell]:
+			var key := Vector2i(entry[0], entry[1])
+			if seen.has(key):
+				continue
+			seen[key] = true
+			var distance := (Vector2(entry[2], entry[3]) - here).length() - float(entry[4])
+			if distance < VIS:
+				candidates.append([distance, key])
+	candidates.sort_custom(func(a, b): return a[0] < b[0])
+	for candidate in candidates:
+		var key: Vector2i = candidate[1]
+		var R: CraftSim.TrackPath = sim.roads[key.x]
+		var first := key.y * CH
+		var last := mini(first + CH, R.N - 1)
+		var joined := false
+		for ji in R.sjx:
+			var join: Array = sim.surface_junctions[ji]
+			var lo: int = join[1] if int(join[0]) == key.x else join[4]
+			var hi: int = join[2] if int(join[0]) == key.x else join[5]
+			if first <= hi + 4 and last >= lo - 4:
+				joined = true
+				break
+		var name := _deco_template_key({"r": key.x, "c0": first, "c1": last, "joins": joined}, R)
+		if name == "" or _deco_templates.has(name):
+			continue
+		_start_chunk(key.x, key.y)
+		_job.signs = []
+		_work(Time.get_ticks_usec() + 60000000)
+		(chunks[key][0] as Node3D).free()
+		chunks.erase(key)
+		built -= 1
+		if _deco_templates.size() >= 16:
+			break
 
 
 ## Every frame: build what's near, free what's far, place the rest against the floating origin.
@@ -262,7 +372,7 @@ func sync(org_x: float, org_y: float) -> void:
 		_catching_up = false
 	for key in chunks.keys():
 		var c: Array = chunks[key]
-		var R = sim.roads[key.x]
+		var R: CraftSim.TrackPath = sim.roads[key.x]
 		var c0: int = key.y * CH
 		var c1: int = mini(c0 + CH, R.N - 1)
 		var cm := (_wxy(key.x, c0) + _wxy(key.x, c1)) / 2.0
@@ -278,17 +388,47 @@ func sync(org_x: float, org_y: float) -> void:
 		(sk[0] as Node3D).position = Vector3(sk[1] - org_x, 0.0, -(sk[2] - org_y))
 	for sk in far_shafts:
 		(sk[0] as Node3D).position = Vector3(sk[1] - org_x, 0.0, -(sk[2] - org_y))
+	if scenery:
+		scenery.sync(org_x, org_y)
 	sync_ms = (Time.get_ticks_usec() - t_in) / 1000.0
 
 
 ## The deck's height at sample i of road r (0 but on a flyover).
 func _h(r: int, i: int) -> float:
+	if r < _heights.size():
+		return _heights[r][i]
 	return sim.net_height(r, float(i))
 
 
+## The same Hermite height as the sim, with interval coefficients reused across
+## adjacent shoulder vertices instead of searching the entire profile each time.
+func _height_at(r: int, sample: float) -> float:
+	var curve: Array = _height_curves.get(r, [])
+	if curve.is_empty() or sample < float(curve[0]) or sample > float(curve[1]):
+		curve = []
+		var keys: Array = sim._net_h.get(r, [])
+		for k in range(keys.size() - 1):
+			var a: Array = keys[k]
+			var b: Array = keys[k + 1]
+			if sample < float(a[0]) or sample > float(b[0]):
+				continue
+			var count := maxf(1.0, float(b[0]) - float(a[0]))
+			var d := count * CraftSim.NET_STEP
+			var c1 := d * float(a[2])
+			var c2 := -3.0 * float(a[1]) + 3.0 * float(b[1]) - d * (2.0 * float(a[2]) + float(b[2]))
+			var c3 := 2.0 * float(a[1]) - 2.0 * float(b[1]) + d * (float(a[2]) + float(b[2]))
+			curve = [float(a[0]), float(b[0]), 1.0 / count, float(a[1]), c1, c2, c3]
+			_height_curves[r] = curve
+			break
+	if curve.is_empty():
+		return 0.0
+	var u := (sample - float(curve[0])) * float(curve[2])
+	return ((float(curve[6]) * u + float(curve[5])) * u + float(curve[4])) * u + float(curve[3])
+
+
 ## A point `off` m left of road r's sample i, `h` up, against the chunk origin (ox, oy).
-func _p(R, ox: float, oy: float, i: int, off: float, h: float) -> Vector3:
-	if R.shaft and shaft.on(_smap[R], float(i)):   # on a shaft's stretch: its own point and frame
+func _p(R: CraftSim.TrackPath, ox: float, oy: float, i: int, off: float, h: float) -> Vector3:
+	if _smap.has(R) and shaft.on(_smap[R], float(i)):
 		var A: Array = shaft.at(_smap[R], float(i))
 		return Vector3(float(A[0]) - ox, A[2], -(float(A[1]) - oy)) + (A[4] as Vector3) * off + (A[5] as Vector3) * (h - float(A[2]))
 	return Vector3(R.px[i] + R.nx[i] * off - ox, h, -(R.py[i] + R.ny[i] * off - oy))
@@ -296,8 +436,8 @@ func _p(R, ox: float, oy: float, i: int, off: float, h: float) -> Vector3:
 
 ## Road r's sample i in the world's plan (a shaft's stretch isn't where the sims' plan has it).
 func _wxy(r: int, i: int) -> Vector2:
-	var R = sim.roads[r]
-	if R.shaft and shaft.on(r, float(i)):
+	var R: CraftSim.TrackPath = sim.roads[r]
+	if shaft.on(r, float(i)):
 		var A: Array = shaft.at(r, float(i))
 		return Vector2(A[0], A[1])
 	return Vector2(R.px[i], R.py[i])
@@ -312,42 +452,51 @@ func _open(r: int, i: int, sgn: float) -> bool:
 ## The lowest adjoining surface at an offset across this road. Only declared junctions
 ## participate: a highway passing under a flyover must keep its own shoulders.
 ## (height, normal.x, normal.y, normal.z), or INF when outside every joining corridor.
-func _joined_surface(r: int, i: int, off: float) -> Vector4:
+func _joined_surface(r: int, i: int, off: float, apron := 0.0) -> Vector4:
+	var key := Vector3(i, off, apron)
+	if _physical_join_cache.has(r) and (_physical_join_cache[r] as Dictionary).has(key):
+		return _physical_join_cache[r][key]
 	if _join_cache_road != r:
 		_join_surface_cache.clear()
+		_join_projections.clear()
 		_join_hints.clear()
 		_join_cache_road = r
-	var joins := _joining_at(r, i)
-	if joins.is_empty():
-		return Vector4(INF, 0.0, 1.0, 0.0)
-	var key := Vector2(i, off)
 	if _join_surface_cache.has(key):
 		return _join_surface_cache[key]
-	var R = sim.roads[r]
-	var out := Vector4(INF, 0.0, 1.0, 0.0)
-	for join in joins:
-		var q: int = join[0]
-		# Project the lateral offset along the joining road from its exact centre
-		# hint. Its adjacent samples cover the curvature remainder across the road.
-		var m := int(join[1]) + roundi(off * float(join[2]))
-		sim._nearest_on(q, R.px[i] + R.nx[i] * off, R.py[i] + R.ny[i] * off, m, 1)
-		if not sim._n_off and absf(sim._n_lat) < sim._n_w / 2.0 - 1.0:
+	var reach := maxf(24.0, apron)
+	var projection_key := Vector3(i, off, reach)
+	if not _join_projections.has(projection_key):
+		var records := []
+		var R: CraftSim.TrackPath = sim.roads[r]
+		for join in _joining_at(r, i):
+			var q: int = join[0]
+			var m := int(join[1]) + roundi(off * float(join[2]))
+			sim._nearest_on(q, R.px[i] + R.nx[i] * off, R.py[i] + R.ny[i] * off, m, 1)
+			var needed := absf(sim._n_lat) - sim._n_w / 2.0 + 1.0
+			if sim._n_off or needed >= reach:
+				continue
 			var edge := CraftSim.net_edge(sim._n_w, sim._n_lat)
-			var h: float = sim.net_height(q, sim._n_i + sim._n_t) + edge.x
-			if h < out.x:
-				var bank := signf(sim._n_lat) * sin(edge.y)
-				out = Vector4(h, -sim._n_nx * bank, cos(edge.y), sim._n_ny * bank)
+			var height := _height_at(q, sim._n_i + sim._n_t) + edge.x
+			var bank := signf(sim._n_lat) * sin(edge.y)
+			records.append([needed, Vector4(height, -sim._n_nx * bank, cos(edge.y), sim._n_ny * bank)])
+		_join_projections[projection_key] = records
+	var out := Vector4(INF, 0.0, 1.0, 0.0)
+	for record in _join_projections[projection_key]:
+		if float(record[0]) < apron and (record[1] as Vector4).x < out.x:
+			out = record[1]
 	_join_surface_cache[key] = out
 	return out
 
 
 func _joining_at(r: int, i: int) -> Array:
+	if _prepared_join_hints.has(r):
+		return _prepared_join_hints[r].get(i, [])
 	if _join_hints.has(i):
 		return _join_hints[i]
-	var R = sim.roads[r]
+	var R: CraftSim.TrackPath = sim.roads[r]
 	var joins := []
-	for k in R.jx:
-		var J: Array = sim.junctions[k]
+	for k in R.sjx:
+		var J: Array = sim.surface_junctions[k]
 		var on_a: bool = int(J[0]) == r
 		var z0: int = int(J[1]) if on_a else int(J[4])
 		var z1: int = int(J[2]) if on_a else int(J[5])
@@ -358,8 +507,19 @@ func _joining_at(r: int, i: int) -> Array:
 		var t1: int = int(J[5]) if on_a else int(J[2])
 		var u := clampf(float(i - z0) / maxf(1.0, float(z1 - z0)), 0.0, 1.0)
 		var m := roundi(t0 + u * (t1 - t0) if int(J[6]) > 0 else t1 - u * (t1 - t0))
-		sim._nearest_on(q, R.px[i], R.py[i], m, 16)
-		joins.append([q, sim._n_i, (R.nx[i] * sim._n_tx + R.ny[i] * sim._n_ty) / sim.roads[q].len[sim._n_i]])
+		var reach := 16
+		# Adjacent road rows are 24 m apart. Reuse the previous row's exact
+		# projection when present; four samples retain ample curvature margin
+		# without rescanning the full padded junction interval for every row.
+		for previous in _join_hints.get(i - 1, []):
+			# A turnaround joins the same highway twice. Its two intervals must
+			# keep separate hints even though both point at the same road.
+			if int(previous[3]) == k:
+				m = int(previous[1])
+				reach = 4
+				break
+		sim._nearest_on(q, R.px[i], R.py[i], m, reach)
+		joins.append([q, sim._n_i, (R.nx[i] * sim._n_tx + R.ny[i] * sim._n_ty) / sim.roads[q].len[sim._n_i], k])
 	_join_hints[i] = joins
 	return joins
 
@@ -373,19 +533,21 @@ func _build_chunk(r: int, k: int) -> void:
 ## The chunk's node, in place (empty) and in `chunks`, and its build in hand.
 func _start_chunk(r: int, k: int) -> void:
 	_join_surface_cache.clear()
+	_join_projections.clear()
 	_join_hints.clear()
 	_join_cache_road = r
-	var R = sim.roads[r]
+	var R: CraftSim.TrackPath = sim.roads[r]
 	var c0 := k * CH
 	var c1 := mini((k + 1) * CH, R.N - 1)
 	var joins := false
-	for ji in R.jx:
-		var join: Array = sim.junctions[ji]
+	var fine_joins := false
+	for ji in R.sjx:
+		var join: Array = sim.surface_junctions[ji]
 		var start := int(join[1]) if int(join[0]) == r else int(join[4])
 		var finish := int(join[2]) if int(join[0]) == r else int(join[5])
 		if c0 <= finish + 4 and c1 >= start - 4:
 			joins = true
-			break
+			fine_joins = fine_joins or ji >= sim.junctions.size()
 	var w0 := _wxy(r, c0)
 	var ox: float = w0.x
 	var oy: float = w0.y
@@ -400,10 +562,36 @@ func _start_chunk(r: int, k: int) -> void:
 		var t := SurfaceTool.new()
 		t.begin(Mesh.PRIMITIVE_TRIANGLES)
 		st.append(t)
-	_job = {"key": key, "r": r, "c0": c0, "c1": c1, "i": c0, "ox": ox, "oy": oy, "node": node, "st": st, "joins": joins,
+	_job = {"key": key, "r": r, "c0": c0, "c1": c1, "i": c0, "ox": ox, "oy": oy, "node": node, "st": st, "joins": joins, "fine_joins": fine_joins,
+		"deco_spans": {},
 		"n_lamps": 0, "made": false, "signs": _signs.get(key, []), "si": 0, "us": 0, "d": 0.0,
 		"rv": PackedVector3Array(), "rn": PackedVector3Array(), "ru": PackedVector2Array(), "rows": 0, "cols": 0,
 		"u0": fposmod(_s[r][c0], ASPHALT_PERIOD) - _s[r][c0]}   # (the asphalt's u, continuous along the chunk)
+	var template_key := _deco_template_key(_job, R)
+	_job.template_key = template_key
+	_job.template = _deco_templates.get(template_key, []) if template_key != "" else []
+
+
+func _deco_template_key(J: Dictionary, R: CraftSim.TrackPath) -> String:
+	if R.role != "" or _smap.has(R) or int(J.c1) - int(J.c0) != CH or int(J.c0) == 0 or int(J.c1) == R.N - 1:
+		return ""
+	var start: int = J.c0
+	var finish: int = J.c1
+	if halls.has(J.r) and finish >= int(halls[J.r][0]) and start <= int(halls[J.r][1]):
+		return ""
+	for guide in _approaches.get(J.r, []):
+		if finish >= int(guide[0]) and start <= int(guide[1]):
+			return ""
+	var height := _h(J.r, start)
+	var left_open := _open(J.r, start, -1.0) if J.joins else false
+	var right_open := _open(J.r, start, 1.0) if J.joins else false
+	for i in range(start, finish + 1):
+		if R.tx[i] != R.tx[start] or R.ty[i] != R.ty[start] or R.w[i] != R.w[start] or R.mode[i] != R.mode[start] or _h(J.r, i) != height or absf(R.len[i] - R.len[start]) > 0.0000001:
+			return ""
+		if J.joins and (_open(J.r, i, -1.0) != left_open or _open(J.r, i, 1.0) != right_open):
+			return ""
+	# All discrete furniture periods divide 120 (6/8/40); colour phase divides8.
+	return "%.10f:%.10f:%.10f:%s:%s:%s:%s:%s:%s" % [R.tx[start], R.ty[start], R.len[start], R.w[start], R.mode[start], height, start % 120, left_open, right_open]
 
 
 ## Build on the chunk in hand until `end` (usec): its samples, then its meshes, then its boards one at
@@ -411,7 +599,7 @@ func _start_chunk(r: int, k: int) -> void:
 func _work(end: int) -> bool:
 	var J := _job
 	var t0 := Time.get_ticks_usec()
-	var R = sim.roads[J.r]
+	var R: CraftSim.TrackPath = sim.roads[J.r]
 	var done := false
 	while true:
 		if J.i < J.c1:
@@ -437,6 +625,9 @@ func _work(end: int) -> bool:
 
 ## One source for the rendered support boxes and their optional collision footprints.
 func pillar_specs(r: int, i: int) -> Array:
+	for roll in sim.twists:
+		if int(roll[0]) == r and i >= int(roll[1]) and i <= int(roll[2]):
+			return [] # no physical support may pierce the rolled deck, even before build()
 	if sim.roads[r].shaft:
 		for sh in sim.shafts:
 			if int(sh[0]) == r and i > int(sh[1]) and i < int(sh[2]):
@@ -445,7 +636,7 @@ func pillar_specs(r: int, i: int) -> Array:
 	var high := h > 150.0
 	if h <= DECK + 2.0 or i % (40 if high else PILLAR_EVERY) != 0:
 		return []
-	var R = sim.roads[r]
+	var R: CraftSim.TrackPath = sim.roads[r]
 	var thick := 20.0 + h * 0.02 if high else 14.0
 	var out := []
 	for side in 2:
@@ -482,7 +673,7 @@ func obstacles_near(x: float, y: float, radius: float = 1000.0) -> Array:
 	return out
 
 ## Sample i of the chunk in hand: its stretch of road, lines, deck, walls, masts.
-func _sample(J: Dictionary, R, i: int) -> void:
+func _sample(J: Dictionary, R: CraftSim.TrackPath, i: int) -> void:
 	var r: int = J.r
 	var ox: float = J.ox
 	var oy: float = J.oy
@@ -495,15 +686,22 @@ func _sample(J: Dictionary, R, i: int) -> void:
 	var hi := _h(r, i)
 	var hj := _h(r, j)
 	var city: bool = R.mode[i] == 0
-	var sec := _section(R.w[i])
+	var sec := _section(R.w[i], bool(J.fine_joins))
 	var te: float = sec.te   # the edges' ramps' top: the walls stand on it
-	var on_shaft: bool = R.shaft and shaft.on(r, float(i))
+	var on_shaft: bool = shaft.on(r, float(i))
 	_up = (shaft.at(r, float(i))[5] as Vector3) if on_shaft else Vector3.UP
 	# the road: a flat middle and a ramp up each side (the sims' net_edge), a row of the chunk's grid
 	# a sample (its normals banked with the ramps)
 	if i == int(J.c0):
 		_road_row(J, R, sec, i, hi)
 	_road_row(J, R, sec, j, hj)
+	if not J.template.is_empty():
+		return
+	var span := _deco_span(J, R, i)
+	if span == 0:
+		return # asphalt retains every sample; only identical coplanar decoration is joined
+	j = i + span
+	hj = _h(r, j)
 	var open_i := [false, false]
 	var open_j := [false, false]
 	if J.joins and not _joining_at(r, i).is_empty():
@@ -515,11 +713,19 @@ func _sample(J: Dictionary, R, i: int) -> void:
 		var side := 0 if ln[0] < 0.0 else 1
 		if open_i[side] or open_j[side]:
 			continue
-		_strip(deco, R, ox, oy, i, ln[0], ln[1], hi + 0.04, hj + 0.04, ln[4], ln[2], ln[3])
+		_strip(deco, R, ox, oy, i, ln[0], ln[1], hi + 0.04, hj + 0.04, ln[4], ln[2], ln[3], span)
 	# The ascent lane has broad amber rails and repeated forward chevrons, visible through its S.
 	if R.role == "launch":
 		for side in [-1.0, 1.0]:
 			_strip(lglow, R, ox, oy, i, side * (hw * 0.55) - 1.75, side * (hw * 0.55) + 1.75, hi + 0.12, hj + 0.12, JUMP_AMBER)
+	for guide in _approaches.get(r, []):
+		if i < int(guide[0]) or i >= int(guide[1]):
+			continue
+		var centre: float = guide[3]
+		for side in [-1.0, 1.0]:
+			_strip(lglow, R, ox, oy, i, centre + side * 12.0 - 1.5, centre + side * 12.0 + 1.5, hi + 0.12, hj + 0.12, JUMP_AMBER, 0.0, 0.0, span)
+		if i % 20 == 0:
+			_approach_arrow(lglow, R, ox, oy, i, hi, float(guide[2]), centre)
 	# a flyover's deck: its edges, its underside, its pillars
 	if hi > 4.0 or hj > 4.0:
 		for sgn in [-1.0, 1.0]:
@@ -565,11 +771,42 @@ func _sample(J: Dictionary, R, i: int) -> void:
 			J.n_lamps += 1
 
 
+## Keep every asphalt row, but avoid four copies of an identical straight wall/stripe.
+## 4 divides the wall colour, mast and arrow periods. Low-deck pillars (period 6),
+## halls, launch chevrons, rolls, changing openings and curved/graded profiles opt out.
+func _deco_span(J: Dictionary, R: CraftSim.TrackPath, i: int) -> int:
+	var first := i - i % 4
+	if not J.deco_spans.has(first):
+		var last := first + 4
+		var r: int = J.r
+		var eligible: bool = last <= int(J.c1) and R.role != "launch" and not _smap.has(R)
+		var h0 := _h(r, first)
+		var h1 := _h(r, mini(last, R.N - 1))
+		eligible = eligible and not ((h0 > DECK + 2.0 and h0 <= 150.0) or (h1 > DECK + 2.0 and h1 <= 150.0))
+		if halls.has(r) and last >= int(halls[r][0]) and first <= int(halls[r][1]):
+			eligible = false
+		for guide in _approaches.get(r, []):
+			if (first < int(guide[0]) and last > int(guide[0])) or (first < int(guide[1]) and last > int(guide[1])):
+				eligible = false
+		if eligible:
+			var left_open := _open(r, first, -1.0) if J.joins else false
+			var right_open := _open(r, first, 1.0) if J.joins else false
+			for row in range(first, last + 1):
+				if R.w[row] != R.w[first] or R.mode[row] != R.mode[first] or absf(R.tx[row] - R.tx[first]) + absf(R.ty[row] - R.ty[first]) > 0.0000001 or absf(_h(r, row) - lerpf(h0, h1, float(row - first) / 4.0)) > 0.000001:
+					eligible = false
+					break
+				if J.joins and (_open(r, row, -1.0) != left_open or _open(r, row, 1.0) != right_open):
+					eligible = false
+					break
+		J.deco_spans[first] = eligible
+	return (4 if i == first else 0) if J.deco_spans[first] else 1
+
+
 ## A city's hall over sample i (the Network's tunnels, as Eridanus' covered ramps): its walls on up
 ## from the fence to a roof HALL_H over the road, the roof, a lit strip down each wall, a steel rib
 ## every HALL_RIB_EVERY samples, a lit bar across the roof every HALL_LIGHT_EVERY (the speed cue
 ## overhead), a lit band round each portal.
-func _hall(J: Dictionary, R, i: int, hw: float, hi: float, hj: float) -> void:
+func _hall(J: Dictionary, R: CraftSim.TrackPath, i: int, hw: float, hi: float, hj: float) -> void:
 	hall_samples += 1
 	var r: int = J.r
 	var ox: float = J.ox
@@ -617,7 +854,7 @@ func _hall(J: Dictionary, R, i: int, hw: float, hi: float, hj: float) -> void:
 
 ## A shaft's hoop round sample i: two legs and a beam over the road, HOOP_H clear, faced both ways so
 ## it reads from outside too; every second one lit. Going up through them is the speed cue.
-func _hoop(J: Dictionary, R, i: int, hw: float, h: float, lit: bool) -> void:
+func _hoop(J: Dictionary, R: CraftSim.TrackPath, i: int, hw: float, h: float, lit: bool) -> void:
 	var ox: float = J.ox
 	var oy: float = J.oy
 	var st: SurfaceTool = J.st[3] if lit else J.st[1]
@@ -636,7 +873,7 @@ func _hoop(J: Dictionary, R, i: int, hw: float, h: float, lit: bool) -> void:
 
 ## A lit chevron across the road at sample i, its point the way `way` (1 up the samples): on a launch
 ## spur, pointing you up it.
-func _chevron(st: SurfaceTool, R, ox: float, oy: float, i: int, h: float, way: float) -> void:
+func _chevron(st: SurfaceTool, R: CraftSim.TrackPath, ox: float, oy: float, i: int, h: float, way: float) -> void:
 	var hw: float = R.w[i] / 2.0 * 0.62
 	var t := Vector3(R.tx[i], 0.0, -R.ty[i]) * way
 	var c := Color(1.0, 0.55, 0.12)
@@ -649,8 +886,18 @@ func _chevron(st: SurfaceTool, R, ox: float, oy: float, i: int, h: float, way: f
 		_quad(st, q, c)
 
 
+## Narrow highway/ramp arrows occupy the exit lane and remain part of the streamed road mesh.
+func _approach_arrow(st: SurfaceTool, R: CraftSim.TrackPath, ox: float, oy: float, i: int, h: float, way: float, off: float) -> void:
+	var t := Vector3(R.tx[i], 0.0, -R.ty[i]) * way
+	var mid := _p(R, ox, oy, i, off, h + 0.14)
+	for side in [-1.0, 1.0]:
+		var edge := _p(R, ox, oy, i, off + side * 22.0, h + 0.14) - t * 48.0
+		var q := [mid, mid + t * 10.0, edge + t * 10.0, edge] if side > 0.0 else [edge, edge + t * 10.0, mid + t * 10.0, mid]
+		_quad(st, q, JUMP_AMBER)
+
+
 ## The chunk in hand's ends (a barrier where nothing goes on), its meshes committed.
-func _finish(J: Dictionary, R) -> void:
+func _finish(J: Dictionary, R: CraftSim.TrackPath) -> void:
 	var r: int = J.r
 	var ox: float = J.ox
 	var oy: float = J.oy
@@ -698,24 +945,34 @@ func _finish(J: Dictionary, R) -> void:
 		arr[Mesh.ARRAY_INDEX] = _grid_index(int(J.rows), int(J.cols))
 		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
 		mesh.surface_set_material(0, _asph)
-	for pair in [[deco, _mat], [glow, _lit], [lglow, _strip_mat]]:
-		var n0 := mesh.get_surface_count()
-		(pair[0] as SurfaceTool).commit(mesh)
-		if mesh.get_surface_count() > n0:
-			mesh.surface_set_material(n0, pair[1])
+	if not J.template.is_empty():
+		var cached: ArrayMesh = J.template[0]
+		for surface in range(1, cached.get_surface_count()):
+			var index := mesh.get_surface_count()
+			mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, cached.surface_get_arrays(surface))
+			mesh.surface_set_material(index, cached.surface_get_material(surface))
+	else:
+		for pair in [[deco, _mat], [glow, _lit], [lglow, _strip_mat]]:
+			var n0 := mesh.get_surface_count()
+			(pair[0] as SurfaceTool).commit(mesh)
+			if mesh.get_surface_count() > n0:
+				mesh.surface_set_material(n0, pair[1])
 	var mi := MeshInstance3D.new()
 	mi.name = "road"
 	mi.mesh = mesh
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	node.add_child(mi)
-	if int(J.n_lamps) > 0:
+	var beacon_mesh: ArrayMesh = J.template[1] if not J.template.is_empty() else (lamps.commit() if int(J.n_lamps) > 0 else null)
+	if beacon_mesh:
 		var bm := MeshInstance3D.new()
 		bm.name = "beacons"
-		bm.mesh = lamps.commit()
+		bm.mesh = beacon_mesh
 		bm.material_override = _beam
 		bm.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		bm.extra_cull_margin = 400.0
 		node.add_child(bm)
+	if J.template_key != "" and J.template.is_empty():
+		_deco_templates[J.template_key] = [mesh, beacon_mesh]
 
 
 ## Does a junction take road r on at its sample e (one of its ends)?
@@ -784,7 +1041,7 @@ func _plan_signs() -> void:
 	# braking boards before each city's STARFIGHTER zone, both ways; its name over the terminal
 	for ci in sim.cities.size():
 		var city: Dictionary = sim.cities[ci]
-		var R = sim.roads[city.road]
+		var R: CraftSim.TrackPath = sim.roads[city.road]
 		var z0 := -1
 		var z1 := -1
 		for i in R.N:
@@ -817,9 +1074,13 @@ func _plan_jump(c: int, p: int, fork: int, dp: int) -> void:
 	var title := "ASCENT %s" % C.name
 	var minimum := "MIN %d,%03d MPH AT LIP" % [mph / 1000, mph % 1000]
 	var P = sim.roads[p]
+	# Junction intervals describe shared pavement, not the exact physical fork.
+	sim._nearest_on(p, C.px[0], C.py[0], fork, 80)
+	fork = sim._n_i
 	_add_sign(p, clampi(fork - dp * FORK_BEFORE, 1, P.N - 2), dp, "fork", [title, minimum, "STRAIGHT ON"])
 	# The spur forks off an exit ramp. Advance guidance belongs on the highway before that ramp.
 	var e: int = 0 if dp > 0 else P.N - 1
+	_add_approach(p, e, fork, dp, 0.0)
 	for J in sim.junctions:
 		if int(J[3]) != p or not (int(J[4]) <= e and e <= int(J[5])):
 			continue
@@ -827,6 +1088,9 @@ func _plan_jump(c: int, p: int, fork: int, dp: int) -> void:
 		var at_mouth := _map(J, e)
 		var way := dp * int(J[6])
 		var H = sim.roads[h]
+		sim._nearest_on(h, P.px[e], P.py[e], at_mouth, 160)
+		at_mouth = sim._n_i
+		_add_approach(h, at_mouth - way * SIGN_NEAR, at_mouth, way, -way * 90.0)
 		for back in [SIGN_FAR, SIGN_NEAR, 20]:
 			var at: int = at_mouth - way * back
 			if at > 0 and at < H.N - 1:
@@ -836,10 +1100,16 @@ func _plan_jump(c: int, p: int, fork: int, dp: int) -> void:
 	_add_sign(c, maxi(1, C.N - 61), 1, "fork", [title, minimum, "LIFT-OFF  1 MI"])
 
 
+func _add_approach(r: int, first: int, last: int, direction: int, centre: float) -> void:
+	if not _approaches.has(r):
+		_approaches[r] = []
+	_approaches[r].append([maxi(0, mini(first, last)), mini(sim.roads[r].N - 1, maxi(first, last)), direction, centre])
+
+
 ## Side road r's corners: a board before each bend CORNER_MIN_K or tighter, both ways: the speed that
 ## holds it at CORNER_G and the gear for that speed, so the bend tells you to shift.
 func _plan_corners(r: int) -> void:
-	var R = sim.roads[r]
+	var R: CraftSim.TrackPath = sim.roads[r]
 	var i := 0
 	while i < R.N:
 		if absf(R.kap[i]) < CORNER_MIN_K:
@@ -938,7 +1208,7 @@ func _dists(road: int, i: int, dir: int) -> Array:
 
 
 ## A sign over road r at its sample spec[0], facing traffic going spec[1].
-func _sign(node: Node3D, R, r: int, ox: float, oy: float, spec: Array) -> void:
+func _sign(node: Node3D, R: CraftSim.TrackPath, r: int, ox: float, oy: float, spec: Array) -> void:
 	var i: int = spec[0]
 	var dir: int = spec[1]
 	var kind: String = spec[2]
@@ -1060,7 +1330,7 @@ func _warm_fonts() -> void:
 func _build_skylines() -> void:
 	var near_pts := {}   # Vector2i(500 m cell) -> true, every 4th road sample within 20 km of a city
 	for r in sim.roads.size():
-		var R = sim.roads[r]
+		var R: CraftSim.TrackPath = sim.roads[r]
 		for i in range(0, R.N, 4):
 			for city in sim.cities:
 				if absf(R.px[i] - city.cx) < 20000.0 and absf(R.py[i] - city.cy) < 20000.0:
@@ -1131,7 +1401,7 @@ func _build_far_shafts() -> void:
 	var col := Color(0.46, 0.54, 0.66)
 	for sh in sim.shafts:
 		var r := int(sh[0])
-		var R = sim.roads[r]
+		var R: CraftSim.TrackPath = sim.roads[r]
 		var i0 := int(sh[1])
 		var i1 := int(sh[2])
 		var o := _wxy(r, i0)
@@ -1163,16 +1433,18 @@ func _build_far_shafts() -> void:
 ## facets up each ramp and the flat middle between: o (offsets left of the centreline), h (the ramp's
 ## height there), c and s (the normal's up and inward parts: banked toward the middle), te (the
 ## ramps' top), lines ([o0, o1, its height at each, colour]: the edge lines, the ramps' feet).
-func _section(w: float) -> Dictionary:
-	if _sec_cache.has(w):
-		return _sec_cache[w]
+func _section(w: float, joined := false) -> Dictionary:
+	var facets := JOIN_EDGE_SEGS if joined else EDGE_SEGS
+	var key := Vector2(w, facets)
+	if _sec_cache.has(key):
+		return _sec_cache[key]
 	var hw := w / 2.0
 	var E := CraftSim.net_edge_span(w)
 	var o := PackedFloat32Array()
-	for k in EDGE_SEGS + 1:
-		o.append(-hw + E * float(k) / EDGE_SEGS)
-	for k in EDGE_SEGS + 1:
-		o.append(hw - E + E * float(k) / EDGE_SEGS)
+	for k in facets + 1:
+		o.append(-hw + E * float(k) / facets)
+	for k in facets + 1:
+		o.append(hw - E + E * float(k) / facets)
 	var h := PackedFloat32Array()
 	var c := PackedFloat32Array()
 	var s := PackedFloat32Array()
@@ -1188,13 +1460,13 @@ func _section(w: float) -> Dictionary:
 			var o1: float = maxf(sgn * ln[0], sgn * ln[1])   # facing down, lit from below: its lines were dim)
 			lines.append([o0, o1, CraftSim.net_edge(w, o0).x, CraftSim.net_edge(w, o1).x, ln[2]])
 	var out := {"o": o, "h": h, "c": c, "s": s, "te": CraftSim.net_edge(w, hw).x, "lines": lines}
-	_sec_cache[w] = out
+	_sec_cache[key] = out
 	return out
 
 
 ## Road r's grid row at its sample s (the deck's height h there): the section's points, banked
 ## normals, the asphalt's uv (u along, v the offset).
-func _road_row(J: Dictionary, R, sec: Dictionary, s: int, h: float) -> void:
+func _road_row(J: Dictionary, R: CraftSim.TrackPath, sec: Dictionary, s: int, h: float) -> void:
 	var o: PackedFloat32Array = sec.o
 	var hh: PackedFloat32Array = sec.h
 	var cc: PackedFloat32Array = sec.c
@@ -1202,7 +1474,7 @@ func _road_row(J: Dictionary, R, sec: Dictionary, s: int, h: float) -> void:
 	var left := Vector3(R.nx[s], 0.0, -R.ny[s])
 	var mid := Vector3(R.px[s] - J.ox, h + 0.02, -(R.py[s] - J.oy))
 	var up := Vector3.UP
-	if R.shaft and shaft.on(J.r, float(s)):
+	if shaft.on(J.r, float(s)):
 		var A: Array = shaft.at(J.r, float(s))
 		left = A[4]
 		up = A[5]
@@ -1221,7 +1493,10 @@ func _road_row(J: Dictionary, R, sec: Dictionary, s: int, h: float) -> void:
 			var height := h + hh[k]
 			var normal := up * cc[k] - left * ss[k]
 			if hh[k] > 0.0:
-				var joined := _joined_surface(int(J.r), s, o[k])
+				# A triangle spans two 24 m rows. Extend only its shoulder shaping one
+				# row past the exact corridor, so its outside vertex cannot bridge over
+				# the neighbouring pavement. Wall openings still use the exact corridor.
+				var joined := _joined_surface(int(J.r), s, o[k], 24.0)
 				if joined.x < height:
 					height = joined.x
 					normal = Vector3(joined.y, joined.z, joined.w)
@@ -1252,7 +1527,7 @@ func _grid_index(rows: int, cols: int) -> PackedInt32Array:
 
 ## A band across the road's end sample e (its open end's marks), from `d0` to `d1` off it, over the
 ## section (the ramps too).
-func _across(st: SurfaceTool, R, ox: float, oy: float, e: int, he: float, d0: Vector3, d1: Vector3, c: Color) -> void:
+func _across(st: SurfaceTool, R: CraftSim.TrackPath, ox: float, oy: float, e: int, he: float, d0: Vector3, d1: Vector3, c: Color) -> void:
 	var sec := _section(R.w[e])
 	var o: PackedFloat32Array = sec.o
 	var hh: PackedFloat32Array = sec.h
@@ -1263,7 +1538,7 @@ func _across(st: SurfaceTool, R, ox: float, oy: float, e: int, he: float, d0: Ve
 
 
 ## A lip's lit face: down DECK from the road's end, its ramps too.
-func _lip(st: SurfaceTool, R, ox: float, oy: float, e: int, he: float, c: Color) -> void:
+func _lip(st: SurfaceTool, R: CraftSim.TrackPath, ox: float, oy: float, e: int, he: float, c: Color) -> void:
 	var sec := _section(R.w[e])
 	var o: PackedFloat32Array = sec.o
 	var hh: PackedFloat32Array = sec.h
@@ -1273,30 +1548,30 @@ func _lip(st: SurfaceTool, R, ox: float, oy: float, e: int, he: float, c: Color)
 
 ## A strip along sample i, from o0 to o1 m left of the centreline, raised e0 and e1 there (on the
 ## edges' ramps).
-func _strip(st: SurfaceTool, R, ox: float, oy: float, i: int, o0: float, o1: float, h0: float, h1: float, c: Color, e0 := 0.0, e1 := 0.0) -> void:
+func _strip(st: SurfaceTool, R: CraftSim.TrackPath, ox: float, oy: float, i: int, o0: float, o1: float, h0: float, h1: float, c: Color, e0 := 0.0, e1 := 0.0, span := 1) -> void:
 	var a := _p(R, ox, oy, i, o0, h0 + e0)
 	var b := _p(R, ox, oy, i, o1, h0 + e1)
-	var cc := _p(R, ox, oy, i + 1, o1, h1 + e1)
-	var d := _p(R, ox, oy, i + 1, o0, h1 + e0)
+	var cc := _p(R, ox, oy, i + span, o1, h1 + e1)
+	var d := _p(R, ox, oy, i + span, o0, h1 + e0)
+	st.set_color(c)
+	st.set_normal(_up)
 	for q in [a, b, cc, a, cc, d]:
-		st.set_color(c)
-		st.set_normal(_up)
 		st.add_vertex(q)
 
 
 func _wall(st: SurfaceTool, a: Vector3, b: Vector3, h0: float, h1: float, c: Color) -> void:
 	var nrm := (b - a).cross(_up).normalized()
+	st.set_color(c)
+	st.set_normal(nrm)
 	for q in [a + _up * h0, b + _up * h0, b + _up * h1, a + _up * h0, b + _up * h1, a + _up * h1]:
-		st.set_color(c)
-		st.set_normal(nrm)
 		st.add_vertex(q)
 
 
 func _quad(st: SurfaceTool, q: Array, c: Color) -> void:
 	var nrm: Vector3 = ((q[1] as Vector3) - (q[0] as Vector3)).cross((q[3] as Vector3) - (q[0] as Vector3)).normalized()
+	st.set_color(c)
+	st.set_normal(nrm)
 	for k in [0, 1, 2, 0, 2, 3]:
-		st.set_color(c)
-		st.set_normal(nrm)
 		st.add_vertex(q[k])
 
 
@@ -1306,17 +1581,17 @@ func _box(st: SurfaceTool, ctr: Vector3, size: Vector3, c: Color) -> void:
 	var hz := size.z / 2.0
 	var v := [ctr + Vector3(-hx, -hy, -hz), ctr + Vector3(hx, -hy, -hz), ctr + Vector3(hx, hy, -hz), ctr + Vector3(-hx, hy, -hz),
 		ctr + Vector3(-hx, -hy, hz), ctr + Vector3(hx, -hy, hz), ctr + Vector3(hx, hy, hz), ctr + Vector3(-hx, hy, hz)]
+	st.set_color(c)
 	for f in [[0, 1, 2, 3, Vector3.FORWARD], [5, 4, 7, 6, Vector3.BACK], [4, 0, 3, 7, Vector3.LEFT], [1, 5, 6, 2, Vector3.RIGHT], [3, 2, 6, 7, Vector3.UP]]:
+		st.set_normal(f[4])
 		for q in [f[0], f[1], f[2], f[0], f[2], f[3]]:
-			st.set_color(c)
-			st.set_normal(f[4])
 			st.add_vertex(v[q])
 
 
 func _beacon(st: SurfaceTool, p: Vector3, c: Color) -> void:
+	st.set_color(c)
+	st.set_uv2(Vector2(0.0, 1e6))
+	st.set_normal(Vector3.UP)
 	for uv in [Vector2(-1, -1), Vector2(1, -1), Vector2(1, 1), Vector2(-1, -1), Vector2(1, 1), Vector2(-1, 1)]:
-		st.set_color(c)
 		st.set_uv(uv)
-		st.set_uv2(Vector2(0.0, 1e6))
-		st.set_normal(Vector3.UP)
 		st.add_vertex(p)

@@ -77,16 +77,22 @@ func _check_search() -> bool:
 					var off: float = R.w[i] / 2.0 * fraction
 					var actual: Vector4 = world._joined_surface(r, i, off)
 					var expected := INF
-					for ji in R.jx:
-						var J: Array = sim.junctions[ji]
+					for ji in R.sjx:
+						var J: Array = sim.surface_junctions[ji]
 						var on_a := int(J[0]) == r
 						var z0 := int(J[1]) if on_a else int(J[4])
 						var z1 := int(J[2]) if on_a else int(J[5])
 						if i < z0 - 4 or i > z1 + 4:
 							continue
 						var q := int(J[3]) if on_a else int(J[0])
-						var hint := (int(J[4]) + int(J[5])) / 2 if on_a else (int(J[1]) + int(J[2])) / 2
-						sim._nearest_on(q, R.px[i] + R.nx[i] * off, R.py[i] + R.ny[i] * off, hint, 150)
+						var target_lo := int(J[4]) if on_a else int(J[1])
+						var target_hi := int(J[5]) if on_a else int(J[2])
+						var hint := (target_lo + target_hi) / 2
+						# Transfer merges can span more than 600 samples. Cover the whole
+						# interval: a truncated interior search can mistake its artificial
+						# endpoint for pavement thousands of metres from the actual point.
+						var reach := maxi(150, (target_hi - target_lo + 1) / 2 + 8)
+						sim._nearest_on(q, R.px[i] + R.nx[i] * off, R.py[i] + R.ny[i] * off, hint, reach)
 						if not sim._n_off and absf(sim._n_lat) < sim._n_w / 2.0 - 1.0:
 							expected = minf(expected, sim.net_height(q, sim._n_i + sim._n_t) + Sim.net_edge(sim._n_w, sim._n_lat).x)
 					n += 1

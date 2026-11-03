@@ -713,10 +713,11 @@ Source verification completed:
   obstruction and now passes (v017-quick-menu-marker-final.log); the final
   menu screenshot was inspected for all labels and footer visibility.
 
-Physical acceptance of the new shafts, partner and VR quick menu remains
-unverified - needs user confirmation. The prior v0.1.6 gentle braking and
-two-sided signs were user-confirmed. Physical obstacle testing is still pending
-as Luke requested. This local integration does not update the live store.
+Luke confirmed the v0.1.7 partner and VR quick-menu playtest on 2026-11-03.
+He reported high-speed shaft clipping and residual road overlap for the next
+iteration. The prior v0.1.6 gentle braking and two-sided signs were confirmed.
+Physical obstacle testing is still pending as Luke requested. This local
+integration does not update the live store.
 
 LOCAL 0.1.7 ARCHIVES AND PLAYER VERIFICATION - 2026-11-03
 Editor import and both exports exited 0 with no logged errors. Both ZIPs
@@ -736,14 +737,11 @@ not establish headset frame rate, stereo rendering or comfort.
 Final original-source check: all 297 snapshot files unchanged. Claude
 worktree remains clean at f6b3041. No test or export helper is retained.
 
-The extracted v0.1.7 PC VR executable was launched with Network preselected,
-PID 82808. Its window responds and its executable path matches the verified
-fresh extraction. Only that intentional playtest remains running; all Godot,
-Python test and export helpers have exited. The launch log remains empty, so
-this launch has not independently established OpenXR session readiness.
-Headset confirmation of the partner and readable quick-menu/resume behavior
-has been requested. Physical acceptance remains unverified - needs user
-confirmation.
+The extracted v0.1.7 PC VR executable launched with Network preselected as
+PID 82808, matching the verified extraction. Its log subsequently recorded
+active headset/controller tracking and a 120 fps average. Luke confirmed the
+partner/quick-menu run. This player was gracefully closed on 2026-11-03 before
+v0.1.8 diagnostics and its process was verified absent.
 
 LOCAL 0.1.7 HEADSET ACCEPTANCE - 2026-11-03
 Luke confirmed the partner and quick-menu playtest: "yeah this is running well."
@@ -753,3 +751,104 @@ the pending launch-readiness note above. Luke also identified high-speed shaft
 ground clipping and remaining road overlap impressions for the next iteration;
 this acceptance does not establish that those geometry cases are correct.
 Physical obstacle-toggle testing remains pending as previously requested.
+
+LOCAL 0.1.8 NETWORK EXPANSION - 2026-11-03
+The Network now has a 600 m upper north/south express level, with graded
+connections to the lower east/west highways. Upper traffic contains more fast
+cars and higher cruise targets; lower roads favor commuters and slower traffic.
+Existing city and corner speed limits still apply.
+
+Twenty jump approaches use terrace, crest and saddle profiles, with distinct
+minimum speeds and flights spanning about 2.7-5.4 km. Four recovery routes act
+as perpendicular-highway interchanges. Four other recovery decks make a full
+carried twist over about 11 km. Launch and capture remain aligned: minimum-speed
+flights land, while below-speed attempts retain their safe miss behavior.
+
+Amber approach paint follows the highway exit and jump fork. The cockpit shows
+the next action, destination/level, distance, time and minimum jump speed, with
+warnings scaled to actual airspeed. Ordinary exits have their own destination
+guidance. A physical parent-road projection keeps the prompt active until the
+actual mouth/fork, rather than the padded junction boundary.
+
+Traffic has five distinct batched silhouettes. Commuters, slower cars and hot
+rods can make a delayed, gradual adjacent-lane move for a faster follower, whether
+player or NPC. Occupied or reserved lanes, late arrivals and junction/twist
+approaches suppress the move. Notice and cooldown vary between cars. Freight
+and racers retain their established roles.
+
+Each city palette now has distant landmark groups: terraced gardens, desert
+spires, an ice observatory, basalt industry and mesa structures. All are static
+batched scenery outside road corridors, with floating-origin placement.
+
+High-speed bound-road height is synchronized after planar integration in both
+sims. This addresses the one-step deck lag at the end shafts without advancing
+jump or landing springs twice. Physical launch/highway overlap records flatten
+the shared inner shoulders while preserving outside guardrails. These records
+are separate from route junctions, so they do not create false driving exits.
+
+Focused evidence completed before final integration:
+- All 60 low/minimum/high jump flights pass in JS and Godot. Four actual driven
+  transfer routes also reach their perpendicular destination highways.
+- The carried-twist suite passes 4,197 checks, including 8,000 mph in both
+  directions and lateral offsets; tested eye clearance remains 2.720 m.
+- Courtesy traffic passes 28 checks at 2.049 ms average for 220 cars. Original
+  traffic passes 12 checks at 1.86 ms for 217 cars, under its 2.5 ms budget.
+- Physical-mouth guidance passes 280 jump and 43 ordinary-exit checks after
+  reproducing the early-hide failures. The rendered cockpit was inspected.
+- Scenery passes 49 placement/clearance checks. Five final Vulkan biome renders
+  and the five-vehicle character sheet were visually inspected.
+
+Final source integration:
+- Original world gates pass: 1,356 ms setup (<2,000), no missing nearby chunks
+  after 40 frames, no missing chunks or stale distant chunks after teleport,
+  and 3.4 ms slowest chunk (<8). Static junction projections are prepared during
+  loading. Turnarounds' two joins to the same road retain distinct hint IDs.
+- Junction geometry passes 49,704 projection offsets with zero mismatches,
+  5,685 triangle probes without obstruction and 153 real body placements.
+- All twenty shared launch entrances pass 15,588 actual mesh probes, with
+  zero obstructions above the 0.25 m tolerance (worst 0.211 m). All 337 internal
+  wall checks and 120 solid/visible outside guardrail checks pass.
+- Final JS/Godot Network replay parity, boundary queries, original shaft suite,
+  high-speed shaft contact, carried twists, scenery, city arrival/persistence
+  and all twenty highway/ramp approach-paint routes pass.
+- All 15 control/physics/audio preservation suites and all eight menu/guidance
+  suites pass. Exact saved preference bytes were restored by the runners.
+- Actual Vulkan tests pass 237 shaft/traffic-mesh checks, 12,044 sign-face checks
+  and the quick-menu occlusion check. Headless XR fixtures retain exit-time
+  ObjectDB warnings; the real-render tests exit cleanly.
+- Independent source review found no remaining issues. The shared-turnaround
+  hint bug and early-hidden approach prompts were fixed and regression-tested.
+- Existing fixture assumptions were corrected without loosening thresholds:
+  the nearest-road reference now covers the full longer transfer junction;
+  ground guardrails are tested after an actual return to ground; visible walls
+  are ray-tested through faces, 1 cm inside a float32 shared triangle edge.
+- All 297 original-source snapshot files are unchanged. Claude's worktree is
+  clean at f6b30415157fb35c31340006ff986f3aca5b4bb4. Both v0.1.7 archive hashes
+  still match the previously recorded releases.
+
+Physical v0.1.8 feel/readability and obstacle-toggle acceptance remain pending.
+This local iteration does not update the live store.
+
+LOCAL 0.1.8 ARCHIVES AND PLAYER VERIFICATION - 2026-11-03
+Editor import and both exports exited 0 with no logged errors. Both archives
+contain 42 allowlisted files; ZIP integrity and fresh-extraction hashes pass.
+Phaethon-Experimental-0.1.8-Windows.zip
+Bytes: 61346319
+SHA256: 780575d5605d2eee5baf2fb9b918d9f89821f2f04b1b86393c9903e4126a2550
+Phaethon-Experimental-0.1.8-Windows-PCVR.zip
+Bytes: 61426715
+SHA256: 3730fc5c088b322255fbd2b4a0e0048cff4e294540b4df7bf05973ca51f8cd58
+Fresh extracted desktop: 168 checks, zero failures. Fresh extracted PC VR with
+XR explicitly off: 284 checks, zero failures. Both exited 0 without logged
+errors and restored saved preferences. The packaged desktop menu, VR startup
+panel and VR quick menu screenshots were inspected. These flat diagnostics do
+not establish headset stereo rendering, comfort or sustained headset frame rate.
+
+LOCAL 0.1.8 INTERACTIVE HANDOFF - 2026-11-03
+The verified freshly extracted PhaethonVR.exe was launched with Network selected
+as PID 72808. The live process executable path matches the 0.1.8 extraction. All
+Godot/export/test helpers were absent before launch; the interactive player is
+intentionally retained for Luke. The launch log was initially empty, so this
+does not confirm an active OpenXR tracking session. Headset confirmation of jump
+feel, high-speed corkscrew clearance, guidance and traffic behavior was requested.
+Physical obstacle-toggle acceptance remains pending as previously requested.

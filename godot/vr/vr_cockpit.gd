@@ -894,17 +894,17 @@ func _update_jump_guidance() -> void:
 	if not _jump_guidance:
 		_jump_guidance = Label3D.new()
 		_jump_guidance.name = "AscentGuidance"
-		_jump_guidance.font_size = 32
+		_jump_guidance.font_size = 36
 		_jump_guidance.pixel_size = 0.0025
 		_jump_guidance.outline_size = 8
 		_jump_guidance.outline_modulate = Color(0.025, 0.03, 0.035, 0.96)
-		_jump_guidance.position = Vector3(0.0, 1.42, -1.8)
+		_jump_guidance.position = Vector3(0.0, 1.45, -1.8)
 		_jump_guidance.double_sided = false
 		rig.add_child(_jump_guidance)
 		_jump_guidance_backing = MeshInstance3D.new()
 		_jump_guidance_backing.name = "AscentGuidanceBacking"
 		var face := QuadMesh.new()
-		face.size = Vector2(1.9, 0.35)
+		face.size = Vector2(2.2, 0.42)
 		_jump_guidance_backing.mesh = face
 		var mat := StandardMaterial3D.new()
 		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
@@ -918,7 +918,12 @@ func _update_jump_guidance() -> void:
 	_jump_guidance.visible = text != ""
 	_jump_guidance_backing.visible = _jump_guidance.visible
 	_jump_guidance.text = text
-	_jump_guidance.modulate = Color(1.0, 0.55, 0.12) if text.contains("TOO SLOW") else Color(0.45, 1.0, 0.6)
+	if text.contains("TOO SLOW") or text.contains("WRONG WAY"):
+		_jump_guidance.modulate = Color(1.0, 0.55, 0.12)
+	elif text.contains("ASCENT"):
+		_jump_guidance.modulate = Color(0.45, 1.0, 0.6)
+	else:
+		_jump_guidance.modulate = Color(0.55, 0.85, 1.0)
 
 
 func _update_hud() -> void:

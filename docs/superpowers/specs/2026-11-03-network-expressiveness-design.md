@@ -7,11 +7,24 @@ This iteration stays in the existing Godot/JS simulation and release checkout.
 
 ## Intended experience
 
+Luke clarified the jump direction: taller, longer, twisted routes and jumps
+that act as interchanges. He also wants levels, with slower traffic below and
+the fastest cars above. This expands the design to an elevated express network
+with meaningful route connections.
+
+Builder choice: north/south highways form the upper express level at about
+600 m; east/west highways, city roads and ground onramps remain below. Existing
+quadrant ramps connect them. Upper highways return to ground before their end
+shafts. Traffic mixes and desired cruise speeds vary smoothly by level;
+road/city braking limits still apply.
+
 The climb into a jump should be an event: a long, readable build-up, a distinct
 ramp profile, a visible lip, flight over the interchange and a clear landing.
-Keep the twenty approaches and their varied minimum speeds. Give them several
-recognizable profiles through shaped ascent and elevated recovery sections,
-while retaining straight launch and capture alignment. Do not require steering
+Keep the twenty approaches and their varied minimum speeds. Raise and lengthen
+selected routes, with staged ascents and elevated recovery sections. Selected
+recovery decks make a full twist, carrying the craft and cockpit with the road,
+and selected jump routes connect to the perpendicular highway. Retain straight
+launch and capture alignment. Do not require steering
 in midair to discover an invisible landing. Additional geometry must preserve
 the minimum-speed landing and safe below-speed miss. Exact profile dimensions
 are builder choices constrained by physical flight tests and road clearance.

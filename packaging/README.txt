@@ -1,5 +1,5 @@
 PHAETHON
-Experimental Desktop Racer - Windows x64 - v0.1.7
+Experimental Desktop Racer - Windows x64 - v0.1.8
 ElstonWorks
 
 Two engines. One cockpit. We know it's a little fucky.
@@ -23,9 +23,14 @@ handling, sparse scenery, rough collisions, and the occasional spectacular
 mistake. There is no multiplayer. This download is the flat-screen edition.
 Future features, updates, and other platforms are not part of this purchase.
 
-The Network has twenty interchange ascent ramps with different heights and minimum launch
-speeds from 2,000 to 4,000 mph. Signs and the approach display show the speed
-needed at the launch lip. Keep enough throttle through the climb.
+The Network has twenty ascent ramps: staged climbs, longer gaps, four jumps
+that transfer onto another highway, and four twisting recovery decks.
+Minimum launch speeds vary from 2,000 to 4,000 mph. Signs and the approach
+display show the speed needed at the launch lip. Keep throttle through the climb.
+North/south expressways rise above the lower east/west roads. The lower level
+has more slow traffic; the upper level has faster commuters and more hot rods.
+Traffic changes lanes for faster vehicles when there is time and room.
+Each region has its own landmarks, and traffic has five distinct silhouettes.
 Signs are readable from both sides; reverse faces identify the other approach.
 Twelve side roads add sweeping corners; vertical shafts turn you around at
 the highway ends. Driving partner adds a teal craft that follows your speed.
@@ -83,4 +88,4 @@ copyright. Third-party components and the CC BY engine audio retain their
 own licenses and permissions. See THIRD_PARTY_NOTICES.txt and licenses/.
 Adapted engine audio is also supplied separately in audio/engines/.
 
-Build: 0.1.7-experimental | 2026-11-02
+Build: 0.1.8-experimental | 2026-11-03

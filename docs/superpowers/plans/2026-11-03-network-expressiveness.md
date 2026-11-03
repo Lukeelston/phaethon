@@ -37,35 +37,39 @@ traffic from world rendering. Parent coordinates shared generated-file edits.
 Files: `sim-core.js`, `godot/sim/craft_sim.gd` (non-generated sections),
 `godot/tests/test_shaft_high_speed.gd`, matching JS regression.
 
-- [ ] Reproduce high-speed deck/mesh/VR-eye error at 4k/8k/12k mph both ways.
-- [ ] Synchronize bound road contact with final planar position without advancing
+- [x] Reproduce high-speed deck/mesh/VR-eye error at 4k/8k/12k mph both ways.
+- [x] Synchronize bound road contact with final planar position without advancing
   airborne or catch-spring state twice; preserve launch velocity.
-- [ ] Pass the new regression and original shaft ride/stall/parity checks.
+- [x] Pass the new regression and original shaft ride/stall/parity checks.
 
 ## Task 2: Traffic behavior and character
 
 Files: `godot/view/network_traffic.gd`, focused traffic behavior test and lineup.
 
-- [ ] Red test for delayed single adjacent move for player and NPC faster followers,
+- [x] Red test for delayed single adjacent move for player and NPC faster followers,
   blocked/claimed lanes, late arrivals, >8-neighbor follower and reverse direction.
-- [ ] Add deterministic varied notice/cooldown, safe swept-gap checks and destination
+- [x] Add deterministic varied notice/cooldown, safe swept-gap checks and destination
   reservations. Suppress discretionary yielding near junctions and shafts.
-- [ ] Add five distinct silhouettes within current footprints, batched body/lights.
-- [ ] Pass original traffic and shaft-mesh gates plus dense high-speed cost test.
+- [x] Add five distinct silhouettes within current footprints, batched body/lights.
+- [x] Pass original traffic and shaft-mesh gates plus dense high-speed cost test.
 
 ## Task 3: Launch overlap, jump profiles and guidance
 
 Files: `tools/design_network.py`, generated network data, `network_world.gd`,
 guidance in `craft_view.gd` / `vr_cockpit.gd`, focused geometry/guidance tests.
 
-- [ ] Reproduce actual shoulder/wall intrusion at all twenty launch/highway overlaps.
-- [ ] Represent the shared pavement explicitly; remove the generator's unexplained
+- [x] Reproduce actual shoulder/wall intrusion at all twenty launch/highway overlaps.
+- [x] Represent the shared pavement explicitly; remove the generator's unexplained
   launch proximity exception once its overlap is accounted for; preserve routing.
-- [ ] Shape launch/recovery profiles into distinct staged ascents without changing
+- [x] Shape launch/recovery profiles into distinct staged ascents without changing
   ballistic launch/catch alignment or removing safe below-speed miss behavior.
-- [ ] Add continuous approach chevrons and earlier actionable distance/time/minimum
+- [x] Build the upper north/south express level, correctly joining ramps, sides,
+  jump baselines and ground-level shaft approaches. Test height continuity.
+- [x] Add longer/higher jump flights and selected perpendicular-highway transfers;
+  add fully carried twisted recovery decks and real mesh/headset clearance tests.
+- [x] Add continuous approach chevrons and earlier actionable distance/time/minimum
   readout, respecting direction and passed entries. Preserve two-sided boards.
-- [ ] Regenerate data after physics edits finish; validate design, all60jump flights,
+- [x] Regenerate data after physics edits finish; validate design, all60jump flights,
   actual overlap meshes, guidance directions and replay parity.
 
 ## Task 4: Background identity
@@ -73,16 +77,21 @@ guidance in `craft_view.gd` / `vr_cockpit.gd`, focused geometry/guidance tests.
 Files: dedicated `godot/view/network_scenery.gd` if useful, world integration,
 render/road-corridor verification.
 
-- [ ] Build deterministic city-specific silhouette groups and distant landmarks,
+- [x] Build deterministic city-specific silhouette groups and distant landmarks,
   outside roads, keeping existing palettes and batched geometry.
-- [ ] Inspect driver-distance renders across representative biomes; verify clearance
+- [x] Inspect driver-distance renders across representative biomes; verify clearance
   and floating-origin placement, retain world-streaming limits.
 
 ## Task 5: Review, packages and interactive build
 
-- [ ] Independent code review; resolve important findings.
-- [ ] Appropriate preservation suites and original-source verification.
-- [ ] Bump project/package/player docs to0.1.8; export desktop and PCVR, package and
+- [x] Independent code review; resolve important findings.
+- [x] Appropriate preservation suites and original-source verification.
+- [x] Bump project/package/player docs to0.1.8; export desktop and PCVR, package and
   verify fresh extracted players, inspect screenshots and record hashes/results.
-- [ ] Commit the integrated work, launch PCVR Network, verify actual runtime log and
+- [x] Commit the integrated work, launch PCVR Network, inspect actual runtime log and
   process cleanup; request headset confirmation of changes requiring human feel.
+
+Final evidence is in RELEASE_REPORT.txt. Both extracted players passed. The
+interactive PC VR executable was launched with Network selected; its process and
+exact extracted path were verified. Its launch log was initially empty, so active
+headset tracking and physical acceptance remain unverified pending Luke's check.

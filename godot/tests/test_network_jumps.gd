@@ -93,14 +93,14 @@ func _process(_d: float) -> bool:
 	_check("boards: %d highway, %d fork/spur, correct varied minimums and approach direction for %d/%d ascents" % [boards.size(), forks.size(), facing_right, sim.jumps.size()], correct_boards and facing_right == sim.jumps.size())
 	_line_up(0, 2500.0)
 	var slow: String = v._progress_text()
-	_check("approach below minimum: " + slow, slow.contains("TOO SLOW") and slow.contains("3,000 MPH AT LIP") and slow.contains("TOP") and slow.contains("LIP"))
+	_check("approach below minimum: " + slow, slow.contains("TOO SLOW") and slow.contains("3,000 MPH AT LIP") and slow.contains("UPPER") and slow.begins_with("JUMP LIP"))
 	_line_up(0, 4000.0)
 	var ready: String = v._progress_text()
-	_check("approach ready: " + ready, ready.contains("READY") and ready.contains("4,000 MPH") and not ready.contains("TOO SLOW"))
+	_check("approach ready: " + ready, ready.contains("READY") and ready.contains(" S") and not ready.contains("TOO SLOW"))
 	for b in sim.bodies:
 		b.vx = -b.vx
 		b.vy = -b.vy
-	_check("approach hidden when facing away", v._net_jump_approach_text().is_empty())
+	_check("reverse travel warns even while the craft faces forward", v._net_jump_approach_text().contains("WRONG WAY") and not v._net_jump_approach_text().contains("READY"))
 	_line_up(0, 0.0)
 	_check("stopped on ascent still shows minimum", v._net_jump_approach_text().contains("TOO SLOW") and v._net_jump_approach_text().contains("3,000 MPH AT LIP"))
 	# a jump at 4,000 mph

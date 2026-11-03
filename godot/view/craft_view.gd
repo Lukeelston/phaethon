@@ -874,7 +874,7 @@ func _shaft_f(x: float, y: float) -> float:
 	if network_world == null or sim.pod.off_road:
 		return -1.0
 	var r: int = sim.pod.path
-	if not sim.roads[r].shaft:
+	if not network_world.shaft.maps.has(r):
 		return -1.0
 	sim._nearest_on(r, x, y, sim.pod.hint, 12)   # (the craft and its partner are within a few samples of the pod)
 	var f: float = sim._n_i + sim._n_t
@@ -1363,21 +1363,147 @@ func _place_camera(k: float) -> void:
 	cam.look_at(pod_p + fwd * 40.0 + cam_up * 1.0, cam_up)
 
 
-## An ascent warning shared by desktop and cockpit: only a launch lane or its parent approach,
-## travelling toward its lip. The posted minimum applies at lift-off, not at the highway exit.
+var _net_guidance_lengths := {} # Per-road arc lengths, built only for roads whose signs are needed.
+var _net_guidance_entries := {} # Physical parent samples for each (parent, child road, child sample).
+var _net_guidance_sim
+
+
+func _net_guidance_parent_sample(junction: Array, child: int) -> int:
+	if _net_guidance_sim != sim:
+		_net_guidance_sim = sim
+		_net_guidance_lengths.clear()
+		_net_guidance_entries.clear()
+	var key := Vector3i(int(junction[0]), int(junction[3]), child)
+	if _net_guidance_entries.has(key):
+		return _net_guidance_entries[key]
+	var P = sim.roads[key.x]
+	var C = sim.roads[key.y]
+	var closest := int(junction[1])
+	var distance := INF
+	# Junction bounds include shared pavement and padding. Use them only to bound the search;
+	# the actual child endpoint determines when the turn is reached, in either travel direction.
+	for i in range(int(junction[1]), int(junction[2]) + 1):
+		var dx: float = P.px[i] - C.px[child]
+		var dy: float = P.py[i] - C.py[child]
+		var d := dx * dx + dy * dy
+		if d < distance:
+			distance = d
+			closest = i
+	_net_guidance_entries[key] = closest
+	return closest
+
+
+## Signed distance along the current road, including the distance since its nearest sample.
+## A projection onto the exit tangent shortens curved approaches and can keep passed signs alive.
+func _net_guidance_distance(sample: int, way: int) -> float:
+	if _net_guidance_sim != sim:
+		_net_guidance_sim = sim
+		_net_guidance_lengths.clear()
+		_net_guidance_entries.clear()
+	var road := int(sim.pod.path)
+	var R = sim.roads[road]
+	if not _net_guidance_lengths.has(road):
+		var lengths := PackedFloat64Array()
+		lengths.resize(R.N)
+		for i in range(1, R.N):
+			lengths[i] = lengths[i - 1] + R.len[i - 1]
+		_net_guidance_lengths[road] = lengths
+	var lengths: PackedFloat64Array = _net_guidance_lengths[road]
+	var here := clampi(sim.pod.hint, 0, R.N - 1)
+	var offset: float = (sim.pod.x - R.px[here]) * R.tx[here] + (sim.pod.y - R.py[here]) * R.ty[here]
+	return (lengths[sample] - lengths[here] - offset) * way
+
+
+## Use actual travel, falling back to facing only while stopped. A reverse slide is still reverse.
+func _net_guidance_way() -> int:
+	var R = sim.roads[sim.pod.path]
+	var at := clampi(sim.pod.hint, 0, R.N - 1)
+	var along: float = sim.pod.vx * R.tx[at] + sim.pod.vy * R.ty[at]
+	if absf(along) < 1.0:
+		along = cos(sim.pod.th) * R.tx[at] + sin(sim.pod.th) * R.ty[at]
+	return 1 if along >= 0.0 else -1
+
+
+## Follow the receiving road's actual far-end junction, including interchange jump transfers.
+func _net_guidance_destination(road: int, end: int) -> String:
+	var R = sim.roads[road]
+	for ji in R.jx:
+		var J: Array = sim.junctions[ji]
+		if int(J[3]) == road and int(J[4]) <= end and end <= int(J[5]):
+			var target := int(J[0])
+			var at := _net_guidance_parent_sample(J, end)
+			return "%s %s" % [sim.roads[target].name.to_upper(), "UPPER" if sim.net_height(target, at) >= 300.0 else "LOWER"]
+	return R.name.to_upper()
+
+
+func _net_guidance_countdown(distance: float, speed: float) -> String:
+	var seconds := "-- S"
+	if speed >= 1.0:
+		var remaining := maxf(0.0, distance) / speed
+		seconds = ("%.1f S" if remaining < 10.0 else "%.0f S") % remaining
+	return "%s / %s" % [_far(maxf(0.0, distance)).to_upper(), seconds]
+
+
+## Ordinary interchange exits use the same small readout when there is no jump approach.
+## The side comes from the real ramp mouth relative to travel, never its construction order.
+func _net_exit_approach_text(travel: int, speed: float, horizon: float) -> String:
+	var highway := int(sim.pod.path)
+	var H = sim.roads[highway]
+	var nearest := INF
+	var side := ""
+	var destination := ""
+	for ji in H.jx:
+		var J: Array = sim.junctions[ji]
+		if int(J[0]) != highway:
+			continue
+		var road := int(J[3])
+		var R = sim.roads[road]
+		if not R.name.begins_with("R"):
+			continue
+		var end: int = 0 if int(J[4]) == 0 else R.N - 1
+		var ramp_way := 1 if end == 0 else -1
+		if ramp_way * int(J[6]) != travel:
+			continue
+		var mouth := _net_guidance_parent_sample(J, end)
+		var distance := _net_guidance_distance(mouth, travel)
+		if distance < 0.0 or distance > horizon or distance > nearest + 0.01:
+			continue
+		var lateral: float = ((R.px[end] - H.px[mouth]) * H.nx[mouth] + (R.py[end] - H.py[mouth]) * H.ny[mouth]) * travel
+		var branch_side := "LEFT" if lateral > 0.0 else "RIGHT"
+		# Equal-distance choices normally have an exit on each side; prefer the right-hand option.
+		if absf(distance - nearest) < 0.01 and side == "RIGHT":
+			continue
+		nearest = distance
+		side = branch_side
+		destination = _net_guidance_destination(road, R.N - 1 if end == 0 else 0)
+	if side.is_empty():
+		return ""
+	return "%s EXIT  %s\nTO %s\nOPTIONAL / KEEP %s" % [side, _net_guidance_countdown(nearest, speed), destination, side]
+
+
+## One compact approach readout shared by desktop and cockpit. At high speed its lead grows to
+## twelve seconds; the action comes first, and the minimum remains a requirement at the lip.
 func _net_jump_approach_text() -> String:
 	if sim.kind != "network" or sim.pod.off_road:
 		return ""
+	var travel := _net_guidance_way()
+	var speed: float = sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy)
+	var horizon := maxf(13000.0, speed * 12.0)
+	var nearest := INF
+	var selected: Array = []
+	var action := ""
+	var lane_cue := ""
 	for jp in sim.jumps:
 		var launch := int(jp[0])
 		var L = sim.roads[launch]
-		var forward: float = sim.pod.vx * L.tx[L.N - 1] + sim.pod.vy * L.ty[L.N - 1]
-		if forward < -1.0 or (absf(forward) < 1.0 and cos(sim.pod.th) * L.tx[L.N - 1] + sin(sim.pod.th) * L.ty[L.N - 1] < 0.5):
-			continue
 		var on_lane: bool = sim.pod.path == launch
 		var on_ramp := false
 		var entry := INF
-		if not on_lane:
+		if on_lane:
+			if travel < 0:
+				return "WRONG WAY\nASCENT %s | TURN BACK\nJUMP LIP IS BEHIND" % L.name
+			entry = _net_guidance_distance(L.N - 1, 1)
+		else:
 			for ji in L.jx:
 				var J: Array = sim.junctions[ji]
 				if int(J[3]) != launch or int(J[4]) != 0:
@@ -1385,10 +1511,11 @@ func _net_jump_approach_text() -> String:
 				var ramp := int(J[0])
 				var R = sim.roads[ramp]
 				var way := int(J[6])
-				var fork := int(J[1]) if way > 0 else int(J[2])
+				var fork := _net_guidance_parent_sample(J, 0)
 				if sim.pod.path == ramp:
-					on_ramp = true
-					entry = ((R.px[fork] - sim.pod.x) * R.tx[fork] + (R.py[fork] - sim.pod.y) * R.ty[fork]) * way
+					if travel == way:
+						on_ramp = true
+						entry = _net_guidance_distance(fork, way)
 					break
 				# The launch now forks off an exit ramp, not directly off the highway.
 				# Follow that ramp's entrance so the warning begins before leaving the highway.
@@ -1397,26 +1524,22 @@ func _net_jump_approach_text() -> String:
 					var HJ: Array = sim.junctions[rji]
 					if int(HJ[0]) != sim.pod.path or int(HJ[3]) != ramp or int(HJ[4]) > end_sample or end_sample > int(HJ[5]):
 						continue
-					var u := float(end_sample - int(HJ[4])) / maxf(1.0, float(int(HJ[5]) - int(HJ[4])))
-					var mouth := roundi(lerpf(float(HJ[1]), float(HJ[2]), u if int(HJ[6]) > 0 else 1.0 - u))
-					var H = sim.roads[sim.pod.path]
-					entry = ((H.px[mouth] - sim.pod.x) * H.tx[mouth] + (H.py[mouth] - sim.pod.y) * H.ty[mouth]) * way * int(HJ[6])
-			if entry < -150.0 or entry > 13000.0:
-				continue
-		var lip: float = maxf(0.0, (L.px[L.N - 1] - sim.pod.x) * L.tx[L.N - 1] + (L.py[L.N - 1] - sim.pod.y) * L.ty[L.N - 1])
-		var mph := roundi(sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy) * 2.236936)
-		var minimum := int(jp[2])
-		var state := "READY" if mph >= minimum else "TOO SLOW"
-		var top := 0.0
-		for key in sim.NET_HEIGHTS:
-			if int(key[0]) == int(jp[1]):
-				for h in key[1]:
-					top = maxf(top, float(h[1]))
-		var where := "LIP %.1f MI" % (lip / 1609.344) if on_lane else ("ENTER RIGHT NOW" if entry <= 800.0 else "RIGHT EXIT %.1f MI" % (entry / 1609.344))
-		if on_ramp:
-			where = "JUMP STRAIGHT NOW" if entry <= 800.0 else "STRAIGHT FORK %.1f MI" % (entry / 1609.344)
-		return "ASCENT %s  %s\nMIN %d,%03d MPH AT LIP  |  %s\nNOW %s MPH  |  TOP %d FT" % [L.name, where, minimum / 1000, minimum % 1000, state, _grouped_mph(), roundi(top / 0.3048)]
-	return ""
+					var highway_way := way * int(HJ[6])
+					if travel == highway_way:
+						entry = _net_guidance_distance(_net_guidance_parent_sample(HJ, end_sample), highway_way)
+		if entry < 0.0 or entry > nearest or (not on_lane and entry > horizon):
+			continue
+		nearest = entry
+		selected = jp
+		action = "JUMP LIP" if on_lane else ("JUMP STRAIGHT" if on_ramp else "RIGHT EXIT")
+		lane_cue = "" if on_lane or on_ramp else " / KEEP RIGHT"
+	if selected.is_empty():
+		return _net_exit_approach_text(travel, speed, horizon)
+	var minimum := int(selected[2])
+	var state := "READY" if speed * 2.236936 >= minimum else "TOO SLOW"
+	var catch_road := int(selected[1])
+	var destination := _net_guidance_destination(catch_road, sim.roads[catch_road].N - 1)
+	return "%s  %s\nASCENT %s > %s%s\nMIN %d,%03d MPH AT LIP | %s" % [action, _net_guidance_countdown(nearest, speed), sim.roads[int(selected[0])].name, destination, lane_cue, minimum / 1000, minimum % 1000, state]
 
 
 ## Second HUD line: lap info on the circuit, mileage and top speed on the range; the job's line on

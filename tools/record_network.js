@@ -200,7 +200,8 @@ const expected = {
   frames: rec.log.length, switches: rec.switches, arrivals: rec.arrivals, hits: rec.hits, scrapes: rec.scrapes,
   final_pod: [P.x, P.y], final_path: P.path, top_mph: Math.round(rec.top * NR.MPH),
   traffic: trafficDrive(),
-  jumps: [jumpRun(0, 4000, 0.87, 12), jumpRun(0, 2500, 0.3, 30), groundRun()],
+  // The higher ascent takes longer to fall after an under-speed miss.
+  jumps: [jumpRun(0, 4000, 0.87, 12), jumpRun(0, 2500, 0.3, 50), groundRun()],
   burner: burnerRun(),
   dead_end: deadEndRun(),
   shafts: [shaftRun('TE2+', 1, 4000, 0.87), shaftRun('TE2+', -1, 4000, 0.87), shaftRun('TE2+', 1, 300, 0, true)]

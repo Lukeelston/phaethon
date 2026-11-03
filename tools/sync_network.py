@@ -13,7 +13,7 @@ import design_network as dn
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-roads, J, cities, H, ok, jumps, onramps, shafts = dn.main()
+roads, J, cities, H, ok, jumps, onramps, shafts, overlaps, twists = dn.main()
 assert ok, "the design isn't OK: fix it before syncing"
 
 
@@ -35,6 +35,10 @@ def js_block():
     for k in range(0, len(J), 6):
         out.append("    " + ", ".join(f"[{', '.join(str(int(v)) for v in j)}]" for j in J[k:k + 6]) + ",")
     out.append("  ];")
+    out.append("  // Physical pavement unions only; route choices remain in NET_JUNCTIONS.")
+    out.append("  const NET_OVERLAPS = [" + ", ".join(str(j) for j in overlaps) + "];")
+    out.append("  const NET_TWISTS = [" + ", ".join(str(j) for j in twists) + "];")
+    out.append("  const NET_JUMP_PROFILES = [" + ", ".join(repr(roads[j[0]].profile) for j in jumps) + "];")
     out.append("  // [name, biome, centre x, centre y, road, terminal sample]")
     out.append("  const NET_CITIES = [")
     for c in cities:
@@ -69,6 +73,10 @@ def gd_block():
     for k in range(0, len(J), 6):
         out.append("\t" + ", ".join(f"[{', '.join(str(int(v)) for v in j)}]" for j in J[k:k + 6]) + ",")
     out.append("]")
+    out.append("# Physical pavement unions only; route choices remain in NET_JUNCTIONS.")
+    out.append("const NET_OVERLAPS := [" + ", ".join(str(j) for j in overlaps) + "]")
+    out.append("const NET_TWISTS := [" + ", ".join(str(j) for j in twists) + "]")
+    out.append("const NET_JUMP_PROFILES := [" + ", ".join('"' + roads[j[0]].profile + '"' for j in jumps) + "]")
     out.append("# [name, biome, centre x, centre y, road, terminal sample]")
     out.append("const NET_CITIES := [")
     for c in cities:
@@ -108,4 +116,4 @@ p = os.path.join(ROOT, 'godot', 'sim', 'craft_sim.gd')
 s = open(p, encoding='utf-8').read()
 s = put_block(s, gd_block(), '# <network>', '# </network>', '# The courses: widths per mode')
 open(p, 'w', encoding='utf-8').write(s)
-print(f"synced {len(roads)} roads, {len(J)} junctions, {len(cities)} cities, {len(H)} height profiles, {len(jumps)} jumps, {len(onramps)} on-ramps, {len(shafts)} shafts")
+print(f"synced {len(roads)} roads, {len(J)} route junctions, {len(overlaps)} physical overlaps, {len(twists)} twists, {len(cities)} cities, {len(H)} height profiles, {len(jumps)} jumps, {len(onramps)} on-ramps, {len(shafts)} shafts")
