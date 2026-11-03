@@ -594,9 +594,11 @@ Source verification:
   input, rumble and two-sided sign change. Final width fitting was also
   inspected in the rendered end-of-road front sign.
 
-Physical headset readability and gentle brake feel for v0.1.6 remain
-unverified - needs user confirmation. This is a local tuning iteration;
-the live store has not been updated.
+Physical headset acceptance: Luke answered "yes" to the v0.1.6 check covering
+smooth engagement from a very light brake squeeze and jump signs readable
+from both directions. Both are now user-confirmed on his headset. Obstacle
+collision checking remains pending, as planned. This is a local tuning
+iteration; the live store has not been updated.
 
 LOCAL 0.1.6 ARCHIVES AND PLAYER VERIFICATION
 Editor import and sequential desktop/PC VR exports exited 0 with no logged
