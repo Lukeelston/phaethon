@@ -319,3 +319,8 @@ player launched for Luke to try, with no automatic shutdown timer. Automated
 test processes exited; only this interactive game was intentionally left open.
 Physical headset readability, controller feel and seat alignment:
 unverified - needs user confirmation. A confirmation question was sent.
+The live log subsequently recorded PCVR STARTUP: menu, menu selection of the
+Network, TRACK: network, RECENTER, and menu inputs released. Both controllers
+then reported tracking and trigger-driven flight. This verifies a live
+menu-to-Network transition; return to menu and subjective readability/comfort
+remain awaiting Luke's confirmation. Evidence: evidence/menu-headset.log.
