@@ -3,7 +3,7 @@ PHAETHON 0.1.0 EXPERIMENTAL - RELEASE RECORD
 
 Public product: https://stan.store/ElstonWorks/p/phaethon--experimental-desktop-racer
 Price: USD 3, one-time purchase including Windows desktop and PC VR downloads
-Title: Phaethon — Experimental Desktop + PC VR
+Title: Phaethon â€” Experimental Desktop + PC VR
 Store: ElstonWorks (existing Stan account)
 Stan product ID: 5600204
 Tagline: Two engines. One cockpit. We know it's a little fucky.
@@ -930,3 +930,83 @@ OpenXR tracking. Headset checks were requested for wind intrusion at5-6k mph
 through turns/leaning, and the binder/cockpit/vehicle appearance. Physical results
 remain unverified - needs user confirmation. Prior obstacle-toggle acceptance
 also remains pending, as Luke previously requested.
+
+LOCAL 0.2.0 NETWORK RHYTHM AND RECEIVING RAMPS - 2026-11-03
+Luke reported unchanged one-grip steering worked fine. The optional steering
+candidate remains parked on fix/single-grip-assist-candidate (a7580e5).
+
+K0/K1/K2/K3 now use genuine tangent acceleration straights between 35km-radius
+bends. Longest continuous turns at entrance speed: 70.49/61.06/85.07/53.27s before,
+10.96/9.50/9.72/10.36s after. Real throttle/brake traversal gains 90-177mph on the
+inserted straights before braking into the next turn. First6km, initial capture
+height keys, endpoint poses, route connections and all launch metadata match the
+previous map. Overall transfer distance remains about200km; this changes rhythm,
+not the journey's scale. Before/after plot: evidence/v020-transfer-rhythm.png.
+
+The recorded headset run contained56 below-deck samples among483 captured-body
+samples, worst engine clearance-28.01m onK1. Paired simulations now enforce deck
+support at the moved position, preserve soft capture above it, and include lateral
+edge height in surface velocity. A valid catch supports nearby intact linked parts
+on that same receiving road. Entirely below-lip and transverse misses remain misses.
+Paired regressions initially failed140 cases, then passed208/208 each. The full
+60-flight matrices and all four complete JS-driven transfers pass. Independent
+review also rejected12 shallow below-lip cases and landed8 combined angled/edge
+approaches, minimum1.5m clearance, no binder breaks.
+
+New road sampling exposed unsafe traffic population cases (3 close pairs; old-map
+control0). Vehicle traces confirmed unsafe spawn gaps. A focused regression also
+proved adjacent-lane traffic could hide a leader beyond the driver's ninth entry.
+Spawn admission now checks headway, relative braking distance and freight tails;
+leader search covers the complete same-road/direction bucket. Regression13/13,
+traffic12/12 with0 close pairs, courtesy28/28. Dense220-car update cost2.276ms.
+
+VALIDATION
+Geometry profiles/rhythm10/10, query160 boundary/480 exhaustive JS comparisons,
+paired replay parity, landing208/208 per sim, jump60 profiles per sim, four complete
+transfers, junction20995 vertices/47048 offsets/5685 triangle probes/153 placements,
+pillar44/44, exit guidance43/43, jump approach280/280, approach paint20highways and
+20ramps, twists4197/4197, rendered shaft mesh237/237, feathering20/20, speed brakes.
+Actual Vulkan deck/straight/bend screenshots inspected in evidence/v020-roads/.
+These scenery screenshots hide the craft; rendered craft-height alignment is
+covered by the jump view test, not inferred from scenery-only screenshots.
+
+Fresh gpt-6-astra read-only review approved the contact/geometry/version changes
+with no source findings. The subsequent traffic integration fix used a separate
+RED-to-GREEN regression and the affected traffic/courtesy/shaft/export gates.
+
+KNOWN VALIDATION LIMIT
+The world gate's documented headless run passes (3.4ms maximum chunk work, no
+missing chunks). The same test under Vulkan fails its8ms accumulated-work budget:
+22.2/25.4ms current,21.8ms pre-rhythm baseline in a separate copy. Geometry and
+streaming completeness pass in all cases. The threshold was not weakened; the
+existing rendered timing limitation is not claimed fixed. Subjective turn rhythm,
+landing comfort and current physical VR still need Luke's headset confirmation.
+
+DECISIONS AND COSTS
+- Reused the existing isolated release checkout; original/Claude worktrees preserved.
+  Risk if mistaken: concurrent release edits would need reconciliation; changes were
+  checkpointed and the worktree checked throughout.
+- End angled landing fixtures at guardrail contact. They prove receiving contact,
+  not survival of continuing sideways into a guardrail; that impact can still crash.
+- Linked support requires an intact binder, same deck, <=50m horizontal and <=40m
+  vertical proximity, pavement containment and direction gate. Cost: a staggered
+  valid landing may need a visible support correction; headset feel remains pending.
+- Chose35km bends and straights with preserved endpoints/joins. Cost: journey length
+  remains about200km despite much shorter continuous steering intervals.
+- Overlapped read-only final review with integration and version preparation. Any
+  fix still required its tests and fresh exports; no publication was authorized here.
+- Retained the documented headless performance gate and reported the baseline Vulkan
+  failure separately. Cost: a pre-existing streaming hitch may still be felt.
+- Fixed the traffic regression rather than changing its seed/threshold. Cost: traffic
+  distribution changes; density, express tiers, courtesy, racers and cost were tested.
+- Preserved accepted steering, guardrails and misses. Headset comfort is user-confirmed
+  only, and substantially shorter total routes were not part of this endpoint tradeoff.
+No deferred reviewer minors. Keeping release/experimental and this checkout.
+
+PACKAGED PLAYERS
+Both42-file archives passed integrity and fresh-extraction hashes. The actual
+extracted desktop player passed168 checks; PCVR with XRoff passed284 checks.
+Desktop: 61370740 bytes; SHA256 4bcca18b33fc3218be340da9528c577a03dafa6f7657aa5515f9c9612ef63fd7
+PCVR: 61459170 bytes; SHA256 f55e1b75705311a895c67fd6aa876c01c1923eb6289dfb9720d013d2dece8cbf
+Logs/screenshots: evidence/v020-desktop*, evidence/v020-pcvr*.
+The v0.1.9 archives are preserved. This local iteration does not update the store.

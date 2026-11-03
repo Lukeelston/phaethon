@@ -1,6 +1,6 @@
 # Network Rhythm and Landings Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Replace prolonged central transfer turns with bends and acceleration straights, and make receiving-ramp contact tolerate imperfect valid approaches.
 
@@ -32,27 +32,27 @@
 
 **Interfaces:** Retain `freeContact`/`_free_contact`, `railHover`/`_rail_hover`, `netEdge`/`net_edge` and existing body state. Any surface-query helper must have matching JS/Godot semantics and be used without mutating unrelated routing hints.
 
-- [ ] Reproduce a landing matrix through actual fixed steps: yaw 0/±5/±15/±30 degrees, center/side offsets including raised edges, minimum/high entrance speeds, and downward closure. Record captured-body clearance against the actual surface after movement; assert it cannot become negative once supported. Check settling and absence of artificial rebound.
-- [ ] Add negative controls for below-lip and transverse overpass approaches. Verify the tests fail for the intended current behavior, not for a fixture that misses the road entirely.
-- [ ] Correct surface-relative vertical velocity to include both longitudinal and lateral height variation. Enforce a nonpenetrating surface contact for captured bodies at their moved positions while preserving soft settling above the deck; do not integrate vertical motion twice.
-- [ ] Run paired landing regressions, existing query/parity, jump matrix and shaft tests. Inspect actual rendered/simulation alignment where new surface logic changes the visible ride.
-- [ ] Commit the independently verified landing fix.
+- [x] Reproduce a landing matrix through actual fixed steps: yaw 0/Â±5/Â±15/Â±30 degrees, center/side offsets including raised edges, minimum/high entrance speeds, and downward closure. Record captured-body clearance against the actual surface after movement; assert it cannot become negative once supported. Check settling and absence of artificial rebound.
+- [x] Add negative controls for below-lip and transverse overpass approaches. Verify the tests fail for the intended current behavior, not for a fixture that misses the road entirely.
+- [x] Correct surface-relative vertical velocity to include both longitudinal and lateral height variation. Enforce a nonpenetrating surface contact for captured bodies at their moved positions while preserving soft settling above the deck; do not integrate vertical motion twice.
+- [x] Run paired landing regressions, existing query/parity, jump matrix and shaft tests. Inspect actual rendered/simulation alignment where new surface logic changes the visible ride.
+- [x] Commit the independently verified landing fix.
 
 ### Task 2: Central transfer driving rhythm
 
 **Files:** `tools/design_network.py`, paired generated blocks through `tools/sync_network.py`, `tools/test_network_profiles.py`, relevant flow/route tests; add `tools/test_network_rhythm.py` if needed.
 
-**Interfaces:** Retain road names K0–K3 and jump indices, the six-kilometre initial capture straight, intended perpendicular destinations, and generated `NET_JUNCTIONS`/height profiles. The generator chooses bend breakpoints/radii/merge distance using measured traversal.
+**Interfaces:** Retain road names K0â€“K3 and jump indices, the six-kilometre initial capture straight, intended perpendicular destinations, and generated `NET_JUNCTIONS`/height profiles. The generator chooses bend breakpoints/radii/merge distance using measured traversal.
 
-- [ ] Measure existing uninterrupted curvature duration and total route lengths; add a failing criterion that central constant-turn stretches do not dominate for 30–60 seconds at their intended entry speeds.
-- [ ] Explore shorter transfer routes and bend/straight sequences. Aim for 8–12 seconds or less per uninterrupted bend with several-second acceleration intervals. Do not count adjacent same-radius arc records as separate bends. Preserve clearance and sensible corner speeds; document chosen tradeoffs with measured lengths/durations.
-- [ ] Regenerate both simulations; drive complete transfers with real throttle/brake controls and measure straight acceleration opportunities. Check joins, overlap, all twenty launches, traffic and support clearance.
-- [ ] Render and inspect revised routes/receiving decks; rerun landing tests against regenerated roads. Commit verified road changes.
+- [x] Measure existing uninterrupted curvature duration and total route lengths; add a failing criterion that central constant-turn stretches do not dominate for 30â€“60 seconds at their intended entry speeds.
+- [x] Explore shorter transfer routes and bend/straight sequences. Aim for 8â€“12 seconds or less per uninterrupted bend with several-second acceleration intervals. Do not count adjacent same-radius arc records as separate bends. Preserve clearance and sensible corner speeds; document chosen tradeoffs with measured lengths/durations.
+- [x] Regenerate both simulations; drive complete transfers with real throttle/brake controls and measure straight acceleration opportunities. Check joins, overlap, all twenty launches, traffic and support clearance.
+- [x] Render and inspect revised routes/receiving decks; rerun landing tests against regenerated roads. Commit verified road changes.
 
 ### Task 3: Integrated build and headset run
 
-- [ ] Run affected physics, geometry, launch approach, guidance, traffic, shaft and export gates. Review changes against the five failure modes above.
-- [ ] Version and export a local PC VR build, preserving earlier archives. Smoke-check the actual exported player and record evidence. Package desktop only if needed for this release's normal paired delivery; never silently publish a store update.
+- [x] Run affected physics, geometry, launch approach, guidance, traffic, shaft and export gates. Review changes against the five failure modes above.
+- [x] Version and export a local PC VR build, preserving earlier archives. Smoke-check the actual exported player and record evidence. Package desktop only if needed for this release's normal paired delivery; never silently publish a store update.
 - [ ] Commit the build/documentation checkpoint, launch with Network selected, verify OpenXR ready, and request focused feedback on turn rhythm and imperfect receiving-ramp landings. Mark subjective feel unverified until Luke confirms.
 
 ## Decisions
