@@ -1,5 +1,5 @@
 PHAETHON - EXPERIMENTAL PC VR EDITION
-Windows x64 / OpenXR - v0.2.2 - ElstonWorks
+Windows x64 / OpenXR - v0.2.3 - ElstonWorks
 
 Two engines. One cockpit. We know it's a little fucky.
 
@@ -20,6 +20,8 @@ jump landings. Chain clean maneuvers for up to a 5x multiplier. Impacts break
 the chain but keep earned points; restart begins a new run. Best scores save
 locally for each course. Traffic yields when a safe lane is available. Enable
 Driving partner for formation flying and occasional passes on wide highways.
+The total rests quietly at upper right, moves to top center while points are
+earned, then fades back to its corner. The partner yields around your full craft.
 If no OpenXR headset session is available, the desktop window explains setup.
 Connect the headset and relaunch the game. Close the window or use Alt+F4 to
 quit; your VR runtime's system interface can also close the application.
@@ -143,7 +145,7 @@ copyright. Third-party components and the CC BY engine audio retain their
 own licenses and permissions. See THIRD_PARTY_NOTICES.txt and licenses/.
 Adapted engine audio is supplied separately in audio/engines/.
 
-Build: 0.2.2-experimental | 2026-11-03
+Build: 0.2.3-experimental | 2026-11-03
 
 IN THIS LOCAL BUILD
 Central highway transfers and long side-road sweeps now alternate bends with

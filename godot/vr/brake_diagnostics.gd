@@ -61,6 +61,11 @@ func capture(view, delta: float) -> void:
 			"heading": b.th, "yaw_rate": b.w, "grip": b.grip, "contact": b.contact,
 			"off_road": b.off_road, "deck_catch": b.lock, "road": road})
 	var controllers := {}
+	var partner := {}
+	if view.partner:
+		var p = view.partner
+		partner = {"position": [p.x, p.y, p.z], "heading": p.th,
+			"phase": p.maneuver, "ahead": p._ahead, "offset": p._offset}
 	for side in view.hands:
 		var hand: XRController3D = view.hands[side]
 		controllers[side] = {"grip": hand.get_float("grip"), "trigger": hand.get_float("trigger"),
@@ -70,7 +75,8 @@ func capture(view, delta: float) -> void:
 		"min_grip": _min_grip, "controllers": controllers, "focused": view.hands_live,
 		"awaiting_neutral": view._await_neutral_controls, "scheme": view.quest.scheme,
 		"input": view.inp, "mode": sim.mode, "handling": sim.hblend,
-		"gear": view.quest.gear, "pair_heading": sim.pair_th, "bodies_L_R_pod": bodies}))
+		"gear": view.quest.gear, "pair_heading": sim.pair_th, "bodies_L_R_pod": bodies,
+		"partner": partner}))
 	_sample_time = 0.0
 	_steps = 0
 	_contact_steps = [0, 0, 0]

@@ -21,7 +21,7 @@ func _initialize() -> void:
 	_run.call_deferred()
 
 func _run() -> void:
-	var out := ProjectSettings.globalize_path("res://../evidence/v022-feedback")
+	var out := ProjectSettings.globalize_path("res://../evidence/v023-feedback")
 	DirAccess.make_dir_recursive_absolute(out)
 	View.best_dir = out.path_join("fixture_")
 	View.track_override = "range"
@@ -44,7 +44,7 @@ func _run() -> void:
 		v._update_hud()
 		for f in 50:
 			await process_frame
-		var words: String = v._skill_readout.text if vr else v.hud.text
+		var words: String = (v._skill_readout.text + v._skill_award.text) if vr else (v._skill_label.text + v._skill_award_label.text)
 		check("score and award are visible to the actual view VR=%s" % vr, words.contains("123456") and words.contains("PRECISION"))
 		if DisplayServer.get_name() != "headless":
 			await RenderingServer.frame_post_draw

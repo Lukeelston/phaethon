@@ -62,8 +62,7 @@ var dashboard   # the instrument panel (vr/dashboard.gd)
 var _jump_guidance: Label3D   # rig-mounted ascent readout above the dash; never follows the pilot's eyes
 var _jump_guidance_backing: MeshInstance3D
 var _skill_readout: Label3D
-var _skill_notice := ""
-var _skill_pulse := 0.0
+var _skill_award: Label3D
 var wag = WagMeterScript.new()        # the nose wag since the last report (a WAG: line every 10 s)
 var wag_all = WagMeterScript.new()    # ... over the whole flight (on exit)
 var fade_mat: StandardMaterial3D
@@ -969,35 +968,39 @@ func _update_skill_readout() -> void:
 	if not _skill_readout:
 		_skill_readout = Label3D.new()
 		_skill_readout.name = "SkillReadout"
-		_skill_readout.font_size = 32
-		_skill_readout.pixel_size = 0.00075
-		_skill_readout.outline_size = 5
-		_skill_readout.outline_modulate = Color(0.015, 0.025, 0.03, 0.95)
-		# Close-mounted auxiliary display above the dashboard, ahead of its hood
-		# and inside the cowl. Road guidance remains above the windscreen.
-		_skill_readout.position = Vector3(0.0, 0.58, -0.15)
-		_skill_readout.rotation = Vector3(-0.18, 0.0, 0.0)
-		_skill_readout.double_sided = false
-		rig.add_child(_skill_readout)
-		var backing := MeshInstance3D.new()
-		backing.name = "SkillReadoutBacking"
-		var face := QuadMesh.new()
-		face.size = Vector2(0.40, 0.070)
-		backing.mesh = face
-		var material := StandardMaterial3D.new()
-		material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		material.albedo_color = Color(0.015, 0.025, 0.03)
-		backing.material_override = material
-		backing.transform = _skill_readout.transform.translated_local(Vector3(0.0, 0.0, -0.01))
-		rig.add_child(backing)
+		_skill_award = Label3D.new()
+		_skill_award.name = "SkillAward"
+		for label in [_skill_readout, _skill_award]:
+			label.font_size = 40
+			label.pixel_size = 0.0021
+			label.outline_size = 7
+			label.outline_render_priority = 1
+			label.render_priority = 2
+			label.outline_modulate = Color(0.015, 0.025, 0.03, 0.95)
+			label.double_sided = false
+			label.no_depth_test = true
+			cam.add_child(label)
+		# Two metres from the eyes; a view-relative corner stays a corner when
+		# looking around. The active readout sits above the road/ramp guidance.
+		_skill_award.position = Vector3(0.0, 0.81, -2.0)
+		_skill_award.scale = Vector3.ONE * 0.82
 	if skill_score:
-		if skill_score.award_text != _skill_notice:
-			_skill_notice = skill_score.award_text
-			_skill_pulse = 1.0 if _skill_notice != "" else 0.0
-		_skill_pulse = maxf(0.0, _skill_pulse - get_process_delta_time() * 3.0)
-		_skill_readout.scale = Vector3.ONE * (1.0 + 0.035 * _skill_pulse)
-		_skill_readout.text = skill_score.readout()
-		_skill_readout.modulate = Color(0.55, 0.95, 0.86) if skill_score.award_text != "" else Color(0.45, 0.66, 0.65, 0.78)
+		var display := _skill_display.update(skill_score)
+		var weight: float = display.emphasis
+		_skill_readout.position = Vector3(1.25, 0.92, -2.0).lerp(Vector3(0.0, 0.96, -2.0), weight)
+		_skill_readout.scale = Vector3.ONE * lerpf(0.7, 1.15, weight)
+		_skill_readout.text = display.total
+		_skill_readout.modulate = Color(0.65, 0.96, 0.9, lerpf(0.52, 1.0, weight))
+		_skill_award.text = display.award
+		_skill_award.modulate = Color(0.65, 0.96, 0.9, weight)
+
+
+func _set_skill_visible(on: bool) -> void:
+	super(on)
+	if _skill_readout:
+		_skill_readout.visible = on
+	if _skill_award:
+		_skill_award.visible = on
 
 
 func _exit_tree() -> void:

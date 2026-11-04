@@ -35,6 +35,8 @@ var _offset := WING
 var _last_path := -999
 var _last_lateral := 0.0
 var _last_direction := 1.0
+var _safe_relative := Vector2.ZERO
+var _safe_ready := false
 var _engines: Array[Node3D] = []
 var _pod: MeshInstance3D
 var _cables: Array[MeshInstance3D] = []
@@ -299,6 +301,8 @@ func update(delta: float) -> void:
 	var P = sim.pod
 	var pv := Vector2(P.vx, P.vy)
 	var frame := _frame(0.0)
+	if not placed:
+		_safe_ready = false
 	if placed and _last_path == P.path and _last_direction == frame.dir and sim.kind == "network" and not P.off_road:
 		# Preserve the partner's lane when the player moves sideways. Otherwise
 		# road-edge clamping can pull an existing formation straight into the pod.
@@ -333,12 +337,78 @@ func update(delta: float) -> void:
 		var dth: float = CraftSim.wrap_angle(atan2(forward.y, forward.x) - th)
 		th += dth * (1.0 if carried else 1.0 - exp(-dt / 0.25))
 		bank += ((0.0 if carried else clampf(-dth * 2.5, -0.6, 0.6)) - bank) * (1.0 - exp(-dt / 0.3))
+	# Planning cannot protect against the player moving into a reserved lane,
+	# especially when every planned escape is rejected because its start overlaps.
+	# Validate the rendered pose and its relative sweep after road clamping/yaw.
+	var protected := _protect_player(Vector2(x, y), dt)
+	if protected.distance_squared_to(Vector2(x, y)) > 0.0001:
+		x = protected.x
+		y = protected.y
+		var road_forward: Vector2 = frame.fw
+		var relative := protected - Vector2(P.x, P.y)
+		_ahead = relative.dot(road_forward)
+		_offset = relative.dot(Vector2(-road_forward.y, road_forward.x))
 	# its height: the road under it, or yours in the air
 	if P.off_road or sim.kind != "network":
 		z = P.z
 	else:
 		z = float(sim.surface_at(x, y, P.hint, P.path).x) + float(sim.P.rideH)
 	_draw_it()
+
+
+## A conservative full-craft clearance envelope, independent of the nominal
+## maneuver. It follows the player's translation and takes the outside arc when
+## a side change would sweep through them. No forces or collisions reach the sim.
+func _protect_player(point: Vector2, dt: float) -> Vector2:
+	var center := (Vector2(sim.eL.x, sim.eL.y) + Vector2(sim.eR.x, sim.eR.y)) * 0.25 + Vector2(sim.pod.x, sim.pod.y) * 0.5
+	var player_radius := 0.0
+	for body in sim.bodies:
+		var half_length: float = (sim.P.podLen if body == sim.pod else sim.P.engineLen) * 0.5
+		player_radius = maxf(player_radius, center.distance_to(Vector2(body.x, body.y)) + half_length + 2.0)
+	var cable_lat: float = sim.P.engineGap / 2.0 - sim.P.podAnchorW * sim.P.podWidth / 2.0
+	var engine_ahead: float = sqrt(sim.P.cableLen * sim.P.cableLen - cable_lat * cable_lat) + sim.P.podLen / 2.0 + sim.P.engineLen / 2.0
+	var half_span := engine_ahead * 0.5
+	var partner_radius: float = Vector2(half_span, sim.P.engineGap * 0.5).length() + maxf(sim.P.podLen, sim.P.engineLen) * 0.5 + 2.0
+	var radius := maxf(48.0, player_radius + partner_radius + 12.0)
+	var nose := Vector2(cos(th), sin(th)) * half_span
+	var desired := point + nose - center
+	if _safe_ready:
+		desired = _safe_relative.move_toward(desired, 85.0 * dt)
+	var corrected := desired
+	if corrected.length() < radius + 3.0:
+		var direction := corrected.normalized() if corrected.length() > 1.0 else Vector2(-sin(th), cos(th)) * side
+		corrected = direction * (radius + 3.0)
+	if _safe_ready and Geometry2D.get_closest_point_to_segment(Vector2.ZERO, _safe_relative, corrected).length() < radius:
+		var angle := _safe_relative.angle()
+		var turn := clampf(CraftSim.wrap_angle(corrected.angle() - angle), -1.4 * dt, 1.4 * dt)
+		corrected = Vector2.from_angle(angle + turn) * maxf(radius + 3.0, minf(_safe_relative.length(), corrected.length()))
+	# Prefer an equally clear position inside the road when an avoidance arc
+	# reaches a wall. At an abrupt route reassignment, clearance takes priority
+	# over snapping sideways to a new road's station.
+	var frame := _frame(0.0)
+	if sim.kind == "network" and not sim.pod.off_road and not _inside_road(center + corrected - nose, frame, partner_radius):
+		var best := INF
+		var requested := corrected
+		for k in 72:
+			var candidate := Vector2.from_angle(TAU * k / 72.0) * (radius + 3.0)
+			if not _inside_road(center + candidate - nose, frame, partner_radius):
+				continue
+			if _safe_ready and Geometry2D.get_closest_point_to_segment(Vector2.ZERO, _safe_relative, candidate).length() < radius:
+				continue
+			if _safe_ready and candidate.distance_to(_safe_relative) > 85.0 * dt:
+				continue
+			var cost := candidate.distance_squared_to(requested)
+			if cost < best:
+				best = cost
+				corrected = candidate
+	_safe_relative = corrected
+	_safe_ready = true
+	return center + corrected - nose
+
+
+func _inside_road(point: Vector2, frame: Dictionary, radius: float) -> bool:
+	var normal := Vector2(-frame.fw.y, frame.fw.x)
+	return absf((point - frame.point).dot(normal)) <= maxf(10.0, frame.width * 0.5 - radius - 4.0)
 
 
 func _draw_it() -> void:

@@ -32,6 +32,7 @@ const CourseAudioScript := preload("res://audio/course_audio.gd")
 const TrafficAudioScript := preload("res://audio/traffic_audio.gd")
 const SkillScoreScript := preload("res://view/skill_score.gd")
 const SkillAudioScript := preload("res://audio/skill_audio.gd")
+const SkillDisplayScript := preload("res://view/skill_display.gd")
 const CanopyFlash := preload("res://view/canopy.gd")
 const SpeedCuesScript := preload("res://view/speed_cues.gd")
 const TrafficScript := preload("res://view/traffic.gd")
@@ -73,6 +74,9 @@ var course_audio             # the halls' and canopy's acoustics, the emergency 
 var traffic_audio            # the Network's traffic going by (audio/traffic_audio.gd)
 var skill_score
 var skill_audio
+var _skill_display := SkillDisplayScript.new()
+var _skill_label: Label
+var _skill_award_label: Label
 var replay: Array = []
 var replay_i := 0
 var shot_path := ""
@@ -736,6 +740,7 @@ func menu_open(on: bool) -> void:
 	else:
 		AudioServer.set_bus_mute(0, _menu_was_muted)
 	menu.open = on
+	_set_skill_visible(not on)
 	if on:
 		menu.at = 0
 		menu.items = _menu_items()
@@ -1347,6 +1352,17 @@ func _make_view() -> void:
 	hud.add_theme_font_size_override("font_size", 18)
 	hud.add_theme_color_override("font_color", Color(0.1, 0.08, 0.06))
 	layer.add_child(hud)
+	_skill_label = Label.new()
+	_skill_award_label = Label.new()
+	for label in [_skill_label, _skill_award_label]:
+		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		label.size = Vector2(560.0, 70.0)
+		label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		label.add_theme_color_override("font_color", Color(0.65, 0.96, 0.9))
+		label.add_theme_color_override("font_outline_color", Color(0.01, 0.025, 0.03, 0.95))
+		label.add_theme_constant_override("outline_size", 5)
+		layer.add_child(label)
+	_skill_award_label.add_theme_font_size_override("font_size", 21)
 	minimap_2d = Minimap2DScript.new()
 	minimap_2d.visible = sim.kind == "circuit" or sim.kind == "network"
 	layer.add_child(minimap_2d)
@@ -1668,4 +1684,20 @@ func _update_hud() -> void:
 		sim.eL.heat * 100, sim.eR.heat * 100, sim.eL.health * 100, sim.eR.health * 100, sim.battery * 100, mode_txt,
 		("Replay: parity lap" if not replay.is_empty() else levers.source) + "   " + handling_text()]
 	if skill_score:
-		hud.text += "\n" + skill_score.readout()
+		var display := _skill_display.update(skill_score)
+		var weight: float = display.emphasis
+		var viewport_size := get_viewport().get_visible_rect().size
+		_skill_label.text = display.total
+		_skill_label.position = Vector2(viewport_size.x - 115.0, 18.0).lerp(Vector2(viewport_size.x * 0.5, 82.0), weight) - Vector2(280.0, 0.0)
+		_skill_label.add_theme_font_size_override("font_size", roundi(lerpf(17.0, 30.0, weight)))
+		_skill_label.modulate.a = lerpf(0.52, 1.0, weight)
+		_skill_award_label.text = display.award
+		_skill_award_label.position = Vector2(viewport_size.x * 0.5 - 280.0, 122.0)
+		_skill_award_label.modulate.a = weight
+
+
+func _set_skill_visible(on: bool) -> void:
+	if _skill_label:
+		_skill_label.visible = on
+	if _skill_award_label:
+		_skill_award_label.visible = on
