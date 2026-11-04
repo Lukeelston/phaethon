@@ -4,8 +4,10 @@ extends Node3D
 const TILE := 8192.0
 const STEP := 512.0
 const GRID := 16
-const RANGE := 5
-const MAX_TILES := 121
+const RANGE := 8
+const MAX_TILES := 289
+const PROP_RANGE := 4
+const GROUPS := 96
 const REGIONS := [
 	["plains", Vector2(300000, 300000), 65000.0, Color(0.37, 0.49, 0.20), 140.0],
 	["tundra", Vector2(300000, 500000), 65000.0, Color(0.48, 0.48, 0.34), 240.0],
@@ -29,6 +31,7 @@ var _job := {}
 var _sim
 var _world
 var road_protection := {}
+var road_anchors := {}
 var prop_library
 var water_material: ShaderMaterial
 var clouds: MeshInstance3D
@@ -59,6 +62,10 @@ func build(sim, world) -> void:
 		var road = sim.roads[r]
 		for i in range(0, road.N, 4):
 			var p: Vector2 = world._wxy(r, i)
+			if i%32 == 0:
+				var tile_key := Vector2i(floori(p.x/TILE),floori(p.y/TILE))
+				if not road_anchors.has(tile_key): road_anchors[tile_key] = []
+				road_anchors[tile_key].append([p,Vector2(road.nx[i],road.ny[i])])
 			var c := Vector2i(floori(p.x / STEP), floori(p.y / STEP))
 			road_cells[c] = maxi(int(road_cells.get(c, 0)), ceili((float(road.w[i]) * 0.5 + 220.0) / STEP) + 1)
 			var pc := Vector2i(floori(p.x/PROP_CELL),floori(p.y/PROP_CELL))
@@ -206,13 +213,20 @@ func clear_at(p: Vector2, radius := 80.0) -> bool:
 	return true
 
 ## Records are deterministic and retain world positions for clearance/support tests.
-func prop_records(key: Vector2i, first := 0, count := 64) -> Array:
+func prop_records(key: Vector2i, first := 0, count := GROUPS) -> Array:
 	var records := []
 	var rng := RandomNumberGenerator.new()
 	var origin := Vector2(key)*TILE
-	for group in range(first,mini(first+count,64)):
+	for group in range(first,mini(first+count,GROUPS)):
 		rng.seed = int(key.x)*73856093 ^ int(key.y)*19349663 ^ (937 + group*83492791)
 		var anchor := origin + Vector2(rng.randf(),rng.randf())*TILE
+		# Additional inhabited clusters follow the highway corridor, not city centers.
+		if group>=64 and road_anchors.has(key):
+			var choices: Array = road_anchors[key]
+			var road_anchor: Array = choices[rng.randi_range(0,choices.size()-1)]
+			anchor = road_anchor[0]+road_anchor[1]*rng.randf_range(900,2400)*(1 if group%2==0 else -1)
+			# Keep each record inside its owner tile for predictable streaming distance.
+			if not Rect2(origin,Vector2.ONE*TILE).has_point(anchor): continue
 		var region := region_at(anchor)
 		var kind := "oak"
 		var number := 7
@@ -240,15 +254,19 @@ func prop_records(key: Vector2i, first := 0, count := 64) -> Array:
 			number = 1
 		if region == "mesa" and group%13 == 0:
 			kind = "industrial"
+		if group>=64 and group%4==0:
+			kind = "service" if group%8==0 else ("solar" if region in ["desert","mesa"] else ("basalt" if region == "jungle" else "wind"))
+			number = 1
 		for k in number:
 			var p := anchor + Vector2(rng.randf_range(-240,240),rng.randf_range(-240,240))
 			var scale := rng.randf_range(0.75,1.8)
 			if region == "jungle" and kind == "oak": scale *= 1.7
-			var radius := (185.0 if kind == "urban" else (90.0 if kind in ["farm","industrial","outpost"] else 35.0))*scale
+			var building := kind in ["urban","farm","industrial","outpost","stilt","service","solar","wind"]
+			var radius := (185.0 if kind == "urban" else (180.0 if kind in ["service","solar","wind"] else (90.0 if kind in ["farm","industrial","outpost","basalt"] else 35.0)))*scale
 			if not clear_at(p,radius): continue
 			var h := surface_at(p)
 			var slope := maxf(absf(surface_at(p+Vector2(radius,0))-h),absf(surface_at(p+Vector2(0,radius))-h)) / radius
-			if slope > (0.045 if kind in ["urban","farm","outpost","industrial","stilt"] else 0.5): continue
+			if slope > (0.045 if building else 0.5): continue
 			if h < -2.0 and region == "swamp" and kind not in ["mangrove","reeds","stilt"]: continue
 			records.append({"kind":kind,"p":p,"height":h,"radius":radius,"scale":scale,"yaw":rng.randf()*TAU})
 	return records
@@ -262,10 +280,11 @@ func _decorate_slice() -> void:
 		var local: Vector2 = prop.p-Vector2(key)*TILE
 		batches[prop.kind].append(Transform3D(Basis(Vector3.UP,prop.yaw).scaled(Vector3.ONE*prop.scale),Vector3(local.x,prop.height,-local.y)))
 	_decor_job.group += 4
-	if _decor_job.group == 64:
+	if _decor_job.group == GROUPS:
 		var root := Node3D.new()
 		tiles[key].node.add_child(root)
 		tiles[key].deco = root
+		tiles[key].deco_born = Time.get_ticks_msec()
 		for kind in batches:
 			prop_library.batch(root,kind,batches[kind])
 		_decor_job.clear()
@@ -330,7 +349,7 @@ func sync(ox: float, oy: float) -> void:
 	var c := Vector2i(floori(ox/TILE),floori(oy/TILE))
 	if c != center:
 		center = c
-		if not _decor_job.is_empty() and (absi(_decor_job.key.x-c.x)>2 or absi(_decor_job.key.y-c.y)>2):
+		if not _decor_job.is_empty() and (absi(_decor_job.key.x-c.x)>PROP_RANGE or absi(_decor_job.key.y-c.y)>PROP_RANGE):
 			_decor_job.clear()
 		pending.clear()
 		if not _job.is_empty() and _outside(_job.key):
@@ -358,18 +377,29 @@ func sync(ox: float, oy: float) -> void:
 			node.add_child(mi)
 			add_child(node)
 			_water(_job.key,node)
-			tiles[_job.key] = {"node":node, "key":_job.key}
+			tiles[_job.key] = {"node":node, "key":_job.key, "born":Time.get_ticks_msec()}
 			_job.clear()
 	for key in tiles:
 		tiles[key].node.position = Vector3(key.x*TILE-ox,0,-key.y*TILE+oy)
+		if not tiles[key].has("revealed"):
+			var reveal := clampf(float(Time.get_ticks_msec()-tiles[key].born)/1800.0,0.0,1.0)
+			for surface in tiles[key].node.get_children():
+				if surface is MeshInstance3D: surface.set_instance_shader_parameter("stream_reveal",reveal)
+			if reveal>=1.0: tiles[key].revealed=true
 	for key in tiles:
-		var near := absi(key.x-center.x)<=2 and absi(key.y-center.y)<=2
+		var near := absi(key.x-center.x)<=PROP_RANGE and absi(key.y-center.y)<=PROP_RANGE
 		var tile: Dictionary = tiles[key]
 		if not near and tile.has("deco"):
 			tile.deco.queue_free()
 			tile.erase("deco")
+			tile.erase("deco_revealed")
 		elif near and not tile.has("deco") and _decor_job.is_empty():
 			_decor_job = {"key":key,"group":0,"batches":{}}
+		if tile.has("deco") and not tile.has("deco_revealed"):
+			var reveal := clampf(float(Time.get_ticks_msec()-tile.deco_born)/1800.0,0.0,1.0)
+			for batch in tile.deco.get_children():
+				batch.set_instance_shader_parameter("stream_reveal",reveal)
+			if reveal>=1.0: tile.deco_revealed=true
 	if not _decor_job.is_empty() and Time.get_ticks_usec()-start<1800:
 		_decorate_slice()
 	clouds.material_override.set_shader_parameter("world_offset",Vector2(fposmod(ox,2304000.0),fposmod(-oy,2304000.0)))

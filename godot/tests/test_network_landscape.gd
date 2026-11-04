@@ -61,9 +61,41 @@ func _run() -> void:
 				jump_clearance=minf(jump_clearance,min_deck-land.surface_at(a.lerp(b,float(k)/40.0)+lateral*offset))
 	check("terrain stays below all20 launch-to-catch flight corridors (%.1f m)" % jump_clearance,jump_clearance>100.0)
 	var pos := Vector2(300000, 300000)
-	for k in 1400:
+	for k in 3000:
 		land.sync(pos.x, pos.y)
 	check("terrain streaming settles and stays bounded", land.pending.is_empty() and land.tiles.size() <= land.MAX_TILES)
+	check("terrain extends at least 65km before eviction",land.RANGE*land.TILE>=65000)
+	check("detailed roads stream beyond 25km",v.network_world.VIS>=25000)
+	var far = v.network_world.far_roads
+	check("distant roads cover every road without unbounded vertices",far!=null and far.vertex_count<100000 and far.pieces.size()>v.sim.roads.size())
+	far.sync(pos.x,pos.y)
+	var endpoint_error := 0.0
+	var chord_intrusion := -INF
+	for piece in far.pieces:
+		var r: int = piece[2]
+		var road = v.sim.roads[r]
+		var vertices: PackedVector3Array = piece[0].mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
+		for end in 2:
+			var i: int = piece[3+end]
+			for side in 2:
+				var index: int = side if end==0 else vertices.size()-2+side
+				var actual: Vector3 = vertices[index]+piece[0].global_position+Vector3(pos.x,0,-pos.y)
+				var expected: Vector3 = v.network_world._p(road,0,0,i,(side*2-1)*road.w[i]*0.5,v.sim.net_height(r,i)-far.UNDER_DECK)
+				endpoint_error=maxf(endpoint_error,actual.distance_to(expected))
+		var rows := vertices.size()/2
+		for row in rows-1:
+			var start: int = piece[3]+row*far.STRIDE
+			var finish: int = mini(start+far.STRIDE,piece[4])
+			var mid: int = (start+finish)/2
+			var u := float(mid-start)/maxi(1,finish-start)
+			var normal := Vector3.UP
+			if v.network_world.shaft.on(r,float(mid)): normal=v.network_world.shaft.at(r,float(mid))[5]
+			for side in 2:
+				var actual: Vector3=vertices[row*2+side].lerp(vertices[(row+1)*2+side],u)+piece[0].global_position+Vector3(pos.x,0,-pos.y)
+				var expected: Vector3=v.network_world._p(road,0,0,mid,(side*2-1)*road.w[mid]*0.5,v.sim.net_height(r,mid))
+				chord_intrusion=maxf(chord_intrusion,(actual-expected).dot(normal))
+	check("distant road endpoints follow real carried geometry and floating origin",endpoint_error<0.15)
+	check("coarse road chords stay below detailed decks (%.3f m)"%chord_intrusion,chord_intrusion<0.1)
 	var wet_key := Vector2i(floori(300000/land.TILE),floori(100000/land.TILE))
 	var water_a := Node3D.new()
 	var water_b := Node3D.new()
@@ -99,6 +131,7 @@ func _run() -> void:
 		var real_clearance := INF
 		var mesh_support_error := 0.0
 		var actual_meshes := {}
+		var new_families := {}
 		for region in land.REGIONS:
 			var rk := Vector2i(floori(region[1].x / land.TILE), floori(region[1].y / land.TILE))
 			var records: Array = land.prop_records(rk)
@@ -108,6 +141,7 @@ func _run() -> void:
 				records.append_array(land.prop_records(rk+offset))
 			check("region has characteristic plants or settlements: " + region[0], not records.is_empty())
 			for prop in records:
+				if prop.kind in ["service","wind","solar","basalt"]: new_families[prop.kind]=true
 				count += 1
 				unsupported += int(absf(prop.height - land.surface_at(prop.p)) > 0.01)
 				var mk := Vector2i(floori(prop.p.x/land.TILE),floori(prop.p.y/land.TILE))
@@ -131,6 +165,7 @@ func _run() -> void:
 						for sample in road_index.get(pc+Vector2i(dx,dy),[]):
 							real_clearance = minf(real_clearance,prop.p.distance_to(sample[0])-sample[1]-prop.radius)
 		check("props sit on the actual rendered triangles", unsupported == 0 and count > 300)
+		check("intercity service courts, energy sites and basalt spires all placed",new_families.size()==4)
 		check("independent mesh triangle planes support prop anchors (%.4f m)" % mesh_support_error,mesh_support_error<0.01)
 		check("whole prop footprints clear the road protection field", obstructing == 0)
 		check("props independently clear actual road samples with gap allowance (%.1f m)" % real_clearance, real_clearance>100.0)

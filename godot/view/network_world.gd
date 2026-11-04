@@ -25,8 +25,8 @@ const SceneryScript := preload("res://view/network_scenery.gd")
 const SupportClearance := preload("res://view/network_support_clearance.gd")
 const CH := 40                    # samples (~960 m), aligned with highway masts and the furniture cycle
 const CELL := 8000.0              # the grid's cells, m
-const VIS := 20000.0              # build chunks this close (m, to the nearest point of their circle)
-const DROP := 28000.0             # free them past this
+const VIS := 26000.0              # detailed roads; coarse pavement extends to 100 km
+const DROP := 34000.0             # free them past this
 const SLICE_MS := 1.0             # build work a frame (a chunk takes a few frames: ~2.3 ms of work, a board
                                   # ~1.4 ms; whole in one frame they were the 120 Hz headset's dropped frames)
 const BUDGET_MS := 6.0            # ... when it's behind (a respawn, a jump): a chunk wanted within CATCH_UP,
@@ -106,6 +106,8 @@ var built := 0            # tests read these
 var dropped := 0
 var build_ms_max := 0.0   # the most work a chunk took (all its slices)
 var wanted := 0           # chunks wanted but not started, this frame
+var profile_streaming := false # optional benchmark instrumentation, disabled in play
+var stream_profile := {}
 var _catching_up := true  # finish the initial/teleport batch before reverting to flight's small slices
 var sync_ms := 0.0        # this frame's sync (streaming and placing), ms
 var setup_ms := 0
@@ -145,6 +147,7 @@ var _prepared_join_hints := {}    # road -> centreline projections in the immuta
 var _physical_join_cache := {}    # road -> exact immutable shoulder results in physical overlap intervals
 var _join_cache_road := -1
 var scenery: Node3D
+var far_roads: Node3D
 var scenery_ground_height := 0.0 # set by NetworkLandscape when its ground is present
 var _pillar_cells := {} # fixed scenery, queried near the craft rather than scanning the whole map
 var _pillars_indexed := false
@@ -244,6 +247,9 @@ func build(s, v) -> void:
 		halls[int(c.road)] = [int(c.i) - HALL_HALF, int(c.i) + HALL_HALF]
 	_build_skylines()
 	_build_far_shafts()
+	far_roads = preload("res://view/network_far_roads.gd").new()
+	add_child(far_roads)
+	far_roads.build(self)
 	scenery = SceneryScript.new()
 	add_child(scenery)
 	scenery.build(sim, self)
@@ -398,6 +404,8 @@ func sync(org_x: float, org_y: float) -> void:
 		(sk[0] as Node3D).position = Vector3(sk[1] - org_x, 0.0, -(sk[2] - org_y))
 	if scenery:
 		scenery.sync(org_x, org_y, scenery_ground_height)
+	if far_roads:
+		far_roads.sync(org_x,org_y)
 	sync_ms = (Time.get_ticks_usec() - t_in) / 1000.0
 
 
@@ -622,18 +630,24 @@ func _work(end: int) -> bool:
 	var R: CraftSim.TrackPath = sim.roads[J.r]
 	var done := false
 	while true:
+		var phase_start := Time.get_ticks_usec() if profile_streaming else 0
+		var phase := "sample"
 		if J.i < J.c1:
 			_sample(J, R, J.i)
 			J.i += 1
 		elif not J.made:
+			phase="finish"
 			_finish(J, R)
 			J.made = true
 		elif J.si < (J.signs as Array).size():
+			phase="sign"
 			_sign(J.node, R, J.r, J.ox, J.oy, J.signs[J.si])
 			J.si += 1
 		else:
 			done = true
 			break
+		if profile_streaming:
+			stream_profile[phase]=maxi(stream_profile.get(phase,0),Time.get_ticks_usec()-phase_start)
 		if Time.get_ticks_usec() >= end:
 			break
 	J.us += Time.get_ticks_usec() - t0

@@ -46,8 +46,8 @@ class NetworkRhythm(unittest.TestCase):
                 self.assertTrue(all(abs(t) > math.radians(1) for t in turns), 'reversals must have meaningful heading change')
 
     def test_hills_and_dips_are_real_and_keep_entry_clear(self):
-        selected = [self.roads[self.jumps[k][1]] for k in dn.TRANSFER_JUMPS]
-        selected += [r for r in self.roads if r.kind == 'side']
+        # v025 removes vertical waves from jump recovery roads; side-road hills remain.
+        selected = [r for r in self.roads if r.kind == 'side']
         for r in selected:
             start = round((6000 if r.role == 'catch' else 12000) / dn.STEP)
             finish = r.N - round((35000 if r.role == 'catch' else 12000) / dn.STEP)

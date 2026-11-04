@@ -5,8 +5,8 @@ var cache := {}
 var material: ShaderMaterial
 func _init() -> void:
 	material = ShaderMaterial.new()
-	material.shader = preload("res://view/network_scenery.gdshader")
-	for kind in ["oak", "pine", "snowpine", "palm", "mangrove", "reeds", "scrub", "cactus", "rock", "farm", "outpost", "stilt", "urban", "industrial"]:
+	material.shader = preload("res://view/network_props.gdshader")
+	for kind in ["oak", "pine", "snowpine", "palm", "mangrove", "reeds", "scrub", "cactus", "rock", "farm", "outpost", "stilt", "urban", "industrial", "service", "solar", "wind", "basalt"]:
 		cache[kind] = _make(kind)
 
 func box(parts: Array, size: Vector3, p: Vector3, c: Color, angle := 0.0) -> void:
@@ -24,6 +24,38 @@ func _make(kind: String) -> ArrayMesh:
 	var metal := Color(0.33,0.39,0.41)
 	var window := Color(0.17,0.31,0.37)
 	match kind:
+		"service":
+			box(p,Vector3(250,14,190),Vector3(0,-7,0),Color(0.28,0.28,0.27))
+			box(p,Vector3(65,22,36),Vector3(-60,11,-45),Color(0.66,0.58,0.45))
+			box(p,Vector3(70,3,40),Vector3(-60,24,-45),metal)
+			box(p,Vector3(55,7,0.5),Vector3(-60,15,-26.8),window)
+			for x in [-65,-15,35,85]:
+				cyl(p,1,1.5,25,Vector3(x,12.5,25),concrete)
+				box(p,Vector3(29,5,12),Vector3(x,3,50),Color(0.45,0.53,0.55))
+			box(p,Vector3(200,3,43),Vector3(10,27,25),Color(0.74,0.69,0.56))
+			box(p,Vector3(200,1,1),Vector3(10,27,47),Color(1.0,0.55,0.12))
+			cyl(p,1,2,75,Vector3(115,37.5,-65),metal)
+			box(p,Vector3(22,10,3),Vector3(115,73,-65),Color(0.8,0.48,0.17))
+		"solar":
+			box(p,Vector3(240,12,240),Vector3(0,-6,0),Color(0.44,0.39,0.29))
+			for x in 6:
+				for z in 6:
+					var at := Vector3((x-2.5)*36,6,(z-2.5)*36)
+					cyl(p,0.6,1,8,at-Vector3(0,2,0),metal,4)
+					p.append([Kit.box(Vector3(30,0.7,26)),Kit.at(at,Vector3(-0.22,0,0)),Color(0.11,0.22,0.32)])
+			box(p,Vector3(20,9,14),Vector3(100,4.5,105),concrete)
+		"wind":
+			cyl(p,7,10,12,Vector3(0,0,0),concrete)
+			cyl(p,2,5,135,Vector3(0,67.5,0),Color(0.77,0.79,0.76))
+			box(p,Vector3(7,7,18),Vector3(0,135,0),metal)
+			for k in 3:
+				var a := k*TAU/3.0+0.3
+				p.append([Kit.box(Vector3(4,66,1.2)),Kit.at(Vector3(sin(a)*34,135+cos(a)*34,11),Vector3(0,0,-a)),Color(0.82,0.83,0.79)])
+		"basalt":
+			for k in 9:
+				var a := k*2.399
+				var h := 35.0+(k%4)*22.0
+				cyl(p,8,12,h,Vector3(cos(a)*k*7,h*0.5-5,sin(a)*k*7),Color(0.19+k*0.01,0.20+k*0.008,0.20+k*0.008),6)
 		"oak", "mangrove":
 			var swamp := kind == "mangrove"
 			cyl(p,1.2,2.7,22,Vector3(0,11,0),bark)
@@ -121,7 +153,6 @@ func batch(parent: Node3D, kind: String, transforms: Array) -> void:
 	instance.multimesh = mm
 	instance.material_override = material
 	instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	instance.visibility_range_end = 25000
-	instance.visibility_range_end_margin = 6000
-	instance.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
+	instance.visibility_range_end = 38000 # shader fades individual fragments before this bound
+	instance.set_instance_shader_parameter("stream_reveal",0.0)
 	parent.add_child(instance)

@@ -4,12 +4,15 @@ render_mode fog_disabled;
 varying vec3 tint;
 varying vec2 local;
 varying float grass;
+instance uniform float stream_reveal = 1.0;
 void vertex() {
 	tint = pow(COLOR.rgb, vec3(2.2));
 	local = UV*256.0;
 	grass = COLOR.a;
 }
 void fragment() {
+	float reveal=stream_reveal*(1.0-smoothstep(54000.0,64000.0,length(VERTEX)));
+	if(reveal<fract(dot(floor(FRAGCOORD.xy),vec2(0.75487766,0.56984029)))) discard;
 	float fw = length(fwidth(local));
 	float mottling = pfbm(local/128.0,8192.0);
 	float fine = pnoise(local/3.0,1048576.0);

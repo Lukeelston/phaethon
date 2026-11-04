@@ -1,6 +1,7 @@
 """Geometry contracts for visibly distinct ascents without changing ballistic capture."""
 import math
 import unittest
+import numpy as np
 
 import design_network as dn
 
@@ -28,6 +29,29 @@ class NetworkProfiles(unittest.TestCase):
             self.assertAlmostEqual(road.h(road.N - 1), lip, places=8)
             slope = (road.h(road.N - 1) - road.h(road.N - 1.01)) / (0.01 * dn.STEP)
             self.assertAlmostEqual(math.degrees(math.atan(slope)), dn.JUMP_ANGLES[speed], delta=0.05)
+
+    def test_launch_is_one_continuous_climb_without_terraces_or_dips(self):
+        for launch, *_ in self.jumps:
+            r = self.roads[launch]
+            first = math.ceil(2700 / dn.STEP)
+            samples = np.array([r.h(i) for i in np.arange(first, r.N-1, 0.5)])
+            slopes = np.diff(samples) / (dn.STEP * 0.5)
+            with self.subTest(road=r.name):
+                self.assertTrue(np.all(slopes > 0), 'no downhill or level terraces after entry')
+                # At most one broad slope maximum, never repeated pitch oscillation.
+                peaks = np.sum((np.diff(slopes)[:-1] > 1e-8) & (np.diff(slopes)[1:] < -1e-8))
+                self.assertLessEqual(peaks, 1)
+                # Under 0.18 degrees of pitch change per 12 metres, including
+                # the tallest existing launch's unavoidable entry curvature.
+                self.assertLess(np.max(np.abs(np.diff(slopes))), 0.003)
+
+    def test_recovery_descent_has_no_intermediate_stop_or_vertical_waves(self):
+        for _, catch, *_ in self.jumps:
+            r = self.roads[catch]
+            flat = r.keys[2][0]
+            end = r.keys[-2][0]
+            z = np.array([r.h(i) for i in np.arange(flat+1, end, 2)])
+            self.assertTrue(np.all(np.diff(z) < 0), r.name+' needs one smooth descent')
 
     def test_explicit_highway_overlap_for_every_launch(self):
         self.assertTrue(hasattr(dn, "surface_overlaps"), "shared pavement needs an explicit physical relation")

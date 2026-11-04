@@ -85,9 +85,9 @@ JL_LIP, JL_KICK = 3 * KM, 4 * KM  # the lip this far short of the crossing, the 
 JC_W, JC_REACH, JC_PULL = 400.0, 40.0, 5 * KM
 JC_FLAT, JC_DOWN, JC_MERGE = 23 * KM, 34 * KM, 44 * KM   # level through a recovery roll, then merge
 JUMP_PROFILES = [
-    ("TERRACE", 400.0, 1.0),
-    ("CREST", 700.0, 1.25),
-    ("SADDLE", 1000.0, 1.5),
+    ("ARC", 400.0, 1.0),
+    ("HIGH ARC", 700.0, 1.25),
+    ("SKY ARC", 1000.0, 1.5),
 ]
 TWIST_JUMPS = (4, 8, 12, 16)
 TRANSFER_JUMPS = (0, 1, 2, 3)
@@ -319,18 +319,22 @@ def dubins(start, finish, radius):
 
 
 def launch_keys(road, baseline, lip, slope, profile):
-    """Distinct staged climb after the launch has completely cleared its highway and ramp."""
-    styles = [
-        [(0.0, 0.0), (0.25, 0.32), (0.40, 0.32), (0.65, 0.62), (0.77, 0.62)],
-        [(0.0, 0.0), (0.32, 0.66), (0.48, 0.66), (0.66, 0.48)],
-        [(0.0, 0.0), (0.28, 0.50), (0.48, 0.18), (0.72, 0.68)],
-    ]
+    """One monotone bowed climb, easing into the original ballistic lip.
+
+    Tall ramps have mean slopes greater than their lip slopes, so a literal
+    ever-steepening exponential cannot preserve their flights. Exact cubic
+    derivatives avoid terraces, repeated pitch changes and downhill sections.
+    """
     first = math.ceil(2700.0 / STEP)
     span = road.N - 1 - first
+    length = span * STEP
+    a = slope * length - 2.0 * lip
+    b = 3.0 * lip - slope * length
     keys = [[0, baseline, 0.0]]
-    for f, z in styles[profile]:
-        keys.append([first + round(f * span), baseline + z * lip, 0.0])
-    keys.append([road.N - 1, baseline + lip, slope])
+    for q in range(9):
+        i = first + round(span * q / 8)
+        t = (i - first) / span
+        keys.append([i, baseline + (a*t+b)*t*t, (3*a*t*t+2*b*t)/length])
     return keys
 
 
@@ -487,7 +491,10 @@ def build():
             # trajectory, so those entries have 7 m of clearance instead of 3 m.
             v = ref * MPH
             c2 = 1.0 / (1.0 + m_lip * m_lip)        # cos^2 of the lip's angle
-            entry_margin = 7.0 if gap_scale > 1.0 and ref <= 2750 else 3.0
+            # Extended flights need this margin at every speed: smoothing the
+            # launch changes finite-step vertical velocity by ~0.09 m/s, enough
+            # for J5 at its posted minimum to miss the old 3 m entry tolerance.
+            entry_margin = 7.0 if gap_scale > 1.0 else 3.0
             hc = h_lip + gap * m_lip - G * gap ** 2 / (2 * v * v * c2) - entry_margin
             # Longer flights spread fast arrivals vertically. A steeper initial catch
             # intercepts them along the landing straight without enlarging the 40 m capture reach.
@@ -552,17 +559,12 @@ def build():
                 i_down = C.N - 1 - round(12000.0 / STEP)
             middle = round((i_flat + i_down) / 2)
             C.keys = [[0, hc, mc], [ip, top, 0.0], [i_flat, top, 0.0],
-                      [middle, destination_h + (top - destination_h) * (0.55 if profile != 1 else 0.82), 0.0],
+                      [middle, 0.0, 0.0],
                       [i_down, destination_h, 0.0], [C.N - 1, destination_h, 0.0]]
-            if jump_id in TRANSFER_JUMPS:
-                first = round(6000.0 / STEP)
-                count = max(4, round((i_flat-first)*STEP/18000.0))
-                amplitude = (420.0, 600.0, 480.0, 700.0)[jump_id]
-                waves = [[first, top, 0.0]]
-                for q in range(1, count):
-                    waves.append([round(first+(i_flat-first)*q/count),
-                                  top + amplitude * (1.0 if q % 2 else -0.3), 0.0])
-                C.keys = C.keys[:2] + waves + C.keys[2:]
+            # One smooth descent; the middle key carries the real derivative.
+            u = (middle-i_flat)/(i_down-i_flat)
+            C.keys[3][1] = top+(destination_h-top)*u*u*(3-2*u)
+            C.keys[3][2] = (destination_h-top)*6*u*(1-u)/((i_down-i_flat)*STEP)
             joins.append((len(roads), 1, destination))
             roads.append(C)
             jumps.append((len(roads) - 2, len(roads) - 1, ref, h_lip, top))
