@@ -1267,15 +1267,16 @@ final render, exports and extracted diagnostics ran sequentially and passed.
 
 LIVE STARTUP / LIMITS
 Fresh-extracted 0.2.3 PC VR initialized Oculus OpenXR with xr_ready=true
-and PCVR STARTUP: menu. The runtime remains IDLE; VR MENU: ready has not yet
-been observed. Process 37148 is alive/responding at the correct extracted path.
-Network/partner launch flags are set. Luke was asked to wake Quest Link.
-Actual headset menu readiness remains unverified — needs user confirmation.
-The actual executable path and runtime log were checked. Physical clearance
-impression, headset comfort/readability and score animation feel remain
-unverified — needs user confirmation.
+and PCVR STARTUP: menu. At initial verification the runtime was IDLE and
+process 37148 was alive/responding at the correct extracted path. Luke was
+asked to wake Quest Link, with Network selected and the partner enabled.
+Subsequent headset feedback confirmed both requested behaviors: the partner
+stays clear when steering toward it, and the score rests quietly upper-right,
+pops top-center while earning, then fades back without leaving text behind.
+This resolves the pending live-play confirmation for these changes; it does
+not establish exhaustive collision coverage or compatibility with other headsets.
 Review exclusions: physical VR feel assigned to Luke; final archives and OpenXR initialization
-assigned to root and verified, with live menu readiness awaiting headset wake; adjacent-traffic candidate reproduced
+assigned to root and verified, with live play subsequently confirmed by Luke; adjacent-traffic candidate reproduced
 and fixed; pre-existing Vulkan chunk-work timing issue remains unchanged.
 Existing unrelated worktrees and previous archives are preserved. No push,
 merge or store update. Previously blocked cleanup folders were not retried.
