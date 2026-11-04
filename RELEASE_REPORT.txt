@@ -1202,3 +1202,90 @@ Automatic approval review rejected deletion of this iteration's temporary
 .superpowers/sdd/2026-11-03-v022-traffic-partner-skills folder with "blocked by
 policy". It remains in place; no alternate deletion was attempted. This is
 separate from the previously denied baseline folder, which was not touched.
+
+
+PHAETHON 0.2.3 — ACTUAL-DRIVING PARTNER CLEARANCE / QUIET SCORE — 2026-11-03
+Production checkpoints: 12f8ff7 and 2f48bf0, local release/experimental.
+
+USER FEEDBACK AND ROOT CAUSE
+Luke reported frequent partner/player clipping in actual 0.2.2 driving and
+requested a quiet corner score that pops top-center while earning, then fades
+back. The prior centered-road scenarios missed ordinary lateral player motion.
+An occupied starting corridor caused every planned escape to fail; the partner
+still rendered at its held station. Road-relative placement therefore remained
+unsafe even though the nominal destination planner rejected the collision.
+
+The five-minute real player recording was reduced to 2,790 body/heading/road
+samples and replayed through production partner.update, interpolated at about
+60 Hz. Baseline: 719 overlapping frames of 19,529. New: zero, conservative
+whole-craft clearance minimum 18.908 m, maximum relative movement 1.431 m/frame.
+This is a reproduction of player motion with traffic removed to isolate the
+failure, not a claim that every conceivable live interaction is covered.
+Fixture: godot/tests/replay/partner_player_run.json.
+
+CHANGES
+The partner now validates its final pose after road clamping and yaw, uses a
+full-craft separation envelope, and takes a continuous outside arc rather than
+crossing the player's craft. Relative movement is limited. Local predicted
+traffic checks select an escape goal before that final correction, including
+oncoming freight geometry. The partner remains visual and applies no force to
+the player. In impossible/abrupt road assignments, player clearance has priority
+over snapping onto the new road; traffic avoidance remains best effort.
+Opt-in local flight traces now include actual partner pose and maneuver state.
+
+The total rests at upper right. Actual point increases move it to top center
+and brighten/enlarge it; the skill notice and multiplier appear underneath.
+After 1.2 seconds without points, it fades home over 0.7 seconds. Continuous
+earning keeps it active, including speed awards with suppressed sound notices.
+VR text sits two metres from the eyes, follows the view, and clears road/ramp
+guidance. Font and outline opacity fade together. Pause hides the overlay and
+freezes its clock; restart returns to quiet zero. Best-score persistence and
+scoring rules are unchanged, as are vehicle physics and course geometry.
+
+REVIEW AND REGRESSIONS
+Independent read-only review found no confirmed Critical/Important defect.
+Its adjacent-traffic candidate was investigated by root rather than dismissed:
+a 14-m lateral player move toward an adjacent car reproduced -0.400 m overlap.
+The predicted escape goal fixes it: +12.506 m physical capsule clearance.
+Root also found a separate Label3D outline-alpha issue in an actual post-fade
+render; the outline ghost was reproduced and now disappears completely.
+Both are covered by failing-before/passing-after regressions; no second review.
+No material finding was declined and no minor was deferred.
+
+Final affected batch: 152/152 checks (replay 2, adjacent traffic 1, maneuvers 28,
+placement 8, menu 75, skill rules 21, display lifecycle 17). Actual Vulkan
+presentation render: 17/17, with idle/earning/fading/returned images inspected.
+Feedback/audio checks: 12/12; captured reward mix peak 0.08378, non-silent and
+unclipped. Exported final desktop 186/186 and PC VR (XR off) 305/305 passed.
+SHA256 verification passed for all ten 0.1.9 through 0.2.3 archives.
+
+A GDScript type inference error during the adjacent-traffic fix was caught and
+corrected; its hung owned process tree was terminated. There were brief overlaps
+between an earlier render check and another test, including this parse-failed
+run; they are not treated as clean final gates. Subsequent affected gates,
+final render, exports and extracted diagnostics ran sequentially and passed.
+
+LIVE STARTUP / LIMITS
+Fresh-extracted 0.2.3 PC VR initialized Oculus OpenXR with xr_ready=true
+and PCVR STARTUP: menu. The runtime remains IDLE; VR MENU: ready has not yet
+been observed. Process 37148 is alive/responding at the correct extracted path.
+Network/partner launch flags are set. Luke was asked to wake Quest Link.
+Actual headset menu readiness remains unverified — needs user confirmation.
+The actual executable path and runtime log were checked. Physical clearance
+impression, headset comfort/readability and score animation feel remain
+unverified — needs user confirmation.
+Review exclusions: physical VR feel assigned to Luke; final archives and OpenXR initialization
+assigned to root and verified, with live menu readiness awaiting headset wake; adjacent-traffic candidate reproduced
+and fixed; pre-existing Vulkan chunk-work timing issue remains unchanged.
+Existing unrelated worktrees and previous archives are preserved. No push,
+merge or store update. Previously blocked cleanup folders were not retried.
+
+ARTIFACTS
+Desktop: 61396528 bytes; SHA256 b0ca9335eb43c65edb557dd9b574adb5fae5cdf271b7e7dcbbb8154c80fbca96
+PC VR: 61486402 bytes; SHA256 42b1b0ef9394420a36277199f3c0465bf069195384473f6dea724dd043f104ad
+Both archives contain 42 allowlisted files. Evidence: v023-build-0.json,
+v023-gates-latest.json, v023-partner-replay-red.log, v023-partner_player_replay.log,
+v023-adjacent-red.log, v023-partner_adjacent_traffic.log, v023-score-render-verified.log,
+v023-score/{vr-idle,vr-earning,vr-fading,vr-returned}.png, v023-headset.log.
+Only the requested interactive PC VR player remains among owned game/test
+processes; export, render, diagnostic and build helpers have terminated.
