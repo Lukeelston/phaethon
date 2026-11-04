@@ -1194,3 +1194,11 @@ PC VR: 61480749 bytes; SHA256 a148d76417b6b4b86204eed15b257e33c2a8052205444d655b
 Both archives contain 42 allowlisted files. Evidence: v022-build-0.json,
 v022-gates-latest.json, v022-*-extracted.log, v022-headset.log,
 v022-feedback/{desktop.png,vr.png,reward-mix.wav}.
+
+Final cleanup process check found only the requested fresh 0.2.2 interactive
+PC VR player (PID 14924), with no owned Godot/build/test helper remaining.
+The execution ledger is archived in docs/superpowers/reports/2026-11-03-v022-progress.md.
+Automatic approval review rejected deletion of this iteration's temporary
+.superpowers/sdd/2026-11-03-v022-traffic-partner-skills folder with "blocked by
+policy". It remains in place; no alternate deletion was attempted. This is
+separate from the previously denied baseline folder, which was not touched.
