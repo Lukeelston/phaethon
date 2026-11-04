@@ -1011,3 +1011,104 @@ PCVR: 61459170 bytes; SHA256 f55e1b75705311a895c67fd6aa876c01c1923eb6289dfb9720d
 Logs/screenshots: evidence/v020-desktop*, evidence/v020-pcvr*.
 The v0.1.9 archives are preserved. This local iteration does not update the store.
 Live OpenXR startup probe passed: Oculus runtime1.208.0, xr_ready=true, VR menu ready. Gracefully closed the probe to flush its buffered log (evidence/v020-headset-startup.log), then relaunched the identical verified PCVR executable with Network selected and opt-in local trace. Physical feel remains unverified pending Luke. Automatic approval review blocked deletion of the temporary baseline copy with only blocked-by-policy; it remains as ignored scratch and no baseline/test process is running.
+
+LOCAL 0.2.1 BEND VARIETY AND HIGH-SPEED CAPTURE - 2026-11-03
+Luke asked for bends/hills/dips in long uninterrupted sweeps and reported that
+fast receiving-ramp arrivals still flew off. The actual v020 headset recording
+shows K10 capturing at 6,861 mph, then drifting 1,076 m above the deck while still
+marked captured. Source fix separates deck following from the soft landing:
+per-body gap and relative vertical speed now settle in the moving deck's frame.
+Surface curvature no longer consumes the capture spring's acceleration budget.
+The spring is 6 rad/s with 30 g downward pull and the existing 20 g upward cushion;
+the hard floor, first-capture eligibility/reach, free flight and under-speed misses
+remain. No control, gearbox, art, audio or collision-option changes.
+
+K0-K3 contain actual counter-steering bends, acceleration straights and broad
+crests/dips. Long side-road arcs also counter-steer; all 12 side roads gain broad
+hills and saddles. Central bends use 25 km radius, side bends stay >=6 km radius.
+All 116 road endpoint poses and the central first 6 km (plan and height) match
+v020. Longest same-direction central turns are 9.10-10.38 seconds at minimum
+entrance speeds. Full controlled drives gain 128-323 mph on the short straights.
+Total central transfer distance remains about 124-125 miles. The geometric
+changes preserve connections while changing what happens during the journey.
+
+VERIFICATION
+- Fast-launch matrix: RED 66/80 in both sims, worst 1,625.82 m captured gap;
+  GREEN 80/80 each at minimum/5,000/7,000/9,000 mph initial lineup speeds, all three
+  bodies caught and settled within 3 s, largest transient gap 42.51 m. The craft
+  accelerates naturally after lineup, so actual catch speeds differ slightly.
+- Exact recorded K10 arrival state with held 10 Hz controller samples: baseline
+  RED, 905.60 m gap and not settled; current GREEN, 34.44 m maximum JS gap and
+  all bodies settled. Both sims pass 81/81 including this shared fixture. This
+  is a recorded-state regression, not a bit-exact replay of unrecorded inputs.
+- Existing landing matrix: 200 angled/edge/descending cases + 8 below-lip and
+  transverse negative controls pass in each sim. Full jump matrix: 60/60 each.
+- Python profile/rhythm 13/13, complete controls-only drives through all four
+  transfers and all 12 side roads in both directions (24 routes). No side-road
+  crash, off-road body or surface discrepancy beyond 0.01 m. JS/Godot replay
+  parity includes generated heights and road topology, plus jump/shaft physics.
+- Geometry: 20,995 junction vertices, 47,080 nearest-search offsets, 5,685 triangle
+  probes, 153 body placements; pillars 44/44; guidance 43/43; approach 280/280;
+  approach paint on 20 highways/20 ramps; twists 4,197/4,197; shaft/view gate.
+- Traffic, spawn-spacing 13/13, courtesy 28/28 and headless world gates pass.
+  Courtesy update at 220 cars measured 2.260 ms in its fixture.
+- Real Vulkan road renders inspected in evidence/v021-roads/. They hide the
+  craft and prove scenery only; physical VR comfort still needs Luke's feedback.
+- Freshly extracted desktop player: 168 checks, zero failures. Freshly extracted
+  PC VR player with XR disabled: 284 checks, zero failures.
+
+DECISIONS / LIMITS
+Central corner radii tightened from 35 to 25 km to insert genuine reverse bends
+inside existing connections; actual full-route drives verify they remain usable.
+A continuous turn ends at an actual steering reversal or straight, never merely
+at a segment boundary. Short final shoulder merges retain their smooth approach.
+The side-road test pilot derives heading from velocity and oscillated when started
+stationary in Speedcraft, on both baseline and new geometry. A 1,200 mph rolling
+entry models the highway exit; all later movement is real simulation/controls.
+Endpoint completion is spatial because shared pavement can correctly assign the
+craft to its highway. No production steering change was made for the harness.
+One test invocation used a nonexistent courtesy filename; the process exited and
+the correctly named gate passed. Existing view harnesses may warn of ObjectDB
+instances at exit; their processes terminate and those warnings are not hidden.
+The prior Vulkan world-test accumulated chunk-work limit remains a known issue
+(~22 ms versus 8 ms, also reproduced on baseline). This iteration passes the
+documented headless gate and does not claim that rendered timing issue fixed.
+Existing steering candidate remains parked; original/Claude checkouts preserved.
+Local release branch retained; no store update, push or merge performed.
+Session-start memory warning was stale: live budget check reports no orphans,
+no dead links, and index under caps. No memory entries were removed.
+
+ARTIFACTS
+Desktop: 61373262 bytes; SHA256 92841a1385403386432638ddf915b4b023bf1a97a9c15027a2684d82e736dbb4
+PC VR: 61461652 bytes; SHA256 4bd81b6fed73ba131f6ce5572ff245b3135e3fe3105dfdb87eddb73425d498ca
+Both ZIPs contain 42 allowlisted files; fresh extraction hashes match. Previous
+0.1.9 and 0.2.0 archives are preserved. Evidence: v021-build-0.json,
+v021-geometry-report.json, v021-road-variety.png, v021-*-extracted.log.
+Final review and physical OpenXR startup result appended separately below.
+
+FINAL REVIEW / LOCAL STARTUP
+Fresh reviewer found no Critical or Important defect. One Minor coverage gap:
+the exact recorded K10 arrival was missing from the generic fast matrix. Root
+treated this as an explicit plan requirement and added a shared state/input
+fixture in test-only commit 17921ee. Baseline RED and paired 81/81 GREEN close
+that finding. Both export presets exclude tests/*; production artifacts from
+011642e therefore contain the same production code as the final source head.
+Reviewer independently checked geometry/profile gates, all endpoint poses,
+initial capture heights, unchanged launch profiles and five fast K10 cases.
+Review exclusions were assigned explicitly: physical comfort/feel to Luke;
+fresh archives and actual OpenXR startup to root (now verified); full integration
+to root's documented suite; pre-existing Vulkan timing remains out of scope.
+No second review was needed for the test-only coverage addition.
+
+Fresh-extracted 0.2.1 PC VR player launched with Network selected. Actual log:
+Oculus runtime, xr_ready=true, PCVR STARTUP: menu and VR MENU: ready; no script
+or engine error in startup. The recorded process path is the fresh 0.2.1 player.
+Only that requested interactive game remains among owned game/test processes;
+all export, diagnostic and helper processes have terminated. Focused headset
+questions sent for bend/height variety and high-speed receiving-ramp settling.
+Physical headset feel: unverified — needs user confirmation.
+
+Automatic approval review rejected deletion of the ignored old baseline copy
+.tools/v020-world-baseline with "blocked by policy". It remains on disk; no
+alternate deletion was attempted and no process runs from it. Prior archives
+and unrelated worktrees remain untouched. Local release branch retained.
