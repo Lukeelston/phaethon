@@ -1350,3 +1350,61 @@ Both contain42 allowlisted files. Evidence:v024-build-0.json,v024-checks.json,
 v024-flight-corridors.log,v024-review-minors-red.log,
 v024-review-fixes-green.log,v024-environment-road-verified.log,
 v024-environment/*.png,v024-headset.log. Source checkpoints1945648,7fc600a.
+
+
+V0.2.5 NETWORK FLOW / COUNTRYSIDE / DISTANCE - 2026-11-03
+
+Luke confirmed v024's environment in the headset: "spectacular", particularly
+Basalt and desert. v025 follows that direction with more intercity vegetation,
+service courts, solar fields, wind turbines and basalt spires. Cached instanced
+geometry, deterministic placement and conservative footprint/road clearance.
+
+All20 launch ramps now use one continuous monotone bowed climb. Existing varied
+heights, launch angles, gap distances and posted speeds retained. Removed
+transfer-road vertical waves and mid-descent stops while retaining lateral
+turn/straight rhythm, side-road hills and existing twists. Longer catch entries
+lowered4m where needed to preserve reliable minimum-speed capture; this follows
+a realJ5 regression from changed finite-step takeoff velocity, now tested.
+
+Detailed road streaming20->26km. Static coarse roads reach100km and stay8m
+below detailed decks during the handoff; carried shafts/twists follow actual
+geometry. Terrain radius5->8 tiles, minimum coverage41->65km, capped289tiles.
+Terrain/water fade54-64km, props22-30km; creation fades1.8s. Props prebuilt4tiles
+out, bounded81decoratedtiles,96groups/tile. Scenery relief remains visual:
+off-road physics is the existing ground plane. No changes to control feel,
+traffic/partner behavior, scoring, collision menu or other maps.
+
+PERFORMANCE
+Live v024 session200reportingwindows: median119.55fps,36windows below110,
+worst66.4fps. These are application frame reports, not compositor telemetry.
+Matched fully populated Vulkan mono route (RTX5080,1440x900,MSAA4):
+stream CPU mean 3.855->4.899ms;
+render GPU mean 0.359->0.479ms.
+Warmup proven121terrain/25decorationtiles before,289/81after. Same70km route.
+This excludes headset stereo, full simulation and traffic; not a VRfps claim.
+Both builds retain occasional ~34ms mesh/sign upload stalls; not claimed fixed.
+Observed desktop frame pacing was display-limited around60Hz. Cold-start runs
+are retained separately and not substituted for settled-world comparison.
+
+VERIFICATION
+Python10profile+5rhythm checks; referenceJS60jump speed trials plus4complete
+transfer routes. RealGDScript jumpmatrix,200positive/8negative landing cases,
+81fastcapture cases through9000mph,4197twist checks,237actualVulkan shaft mesh
+checks, full network JS/GD parity, junction/world, recordedpartner replay and
+17score-displaychecks. Landscape probes118902road/shoulder points and actual
+terrain triangles/props. Separate actual-render first-frame/half/full fade
+checks and three ramp snapshots; nine regional and three road snapshots.
+
+Review found and corrected first-frame prop flash and incomplete benchmark
+warmup. Water fades with terrain; far-road endpoints/edges/chords checked.
+Headless shaft MultiMesh readback was invalid (dummy renderer); same test
+passed237/237 on actualVulkan. No test was relaxed to hide a product failure.
+
+ARTIFACTS
+Fresh-extracted desktop186/186 and PCVR XR-off305/305 diagnostics passed.
+Desktop bytes 61426385, SHA256 6b9d85e794a83505753ef5f4c96aecfbcffe74115f8888638090ee3cd947b5b0
+PCVR bytes 61516484, SHA256 31b2ad8fdc11309b97f3ea6c6b36e983d277bcc0b7dfaae96dcc107957065b20
+Both42-file allowlists; historical archives retained and hashes verified.
+Local release branch only. No remote push, merge or store upload.
+Headset ramp feel, distance transitions and sustained VR performance remain
+unverified - needs user confirmation on the launched build.

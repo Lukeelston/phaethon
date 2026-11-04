@@ -60,4 +60,15 @@ Display-paced frame means16.722->16.674ms; p95stalls35.68->37.909ms. This mono
 renderer workload excludes headset stereo, physics and traffic. User VR feel
 remains pending; inherited road mesh/sign upload stalls remain explicitly open.
 
-Source verified; both release exports and fresh-package checks in progress.
+Source checkpoint f42ff93. Both exports completed; freshly extracted desktop
+186/186 and PCVR XR-off305/305 diagnostics passed. Both42file archives validated,
+and all14 historical/current ZIP hashes verified. RELEASE_REPORT.txt contains
+exact artifacts and performance measurements; evidence/v025-performance.json
+retains full benchmark summaries.
+
+Fresh-extracted PCVR0.2.5 launched as PID24360 withNetwork selected and partner
+enabled. Oculus OpenXR initialized; main menu ready, runtime currently IDLE
+awaiting headset wake. Asynchronous ramp/distance/frame-pacing feedback requested.
+Physical headset outcome remains unverified - needs user confirmation.
+All bounded test/export helpers exited; only requested interactive game retained.
+No push/merge/store update. Original and Claude checkouts untouched.
