@@ -13,6 +13,8 @@ uniform float haze = 0.000018;                     // per metre
 varying float ly;      // 0 at the foot, 1 at the top
 varying vec3 tint;
 varying float tall;    // m
+varying vec2 facade;
+varying float roof;
 
 vec3 lin(vec3 c) {
 	return pow(clamp(c, vec3(0.0), vec3(1.0)), vec3(2.2));
@@ -22,6 +24,10 @@ void vertex() {
 	ly = clamp(VERTEX.y + 0.5, 0.0, 1.0);
 	tint = COLOR.rgb;
 	tall = max(length(MODEL_MATRIX[1].xyz), 1.0);
+	float width = length(MODEL_MATRIX[0].xyz);
+	float depth = length(MODEL_MATRIX[2].xyz);
+	facade = vec2(abs(NORMAL.x)>0.5 ? VERTEX.z*depth : VERTEX.x*width,ly*tall);
+	roof = abs(NORMAL.y);
 }
 
 void fragment() {
@@ -31,6 +37,13 @@ void fragment() {
 	float fw = max(fwidth(f), 1e-4);
 	float floors = (1.0 - smoothstep(0.25, 0.6, fw)) * 0.12 * step(0.55, fract(f));
 	vec3 base = lin(tint) * (0.7 + 0.3 * ly) * (1.0 - floors);
+	vec2 cell = facade/vec2(9.0,8.0);
+	vec2 pixel = max(fwidth(cell),vec2(0.001));
+	vec2 glass = smoothstep(vec2(0.10),vec2(0.10)+pixel,fract(cell))*(1.0-smoothstep(vec2(0.83)-pixel,vec2(0.83),fract(cell)));
+	float windows = glass.x*glass.y*(1.0-roof)*(1.0-smoothstep(0.3,1.0,max(pixel.x,pixel.y)));
+	base = mix(base,lin(vec3(0.18,0.31,0.39))*(0.65+0.35*ly),windows*0.72);
+	float fins = (1.0-smoothstep(0.02,0.07,abs(fract(facade.x/36.0)-0.5)))*(1.0-roof);
+	base *= 1.0+fins*0.18;
 	float top = smoothstep(1.0 - 14.0 / tall, 1.0, ly);
 	ALBEDO = base * (1.0 - h) * (1.0 - top);
 	EMISSION = lin(haze_col) * h * 0.85 + lin(crown) * top * 3.0 * (1.0 - 0.7 * h);

@@ -994,6 +994,8 @@ func _grain(c: Color, tiles: float) -> StandardMaterial3D:
 	return m
 
 
+var landscape: Node3D
+
 func _build_world() -> void:
 	# Sky: dusty blue overhead, washing out to the haze at the horizon. The fog skips the sky
 	# (it would paint it flat) and meets it at the horizon in the same colour.
@@ -1163,9 +1165,11 @@ func _build_world() -> void:
 		traffic_net = NetworkTrafficScript.new()
 		add_child(traffic_net)
 		traffic_net.build(sim, self, network_world)
-		horizon = HorizonScript.new()
-		add_child(horizon)
-		horizon.build(self, hz)
+		landscape = load("res://view/network_landscape.gd").new()
+		add_child(landscape)
+		landscape.build(sim, network_world)
+		landscape.setup_ground(ground_mat)
+		ground.position.y = -8.0
 		print("NETWORK: %d roads, %d cities (%d towers) set up in %d ms" % [sim.roads.size(), sim.cities.size(), network_world.towers, Time.get_ticks_msec() - t0])
 		return
 
@@ -1260,6 +1264,9 @@ func _sync_world() -> void:
 		traffic.sync(sim.time)
 	if horizon:
 		horizon.sync(org_x, org_y)
+	if landscape:
+		landscape.sync(org_x, org_y)
+		ground_mat.set_shader_parameter("absolute_org", Vector2(org_x,org_y))
 	if gp_world:
 		gp_world.sync(org_x, org_y)
 	if course_world:

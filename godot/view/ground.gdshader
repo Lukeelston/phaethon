@@ -23,6 +23,10 @@ uniform float verdant = 0.0;        // 1 on Eridanus: meadows, not sand
 uniform float ice = 0.0;            // the Network's landscapes, by weight (0..1 each)
 uniform float basalt = 0.0;
 uniform float mesa = 0.0;
+uniform bool network_on = false;
+uniform vec2 absolute_org;
+uniform vec3 regions[9];
+uniform vec4 region_colors[9];
 uniform float dawn_on = 0.0;        // 1 on the emergency run: the land the dawn has reached warms (view/dawn.gd)
 uniform vec2 dawn_u = vec2(1.0, 0.0);   // the front's travel (render x, z)
 uniform float dawn_f = 0.0;         // the front's line: dot(render xz, dawn_u) == dawn_f (against the floating origin)
@@ -132,6 +136,19 @@ void fragment() {
 	if (dawn_on > 0.0) {
 		float lit = smoothstep(-200.0, 400.0, dawn_f - dot(lp, dawn_u));
 		col = mix(col, col * vec3(2.3, 1.95, 1.5) + vec3(0.05, 0.035, 0.01), lit * dawn_on);
+	}
+	if (network_on) {
+		vec2 world_p = absolute_org + vec2(lp.x,-lp.y);
+		vec3 geographic = vec3(0.0);
+		float total = 0.0;
+		for (int i=0;i<9;i++) {
+			float d = max(length(world_p-regions[i].xy)/regions[i].z,0.035);
+			float w = 1.0/(d*d*d*d);
+			geographic += region_colors[i].rgb*w;
+			total += w;
+		}
+		col = geographic/total*(0.88+0.16*n3);
+		glow = vec3(0.0);
 	}
 	ALBEDO = srgb(col);
 	EMISSION = glow;

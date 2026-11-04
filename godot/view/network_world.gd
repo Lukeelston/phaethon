@@ -145,6 +145,7 @@ var _prepared_join_hints := {}    # road -> centreline projections in the immuta
 var _physical_join_cache := {}    # road -> exact immutable shoulder results in physical overlap intervals
 var _join_cache_road := -1
 var scenery: Node3D
+var scenery_ground_height := 0.0 # set by NetworkLandscape when its ground is present
 var _pillar_cells := {} # fixed scenery, queried near the craft rather than scanning the whole map
 var _pillars_indexed := false
 var _pillar_specs_cache := {}   # immutable road/sample -> already cleared render/collision supports
@@ -392,11 +393,11 @@ func sync(org_x: float, org_y: float) -> void:
 			continue
 		(c[0] as Node3D).position = Vector3(c[1] - org_x, 0.0, -(c[2] - org_y))
 	for sk in skylines:
-		(sk[0] as Node3D).position = Vector3(sk[1] - org_x, 0.0, -(sk[2] - org_y))
+		(sk[0] as Node3D).position = Vector3(sk[1] - org_x, scenery_ground_height, -(sk[2] - org_y))
 	for sk in far_shafts:
 		(sk[0] as Node3D).position = Vector3(sk[1] - org_x, 0.0, -(sk[2] - org_y))
 	if scenery:
-		scenery.sync(org_x, org_y)
+		scenery.sync(org_x, org_y, scenery_ground_height)
 	sync_ms = (Time.get_ticks_usec() - t_in) / 1000.0
 
 

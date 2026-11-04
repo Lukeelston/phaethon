@@ -133,6 +133,6 @@ func _landmark(biome: String, variant: int, pal: Array) -> ArrayMesh:
 	mesh.surface_set_material(1, _glow)
 	return mesh
 
-func sync(ox: float, oy: float) -> void:
+func sync(ox: float, oy: float, ground_height := 0.0) -> void:
 	for landmark in landmarks:
-		landmark.node.position = Vector3(landmark.x - ox, 0.0, -(landmark.y - oy))
+		landmark.node.position = Vector3(landmark.x - ox, ground_height, -(landmark.y - oy))
