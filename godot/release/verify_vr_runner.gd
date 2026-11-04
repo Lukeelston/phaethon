@@ -59,6 +59,8 @@ func shot(name: String) -> void:
 	check(name + " VR scene screenshot saved", image.save_png(evidence.path_join("pcvr-" + name + ".png")) == OK)
 
 func _run() -> void:
+	DirAccess.make_dir_recursive_absolute(evidence.path_join("profile"))
+	View.best_dir = evidence.path_join("profile/")
 	_settings_existed = FileAccess.file_exists(Settings.PREFS)
 	if _settings_existed:
 		_settings_before = FileAccess.get_file_as_bytes(Settings.PREFS)
@@ -124,6 +126,7 @@ func _run() -> void:
 		check(stop + " job selection is correct", not view.sim.job.is_empty() if stop == "emergency" else view.sim.job.is_empty())
 		check(stop + " launch respects obstacle checkbox", view.sim.P.obstacleCollisions == collisions)
 		check(stop + " launch builds the selected partner state", view.partner_on == partner_enabled and (view.partner != null) == partner_enabled)
+		check(stop + " skill tracker and audio loaded", view.skill_score != null and view.skill_audio != null)
 		check(stop + " has XR origin and camera", view.origin is XROrigin3D and view.cam is XRCamera3D)
 		check(stop + " has both controller nodes", view.hands.get("left") is XRController3D and view.hands.get("right") is XRController3D)
 		check(stop + " controller trackers are assigned", view.hands.left.tracker == &"left_hand" and view.hands.right.tracker == &"right_hand")
@@ -162,10 +165,12 @@ func _run() -> void:
 		view.menu_open(true)
 		check(stop + " quick-menu panel is visible", view.menu.open and view.menu_panel.visible and (view.menu_panel.get_node("words") as Label3D).text.contains("DRIVING PARTNER"))
 		var hold_time: float = view.sim.time
+		var score_time: float = view.skill_score.time
 		var partner_position := Vector3.ZERO if view.partner == null else Vector3(view.partner.x, view.partner.y, view.partner.z)
 		var traffic_tick: int = view.traffic_net._tick if view.traffic_net != null else 0
 		await frames(3)
 		check(stop + " quick menu freezes simulation", view.sim.time == hold_time)
+		check(stop + " quick menu freezes skill tracking", view.skill_score.time == score_time)
 		check(stop + " quick menu freezes partner", view.partner == null or Vector3(view.partner.x, view.partner.y, view.partner.z) == partner_position)
 		check(stop + " quick menu freezes traffic", view.traffic_net == null or view.traffic_net._tick == traffic_tick)
 		check(stop + " quick menu mutes output", AudioServer.is_bus_mute(0))
@@ -189,6 +194,7 @@ func _run() -> void:
 		if index < Stops.size() - 1:
 			await shot(stop)
 		view._respawn()
+		check(stop + " restart starts a fresh skill run", view.skill_score.total == 0)
 		check(stop + " restart keeps obstacle checkbox", view.sim.P.obstacleCollisions == collisions)
 		check(stop + " restart keeps partner", view.partner_on == partner_enabled and (view.partner != null) == partner_enabled)
 		if stop == "network":

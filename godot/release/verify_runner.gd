@@ -68,6 +68,8 @@ func _run() -> void:
 		_finish()
 		return
 	check("exported default main scene is menu", ProjectSettings.get_setting("application/run/main_scene") == MENU_SCENE)
+	DirAccess.make_dir_recursive_absolute(evidence.path_join("profile"))
+	View.best_dir = evidence.path_join("profile/")
 	var engine_sample := load("res://audio/engines/v8_mip0.wav") as AudioStreamWAV
 	check("PCM16 engine import", engine_sample != null and engine_sample.format == AudioStreamWAV.FORMAT_16_BITS)
 	# Autoloads initialize before the main scene, so wait for the normal launch.
@@ -109,6 +111,7 @@ func _run() -> void:
 		check(course + " opens its selected mission", not view.sim.job.is_empty() if course == "emergency" else view.sim.job.is_empty())
 		check(course + " launch respects obstacle collisions", view.sim.P.obstacleCollisions == collisions)
 		check(course + " launch builds the selected partner state", view.partner_on == partner_enabled and (view.partner != null) == partner_enabled)
+		check(course + " skill tracker and audio loaded", view.skill_score != null and view.skill_audio != null)
 		if course == "gp":
 			check("Grand Prix starts in starfighter mode", view.sim.P.handling == "starfighter")
 		var start := Vector2(view.sim.pod.x, view.sim.pod.y)
@@ -133,8 +136,10 @@ func _run() -> void:
 		key(KEY_ESCAPE, false)
 		check(course + " Escape pauses", get_tree().paused and overlay.is_paused)
 		var before: float = view.sim.time
+		var score_before: float = view.skill_score.time
 		await frames(3)
 		check(course + " pause freezes simulation", view.sim.time == before)
+		check(course + " pause freezes skill tracking", view.skill_score.time == score_before)
 		check(course + " pause mutes output", AudioServer.is_bus_mute(0))
 		check(course + " pause shows current partner setting", overlay.partner_checkbox.button_pressed == partner_enabled)
 		overlay.partner_checkbox.button_pressed = not partner_enabled
@@ -156,6 +161,7 @@ func _run() -> void:
 		check(course + " restart clears throttle", view.inp.thrL == 0.0 and view.inp.thrR == 0.0)
 		check(course + " restart retains obstacle collisions", view.sim.P.obstacleCollisions == collisions)
 		check(course + " restart retains partner", view.partner_on == partner_enabled and (view.partner != null) == partner_enabled)
+		check(course + " restart starts a fresh skill run", view.skill_score.total == 0)
 		if course == "network":
 			check("Network traffic follows obstacle checkbox", view.traffic_net.collide == collisions)
 			for city in view.sim.cities:

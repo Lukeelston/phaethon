@@ -61,4 +61,4 @@
 
 ## Execution decisions
 
-Luke explicitly requested these additions within the established local build/playtest workflow. Continue inline under that authorization; routine tuning choices do not need another permission round. Builder check returned "nothing important left". Optional aesthetic question remains open; use the stated arcade-chain default if unanswered. Existing release checkout is a separate repository on release/experimental, preserving the other development trees. Baseline is 1be0668.
+Luke explicitly requested these additions within the established local build/playtest workflow. Continue inline under that authorization; routine tuning choices do not need another permission round. Builder check returned "nothing important left". Luke named Forza Horizon as a parallel and emphasized precision at high speed. Existing release checkout is a separate repository on release/experimental, preserving the other development trees. Baseline is 1be0668.

@@ -30,6 +30,8 @@ const EngineAudioScript := preload("res://audio/engine_audio.gd")
 const WindAudioScript := preload("res://audio/wind_audio.gd")
 const CourseAudioScript := preload("res://audio/course_audio.gd")
 const TrafficAudioScript := preload("res://audio/traffic_audio.gd")
+const SkillScoreScript := preload("res://view/skill_score.gd")
+const SkillAudioScript := preload("res://audio/skill_audio.gd")
 const CanopyFlash := preload("res://view/canopy.gd")
 const SpeedCuesScript := preload("res://view/speed_cues.gd")
 const TrafficScript := preload("res://view/traffic.gd")
@@ -69,6 +71,8 @@ var engine_audio
 var wind_audio
 var course_audio             # the halls' and canopy's acoustics, the emergency run's sounds (audio/course_audio.gd)
 var traffic_audio            # the Network's traffic going by (audio/traffic_audio.gd)
+var skill_score
+var skill_audio
 var replay: Array = []
 var replay_i := 0
 var shot_path := ""
@@ -214,6 +218,8 @@ func _ready() -> void:
 	minimap.setup(sim)
 	minimap.target = net_target
 	_load_best()
+	skill_score = SkillScoreScript.new()
+	skill_score.setup(sim, best_dir + "skills_%s.json" % sim.track_name)
 	if cruise >= 0.0:
 		inp = {"thrL": cruise, "thrR": cruise, "brkL": hold_brake[0], "brkR": hold_brake[1], "repair": false, "reignite": true}
 	_follow_origin()
@@ -228,6 +234,9 @@ func _ready() -> void:
 	if sim.kind == "network":
 		dust.road_spray()
 	if not mute and shot_path == "":
+		skill_audio = SkillAudioScript.new()
+		add_child(skill_audio)
+		skill_audio.setup()
 		engine_audio = EngineAudioScript.new()
 		add_child(engine_audio)
 		engine_audio.setup(sim)
@@ -268,9 +277,13 @@ func _sim_step() -> void:
 	for e in sim.events:
 		_on_event(e)
 	sim.events.clear()
+	if skill_score:
+		skill_score.step(DT)
 
 
 func _on_event(e: Dictionary) -> void:
+	if skill_score:
+		skill_score.on_event(e)
 	if e.type == "bump":   # traffic's forcefield: a shove you feel, not a hit (and see: the field flares)
 		_on_hit(e.who, 0.5)
 		_field_flash(1.0)
@@ -679,6 +692,8 @@ func _respawn() -> void:
 	if near >= 0:
 		sim.net.from = near
 	sim.restart()
+	if skill_score:
+		skill_score.reset_run()
 	net_air_t0 = -1.0
 	if minimap:
 		minimap.waypoint = {}
@@ -746,6 +761,8 @@ func _menu_show() -> void:
 
 
 func _exit_tree() -> void:
+	if skill_score:
+		skill_score.save_best()
 	if menu.open:
 		AudioServer.set_bus_mute(0, _menu_was_muted)
 
@@ -798,6 +815,12 @@ func _process(delta: float) -> void:
 	craft.sync_cables(sim, delta)   # after the camera: in VR the cables' pod end rides the cockpit
 	var t_world := Time.get_ticks_usec()
 	_sync_world()   # after the camera: distant anchors scale about its current position
+	if skill_score:
+		if traffic_net:
+			skill_score.observe_traffic(traffic_net.cars, minf(delta, 0.05))
+		if skill_audio:
+			skill_audio.update(delta, skill_score.feedback)
+		skill_score.feedback.clear()
 	cpu.world = (Time.get_ticks_usec() - t_world) / 1000.0
 	top_kmh = maxf(top_kmh, _kmh())
 	var t_hud := Time.get_ticks_usec()
@@ -1642,3 +1665,5 @@ func _update_hud() -> void:
 		_kmh() / 1.609344, cues.readout(), _progress_text(), inp.thrL, inp.thrR, inp.brkL, inp.brkR,
 		sim.eL.heat * 100, sim.eR.heat * 100, sim.eL.health * 100, sim.eR.health * 100, sim.battery * 100, mode_txt,
 		("Replay: parity lap" if not replay.is_empty() else levers.source) + "   " + handling_text()]
+	if skill_score:
+		hud.text += "\n" + skill_score.readout()

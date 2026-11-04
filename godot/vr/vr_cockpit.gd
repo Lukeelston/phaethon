@@ -61,6 +61,9 @@ var lever_tips: Array[StandardMaterial3D] = []
 var dashboard   # the instrument panel (vr/dashboard.gd)
 var _jump_guidance: Label3D   # rig-mounted ascent readout above the dash; never follows the pilot's eyes
 var _jump_guidance_backing: MeshInstance3D
+var _skill_readout: Label3D
+var _skill_notice := ""
+var _skill_pulse := 0.0
 var wag = WagMeterScript.new()        # the nose wag since the last report (a WAG: line every 10 s)
 var wag_all = WagMeterScript.new()    # ... over the whole flight (on exit)
 var fade_mat: StandardMaterial3D
@@ -944,6 +947,7 @@ func _update_jump_guidance() -> void:
 
 func _update_hud() -> void:
 	_update_jump_guidance()
+	_update_skill_readout()
 	var kmh := _kmh()
 	_scheme_flash = maxf(0.0, _scheme_flash - get_process_delta_time())
 	var ctl: String = QuestControlsScript.HINTS[quest.scheme] if _scheme_flash > 0.0 else QuestControlsScript.NAMES[quest.scheme]
@@ -959,6 +963,41 @@ func _update_hud() -> void:
 		"gear": quest.display_gear(), "overdrive": bool(inp.get("gearOverdrive", false)),
 		"blink": (Time.get_ticks_msec() / 250) % 2 == 0,
 	})
+
+
+func _update_skill_readout() -> void:
+	if not _skill_readout:
+		_skill_readout = Label3D.new()
+		_skill_readout.name = "SkillReadout"
+		_skill_readout.font_size = 32
+		_skill_readout.pixel_size = 0.00075
+		_skill_readout.outline_size = 5
+		_skill_readout.outline_modulate = Color(0.015, 0.025, 0.03, 0.95)
+		# Close-mounted auxiliary display above the dashboard, ahead of its hood
+		# and inside the cowl. Road guidance remains above the windscreen.
+		_skill_readout.position = Vector3(0.0, 0.58, -0.15)
+		_skill_readout.rotation = Vector3(-0.18, 0.0, 0.0)
+		_skill_readout.double_sided = false
+		rig.add_child(_skill_readout)
+		var backing := MeshInstance3D.new()
+		backing.name = "SkillReadoutBacking"
+		var face := QuadMesh.new()
+		face.size = Vector2(0.40, 0.070)
+		backing.mesh = face
+		var material := StandardMaterial3D.new()
+		material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		material.albedo_color = Color(0.015, 0.025, 0.03)
+		backing.material_override = material
+		backing.transform = _skill_readout.transform.translated_local(Vector3(0.0, 0.0, -0.01))
+		rig.add_child(backing)
+	if skill_score:
+		if skill_score.award_text != _skill_notice:
+			_skill_notice = skill_score.award_text
+			_skill_pulse = 1.0 if _skill_notice != "" else 0.0
+		_skill_pulse = maxf(0.0, _skill_pulse - get_process_delta_time() * 3.0)
+		_skill_readout.scale = Vector3.ONE * (1.0 + 0.035 * _skill_pulse)
+		_skill_readout.text = skill_score.readout()
+		_skill_readout.modulate = Color(0.55, 0.95, 0.86) if skill_score.award_text != "" else Color(0.45, 0.66, 0.65, 0.78)
 
 
 func _exit_tree() -> void:
