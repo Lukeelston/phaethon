@@ -1,10 +1,9 @@
 ## The driving partner (Luke: "a 'driving partner', that stays around your speed and just generally does
 ## what you do - i found it interesting to see a stable reference point at high speed - kind of trippy";
-## the main menu's DRIVING PARTNER, or --partner). A second craft flying formation off your wing: it holds
-## your speed (your velocity, a beat late, so it drifts back a little when you brake and comes up again
-## when you accelerate), your heading and your road, wandering a few metres so it's alive. It keeps to
-## the side with the room and inside the walls, comes off lips and up shafts with you, and it's not in
-## the sims: nothing to hit, nothing in the parity. Teal engines, so it's not mistaken for traffic.
+## the main menu's DRIVING PARTNER, or --partner). A second craft holds formation, then occasionally
+## passes, crosses well ahead and rejoins on the other side. Road-relative stations follow bends;
+## swept gap checks keep it clear of the player and traffic. Narrow roads, jumps and shaft carry
+## retain quiet formation. It remains visual only: nothing to hit and no sim parity change.
 ##   var p := DrivingPartner.new(); add_child(p); p.build(view)
 ##   p.update(delta)   every frame, after the camera
 extends Node3D
@@ -13,8 +12,6 @@ const CraftModelScript := preload("res://view/craft_model.gd")
 const Kit := preload("res://view/mesh_kit.gd")
 const WING := 48.0          # m off your centreline
 const AHEAD := 14.0         # m ahead of the pod: out of the cockpit's left or right, level with the cables
-const LAG_V := 0.3          # s: how late it takes up your velocity
-const LAG_P := 1.2          # s: how it settles back onto its station
 const SNAP := 1500.0        # m: further off than this (a restart) it's just put there
 const MARGIN := 62.0        # m kept from a road's walls (clear of the edges' ramps)
 const MIN_WING := 22.0      # m: however narrow the road, this far off you
@@ -31,6 +28,10 @@ var side := 1.0             # +1 your left, -1 your right
 var t := 0.0
 var placed := false
 var bank := 0.0
+var maneuver := "formation"
+var maneuver_time := 0.0
+var _ahead := AHEAD
+var _offset := WING
 var _engines: Array[Node3D] = []
 var _pod: MeshInstance3D
 var _cables: Array[MeshInstance3D] = []
@@ -134,12 +135,150 @@ func _station() -> Vector2:
 	return Vector2(P.x, P.y) + fw * a + lf * side * clampf(d, MIN_WING, maxf(mine, MIN_WING))
 
 
+## Road-relative target: follow the sampled bend rather than cutting a chord
+## across it. The offsets are in the player's direction, in either road direction.
+func _frame(a: float) -> Dictionary:
+	var P = sim.pod
+	var fw := Vector2(cos(sim.pair_th), sin(sim.pair_th))
+	var out := {"point": Vector2(P.x, P.y) + fw * a, "fw": fw, "lat": 0.0, "width": 100000.0, "f": 0.0, "dir": 1.0}
+	if sim.kind != "network" or P.off_road:
+		return out
+	var R = sim.roads[P.path]
+	var i: int = clampi(P.hint, 0, R.N - 2)
+	var direction := 1.0 if fw.dot(Vector2(R.tx[i], R.ty[i])) >= 0.0 else -1.0
+	var along: float = (P.x - R.px[i]) * R.tx[i] + (P.y - R.py[i]) * R.ty[i]
+	var f := clampf(float(i) + along / R.len[i] + a * direction / 24.0, 0.0, R.N - 1.001)
+	var j := int(f)
+	var u := f - j
+	var tangent := Vector2(R.tx[j], R.ty[j]).lerp(Vector2(R.tx[j + 1], R.ty[j + 1]), u).normalized()
+	var lateral: float = ((P.x - R.px[i]) * R.nx[i] + (P.y - R.py[i]) * R.ny[i]) * direction
+	out = {"point": Vector2(R.px[j], R.py[j]) + Vector2(R.tx[j], R.ty[j]) * R.len[j] * u, "fw": tangent * direction, "lat": lateral, "width": R.w[j], "f": f, "dir": direction}
+	return out
+
+
+func _point(a: float, offset: float) -> Vector2:
+	var frame := _frame(a)
+	var normal := Vector2(-frame.fw.y, frame.fw.x)
+	var margin := minf(MARGIN, frame.width * 0.2)
+	var lateral := clampf(frame.lat + offset, -frame.width / 2.0 + margin, frame.width / 2.0 - margin)
+	return frame.point + normal * lateral
+
+
+func _can_pass() -> bool:
+	if sim.pod.off_road or Vector2(sim.pod.vx, sim.pod.vy).length() < 400.0:
+		return false
+	if sim.kind != "network":
+		return false # branch roll and narrow circuits retain quiet formation
+	var R = sim.roads[sim.pod.path]
+	return not R.shaft and R.role == "" and _frame(300.0).width >= 300.0
+
+
+## Reserve the swept corridor, including a freight train's tail. This is visual
+## avoidance only: the partner never becomes a physical obstacle to the player.
+func _target_clear(a: float, offset: float) -> bool:
+	var lo := minf(_offset, offset)
+	var hi := maxf(_offset, offset)
+	if lo < 30.0 and hi > -30.0 and minf(_ahead, a) < 75.0 and maxf(_ahead, a) > -65.0:
+		return false
+	var traffic = view.get("traffic_net")
+	if traffic == null or sim.kind != "network" or sim.pod.off_road:
+		return true
+	var frame := _frame(0.0)
+	var speed := Vector2(sim.pod.vx, sim.pod.vy).length()
+	var duration := clampf(maxf(absf(a - _ahead) / 85.0, absf(offset - _offset) / 18.0), 0.6, 3.0)
+	for c in traffic.cars:
+		var same_road: bool = c.road == sim.pod.path
+		var relative := Vector2(c.x - sim.pod.x, c.y - sim.pod.y)
+		if not same_road and (relative.length_squared() > 36000000.0 or absf(sim.net_height(c.road, c.f) - sim.pod.z) > 20.0):
+			continue
+		var lateral: float = c.lat * frame.dir - frame.lat if same_road else relative.dot(Vector2(-frame.fw.y, frame.fw.x))
+		if lateral < lo - 24.0 or lateral > hi + 24.0:
+			continue
+		var gap: float = (c.f - frame.f) * frame.dir * 24.0 if same_road else relative.dot(frame.fw)
+		var relative_v: float = (c.v * c.dir * frame.dir if same_road else Vector2(c.hx, c.hy).dot(frame.fw) * c.v) - speed
+		var now := gap - _ahead
+		var later := gap + relative_v * duration - a
+		var tail := 290.0 if c.kind == 3 else 24.0
+		if minf(now, later) < tail + 45.0 and maxf(now, later) > -55.0:
+			return false
+	return true
+
+
+func _move_station(dt: float) -> void:
+	var room := _room()
+	var target_a := AHEAD
+	var target_side := side
+	maneuver_time += dt
+	if not _can_pass():
+		maneuver = "formation"
+		maneuver_time = 0.0
+	else:
+		match maneuver:
+			"formation":
+				if maneuver_time > 7.0:
+					maneuver = "lead"
+					maneuver_time = 0.0
+			"lead":
+				target_a = 280.0
+				if _ahead > 260.0 and maneuver_time > 6.0:
+					maneuver = "cross"
+					side = -side
+					maneuver_time = 0.0
+			"cross":
+				target_a = 280.0
+				if _offset * side > 65.0:
+					maneuver = "rejoin"
+					maneuver_time = 0.0
+			"rejoin":
+				if absf(_ahead - AHEAD) < 2.0:
+					maneuver = "formation"
+					maneuver_time = 0.0
+	target_side = side
+	var mine: float = room.x if side > 0.0 else room.y
+	var other: float = room.y if side > 0.0 else room.x
+	if mine < 32.0 and other > mine + 20.0:
+		target_side = -side
+	var width := 72.0 if maneuver != "formation" else WING + 5.0 * sin(t * 0.23)
+	var target_offset := target_side * minf(width, maxf(MIN_WING, room.x if target_side > 0 else room.y))
+	# Cross ahead or behind the entire craft, never through its cables.
+	if target_offset * _offset < 0.0 and _ahead > -100.0 and _ahead < 100.0:
+		target_a = -120.0
+		target_offset = _offset
+	elif (target_offset * _offset < 0.0 or absf(_offset) < 35.0) and (_ahead <= -100.0 or _ahead >= 100.0):
+		# Finish crossing before pulling alongside again. Otherwise a blocked
+		# pass can oscillate at the centreline between two individually safe goals.
+		target_a = _ahead
+	if not _target_clear(target_a, target_offset):
+		var candidates := [Vector2(_ahead, -target_offset), Vector2(-120.0, _offset), Vector2(-120.0, -target_offset)]
+		var found := false
+		for candidate in candidates:
+			if _target_clear(candidate.x, candidate.y):
+				target_a = candidate.x
+				target_offset = candidate.y
+				found = true
+				break
+		if not found:
+			target_a = _ahead
+			target_offset = _offset
+	if target_offset * side < 0.0:
+		side = signf(target_offset)
+	_ahead = move_toward(_ahead, target_a, 85.0 * dt)
+	_offset = move_toward(_offset, target_offset, 18.0 * dt)
+
+
 func update(delta: float) -> void:
 	var dt := clampf(delta, 0.0, 0.1)
 	t += dt
 	var P = sim.pod
 	var pv := Vector2(P.vx, P.vy)
-	var st := _station()
+	if not placed:
+		_station() # select the roomy side on first placement
+		_ahead = AHEAD
+		_offset = side * minf(WING, maxf(MIN_WING, _room().x if side > 0.0 else _room().y))
+		maneuver = "formation"
+		maneuver_time = 0.0
+	_move_station(dt)
+	var st := _point(_ahead, _offset)
 	if not placed or Vector2(st.x - x, st.y - y).length() > SNAP or dt <= 0.0:
 		placed = true
 		x = st.x
@@ -148,16 +287,13 @@ func update(delta: float) -> void:
 		lag = pv
 		z = P.z
 	else:
-		# (round a shaft's bulb the plan's velocity turns half a radian a second: that's the road, not
-		# you, so it isn't late for it)
+		# Road-relative feed-forward keeps even fast bends attached to their lane.
 		var carried: bool = sim.kind == "network" and not P.off_road and sim.roads[P.path].shaft and sim.roads[P.path].kap[P.hint] != 0.0
-		lag = pv if carried else lag + (pv - lag) * (1.0 - exp(-dt / LAG_V))
-		x += lag.x * dt
-		y += lag.y * dt
-		var k := 1.0 - exp(-dt / LAG_P)
-		x += (st.x - x) * k
-		y += (st.y - y) * k
-		var dth: float = CraftSim.wrap_angle(sim.pair_th - th)
+		lag = pv
+		x = st.x
+		y = st.y
+		var forward: Vector2 = _frame(_ahead).fw
+		var dth: float = CraftSim.wrap_angle(atan2(forward.y, forward.x) - th)
 		th += dth * (1.0 if carried else 1.0 - exp(-dt / 0.25))
 		bank += ((0.0 if carried else clampf(-dth * 2.5, -0.6, 0.6)) - bank) * (1.0 - exp(-dt / 0.3))
 	# its height: the road under it, or yours in the air
