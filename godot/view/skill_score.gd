@@ -239,7 +239,7 @@ func observe_traffic(cars: Array, dt: float) -> void:
 		if valid:
 			var heading := Vector2(c.hx, c.hy)
 			var radius := 8.4 if c.kind == 3 else (6.4 if c.kind == 1 else 5.2)
-			var front := 9.0 if c.kind == 3 else 7.0
+			var front := 9.0 if c.kind == 3 else (8.0 if c.kind == 1 else 7.0)
 			var rear := front + (266.0 if c.kind == 3 else 0.0)
 			for i in points.size():
 				if minf(points[i][1], _previous_bodies[i][1]) > h + 12.0 or maxf(points[i][1], _previous_bodies[i][1]) < h - 2.0:

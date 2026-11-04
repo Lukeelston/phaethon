@@ -692,6 +692,8 @@ func _respawn() -> void:
 	if near >= 0:
 		sim.net.from = near
 	sim.restart()
+	if partner:
+		partner.placed = false
 	if skill_score:
 		skill_score.reset_run()
 	net_air_t0 = -1.0

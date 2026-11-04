@@ -32,6 +32,9 @@ var maneuver := "formation"
 var maneuver_time := 0.0
 var _ahead := AHEAD
 var _offset := WING
+var _last_path := -999
+var _last_lateral := 0.0
+var _last_direction := 1.0
 var _engines: Array[Node3D] = []
 var _pod: MeshInstance3D
 var _cables: Array[MeshInstance3D] = []
@@ -176,14 +179,36 @@ func _can_pass() -> bool:
 ## Reserve the swept corridor, including a freight train's tail. This is visual
 ## avoidance only: the partner never becomes a physical obstacle to the player.
 func _target_clear(a: float, offset: float) -> bool:
-	var lo := minf(_offset, offset)
-	var hi := maxf(_offset, offset)
-	if lo < 30.0 and hi > -30.0 and minf(_ahead, a) < 75.0 and maxf(_ahead, a) > -65.0:
+	var frame := _frame(0.0)
+	var origin := Vector2(sim.pod.x, sim.pod.y)
+	var fw: Vector2 = frame.fw
+	var lf := Vector2(-fw.y, fw.x)
+	# Reserve the actual clamped trajectory, including the engines and cables.
+	var lo := INF
+	var hi := -INF
+	var back := INF
+	var front := -INF
+	for u in [0.0, 0.25, 0.5, 0.75, 1.0]:
+		var q := _point(lerpf(_ahead, a, u), lerpf(_offset, offset, u)) - origin
+		lo = minf(lo, q.dot(lf) - 10.0)
+		hi = maxf(hi, q.dot(lf) + 10.0)
+		back = minf(back, q.dot(fw) - 12.0)
+		front = maxf(front, q.dot(fw) + 40.0)
+	var player_lo := INF
+	var player_hi := -INF
+	var player_back := INF
+	var player_front := -INF
+	for b in sim.bodies:
+		var q := Vector2(b.x, b.y) - origin
+		player_lo = minf(player_lo, q.dot(lf) - 10.0)
+		player_hi = maxf(player_hi, q.dot(lf) + 10.0)
+		player_back = minf(player_back, q.dot(fw) - 12.0)
+		player_front = maxf(player_front, q.dot(fw) + 12.0)
+	if lo < player_hi and hi > player_lo and back < player_front and front > player_back:
 		return false
 	var traffic = view.get("traffic_net")
 	if traffic == null or sim.kind != "network" or sim.pod.off_road:
 		return true
-	var frame := _frame(0.0)
 	var speed := Vector2(sim.pod.vx, sim.pod.vy).length()
 	var duration := clampf(maxf(absf(a - _ahead) / 85.0, absf(offset - _offset) / 18.0), 0.6, 3.0)
 	for c in traffic.cars:
@@ -191,15 +216,17 @@ func _target_clear(a: float, offset: float) -> bool:
 		var relative := Vector2(c.x - sim.pod.x, c.y - sim.pod.y)
 		if not same_road and (relative.length_squared() > 36000000.0 or absf(sim.net_height(c.road, c.f) - sim.pod.z) > 20.0):
 			continue
-		var lateral: float = c.lat * frame.dir - frame.lat if same_road else relative.dot(Vector2(-frame.fw.y, frame.fw.x))
-		if lateral < lo - 24.0 or lateral > hi + 24.0:
-			continue
-		var gap: float = (c.f - frame.f) * frame.dir * 24.0 if same_road else relative.dot(frame.fw)
-		var relative_v: float = (c.v * c.dir * frame.dir if same_road else Vector2(c.hx, c.hy).dot(frame.fw) * c.v) - speed
-		var now := gap - _ahead
-		var later := gap + relative_v * duration - a
-		var tail := 290.0 if c.kind == 3 else 24.0
-		if minf(now, later) < tail + 45.0 and maxf(now, later) > -55.0:
+		var lateral: float = c.lat * frame.dir - frame.lat if same_road else relative.dot(lf)
+		var gap: float = (c.f - frame.f) * frame.dir * 24.0 if same_road else relative.dot(fw)
+		var heading := Vector2(c.dir * frame.dir, 0.0) if same_road else Vector2(Vector2(c.hx, c.hy).dot(fw), Vector2(c.hx, c.hy).dot(lf))
+		var velocity: Vector2 = heading * c.v - Vector2(speed, 0.0)
+		var nose := Vector2(gap, lateral) + heading * 9.0
+		var tail := Vector2(gap, lateral) - heading * (275.0 if c.kind == 3 else 9.0)
+		var xmin := minf(nose.x, tail.x) + minf(0.0, velocity.x * duration) - 16.0
+		var xmax := maxf(nose.x, tail.x) + maxf(0.0, velocity.x * duration) + 16.0
+		var ymin := minf(nose.y, tail.y) + minf(0.0, velocity.y * duration) - 16.0
+		var ymax := maxf(nose.y, tail.y) + maxf(0.0, velocity.y * duration) + 16.0
+		if xmin < front and xmax > back and ymin < hi and ymax > lo:
 			return false
 	return true
 
@@ -271,12 +298,22 @@ func update(delta: float) -> void:
 	t += dt
 	var P = sim.pod
 	var pv := Vector2(P.vx, P.vy)
+	var frame := _frame(0.0)
+	if placed and _last_path == P.path and _last_direction == frame.dir and sim.kind == "network" and not P.off_road:
+		# Preserve the partner's lane when the player moves sideways. Otherwise
+		# road-edge clamping can pull an existing formation straight into the pod.
+		_offset += _last_lateral - frame.lat
+	elif placed and _last_path != P.path:
+		placed = false
 	if not placed:
 		_station() # select the roomy side on first placement
 		_ahead = AHEAD
 		_offset = side * minf(WING, maxf(MIN_WING, _room().x if side > 0.0 else _room().y))
 		maneuver = "formation"
 		maneuver_time = 0.0
+	_last_path = P.path
+	_last_lateral = frame.lat
+	_last_direction = frame.dir
 	_move_station(dt)
 	var st := _point(_ahead, _offset)
 	if not placed or Vector2(st.x - x, st.y - y).length() > SNAP or dt <= 0.0:

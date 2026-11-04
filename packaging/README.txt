@@ -1,8 +1,14 @@
 PHAETHON
-Experimental Desktop Racer - Windows x64 - v0.2.1
+Experimental Desktop Racer - Windows x64 - v0.2.2
 ElstonWorks
 
 Two engines. One cockpit. We know it's a little fucky.
+
+Skill points reward sustained speed, clean fast turns, close calls and settled
+jump landings. Chain clean maneuvers for up to a 5x multiplier. Impacts break
+the chain but keep earned points; restart begins a new run. Best scores save
+locally for each course. Traffic yields when a safe lane is available. Enable
+Driving partner for formation flying and occasional passes on wide highways.
 
 GET IN
 1. Extract the whole ZIP into a folder.
@@ -88,7 +94,7 @@ copyright. Third-party components and the CC BY engine audio retain their
 own licenses and permissions. See THIRD_PARTY_NOTICES.txt and licenses/.
 Adapted engine audio is also supplied separately in audio/engines/.
 
-Build: 0.2.1-experimental | 2026-11-03
+Build: 0.2.2-experimental | 2026-11-03
 
 IN THIS LOCAL BUILD
 Central highway transfers and long side-road sweeps now alternate bends with

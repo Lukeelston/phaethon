@@ -8,6 +8,18 @@ var view
 var road := -1
 const DT := 1.0 / 60.0
 
+func whole_clearance(p) -> float:
+	var fw := Vector2(cos(p.th), sin(p.th))
+	var lf := Vector2(-fw.y, fw.x)
+	var s = view.sim
+	var lat: float = s.P.engineGap / 2.0 - s.P.podAnchorW * s.P.podWidth / 2.0
+	var ahead: float = sqrt(s.P.cableLen * s.P.cableLen - lat * lat) + s.P.podLen / 2.0 + s.P.engineLen / 2.0
+	var clearance := INF
+	for pos in [Vector2(p.x, p.y), Vector2(p.x, p.y) + fw * ahead + lf * s.P.engineGap / 2.0, Vector2(p.x, p.y) + fw * ahead - lf * s.P.engineGap / 2.0]:
+		for b in s.bodies:
+			clearance = minf(clearance, pos.distance_to(Vector2(b.x, b.y)) - 10.0)
+	return clearance
+
 func check(label: String, ok: bool) -> void:
 	checks += 1
 	failures += int(not ok)
@@ -68,8 +80,7 @@ func scenario(direction: int, obstacle: bool) -> void:
 			minimum = minf(minimum, ahead)
 		left = left or lateral > 35.0
 		right = right or lateral < -35.0
-		for b in s.bodies:
-			clearance = minf(clearance, Vector2(p.x - b.x, p.y - b.y).length())
+		clearance = minf(clearance, whole_clearance(p))
 		if obstacle:
 			var c = view.traffic_net.cars[0]
 			clearance = minf(clearance, Vector2(p.x - c.x, p.y - c.y).length() - 24.0)
@@ -109,6 +120,40 @@ func _run() -> void:
 	var target: Vector2 = p._point(0.0, 72.0)
 	var lat: float = (target.x - R.px[6000]) * R.nx[6000] + (target.y - R.py[6000]) * R.ny[6000]
 	check("moving player cannot pull partner outside road edge", lat <= half - 25.0)
+	# Move an existing formation to the boundary; first-placement chooses the
+	# roomy side and hides this bug. Both travel directions need the same result.
+	for direction in [1, -1]:
+		view.set_partner(false)
+		pose(6000.0, direction)
+		view.set_partner(true)
+		p = view.partner
+		p.side = 1.0
+		p._offset = 48.0
+		p._ahead = 14.0
+		p.update(DT)
+		var nearest := INF
+		for frame in 40:
+			pose(6000.0 + direction * frame * DT * 1000.0 / 24.0, direction)
+			for b in view.sim.bodies:
+				b.x += R.nx[6000] * (half - 62.0) * direction
+				b.y += R.ny[6000] * (half - 62.0) * direction
+			p.update(DT)
+			nearest = minf(nearest, whole_clearance(p))
+		check("existing full craft clears player at boundary %d (%.2f)" % [direction, nearest], nearest > 5.0)
+		pose(6000.0, direction)
+		p._ahead = 14.0
+		p._offset = 48.0
+		var train = Traffic.Car.new()
+		train.kind = Traffic.TRANSPORT
+		train.road = road
+		train.dir = -direction
+		train.f = 6000.0 - direction * 100.0 / 24.0
+		train.lat = 48.0 * direction
+		train.v = 1000.0
+		view.traffic_net._place(train)
+		view.traffic_net.cars.assign([train])
+		check("oncoming freight tail blocks occupied partner station %d" % direction, not p._target_clear(14.0, 48.0))
+		view.traffic_net.cars.clear()
 	pose(6000.0, 1)
 	p._ahead = 14.0
 	p._offset = 48.0
@@ -125,6 +170,12 @@ func _run() -> void:
 	view.sim._net_h[crossing.road] = [[0, 0.0, 0.0], [view.sim.roads[crossing.road].N - 1, 0.0, 0.0]]
 	view.traffic_net.cars.assign([crossing])
 	check("same-level joining traffic blocks a pass", not p._target_clear(280.0, 72.0))
+	crossing.x = view.sim.pod.x + R.tx[6000] * 140.0 + R.nx[6000] * 500.0
+	crossing.y = view.sim.pod.y + R.ty[6000] * 140.0 + R.ny[6000] * 500.0
+	crossing.hx = -R.nx[6000]
+	crossing.hy = -R.ny[6000]
+	crossing.v = 1000.0
+	check("crossing traffic lateral velocity reserves pass corridor", not p._target_clear(280.0, 72.0))
 	view.sim._net_h[crossing.road] = [[0, 600.0, 0.0], [view.sim.roads[crossing.road].N - 1, 600.0, 0.0]]
 	check("traffic on another deck does not block a pass", p._target_clear(280.0, 72.0))
 	if saved_height == null:
@@ -138,6 +189,24 @@ func _run() -> void:
 	R.w[6012] = 200.0
 	check("partner suspends passing on narrow approach", not p._can_pass())
 	R.w[6012] = saved_width
+	view.traffic_net.cars.clear()
+	p.maneuver = "cross"
+	p._ahead = 280.0
+	p._offset = 0.0
+	view._respawn()
+	p.update(0.0)
+	check("restart discards an in-progress pass", p.maneuver == "formation" and p._ahead == 14.0 and whole_clearance(p) > 5.0)
+	pose(6000.0, 1)
+	p.update(DT)
+	p.maneuver = "cross"
+	p._ahead = 280.0
+	p._offset = 0.0
+	var old_road := road
+	road = (road + 1) % view.sim.roads.size()
+	pose(minf(100.0, view.sim.roads[road].N - 2.0), 1)
+	p.update(DT)
+	check("route change returns to clear formation", p.maneuver == "formation" and absf(p._offset) >= 22.0 and whole_clearance(p) > 5.0)
+	road = old_road
 	view.free()
 	View.track_override = ""
 	View.job_override = ""

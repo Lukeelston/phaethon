@@ -93,6 +93,32 @@ func corners(noisy := false, wall := false):
 	road = original
 	return score
 
+func transverse_slow(offset: float):
+	pose(0.0)
+	var score = fresh()
+	var R = sim.roads[road]
+	var fw := Vector2(R.tx[6000], R.ty[6000])
+	var lf := Vector2(-fw.y, fw.x)
+	var origin := Vector2(sim.pod.x, sim.pod.y)
+	var c = Traffic.Car.new()
+	c.id = 123
+	c.kind = Traffic.SLOW
+	c.road = road
+	c.f = 6000.0
+	c.v = 0.0
+	c.x = origin.x
+	c.y = origin.y
+	c.hx = lf.x
+	c.hy = lf.y
+	for frame in 9:
+		pose(-200.0 + frame * 50.0)
+		for b in sim.bodies:
+			b.x += lf.x * offset
+			b.y += lf.y * offset
+		score.step(0.025)
+		score.observe_traffic([c], 0.025)
+	return score
+
 func _initialize() -> void:
 	if not FileAccess.file_exists("res://view/skill_score.gd"):
 		check("skill rewards are available to the game", false)
@@ -120,6 +146,8 @@ func _initialize() -> void:
 		near_count += int(event.kind == "near")
 	check("one passing car cannot award repeatedly", near_count == 1)
 	check("actual overlap earns no near miss even with collisions off", not has_award(passing(0.0), "near"))
+	check("transverse slow-car nose overlap earns nothing", not has_award(transverse_slow(18.35), "near"))
+	check("clean transverse slow-car pass still earns points", has_award(transverse_slow(21.0), "near"))
 	check("ordinary distant traffic earns no near miss", not has_award(passing(70.0), "near"))
 	check("another deck earns no near miss", not has_award(passing(18.0, 600.0), "near"))
 	check("teleport across traffic earns no near miss", not has_award(passing(18.0, 0.0, true), "near"))
