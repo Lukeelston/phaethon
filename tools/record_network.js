@@ -114,7 +114,9 @@ function shaftRun(name, dir, mph, lev, stall = false) {
   const a = R.pts[i], speed = mph / NR.MPH;
   sim.respawnOn(r, i, dir);
   for (const b of S.bodies) { b.vx = speed * a.tx * dir; b.vy = speed * a.ty * dir; }
-  const samples = [], secs = 40;
+  // Broad crowns have a gentler initial grade: allow their unpowered climb to
+  // reach its turning point before demanding a backward slide.
+  const samples = [], secs = stall ? 90 : 60;
   let peak = 0, back = false, crash = false, binder = false;
   for (let k = 0; k < secs * 480; k++) {
     sim.step({thrL: lev, thrR: lev, brkL: 0, brkR: 0, repair: false, reignite: true}, DT);

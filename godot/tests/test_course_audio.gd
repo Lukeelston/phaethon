@@ -1,8 +1,7 @@
 ## Course audio gate (audio/course_audio.gd: the courses' places and the emergency run in sound).
 ##   synthesis   every loop and cue is sound: not silent, no NaNs, loops that join without a click
 ##               (the seam no bigger a step than 4x the loop's own typical one)
-##   enclosure   under a covered ramp's roof the air closes in (the reverb's wet up, the hall's ring
-##               with your speed); out on the open loop it's gone
+##   enclosure   roof reverb follows enclosure, with no synthesized hall buzz/player
 ##   the dawn    its roar grows as the front nears and the searing hiss comes in over the last km
 ##   the pad     a beep each half second you hold on it, then the drop's chime
 ##   the gate    a chirp as the shade line's gate opens for you, a buzzer if it shuts
@@ -20,9 +19,13 @@ var passed := 0
 
 
 func _initialize() -> void:
+	_run_checks.call_deferred()
+
+
+func _run_checks() -> void:
 	# synthesis
 	var worst := ""
-	for pair in [["rumble", CA.make_rumble()], ["hiss", CA.make_hiss()], ["hall", CA.make_hall()]]:
+	for pair in [["rumble", CA.make_rumble()], ["hiss", CA.make_hiss()]]:
 		var e := _peaks(pair[1])
 		if e[0] < 0.02 or e[1] > 0.01 or is_nan(e[0]):
 			worst += "%s (peak %.3f, seam %.3f) " % [pair[0], e[0], e[1]]
@@ -44,8 +47,9 @@ func _initialize() -> void:
 	var hall_db: float = ca.hall_db
 	_go(sim, 3000, 3000.0)
 	_run(sim, ca, 3.0, INF)
-	_check("enclosure: under the ramp's roof the reverb is %.2f wet and the hall rings at %.1f dB; out on the loop %.2f wet, the ring %.1f dB" % [inside, hall_db, ca.wet, ca.hall_db],
-		inside > 0.9 and hall_db > -20.0 and ca.wet < 0.05 and ca.hall_db < -60.0)
+	_check("enclosure: reverb follows the roof, no synthesized tunnel buzz or Hall player",
+		inside > 0.9 and hall_db <= -80.0 and ca.wet < 0.05 and ca.hall_db <= -80.0
+		and ca.get_children().filter(func(p): return p is AudioStreamPlayer and p.bus == "Hall").is_empty())
 
 	# the dawn: far, then close
 	var js = Sim.new({"track": "eridanus", "job": "emergency", "dawnT0": 1e9})

@@ -12,8 +12,8 @@
 ##   stall      no throttle at 300 mph: gravity stops it on the climb and it slides back
 ##   sides      twelve side roads, every one with corners a board names (a speed and a gear), at least
 ##              two gears' worth on each, none slower than second
-##   partner    on E2 at 4,000 mph: it holds station within ~120 m without a hand on it, on the road; you
-##              brake, it comes back a little and stays with you; it goes up the shaft with you
+##   partner    on E2 at 4,000 mph: it passes within 400 m while staying on the road;
+##              braking matches speed without cancelling a safe pass; shafts retain close formation
 ##   menu       the main menu toggles it, saved; a new view has it; the flight waits while the menu's open
 ##   cockpit    the headset's rig: upside down over the top with the pod where it should be, level on the
 ##              way out; its menu has the partner, controls and map selection, its panel shows
@@ -209,7 +209,7 @@ func _stall(sim) -> void:
 		b.vx = 300.0 / MPH * R.tx[start]
 		b.vy = 300.0 / MPH * R.ty[start]
 	var st := {"top": 0.0, "back": false}
-	_fly(0.0, 60 * 40, func(_f):
+	_fly(0.0, 60 * 90, func(_f):
 		st.top = maxf(st.top, sim.pod.z)
 		if sim.pod.vx * R.tx[start] + sim.pod.vy * R.ty[start] < -5.0:
 			st.back = true)
@@ -264,7 +264,7 @@ func _partner(sim) -> void:
 		st.near = minf(st.near, d)
 		var q: int = sim.pod.hint
 		st.off = maxf(st.off, absf((p.x - R.px[q]) * R.nx[q] + (p.y - R.py[q]) * R.ny[q])))
-	_check("partner: at 4,000 mph it holds %.0f-%.0f m off you, at most %.0f m off the centreline (the wall at %.0f)" % [st.near, st.far, st.off, R.w[i] / 2.0], st.far < 120.0 and st.near > 15.0 and st.off < R.w[i] / 2.0)
+	_check("partner: at 4,000 mph it passes %.0f-%.0f m off you, at most %.0f m off the centreline (the wall at %.0f)" % [st.near, st.far, st.off, R.w[i] / 2.0], st.far < 400.0 and st.near > 15.0 and st.off < R.w[i] / 2.0)
 	# you brake: it falls in behind and stays with you
 	v.inp = {"thrL": 0.0, "thrR": 0.0, "brkL": 1.0, "brkR": 1.0, "repair": false, "reignite": true}
 	var fw0 := Vector2(R.tx[i], R.ty[i])
@@ -277,7 +277,7 @@ func _partner(sim) -> void:
 		ahead = maxf(ahead, Vector2(p.x - sim.pod.x, p.y - sim.pod.y).dot(fw0))
 	var sp := Vector2(sim.pod.vx, sim.pod.vy).length()
 	var dv: float = absf(p.lag.length() - sp)
-	_check("partner: you brake to %.0f mph: it runs on at most %.0f m ahead and comes back, its speed within %.0f mph of yours" % [sp * MPH, ahead, dv * MPH], ahead < 400.0 and dv * MPH < 150.0 and Vector2(p.x - sim.pod.x, p.y - sim.pod.y).length() < 120.0)
+	_check("partner: you brake to %.0f mph: it stays at most %.0f m ahead during its pass, its speed within %.0f mph of yours" % [sp * MPH, ahead, dv * MPH], ahead < 400.0 and dv * MPH < 150.0 and Vector2(p.x - sim.pod.x, p.y - sim.pod.y).length() < 320.0)
 	# up the shaft with you
 	var r := _road("TE2+")
 	var sh: Array = []

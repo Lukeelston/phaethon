@@ -2,8 +2,7 @@
 ## polish run ... focus on the graphics and sound design"). Everything is synthesized at load, like
 ## WindAudio, and plays on its own buses; the engine audio's buses are left alone.
 ##   enclosure   under a covered ramp's roof or the shade line's canopy the air closes in: a big
-##               reverb opens on the Wind bus (your own rush rings off the hall) and a low tunnel
-##               ring rises with your speed, both eased in and out
+##               reverb opens on the Wind bus (your own rush rings off the hall), eased in and out
 ##   the dawn    (the emergency run) a deep roar that grows as the front nears, a searing hiss over
 ##               it the last few km, both muffled under shelter
 ##   the pad     a beep each half second you hold on it, climbing, then the drop's chime
@@ -14,7 +13,7 @@
 extends Node
 
 const RATE := 44100
-const RATE_LO := 22050          # the low loops (the roar, the hall's ring) don't need more
+const RATE_LO := 22050          # the low roar loop does not need more
 const XF := 0.25                # loop crossfade, s
 const ENCLOSE_TAU := 0.35       # s: the enclosure eases in and out
 const DAWN_NEAR := 40000.0      # m: the roar builds as the front closes from here ...
@@ -24,14 +23,13 @@ const PAD_BEEP := 0.5           # s between the pad's beeps
 var sim
 var wet := 0.0                  # the enclosure, 0..1 (tests read it)
 var net_halls := {}             # the Network: road -> [first, last sample] of its city's hall (view/network_world.gd)
-var hall_db := -80.0            # the tunnel ring's level (tests)
+var hall_db := -80.0            # retained telemetry: the removed tunnel ring is always silent
 var dawn_db := -80.0            # the dawn's roar (tests)
 var hiss_db := -80.0            # its hiss (tests)
 var beeps := 0                  # the pad's beeps played (tests)
 var cues: Array[String] = []    # one-shot cues played, in order (tests)
 var _wind_rev: AudioEffectReverb
 var _wind_bus := -1
-var _hall: AudioStreamPlayer
 var _rumble: AudioStreamPlayer
 var _hiss: AudioStreamPlayer
 var _shots: Array[AudioStreamPlayer] = []
@@ -48,14 +46,6 @@ func setup(craft_sim) -> void:
 		var lim := AudioEffectHardLimiter.new()
 		lim.ceiling_db = -1.0
 		AudioServer.add_bus_effect(course, lim)
-	var hall := _bus("Hall", "Course")
-	if AudioServer.get_bus_effect_count(hall) == 0:
-		var rv := AudioEffectReverb.new()
-		rv.room_size = 0.9
-		rv.damping = 0.3
-		rv.wet = 0.55
-		rv.dry = 0.8
-		AudioServer.add_bus_effect(hall, rv)
 	_bus("Dawn", "Course")
 	# the enclosure's reverb on the Wind bus (WindAudio's), ahead of its limiter; removed on exit
 	_wind_bus = AudioServer.get_bus_index("Wind")
@@ -71,7 +61,6 @@ func setup(craft_sim) -> void:
 				at = k
 				break
 		AudioServer.add_bus_effect(_wind_bus, _wind_rev, at)
-	_hall = _player(make_hall(), "Hall")
 	if not sim.job.is_empty():
 		_rumble = _player(make_rumble(), "Dawn")
 		_hiss = _player(make_hiss(), "Dawn")
@@ -128,15 +117,12 @@ func enclosed() -> bool:
 
 func update(delta: float, dawn_dist: float) -> void:
 	var Pd = sim.pod
-	var v: float = sqrt(Pd.vx * Pd.vx + Pd.vy * Pd.vy)
 	var enc := enclosed()
 	wet = _follow(wet, 1.0 if enc else 0.0, ENCLOSE_TAU, delta)
 	if _wind_rev:
 		_wind_rev.wet = 0.42 * wet
 		_wind_rev.dry = 1.0 - 0.2 * wet
-	var ring := wet * clampf(v / 900.0, 0.0, 1.0)
-	hall_db = linear_to_db(ring) - 4.0 if ring > 1e-3 else -80.0
-	_level(_hall, hall_db)
+	hall_db = -80.0  # no continuous tunnel tone; enclosure uses the existing wind only
 	if sim.job.is_empty():
 		dawn_db = -80.0
 		return
@@ -294,37 +280,6 @@ static func make_hiss() -> AudioStreamWAV:
 		l[i] = ll * flick
 		r[i] = lr * flick
 	return _wav(l, r, RATE, 0.7, n)
-
-
-## A hall's ring at speed: band noise (120-600 Hz) through a resonant comb at 85 Hz, 2 s loop.
-static func make_hall() -> AudioStreamWAV:
-	var n := int(2.0 * RATE_LO)
-	var m := n + int(XF * RATE_LO)
-	var rng := RandomNumberGenerator.new()
-	rng.seed = 1187
-	var l := PackedFloat32Array()
-	var r := PackedFloat32Array()
-	l.resize(m)
-	r.resize(m)
-	var a_lo := 1.0 - exp(-TAU * 600.0 / RATE_LO)
-	var a_hi := 1.0 - exp(-TAU * 120.0 / RATE_LO)
-	var d := int(RATE_LO / 85.0)
-	var bl := 0.0
-	var br := 0.0
-	var hl := 0.0
-	var hr := 0.0
-	for i in m:
-		var xl := rng.randf_range(-1.0, 1.0)
-		var xr := rng.randf_range(-1.0, 1.0)
-		bl += a_lo * (xl - bl)
-		br += a_lo * (xr - br)
-		hl += a_hi * (bl - hl)
-		hr += a_hi * (br - hr)
-		var sl := bl - hl
-		var sr := br - hr
-		l[i] = sl + (0.72 * l[i - d] if i >= d else 0.0)
-		r[i] = sr + (0.72 * r[i - d] if i >= d else 0.0)
-	return _wav(l, r, RATE_LO, 0.8, n)
 
 
 ## A short beep: a sine at f, 5 ms attack, quick decay.

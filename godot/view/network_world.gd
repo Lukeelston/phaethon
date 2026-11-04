@@ -914,29 +914,72 @@ func _hoop(J: Dictionary, R: CraftSim.TrackPath, i: int, hw: float, h: float, li
 		_quad(st, [p + along, e + along, e, p], c)
 
 
-## A lit chevron across the road at sample i, its point the way `way` (1 up the samples): on a launch
-## spur, pointing you up it.
-func _chevron(st: SurfaceTool, R: CraftSim.TrackPath, ox: float, oy: float, i: int, h: float, way: float) -> void:
-	var hw: float = R.w[i] / 2.0 * 0.62
-	var t := Vector3(R.tx[i], 0.0, -R.ty[i]) * way
-	var c := Color(1.0, 0.55, 0.12)
-	var mid := _p(R, ox, oy, i, 0.0, h + 0.1)
-	var run := 90.0   # the arms sweep back this far
-	var wide := 18.0  # along the road, each arm
-	for sd in [-1.0, 1.0]:
-		var e := _p(R, ox, oy, i, sd * hw, h + 0.1) - t * run
-		var q := [mid, mid + t * wide, e + t * wide, e] if sd > 0.0 else [e, e + t * wide, mid + t * wide, mid]
-		_quad(st, q, c)
+## Clip each arrow arm to actual pavement triangles in (sample, lateral) coordinates.
+## A twisted road is triangulated, not a bilinear surface: interpolating row frames
+## alone can put paint underneath the diagonal between two differently banked rows.
+func _paint_arrow(st: SurfaceTool, R: CraftSim.TrackPath, ox: float, oy: float, i: int, way: float, off: float, half_width: float, run: float, thickness: float) -> void:
+	var r: int = sim.roads.find(R)
+	var tip := float(i)
+	var tail := tip - way * run / CraftSim.NET_STEP
+	var wide := way * thickness / CraftSim.NET_STEP
+	var first := maxi(0, floori(minf(tip,tail)+minf(0.0,wide)))
+	var last := mini(R.N-1, ceili(maxf(tip,tail)+maxf(0.0,wide)))
+	if last <= first: return
+	var sec := _section(R.w[i])
+	var grid := {"r":r,"ox":ox,"oy":oy,"u0":0.0,"rv":PackedVector3Array(),"rn":PackedVector3Array(),"ru":PackedVector2Array(),"rows":0,"cols":0,"joins":true}
+	for row in range(first,last+1): _road_row(grid,R,sec,row,_h(r,row))
+	var cols: int = grid.cols
+	for side in [-1.0,1.0]:
+		var edge: float = off + side * half_width
+		var arm := PackedVector2Array([Vector2(tip,off),Vector2(tip+wide,off),Vector2(tail+wide,edge),Vector2(tail,edge)])
+		for row in range(first,last):
+			for col in cols-1:
+				var lo: float = sec.o[col]
+				var hi: float = sec.o[col+1]
+				if hi < minf(off,edge) or lo > maxf(off,edge): continue
+				var cell := [Vector2(row,lo),Vector2(row,hi),Vector2(row+1,hi),Vector2(row+1,lo)]
+				var start := (row-first)*cols+col
+				var corners := [start,start+1,start+cols+1,start+cols]
+				for indices in [[0,1,2],[0,2,3]]:
+					var a: Vector2 = cell[indices[0]]
+					var b: Vector2 = cell[indices[1]]
+					var c: Vector2 = cell[indices[2]]
+					var va: Vector3 = grid.rv[corners[indices[0]]]
+					var vb: Vector3 = grid.rv[corners[indices[1]]]
+					var vc: Vector3 = grid.rv[corners[indices[2]]]
+					var normal := (vc-va).cross(vb-va).normalized()
+					var ab := b-a
+					var ac := c-a
+					var determinant := ab.cross(ac)
+					for polygon in Geometry2D.intersect_polygons(arm,PackedVector2Array([a,b,c])):
+						var points := PackedVector3Array()
+						for point in polygon:
+							var d: Vector2 = point-a
+							var wb := d.cross(ac)/determinant
+							var wc := ab.cross(d)/determinant
+							points.append(va+(vb-va)*wb+(vc-va)*wc+normal*0.1)
+						st.set_color(JUMP_AMBER)
+						st.set_normal(normal)
+						for k in range(1,points.size()-1):
+							var pa := points[0]
+							var pb := points[k]
+							var pc := points[k+1]
+							if (pb-pa).cross(pc-pa).dot(normal)>0.0:
+								var swap := pb
+								pb=pc
+								pc=swap
+							st.add_vertex(pa)
+							st.add_vertex(pb)
+							st.add_vertex(pc)
 
 
-## Narrow highway/ramp arrows occupy the exit lane and remain part of the streamed road mesh.
-func _approach_arrow(st: SurfaceTool, R: CraftSim.TrackPath, ox: float, oy: float, i: int, h: float, way: float, off: float) -> void:
-	var t := Vector3(R.tx[i], 0.0, -R.ty[i]) * way
-	var mid := _p(R, ox, oy, i, off, h + 0.14)
-	for side in [-1.0, 1.0]:
-		var edge := _p(R, ox, oy, i, off + side * 22.0, h + 0.14) - t * 48.0
-		var q := [mid, mid + t * 10.0, edge + t * 10.0, edge] if side > 0.0 else [edge, edge + t * 10.0, mid + t * 10.0, mid]
-		_quad(st, q, JUMP_AMBER)
+## Broad launch chevrons and narrow exit-lane arrows share the actual road frame.
+func _chevron(st: SurfaceTool, R: CraftSim.TrackPath, ox: float, oy: float, i: int, _h0: float, way: float) -> void:
+	_paint_arrow(st,R,ox,oy,i,way,0.0,R.w[i] * 0.31,90.0,18.0)
+
+
+func _approach_arrow(st: SurfaceTool, R: CraftSim.TrackPath, ox: float, oy: float, i: int, _h0: float, way: float, off: float) -> void:
+	_paint_arrow(st,R,ox,oy,i,way,off,22.0,48.0,10.0)
 
 
 ## The chunk in hand's ends (a barrier where nothing goes on), its meshes committed.

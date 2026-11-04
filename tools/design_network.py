@@ -65,9 +65,17 @@ STRAIGHT = ("E2", "N2", "E3")     # dead straight edge to edge (Luke); the other
 # the highway, a bulb SH_BULB, back on its left) whose bulb carries the craft round (NET_SHAFTS: its
 # curvature turns the bodies with it, nothing to steer); view/network_shaft.gd draws the plan's stretch
 # between the two feet as the shape above, and sim heights are the real altitude along it.
-SH_R = 3504.0                     # m: the pull-up, the top and the pull-out (2 SH_R and the legs' flats whole samples,
-                                  # so the world's feet land exactly on the plan's)
-SH_BULB = 3600.0                  # m: the plan's bulb (its length sets SH_V)
+# (world arc radius, plan bulb radius), E1-/+ through N3-/+.
+# Whole 12 m radii keep 2R aligned to the 24 m sample grid and both feet exact.
+# Narrow spires, broad crowns and intermediate arches each have their own silhouette.
+SH_PROFILES = [
+    (2400.0, 4800.0), (5400.0, 4200.0),
+    (3000.0, 6000.0), (6000.0, 4800.0),
+    (3600.0, 3600.0), (4200.0, 5400.0),
+    (2808.0, 5400.0), (6600.0, 4800.0),
+    (4008.0, 6000.0), (4800.0, 4200.0),
+    (3204.0, 6600.0), (5700.0, 5100.0),
+]
 SH_SPLIT = 1600.0                 # the two legs leave the highway this far before its end
 SH_FLAT = 296.0                   # the landing touches down this far past the highway's end
 SH_KEYS = 24                      # samples between the height keys round the arcs
@@ -358,14 +366,14 @@ def shaft_z(d, R, V):
     return 0.0, 0.0
 
 
-def shaft_keys(r, i_up, i_dn, V):
+def shaft_keys(r, i_up, i_dn, radius, V):
     """Height keys [sample, m, slope] along a shaft: every SH_KEYS samples, the exact height and slope, so
     the sims' Hermite cubics hold the real altitude (the view's shape: view/network_shaft.gd)."""
     s = np.concatenate([[0.0], np.cumsum(r.len[:-1])])
     keys = [[0, 0.0, 0.0]] if i_up > 0 else []
     i = i_up
     while True:
-        z, m = shaft_z(s[i] - s[i_up], SH_R, V)
+        z, m = shaft_z(s[i] - s[i_up], radius, V)
         keys.append([i, z, m])
         if i >= i_dn:
             break
@@ -420,12 +428,12 @@ def build():
     # along its left. A leg's flat stretch: from the split past the highway's end by the landing (the way
     # back) or by the landing and 2 SH_R (the way out: the top comes back that far over the road)
     shafts = []
-    ca = (OFF + SH_BULB) / (2 * SH_BULB)
-    alpha = math.degrees(math.acos(ca))
-    bulb = SH_BULB * math.radians(360.0 + 4 * alpha - 180.0)   # (alpha, 180 + 2 alpha, alpha)
     for hi in ew + ns:
         H = roads[hi]
         for end in (0, 1):
+            radius, bulb_radius = SH_PROFILES[len(shafts)]
+            ca = (OFF + bulb_radius) / (2 * bulb_radius)
+            alpha = math.degrees(math.acos(ca))
             if end == 1:
                 px, py = H.p[-1]
                 u = H.t[-1]
@@ -435,19 +443,19 @@ def build():
             nl = (-u[1], u[0])
             sx, sy = px - SH_SPLIT * u[0] - OFF * nl[0], py - SH_SPLIT * u[1] - OFF * nl[1]
             land = SH_SPLIT + SH_FLAT                 # flat, split to touchdown (and the plan's way back)
-            out = land + 2 * SH_R                     # flat, split to pull-up (and the plan's way out)
+            out = land + 2 * radius                     # flat, split to pull-up (and the plan's way out)
             r = Road(f"T{H.name}{'+' if end else '-'}", "turn", sx, sy, heading_deg(u[0], u[1]), W_RAMP,
-                     [("S", out, 0, "sp"), ("R", SH_BULB, alpha, "sp"), ("L", SH_BULB, 180.0 + 2 * alpha, "sp"),
-                      ("R", SH_BULB, alpha, "sp"), ("S", out, 0, "sp")])
+                     [("S", out, 0, "sp"), ("R", bulb_radius, alpha, "sp"), ("L", bulb_radius, 180.0 + 2 * alpha, "sp"),
+                      ("R", bulb_radius, alpha, "sp"), ("S", out, 0, "sp")])
             # the world's length between the feet is the plan's: bulb + (out - land) back on the leg
             s_up, s_dn = out, r.len[:-1].sum() - land
-            V = (s_dn - s_up - 2 * math.pi * SH_R) / 2.0
+            V = (s_dn - s_up - 2 * math.pi * radius) / 2.0
             assert V > 2000, f"the shaft's straight is only {V:.0f} m"
             i_up, i_dn = int(round(out / STEP)), r.N - 1 - int(round(land / STEP))
             s_up, s_dn = float(np.sum(r.len[:i_up])), float(np.sum(r.len[:i_dn]))
-            V = (s_dn - s_up - 2 * math.pi * SH_R) / 2.0
-            r.keys = shaft_keys(r, i_up, i_dn, V)
-            shafts.append((len(roads), i_up, i_dn, SH_R, V))
+            V = (s_dn - s_up - 2 * math.pi * radius) / 2.0
+            r.keys = shaft_keys(r, i_up, i_dn, radius, V)
+            shafts.append((len(roads), i_up, i_dn, radius, V))
             joins += [(len(roads), 0, hi), (len(roads), 1, hi)]
             roads.append(r)
     # the jump sets: one each way through each crossing in JUMP_AT, off the exit ramp on that way's right

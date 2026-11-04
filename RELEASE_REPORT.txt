@@ -1408,3 +1408,53 @@ Both42-file allowlists; historical archives retained and hashes verified.
 Local release branch only. No remote push, merge or store upload.
 Headset ramp feel, distance transitions and sustained VR performance remain
 unverified - needs user confirmation on the launched build.
+
+
+v0.2.6 - clear sightlines and varied end towers - 2026-11-03
+==========================================================
+Removed the continuous 85 Hz resonant tunnel loop/player/bus; retained Wind
+enclosure reverb, engine audio, speed shield and emergency/gate cues.
+Amber arrows are clipped to the actual graded/banked road triangles, including
+their interiors, and offset 10 cm above each face. Twelve end towers now have
+distinct radii/vertical legs: tops 12.57-23.62 km, radii 2.4-6.6 km. Both sims
+are generated together; original ground connections and four barrel rolls remain.
+The minimap fits the expanded road plans instead of clipping at its old bounds.
+The forcefield's clear region now follows the camera ray, with a clear forward
+cone and restrained peripheral emission. Regional haze/exposure remain intact.
+
+VERIFICATION
+Python tower/profile/rhythm gates: 2 + 10 + 5 passed. Generator design clearances
+passed. 96 shaft speed/direction cases across all twelve profiles reached the
+opposite foot and apex without crash, binder break or off-road state; ride-height
+error below 5 cm. Actual GPU shaft mesh/traffic237 checks passed. Godot rendered
+craft/headset high-speed contact, stall and complete JS/GD replay parity passed.
+Paint: 21,632 independent actual-triangle ray probes passed, including backwards,
+sideways and inverted arrow interiors; worst clearance deviation4.25mm.
+GPU canopy30 speed/burner/head-lean/impact/decay conditions passed. At6000mph,
+mean forward RGB difference from field-disabled control fell0.03243->0.000147.
+Impact flashes remain visible and decay. Captured speed shield retains36Hz
+reverberation and speed-rising tone. Course audio7 and shield28 checks passed.
+Jump matrix60 cases, landings200 positive/8 negative, fast capture81 cases,
+twists4197 checks, junction geometry, guidance, world/minimap and landscape33
+checks passed. Landscape tested121,530 road probes. Partner28 maneuver checks
+and19,529 recorded-player frames passed with zero overlaps.
+Actual Vulkan tower/ramp/cockpit screenshots inspected. Independent review found
+two test gaps (false-positive shaft exits and unrendered impact flashes); both
+closed. Follow-up review accepted exact-triangle paint and dynamic minimap bounds.
+
+PERFORMANCE
+Matched isolated desktop workload: stream CPU mean 4.899->4.856ms; GPU mean 0.479->0.464ms.
+Frame-wall p95 37.91->38.08ms; current max 55.28ms.
+Existing streaming finish/upload hitches remain. This is mono desktop scenery,
+not a compositor/VR frame-rate claim. See evidence/v026-release-verification.json.
+
+ARTIFACTS
+Fresh desktop186/186 and PCVR XR-off305/305 diagnostic checks passed.
+Phaethon-Experimental-0.2.6-Windows.zip
+  bytes 61440266; SHA256 467260ed17d1b70e59f24c2e719ad96a92dedc051f2475fd962bb1c2471016ce
+Phaethon-Experimental-0.2.6-Windows-PCVR.zip
+  bytes 61530604; SHA256 b8582e4c7d0df3c77601d49cec37e042a76b528be9cc81619fe1097d23d95a05
+Both42-file package allowlists validated. All historical archives retained.
+Local release branch only; no store publication, remote push or merge.
+Physical headset appearance, sound and feel remain unverified - needs user
+confirmation. Source changes and local artifacts are ready for that evaluation.

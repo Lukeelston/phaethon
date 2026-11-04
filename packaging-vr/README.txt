@@ -1,5 +1,5 @@
 PHAETHON - EXPERIMENTAL PC VR EDITION
-Windows x64 / OpenXR - v0.2.5 - ElstonWorks
+Windows x64 / OpenXR - v0.2.6 - ElstonWorks
 
 Two engines. One cockpit. We know it's a little fucky.
 
@@ -11,6 +11,9 @@ Jump approaches now climb in one continuous bow, with varied heights and
 smooth recovery descents. Service courts, solar fields, wind turbines and
 basalt spires fill out the countryside. Distant roads reach into the haze,
 terrain extends farther, and new scenery fades into view.
+Twelve highway-end towers now have distinct heights and curved profiles.
+Ramp arrows follow the pavement. The continuous tunnel buzz is gone, and
+the speed shield keeps the forward view clear while glowing at the edges.
 
 START HERE
 1. Extract the whole ZIP. Keep PhaethonVR.exe and PhaethonVR.pck together.
@@ -154,7 +157,7 @@ copyright. Third-party components and the CC BY engine audio retain their
 own licenses and permissions. See THIRD_PARTY_NOTICES.txt and licenses/.
 Adapted engine audio is supplied separately in audio/engines/.
 
-Build: 0.2.5-experimental | 2026-11-03
+Build: 0.2.6-experimental | 2026-11-03
 
 IN THIS LOCAL BUILD
 Central highway transfers and long side-road sweeps now alternate bends with

@@ -45,7 +45,8 @@ var gp_cities: Array = []           # the cities with a GP (names; the view sets
 var _w_lines := []                  # the whole map's roads: [[points (m, from W_MID, north up), modes], ...]
 var _w_marks := []                  # ... its marks: [[at, kind], ...] ("jump", "gp", "city", "ramp")
 const W_MID := Vector2(300000.0, 300000.0)   # the country's middle
-const W_HALF := 300000.0            # m: half the whole map's side (the roads run 25-575 km, the shafts' plans a little past)
+const W_HALF := 300000.0            # minimum half extent; larger end towers expand the fitted map
+var _w_half := W_HALF
 const W_STEP := 20                  # samples between the whole map's points (~480 m)
 const JUMP_COL := Color(1.0, 0.55, 0.1)
 const GP_COL := Color(1.0, 0.3, 0.75)
@@ -83,13 +84,16 @@ func mode_at(i: int) -> int:
 func _net_setup() -> void:
 	_w_lines.clear()
 	_w_marks.clear()
+	_w_half = W_HALF
 	for r in sim.roads.size():   # the whole map: every road, coarse
 		var R = sim.roads[r]
 		var pts := PackedVector2Array()
 		var modes := PackedByteArray()
 		var i := 0
 		while true:
-			pts.append(Vector2(R.px[i], R.py[i]) - W_MID)
+			var point := Vector2(R.px[i], R.py[i]) - W_MID
+			pts.append(point)
+			_w_half = maxf(_w_half, maxf(absf(point.x), absf(point.y)) + 1000.0)
 			modes.append(R.mode[i])
 			if i >= R.N - 1:
 				break
@@ -252,7 +256,7 @@ func _whole_update(heading: float) -> Dictionary:
 		if gp_cities.has(c.name):
 			mk.append([Vector2(c.cx, c.cy) - W_MID, "gp"])
 	var f := {"pts": PackedVector2Array(), "modes": PackedByteArray(), "ahead": ahead, "next": {}, "whole": true,
-		"lines_w": _w_lines, "half": W_HALF, "marks_w": mk,
+		"lines_w": _w_lines, "half": _w_half, "marks_w": mk,
 		"craft_at": Vector2(sim.pod.x, sim.pod.y) - W_MID, "craft_dir": Vector2(cos(heading), sin(heading))}
 	if not waypoint.is_empty():
 		f["target"] = {"name": waypoint.name, "dist": Vector2(float(waypoint.x) - sim.pod.x, float(waypoint.y) - sim.pod.y).length(), "at_w": Vector2(float(waypoint.x), float(waypoint.y)) - W_MID}
