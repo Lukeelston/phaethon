@@ -991,8 +991,10 @@ func _update_skill_readout() -> void:
 		_skill_readout.scale = Vector3.ONE * lerpf(0.7, 1.15, weight)
 		_skill_readout.text = display.total
 		_skill_readout.modulate = Color(0.65, 0.96, 0.9, lerpf(0.52, 1.0, weight))
+		_skill_readout.outline_modulate.a = lerpf(0.52, 0.95, weight)
 		_skill_award.text = display.award
 		_skill_award.modulate = Color(0.65, 0.96, 0.9, weight)
+		_skill_award.outline_modulate.a = 0.95 * weight
 
 
 func _set_skill_visible(on: bool) -> void:

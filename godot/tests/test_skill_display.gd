@@ -53,8 +53,10 @@ func _run() -> void:
 		await shot(v, "vr-fading" if vr else "desktop-fading")
 		check("total and award visibly fade toward corner VR=%s" % vr, label.position.x > active.x and label.position.x < corner.x and award.modulate.a > 0.0 and award.modulate.a < 1.0)
 		v.skill_score.time += 1.0
-		v._update_hud()
+		await shot(v, "vr-returned" if vr else "desktop-returned")
 		check("after earning stops only quiet total remains VR=%s" % vr, label.position.distance_to(corner) < 0.001 and label.text.contains("1225") and award.modulate.a == 0.0)
+		if vr:
+			check("faded VR award leaves no outline ghost", award.outline_modulate.a == 0.0)
 		v.skill_score._award("speed", "SPEED", 18, false)
 		v._update_hud()
 		check("new points reactivate center display VR=%s" % vr, label.position.distance_to(active) < 0.001 and label.modulate.a > 0.95)

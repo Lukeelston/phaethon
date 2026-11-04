@@ -372,6 +372,7 @@ func _protect_player(point: Vector2, dt: float) -> Vector2:
 	var radius := maxf(48.0, player_radius + partner_radius + 12.0)
 	var nose := Vector2(cos(th), sin(th)) * half_span
 	var desired := point + nose - center
+	desired = _traffic_escape(desired, center, radius, partner_radius, nose)
 	if _safe_ready:
 		desired = _safe_relative.move_toward(desired, 85.0 * dt)
 	var corrected := desired
@@ -409,6 +410,48 @@ func _protect_player(point: Vector2, dt: float) -> Vector2:
 func _inside_road(point: Vector2, frame: Dictionary, radius: float) -> bool:
 	var normal := Vector2(-frame.fw.y, frame.fw.x)
 	return absf((point - frame.point).dot(normal)) <= maxf(10.0, frame.width * 0.5 - radius - 4.0)
+
+
+## Final separation can translate a reserved lane when the pilot moves sideways.
+## Pick a clear nearby goal before applying the continuous player-clearance arc.
+func _traffic_escape(desired: Vector2, center: Vector2, radius: float, body_radius: float, nose: Vector2) -> Vector2:
+	var traffic = view.get("traffic_net")
+	if traffic == null or sim.kind != "network" or sim.pod.off_road:
+		return desired
+	var capsules := []
+	var velocity := (Vector2(sim.eL.vx, sim.eL.vy) + Vector2(sim.eR.vx, sim.eR.vy)) * 0.25 + Vector2(sim.pod.vx, sim.pod.vy) * 0.5
+	for c in traffic.cars:
+		var relative := Vector2(c.x, c.y) - center
+		if relative.length_squared() > 1000000.0 or absf(sim.net_height(c.road, c.f) - sim.pod.z) > 20.0:
+			continue
+		var heading := Vector2(c.hx, c.hy)
+		var reach := 275.0 if c.kind == 3 else 9.0
+		var clearance := body_radius + (8.4 if c.kind == 3 else 6.4) + 6.0
+		for seconds in [0.0, 0.65]:
+			var pos: Vector2 = relative + (heading * c.v - velocity) * seconds
+			capsules.append([pos - heading * reach, pos + heading * 9.0, clearance])
+	if _traffic_gap(desired, capsules) >= 0.0:
+		return desired
+	var frame := _frame(0.0)
+	var best := INF
+	var result := desired
+	for reach in [radius + 3.0, radius + 75.0]:
+		for k in 36:
+			var candidate: Vector2 = Vector2.from_angle(TAU * k / 36.0) * reach
+			if not _inside_road(center + candidate - nose, frame, body_radius) or _traffic_gap(candidate, capsules) < 0.0:
+				continue
+			var cost := candidate.distance_squared_to(desired)
+			if cost < best:
+				best = cost
+				result = candidate
+	return result
+
+
+func _traffic_gap(point: Vector2, capsules: Array) -> float:
+	var gap := INF
+	for capsule in capsules:
+		gap = minf(gap, point.distance_to(Geometry2D.get_closest_point_to_segment(point, capsule[0], capsule[1])) - capsule[2])
+	return gap
 
 
 func _draw_it() -> void:
