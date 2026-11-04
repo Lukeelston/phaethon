@@ -1290,3 +1290,63 @@ v023-adjacent-red.log, v023-partner_adjacent_traffic.log, v023-score-render-veri
 v023-score/{vr-idle,vr-earning,vr-fading,vr-returned}.png, v023-headset.log.
 Only the requested interactive PC VR player remains among owned game/test
 processes; export, render, diagnostic and build helpers have terminated.
+
+
+V0.2.4 NETWORK ENVIRONMENT - 2026-11-03
+
+Replaced Network's sprint mountain strips and player-pinned ring with fixed,
+world-coordinate terrain. Nine geographic families: grassy plains/farmland,
+tundra, rocky mountains, desert, snowy alpine terrain, wetlands, jungle,
+urban districts and red mesas. Terrain and ground colors are spatially fixed.
+Added clustered regional plants, farms/silos, utility sites, stilt buildings,
+industrial compounds, urban blocks, facade windows, wetland water, fixed cloud
+patterns and regional haze. This is procedural art, not photorealistic assets.
+
+Road clearance uses actual carried road coordinates and protects whole terrain
+triangles. City/landmark foundations are cleared and grounded. Up to121 terrain
+tiles,25 near decoration tiles; two terrain rows/four vegetation groups built
+per slice. Previous maps retain their existing landscapes. Physics, scoring,
+partner logic and road geometry are unchanged. Scenic relief remains visual;
+the existing off-road physics surface is still the zero plane.
+
+VERIFICATION
+Landscape27/27:118,902 road/shoulder probes, exact seams/recreation, origin
+invariance, all regional families, bounded eviction, whole prop footprints,
+independent rendered-triangle support, water phase continuity, and all20 jump
+corridors. Minimum measured prop-to-road clearance218.7m with100m sampling
+allowance; lowest flight-corridor terrain clearance632.3m below endpoint deck.
+Affected source checks174/174 total including scenery49, range12, city GPs8,
+partner maneuvers28/replay2/adjacent1, score21/display17, Network world9.
+Network world headless road chunks3.5ms; this does not establish that the
+historical actual-render road-chunk timing issue has been fixed.
+
+Actual Vulkan: nine regional views plus three correctly streamed on-road
+views, inspected across the art passes. GPU MultiMesh anchors independently
+read back and checked. Final rendering had no errors. Worst added landscape
+slice4.674ms, vegetation3.328ms on RTX5080. These are added-scene CPU work
+measurements, not a claim about total headset frame time or minimum hardware.
+
+Fresh-context review: no Critical/Important findings. Both Minor findings
+addressed: world-coordinate water ripples (RED then GREEN seam test), and
+independent mesh-triangle/GPU-anchor support checks. Compound foundations
+also extended below the grade. No second reviewer or unresolved finding.
+
+Fresh-extracted desktop186/186 and PCVR with XR off305/305 release checks
+passed. Import, exports and all Godot runs serialized. SHA256 checks cover
+all previous0.1.9-0.2.3 archives plus both new archives. Old versions retained.
+
+LIVE PLAYTEST
+Fresh-extracted PCVR0.2.4 launched with Network selected and partner enabled.
+OpenXR startup evidence: evidence/v024-headset.log. Physical headset appearance
+and high-speed frame pacing are unverified - needs user confirmation.
+No store upload, push or merge. Original and Claude repositories untouched.
+Only the requested interactive PCVR game is left running; owned tests/export
+helpers exited. Previously rejected cleanup folders were retained.
+
+ARTIFACTS
+Desktop:61417996bytes; SHA256 8ba472863dd9870ae275a8db47e23229df0eea424e832f38dd7195fb0e098591
+PCVR:61508384bytes; SHA256 5ac72dc14dde234f710052c4ec640411d7ce205baca0f63cb76ad4a6cb118806
+Both contain42 allowlisted files. Evidence:v024-build-0.json,v024-checks.json,
+v024-flight-corridors.log,v024-review-minors-red.log,
+v024-review-fixes-green.log,v024-environment-road-verified.log,
+v024-environment/*.png,v024-headset.log. Source checkpoints1945648,7fc600a.

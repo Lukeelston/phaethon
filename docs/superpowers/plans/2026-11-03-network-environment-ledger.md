@@ -22,6 +22,6 @@ Affected regression batch: Network scenery49, range scenery12, city GPs8, partne
 
 Final actual Vulkan inspection: nine regional aerials plus three on-road views; actual GPU prop anchors match generated placement. Last run v024-environment-road-verified.log passed without errors, worst added landscape slice4.674 ms and prop slice3.328 ms. Inspected all nine regional families across the render passes, including snow road corridor, wetland water and city facades. Camera/stream origin in road screenshot harness corrected so the photographed road is actually loaded. Source visual checks do not substitute for physical headset confirmation.
 
-Fresh desktop/PCVR exports and extracted diagnostics in progress. Headset appearance and frame pacing remain pending Luke.
+Final local artifacts: desktop186/186 and PCVR XR-off305/305 diagnostics pass; hashes verify for all12 historical/current archives. Fresh PCVR0.2.4 launched for the requested Network playtest. Headset appearance and frame pacing remain pending Luke. All owned temporary test/export processes exited; only the interactive game is retained. Local release branch retained as established; no push, merge, or store update. Execution record is archived here in git; no disposable workspace was created or deleted.
 
 Live Atlas memory check: 17,015 bytes / 131 lines, 0 dead links and 0 orphan files. The session-start 137-orphan warning is stale; the 137 entries are linked through reference_hub.md. No memory edits required.

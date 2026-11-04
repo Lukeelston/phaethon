@@ -31,10 +31,10 @@ Files: create `godot/view/network_landscape.gd`, `network_terrain.gdshader`; mod
 
 Interfaces: `build(sim, world)`, `sync(ox, oy)`, `region_at(p)`, `height_at(p)`, `surface_at(p)`, `color_at(p)`; `tiles` stores fixed tile origins and nodes.
 
-- [ ] Reproduce old pinned-ring defect with actual Network view and test that it is replaced by geographic terrain.
-- [ ] Implement world-coordinate atlas, clearance raster from `_wxy`, triangle-aligned protected corridor and deterministic shared-grid terrain. Network ground fallback uses the same spatial palette.
-- [ ] Prove dense road clearance, seams, invariance, all regions, upward winding, eviction and measured slices; retain other-map scenery.
-- [ ] Checkpoint commit.
+- [x] Reproduce old pinned-ring defect with actual Network view and test that it is replaced by geographic terrain.
+- [x] Implement world-coordinate atlas, clearance raster from `_wxy`, triangle-aligned protected corridor and deterministic shared-grid terrain. Network ground fallback uses the same spatial palette.
+- [x] Prove dense road clearance, seams, invariance, all regions, upward winding, eviction and measured slices; retain other-map scenery.
+- [x] Checkpoint commit.
 
 ### Task 2: Regional life and atmosphere
 
@@ -42,16 +42,16 @@ Files: create `godot/view/network_biome_props.gd`, atmosphere/cloud shader as ne
 
 Interfaces: cached `mesh(kind)` plus deterministic regional placement records supported by `surface_at(p)`, conservative `clear_at(p, radius)`.
 
-- [ ] Add meaningful clearance/support/budget checks before implementation.
-- [ ] Add regional plants, wetland water, settled compounds and cloud/air treatment; ensure existing towers and landmarks are grounded.
-- [ ] Render road-level/aerial region sheet and inspect real output; fix art defects; run affected regressions.
-- [ ] Checkpoint commit and one fresh read-only final review, addressing material issues with regression evidence.
+- [x] Add meaningful clearance/support/budget checks before implementation.
+- [x] Add regional plants, wetland water, settled compounds and cloud/air treatment; ensure existing towers and landmarks are grounded.
+- [x] Render road-level/aerial region sheet and inspect real output; fix art defects; run affected regressions.
+- [x] Checkpoint commit and one fresh read-only final review, addressing material issues with regression evidence.
 
 ### Task 3: Local playtest delivery
 
 Files: version/package metadata, release report and execution ledger.
 
-- [ ] Version 0.2.4; export and package both editions serially.
-- [ ] Run diagnostics on freshly extracted artifacts and inspect logs; retain historical ZIPs.
-- [ ] Commit report with honest evidence/limitations, clean up only owned test processes, and launch requested PCVR playtest.
-- [ ] Ask Luke for scenery/streaming confirmation; no claim of headset verification before response.
+- [x] Version 0.2.4; export and package both editions serially.
+- [x] Run diagnostics on freshly extracted artifacts and inspect logs; retain historical ZIPs.
+- [x] Commit report with honest evidence/limitations, clean up only owned test processes, and launch requested PCVR playtest.
+- [x] Ask Luke for scenery/streaming confirmation; no claim of headset verification before response.
