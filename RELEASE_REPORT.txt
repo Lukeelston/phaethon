@@ -1112,3 +1112,85 @@ Automatic approval review rejected deletion of the ignored old baseline copy
 .tools/v020-world-baseline with "blocked by policy". It remains on disk; no
 alternate deletion was attempted and no process runs from it. Prior archives
 and unrelated worktrees remain untouched. Local release branch retained.
+
+
+PHAETHON 0.2.2 — TRAFFIC, PARTNER AND SKILL REWARDS — 2026-11-03
+Production checkpoint: 67e6032, release/experimental. Local builds/playtest.
+
+CHANGES
+Traffic notices fast approaching craft earlier, considers the engines as well
+as the pod, and selects a gradual lane change that increases clearance. Its
+swept lane corridor must be clear; unavailable gaps do not trigger a sudden
+brake or teleport. Existing freight/racer behavior and route guards remain.
+The visual driving partner holds formation, sometimes speeds ahead, crosses
+well ahead and rejoins on the other side. Passes are limited to wide Network
+roads; narrow roads, jumps, other courses and shaft carry retain formation.
+Planning uses road-clamped positions, full craft envelopes, freight direction
+and crossing-traffic motion. Restart/route changes reset an in-progress pass.
+The partner remains nonphysical; avoidance is best effort, not a guarantee
+against a player deliberately steering into it or every possible route state.
+
+Skill rewards recognize sustained speed, clean fast turns, close traffic
+passes and settled jump landings. Clean skills build a multiplier up to 5x.
+Speed alone cannot build or prolong the chain. Impacts break the chain and
+retain earned points. Restart clears the run; per-course best scores persist.
+Swept full-body and height checks reject overlaps, other-deck traffic, warps
+and duplicate passes, even with obstacle collisions disabled. Desktop HUD
+and a compact two-line cockpit display show points, multiplier and the last
+award. Original short synthesized chimes have volume/cooldown limits.
+Vehicle physics, accepted landing behavior, course geometry and controls
+are unchanged by this iteration.
+
+VERIFICATION
+Final affected regression batch: 250/250 checks passed:
+partner maneuvers 28, placement 8, menu 75, scoring 21, yielding 9,
+courtesy 28, and fast-landing capture 81. Courtesy timing: 2.305 ms for
+220 vehicles against 2.5 ms gate. Fast capture maximum gap 42.46197 m;
+all tested arrivals settle and do not go beneath the deck.
+Earlier traffic/spawn and dashboard regressions also passed. Actual Vulkan
+feedback render/lifecycle/audio checks: 12/12. Desktop/VR screenshots were
+inspected; the final VR readout clears the main dashboard and road view.
+Captured mixed reward audio is non-silent and unclipped (peak 0.08378).
+Freshly extracted final desktop: 186/186; final PC VR with XR off: 305/305.
+Both diagnostics restore user preferences and isolate their best-score data.
+All eight archives for 0.1.9 through 0.2.2 pass recorded SHA256 verification.
+
+FINAL REVIEW
+Independent whole-change review found no Critical and three Important issues.
+All were reproduced in production-consumer regressions before fixing:
+1. Existing formation at the road boundary could be clamped through the
+   player. Both road directions failed; full-craft boundary tests now pass.
+2. Oncoming freight tails occupied the partner station on the opposite side
+   from the planner's assumption. Both directions failed and now pass.
+3. Transverse SLOW nose overlap could earn a near miss. That overlap failed
+   before the fix and now earns nothing; a clean transverse pass still scores.
+The final 250-check affected suite passed after the fixes. Crossing motion,
+full-craft clearance and route/restart transitions gained coverage. No material
+finding declined and no deferred minor. No second reviewer was dispatched.
+One new GDScript type-inference error was corrected after the test caught it;
+its owned process tree was terminated before rerunning. Earlier brief test
+overlap was followed by serialized gates; final exports/tests were serialized.
+
+LIMITS / LOCAL STARTUP
+The previous rendered world-test chunk-work budget issue remains (~22 ms
+versus 8 ms on baseline too); this iteration does not claim to fix it.
+Some existing view harnesses warn about ObjectDB objects at shutdown; their
+processes exit. No claim of a production leak fix is made.
+Fresh-extracted 0.2.2 PC VR started on the Oculus OpenXR runtime with
+xr_ready=true, PCVR STARTUP: menu and VR MENU: ready. Network is preselected
+and the partner is enabled by the local launch flag. Actual runtime and
+executable path were checked, rather than inferring launch from export success.
+Physical comfort, depth/readability in the headset, audio balance in driving
+ambience and reward satisfaction: unverified — needs user confirmation.
+Those review exclusions are assigned to Luke's playtest; archive/startup
+verification was assigned to root and passed. Existing performance limitation
+remains explicitly documented. No new integration permission is needed:
+the existing local release branch and unrelated worktrees are preserved.
+No store update, push or merge performed. Prior archives remain intact.
+
+ARTIFACTS
+Desktop: 61390828 bytes; SHA256 2059b4082803932a73ed10c5fcadc21fa7fc7fafdafcaab08dcf634c0a31ae94
+PC VR: 61480749 bytes; SHA256 a148d76417b6b4b86204eed15b257e33c2a8052205444d655b73de92a6d94e97
+Both archives contain 42 allowlisted files. Evidence: v022-build-0.json,
+v022-gates-latest.json, v022-*-extracted.log, v022-headset.log,
+v022-feedback/{desktop.png,vr.png,reward-mix.wav}.
