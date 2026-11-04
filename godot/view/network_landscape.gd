@@ -280,6 +280,7 @@ func _water(key: Vector2i, node: Node3D) -> void:
 	instance.mesh = plane
 	instance.position = Vector3(TILE/2,-2.0,-TILE/2)
 	instance.material_override = water_material
+	instance.set_instance_shader_parameter("world_offset",Vector2((key.x+0.5)*TILE,-(key.y+0.5)*TILE))
 	instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	node.add_child(instance)
 

@@ -14,6 +14,14 @@ Task 2: vegetation/habitation regression first failed (v024-props-red.log). The 
 
 Rendered first pass found expensive dense vegetation generation (up to 42.9 ms). Reworked it into four-grove slices and terrain into two-row slices with normals built incrementally. Headless worst landscape slice 1.37 ms after this fix. Actual rendered recheck pending. Real render inspection also drove geographic field pattern/detail and closer, independently cleared vegetation.
 
-Verification still pending: final rendering/art pass, independent prop-to-road geometry check, regression gates, final review, fresh exports, headset confirmation.
+Final review: fresh environment_final_review found no Critical/Important defects. Both Minor findings addressed: water has an instance world offset (boundary regression RED then GREEN); support is independently interpolated from generated mesh indices and triangle planes, with actual GPU MultiMesh anchor readback in the render harness. Building compound foundations extend into the ground to cover modest local slopes.
+
+Final landscape gate: 27/27. 118,902 road/shoulder probes, independent prop-to-road minimum 218.7 m (with 100 m between-sample allowance), all 20 jump corridors clear by at least 632.3 m below their lower endpoint deck. Mesh support error 0.0000 m. Headless worst slice varies 1.4-4.2 ms across runs.
+
+Affected regression batch: Network scenery49, range scenery12, city GPs8, partner maneuvers28, recorded player replay2, adjacent traffic1, skill rules21, skill display17, Network world9 all pass. Network world headless chunk work measured3.5 ms; this does not prove the historical GPU chunk timing issue is resolved.
+
+Final actual Vulkan inspection: nine regional aerials plus three on-road views; actual GPU prop anchors match generated placement. Last run v024-environment-road-verified.log passed without errors, worst added landscape slice4.674 ms and prop slice3.328 ms. Inspected all nine regional families across the render passes, including snow road corridor, wetland water and city facades. Camera/stream origin in road screenshot harness corrected so the photographed road is actually loaded. Source visual checks do not substitute for physical headset confirmation.
+
+Fresh desktop/PCVR exports and extracted diagnostics in progress. Headset appearance and frame pacing remain pending Luke.
 
 Live Atlas memory check: 17,015 bytes / 131 lines, 0 dead links and 0 orphan files. The session-start 137-orphan warning is stale; the 137 entries are linked through reference_hub.md. No memory edits required.

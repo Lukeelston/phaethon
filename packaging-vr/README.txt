@@ -1,7 +1,12 @@
 PHAETHON - EXPERIMENTAL PC VR EDITION
-Windows x64 / OpenXR - v0.2.3 - ElstonWorks
+Windows x64 / OpenXR - v0.2.4 - ElstonWorks
 
 Two engines. One cockpit. We know it's a little fucky.
+
+The Network now has fixed geographic landscapes: grassy plains and farms,
+tundra, rocky ranges, desert, snowy mountains, wetlands, jungle and urban
+districts. Regional plants, settlements, water and clouds give the highways
+a sense of place. Mountains remain fixed in the world and clear the roads.
 
 START HERE
 1. Extract the whole ZIP. Keep PhaethonVR.exe and PhaethonVR.pck together.
@@ -145,7 +150,7 @@ copyright. Third-party components and the CC BY engine audio retain their
 own licenses and permissions. See THIRD_PARTY_NOTICES.txt and licenses/.
 Adapted engine audio is supplied separately in audio/engines/.
 
-Build: 0.2.3-experimental | 2026-11-03
+Build: 0.2.4-experimental | 2026-11-03
 
 IN THIS LOCAL BUILD
 Central highway transfers and long side-road sweeps now alternate bends with

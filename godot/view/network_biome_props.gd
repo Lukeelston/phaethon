@@ -62,7 +62,7 @@ func _make(kind: String) -> ArrayMesh:
 			ball(p,Vector3(16,11,13),Vector3(0,6,0),Color(0.41,0.40,0.37))
 			ball(p,Vector3(8,7,11),Vector3(12,3,6),Color(0.47,0.45,0.40))
 		"farm":
-			box(p,Vector3(96,2,105),Vector3(0,0,0),Color(0.48,0.43,0.29))
+			box(p,Vector3(96,8,105),Vector3(0,-3,0),Color(0.48,0.43,0.29))
 			box(p,Vector3(38,18,24),Vector3(-14,9,0),Color(0.61,0.40,0.26))
 			p.append([Kit.cyl(0,25,11,4),Kit.at(Vector3(-14,23,0),Vector3(0,PI/4,0),Vector3(1,1,0.75)),Color(0.31,0.32,0.32)])
 			for k in 3:
@@ -79,7 +79,7 @@ func _make(kind: String) -> ArrayMesh:
 			p.append([Kit.cyl(0,21,7,4),Kit.at(Vector3(0,26,0),Vector3(0,PI/4,0)),Color(0.29,0.32,0.26)])
 			box(p,Vector3(14,4,0.5),Vector3(0,19,10.1),window)
 		"urban":
-			box(p,Vector3(260,1,250),Vector3(0,-0.5,0),Color(0.24,0.26,0.26))
+			box(p,Vector3(260,18,250),Vector3(0,-9,0),Color(0.24,0.26,0.26))
 			for k in 6:
 				var at := Vector3((k%3-1)*75,0,(k/3*2-1)*70)
 				var h := 24.0+(k%3)*15.0
@@ -93,7 +93,7 @@ func _make(kind: String) -> ArrayMesh:
 				box(p,Vector3(245,0.2,2),Vector3(0,0.2,s*27),Color(0.65,0.65,0.58))
 				ball(p,Vector3(7,9,7),Vector3(s*110,10,0),green)
 		"industrial", "outpost":
-			box(p,Vector3(120,2,100),Vector3.ZERO,Color(0.42,0.42,0.37))
+			box(p,Vector3(120,10,100),Vector3(0,-4,0),Color(0.42,0.42,0.37))
 			box(p,Vector3(53,18,34),Vector3(-20,10,8),concrete)
 			box(p,Vector3(55,2,37),Vector3(-20,20,8),metal)
 			box(p,Vector3(38,7,0.5),Vector3(-20,13,25.1),window)
@@ -117,6 +117,7 @@ func batch(parent: Node3D, kind: String, transforms: Array) -> void:
 	for i in transforms.size():
 		mm.set_instance_transform(i,transforms[i])
 	var instance := MultiMeshInstance3D.new()
+	instance.name = kind
 	instance.multimesh = mm
 	instance.material_override = material
 	instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF

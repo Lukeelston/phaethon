@@ -47,10 +47,37 @@ func _run() -> void:
 				bad += int(land.surface_at(q) > -0.49)
 				samples += 1
 	check("terrain triangles remain below real road decks and shoulders (%d samples)" % samples, bad == 0)
+	var jump_clearance := INF
+	for jump in v.sim.jumps:
+		var launch: int = jump[0]
+		var catch_road: int = jump[1]
+		var end: int = v.sim.roads[launch].N-1
+		var a: Vector2 = v.network_world._wxy(launch,end)
+		var b: Vector2 = v.network_world._wxy(catch_road,0)
+		var min_deck: float = minf(v.sim.net_height(launch,float(end)),v.sim.net_height(catch_road,0.0))
+		var lateral := (b-a).normalized().orthogonal()
+		for k in 41:
+			for offset in [-400.0,0.0,400.0]:
+				jump_clearance=minf(jump_clearance,min_deck-land.surface_at(a.lerp(b,float(k)/40.0)+lateral*offset))
+	check("terrain stays below all20 launch-to-catch flight corridors (%.1f m)" % jump_clearance,jump_clearance>100.0)
 	var pos := Vector2(300000, 300000)
 	for k in 1400:
 		land.sync(pos.x, pos.y)
 	check("terrain streaming settles and stays bounded", land.pending.is_empty() and land.tiles.size() <= land.MAX_TILES)
+	var wet_key := Vector2i(floori(300000/land.TILE),floori(100000/land.TILE))
+	var water_a := Node3D.new()
+	var water_b := Node3D.new()
+	root.add_child(water_a)
+	root.add_child(water_b)
+	land._water(wet_key,water_a)
+	land._water(wet_key+Vector2i.RIGHT,water_b)
+	var phase_a = water_a.get_child(0).get_instance_shader_parameter("world_offset")
+	var phase_b = water_b.get_child(0).get_instance_shader_parameter("world_offset")
+	if phase_a == null: phase_a = Vector2.ZERO
+	if phase_b == null: phase_b = Vector2.ZERO
+	check("water has continuous world-space phase at tile boundary",(phase_a+Vector2(land.TILE/2,0)).distance_to(phase_b-Vector2(land.TILE/2,0))<0.01)
+	water_a.free()
+	water_b.free()
 	var key: Vector2i = land.tiles.keys()[0]
 	var tile = land.tiles[key]
 	var original: Vector3 = tile.node.position + Vector3(pos.x, 0, -pos.y)
@@ -70,6 +97,8 @@ func _run() -> void:
 		var unsupported := 0
 		var obstructing := 0
 		var real_clearance := INF
+		var mesh_support_error := 0.0
+		var actual_meshes := {}
 		for region in land.REGIONS:
 			var rk := Vector2i(floori(region[1].x / land.TILE), floori(region[1].y / land.TILE))
 			var records: Array = land.prop_records(rk)
@@ -81,6 +110,20 @@ func _run() -> void:
 			for prop in records:
 				count += 1
 				unsupported += int(absf(prop.height - land.surface_at(prop.p)) > 0.01)
+				var mk := Vector2i(floori(prop.p.x/land.TILE),floori(prop.p.y/land.TILE))
+				if not actual_meshes.has(mk): actual_meshes[mk] = land.make_mesh(mk).surface_get_arrays(0)
+				var data: Array = actual_meshes[mk]
+				var local: Vector2 = prop.p-Vector2(mk)*land.TILE
+				var cx := floori(local.x/land.STEP)
+				var cy := floori(local.y/land.STEP)
+				var frac: Vector2 = local/land.STEP-Vector2(cx,cy)
+				var tri: int = (cy*land.GRID+cx)*6+(3 if frac.x+frac.y>1.0 else 0)
+				var va: Vector3 = data[Mesh.ARRAY_VERTEX][data[Mesh.ARRAY_INDEX][tri]]
+				var vb: Vector3 = data[Mesh.ARRAY_VERTEX][data[Mesh.ARRAY_INDEX][tri+1]]
+				var vc: Vector3 = data[Mesh.ARRAY_VERTEX][data[Mesh.ARRAY_INDEX][tri+2]]
+				var normal := (vb-va).cross(vc-va)
+				var support := va.y-(normal.x*(local.x-va.x)+normal.z*(-local.y-va.z))/normal.y
+				mesh_support_error=maxf(mesh_support_error,absf(support-prop.height))
 				obstructing += int(not land.clear_at(prop.p, prop.radius))
 				var pc := Vector2i(floori(prop.p.x/1000),floori(prop.p.y/1000))
 				for dx in range(-1,2):
@@ -88,6 +131,7 @@ func _run() -> void:
 						for sample in road_index.get(pc+Vector2i(dx,dy),[]):
 							real_clearance = minf(real_clearance,prop.p.distance_to(sample[0])-sample[1]-prop.radius)
 		check("props sit on the actual rendered triangles", unsupported == 0 and count > 300)
+		check("independent mesh triangle planes support prop anchors (%.4f m)" % mesh_support_error,mesh_support_error<0.01)
 		check("whole prop footprints clear the road protection field", obstructing == 0)
 		check("props independently clear actual road samples with gap allowance (%.1f m)" % real_clearance, real_clearance>100.0)
 	check("terrain and vegetation work is bounded per slice",land.max_slice_ms<6.0)
