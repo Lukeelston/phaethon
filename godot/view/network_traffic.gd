@@ -74,6 +74,10 @@ class Car:
 	var dir := 1          # 1 up the samples, -1 down
 	var lane := 0
 	var lat := 0.0        # m left of the centreline
+	var left_width := 7.0
+	var right_width := 7.0
+	var front := 24.0
+	var rear := 24.0
 	var v := 0.0          # m/s
 	var vdes := 0.0
 	var cruise := 0.0     # the vehicle's own lower-deck cruise; express roads scale cars/hot rods
@@ -289,6 +293,17 @@ func _pod_as_car() -> Car:
 	c.f = float(i)
 	c.v = absf(along)
 	c.lat = (P.x - R.px[i]) * R.nx[i] + (P.y - R.py[i]) * R.ny[i]
+	# The engines can swing wider and run well ahead of the pod. Other drivers
+	# reserve that physical corridor, not just the cockpit's centre point.
+	for body in sim.bodies:
+		var dx: float = body.x - P.x
+		var dy: float = body.y - P.y
+		var across: float = dx * R.nx[i] + dy * R.ny[i]
+		var ahead: float = (dx * R.tx[i] + dy * R.ty[i]) * c.dir
+		c.left_width = maxf(c.left_width, across + 3.0)
+		c.right_width = maxf(c.right_width, -across + 3.0)
+		c.front = maxf(c.front, ahead + 5.0)
+		c.rear = maxf(c.rear, -ahead + 5.0)
 	return c
 
 
@@ -573,11 +588,13 @@ func _clear(arr: Array, idx: int, c: Car, lat_n: float) -> bool:
 		var g: float = (o.f - c.f) * c.dir * 24.0
 		var future := g + (o.v - c.v) * duration
 		var tail := (TRAIN - 1) * TRAIN_GAP if o.kind == TRANSPORT else 0.0
-		var unsafe_gap := minf(g, future) < c.v * c.headway * 1.3 + 40.0 + tail if g > 0.0 else maxf(g, future) > -60.0
+		var unsafe_gap := minf(g, future) < c.v * c.headway * 1.3 + c.front + o.rear + tail if g > 0.0 else maxf(g, future) > -(c.rear + o.front + 12.0)
 		if not unsafe_gap:
 			continue
 		var committed := o.lat if o.id == 0 else _lane_lat(o, o.lane)
-		if lat_n >= minf(o.lat, committed) - 25.0 and lat_n <= maxf(o.lat, committed) + 25.0:
+		var swept_lo := minf(c.lat, lat_n) - c.right_width
+		var swept_hi := maxf(c.lat, lat_n) + c.left_width
+		if swept_hi >= minf(o.lat, committed) - o.right_width - 10.0 and swept_lo <= maxf(o.lat, committed) + o.left_width + 10.0:
 			return false
 	return true
 
@@ -616,13 +633,15 @@ func _courtesy(c: Car, arr: Array, idx: int) -> bool:
 			var behind := (c.f - o.f) * c.dir * 24.0
 			if behind > R_SPAWN.y:
 				break
-			if behind <= 0.0 or absf(o.lat - c.lat) > 18.0:
+			var corridor_lo := o.lat - o.right_width - c.left_width - 18.0
+			var corridor_hi := o.lat + o.left_width + c.right_width + 18.0
+			if behind <= 0.0 or c.lat < corridor_lo or c.lat > corridor_hi:
 				continue
 			# The nearest vehicle in this corridor is the one actually approaching us.
 			var closing := o.v - c.v
 			if closing > 120.0:
 				var catch_time := behind / closing
-				if catch_time > maneuver + 0.9 and catch_time < 7.0:
+				if catch_time > maneuver + 0.9 and catch_time < 11.0:
 					follower = o
 			break
 	if follower == null:
@@ -636,18 +655,25 @@ func _courtesy(c: Car, arr: Array, idx: int) -> bool:
 	c.flow_notice += glance
 	if c.flow_notice < 0.30 + float(c.id % 7) * 0.055:
 		return false
-	# Keep right when practical, then consider the other adjacent gap. Do not mirror
-	# the follower's steering or keep taking lanes away after this one move.
+	# Prefer the move that opens the largest gap, keeping right on a tie.
+	# Commit once; do not mirror steering or repeatedly chase the follower's lane.
+	var chosen := -1
+	var clearance := 0.0
 	for dl in [-1, 1]:
 		var lane: int = c.lane + dl
 		if lane < 0 or lane >= _lanes[c.road].size():
 			continue
-		if _clear(arr, idx, c, _lane_lat(c, lane)):
-			c.lane = lane
-			c.lc_cool = 5.0 + float(c.id % 7) * 0.45
-			c.flow_source = -1
-			c.flow_notice = 0.0
-			return true
+		var target := _lane_lat(c, lane)
+		var gap := maxf(target - follower.lat - follower.left_width - c.right_width, follower.lat - target - follower.right_width - c.left_width)
+		if gap > clearance and _clear(arr, idx, c, target):
+			chosen = lane
+			clearance = gap
+	if chosen >= 0:
+		c.lane = chosen
+		c.lc_cool = 5.0 + float(c.id % 7) * 0.45
+		c.flow_source = -1
+		c.flow_notice = 0.0
+		return true
 	return false
 
 
