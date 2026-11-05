@@ -1,5 +1,5 @@
 PHAETHON - EXPERIMENTAL PC VR EDITION
-Windows x64 / OpenXR - v0.2.8 - ElstonWorks
+Windows x64 / OpenXR - v0.2.9 - ElstonWorks
 
 Two engines. One cockpit. We know it's a little fucky.
 
@@ -162,7 +162,7 @@ copyright. Third-party components and the CC BY engine audio retain their
 own licenses and permissions. See THIRD_PARTY_NOTICES.txt and licenses/.
 Adapted engine audio is supplied separately in audio/engines/.
 
-Build: 0.2.8-experimental | 2026-11-04
+Build: 0.2.9-experimental | 2026-11-04
 
 IN THIS LOCAL BUILD
 Central highway transfers and long side-road sweeps now alternate bends with
@@ -170,3 +170,9 @@ counter-steering, broad crests and dips. Receiving ramps cushion the landing
 relative to the deck, keeping fast arrivals attached through the pull-out.
 All highway connections, jump approaches and minimum entrance speeds remain.
 Experimental aircraft cockpit, swept fairings and electric binder arcs included.
+
+STARFIGHTER HANDLING
+Starfighter air brakes now work at course speeds, building from 200 to 500 mph.
+Squeeze one side to tighten the turn; squeeze both to slow straight ahead.
+Progressive grips and steadier cockpit alignment suit the narrower courses.
+Starfighter keeps its lower top speed and single gear.

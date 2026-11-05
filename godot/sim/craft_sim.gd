@@ -50,7 +50,7 @@ const DEFAULTS := {
 }
 # Handling modes, mirroring sim-core.js: named overrides on top of DEFAULTS (explicit
 # overrides still win). speed = the v3 sprint model; starfighter = ~990 mph lever / 1,200
-# burner, 50 g grip, ~56 deg/s at 320 mph, stiff tow bar.
+# burner, 50 g grip, lower-speed progressive air brakes and a stiff tow bar.
 # Track settings, mirroring sim-core.js TRACKS: the GP's walls deflect rather than wreck (only
 # impacts harder than 25 m/s into the wall do damage, a third as much; lower friction).
 const TRACKS := {
@@ -70,9 +70,11 @@ const HANDLING := {
 	"speed": {},
 	"starfighter": {
 		"thrustMax": 180000.0, "engineCd": 0.725, "podCd": 0.3625,
-		"frontBrakeCd": 0.05, "frontBrakeV0": 670.6, "frontBrakeV1": 1117.6, "frontBrakeMaxG": 0.0, "brakeTurnG": 0.0,
-		"gripCapG": 50.0, "engineGrip": 90.0, "podGrip": 30.0, "podCapG": 30.0, "finK": 3.0, "yawDamp": 20000.0,
-		"podAlignK": 6.0e6, "podYawDamp": 250000.0, "towK": 5.0e6, "towC": 200000.0,
+		# Speedcraft's bounded brake/turn response, scaled to narrow-course speeds:
+		# flaps blend in at200-500mph; yaw damping calms alternating grip inputs.
+		"frontBrakeCd": 4.5, "frontBrakeV0": 89.408, "frontBrakeV1": 223.52, "frontBrakeMaxG": 24.0, "brakeTurnG": 15.0,
+		"gripCapG": 50.0, "engineGrip": 90.0, "podGrip": 30.0, "podCapG": 30.0, "finK": 3.0, "yawDamp": 150000.0,
+		"podAlignK": 1.2e7, "podYawDamp": 250000.0, "towK": 5.0e6, "towC": 200000.0,
 	},
 }
 # The range: 100 miles of open desert. Speed runway along y = 0, a jump lane at y = +400
@@ -1905,6 +1907,21 @@ func _body_push(a: Body, ca: Array, b: Body, cb: Array) -> void:
 			_apply_at(a, -f * nx, -f * ny, p[0], p[1])
 
 
+## Blend evaluated flap/drag/grip responses, not their nonlinear coefficients.
+## Explicit tuning overrides are absent from _h0/_h1 and fall back to P.
+func _brake_profile(profile: Dictionary, speed: float, mass: float) -> Array:
+	var active := smoothstep(float(profile.get("frontBrakeV0",P.frontBrakeV0)),float(profile.get("frontBrakeV1",P.frontBrakeV1)),speed)
+	var cd: float = profile.get("frontBrakeCd",P.frontBrakeCd)
+	var max_g: float = profile.get("frontBrakeMaxG",P.frontBrakeMaxG)
+	if max_g>0.0: cd=minf(cd,mass*max_g*G/maxf(speed*speed,1.0))
+	return [active if cd>0.0 else 0.0,cd*active,float(profile.get("brakeTurnG",P.brakeTurnG))*active]
+
+func brake_response(speed: float, mass: float) -> Array:
+	var a := _brake_profile(_h0,speed,mass)
+	var b := _brake_profile(_h1,speed,mass)
+	return [lerpf(a[0],b[0],hblend),lerpf(a[1],b[1],hblend),lerpf(a[2],b[2],hblend)]
+
+
 ## One fixed step. input keys: thrL, thrR, brkL, brkR (0..1), repair, reignite (bool).
 func step(inp: Dictionary, dt: float) -> void:
 	var L := eL
@@ -1975,6 +1992,8 @@ func step(inp: Dictionary, dt: float) -> void:
 
 	var gm: float = float(inp.get("thrMul", 1.0))   # the gearbox's pull (its ratio, at its revs; 1 without one)
 	var brake_grip: float = P.brakeTurnG * maxf(inp.brkL, inp.brkR) * smoothstep(P.frontBrakeV0, P.frontBrakeV1, speed)
+	if hblend>0.0 and hblend<1.0:
+		brake_grip = maxf(inp.brkL,inp.brkR)*brake_response(speed,L.m)[2]
 	var cruise_drag := 1.0
 	if bool(inp.get("gearOverdrive", false)):
 		# Fourth's normal aero drag approaches full-throttle thrust exponentially.
@@ -2024,7 +2043,12 @@ func step(inp: Dictionary, dt: float) -> void:
 		var front_cd: float = P.frontBrakeCd
 		if P.frontBrakeMaxG > 0.0:
 			front_cd = minf(front_cd, e.m * P.frontBrakeMaxG * G / maxf(v * v, 1.0))
-		var cd: float = (P.engineCd * cruise_drag + P.brakeCd * brk + front_cd * e.front) * P.forceScale
+		var front_drag: float = front_cd * e.front
+		if hblend>0.0 and hblend<1.0:
+			var response := brake_response(v,e.m)
+			e.front = brk*response[0]
+			front_drag = brk*response[1]
+		var cd: float = (P.engineCd * cruise_drag + P.brakeCd * brk + front_drag) * P.forceScale
 		var bl: float = (P.brakeLin * brk + P.brakeConst * brk / maxf(v, 2.0)) * P.forceScale
 		e.fx -= cd * v * e.vx + bl * e.vx
 		e.fy -= cd * v * e.vy + bl * e.vy
@@ -2161,9 +2185,12 @@ func step(inp: Dictionary, dt: float) -> void:
 		var lat_c: float = P.engineGap / 2.0 - P.podAnchorW * P.podWidth / 2.0
 		var rest: float = sqrt(P.cableLen * P.cableLen - lat_c * lat_c) + P.podLen / 2.0 + P.engineLen / 2.0
 		var el: float = (Pd.x - tx) * pf + (Pd.y - ty) * ps2 - (back - rest) - P.towLongSlack
-		if el > 0.0 and P.towLongK > 0.0:
-			var elv := (Pd.vx - (L.vx + R.vx) / 2.0) * pf + (Pd.vy - (L.vy + R.vy) / 2.0) * ps2
-			var fl: float = minf(0.0, -P.towLongK * el - P.towLongC * elv)
+		var elv := (Pd.vx - (L.vx + R.vx) / 2.0) * pf + (Pd.vy - (L.vy + R.vy) / 2.0) * ps2
+		if P.towLongK > 0.0 and (el > 0.0 or (hblend > 0.0 and elv > 0.0)):
+			# SF's lower-speed brakes pre-damp closing motion through the slack,
+			# rather than letting the pod hit the stand-off damper at closing speed.
+			# Equal/opposite and dissipative; Speedcraft keeps compression only.
+			var fl: float = minf(0.0, -P.towLongK * el - P.towLongC * elv) if el > 0.0 else -P.towLongC * elv * hblend
 			Pd.fx += fl * pf
 			Pd.fy += fl * ps2
 			L.fx -= fl * pf / 2.0

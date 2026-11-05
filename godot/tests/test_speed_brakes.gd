@@ -95,6 +95,7 @@ func trial(mph: float, gear: int, controls: Array, overrides := {}) -> Dictionar
 	var last_energy := energy(sim)
 	var h0 := atan2(sim.pod.vy, sim.pod.vx)
 	var n0: float = sim.pair_th
+	var pod_n0: float = sim.pod.th
 	var dist := 0.0
 	var path := 0.0
 	var prev_h := h0
@@ -131,6 +132,7 @@ func trial(mph: float, gear: int, controls: Array, overrides := {}) -> Dictionar
 		if i + 1 in [240, 480, 1440, 1920]:
 			var t := (i + 1) * DT
 			r.marks.append({"t": t, "path_deg": rad_to_deg(path), "nose_deg": rad_to_deg(wrapf(sim.pair_th - n0, -PI, PI)),
+				"pod_nose_deg":rad_to_deg(wrapf(sim.pod.th-pod_n0,-PI,PI)),
 				"mph": hypot(sim.pod.vx, sim.pod.vy) * MPH, "radius_m": dist / maxf(absf(path), 1e-9), "distance_m": dist,
 				"decel_g": (mph / MPH - hypot(sim.pod.vx, sim.pod.vy)) / t / 9.81,
 				"yaw_dps": rad_to_deg((sim.eL.w + sim.eR.w) / 2.0)})

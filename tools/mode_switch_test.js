@@ -57,7 +57,9 @@ const b = phaseRun(sim, 60, (v) => Object.assign({ thrL: 0, thrR: 0, brkL: 1, br
   () => S.hblend === 1);
 out.push(`B  braking, STARFIGHTER asked from 3,000 mph: engaged at ${b.engagedAt?.toFixed(0)} mph after ${((S.pod.x - x0) / 1000).toFixed(1)} km; ` +
   `while blending: decel ${b.decel.toFixed(1)} g, pod sway ${b.sway.toFixed(2)} deg, cable ${(b.cable / 1000).toFixed(0)} kN, yaw ${b.yaw.toFixed(2)} deg/s  [${b.events}]`);
-ok = ok && b.engagedAt !== null && b.engagedAt <= 1251 && b.sway < 3 && S.P.handling === 'starfighter' && S.P.thrustMax === 180000;
+// The mode blend must not create a brake impulse greater than the lower-speed
+// profile's bounded braking plus its ordinary aerodynamic drag.
+ok = ok && b.engagedAt !== null && b.engagedAt <= 1251 && b.sway < 3 && b.decel < 45 && S.P.handling === 'starfighter' && S.P.thrustMax === 180000;
 
 const c = phaseRun(sim, 25, () => flat);
 out.push(`C  STARFIGHTER flat out: ${mph().toFixed(0)} mph (thrustMax ${S.P.thrustMax}, engineCd ${S.P.engineCd})`);

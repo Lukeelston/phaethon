@@ -1555,3 +1555,41 @@ Phaethon-Experimental-0.2.8-Windows-PCVR.zip
 Physical headset comfort and resolution of Luke's specific city symptom remain
 unverified - needs user confirmation. Local builds only; no store upload/push.
 Evidence: v028-roll-*.log, v028-checks.json, v028-build-0.json.
+
+
+v0.2.9 - Starfighter air-brake steering for narrower courses - 2026-11-04
+======================================================================
+Starfighter uses progressive200-500mph front brakes with capped24g drag,
+15g extra brake grip, stronger yaw damping and tighter pod alignment.
+One grip tightens the turn while shedding speed; two grips slow straight.
+At600mph with both throttles held, a3s full-grip turn now finishes477mph
+with344m mean radius (previously804mph/2000m). Feather/half/full grips remain
+progressive. Actual cockpit pod heading settles within2deg on release.
+Starfighter retains one gear and991mph full-lever top speed. Speedcraft
+endpoint tuning and v028 gentler cockpit-roll filtering remain unchanged.
+
+Nonlinear brake coefficients caused a mid-mode-transition force spike.
+Transition now blends evaluated flap, capped drag and grip responses while
+honoring explicit overrides. SF closing motion is damped before pod slack
+runs out; forces are equal/opposite and dissipative. The transition probe
+fell from126.7g during initial tuning to32.7g;45g regression gate passes.
+
+VERIFICATION
+17 regression groups pass, including50 new Starfighter grip/release/energy
+checks and2016 endpoint/override checks. JS/Godot parity passes for handling,
+modes, all5GP variants, Eridanus, delivery jobs and Network. Unchanged JS
+autopilots completed courses with zero hits; intended late job still fails.
+Speedcraft brakes, feathering, Quest input, mode gears, cockpit roll and ride
+pass. Energy test retains the old low-damping negative control (52seconds
+gaining energy with audit off, bounded with audit on); current profile remains
+bounded with no wrecks. Independent review found no unresolved source issues.
+Fresh extracted desktop186/186 and PCVR XR-off305/305 diagnostics pass.
+Both42-file allowlists and historical archive hashes checked separately.
+Phaethon-Experimental-0.2.9-Windows.zip
+  bytes 61447882; SHA256 d88715d64a14542225540577d8cddb13fd97e932ed6750491d57211473fef622
+Phaethon-Experimental-0.2.9-Windows-PCVR.zip
+  bytes 61539488; SHA256 73b2d7b89c573484f918101b73a5c3a4f76c5eefaf8007eda385d3ca9e279588
+Physical headset steering feel remains unverified - needs user confirmation.
+Local release only; no remote push or store upload.
+Evidence: v029-checks-final.json, v029-reference-results.json,
+v029-mode-comparison.json, v029-build-0.json and v029-test_*.log.

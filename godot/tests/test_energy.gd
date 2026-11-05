@@ -5,8 +5,8 @@
 ## CraftSim's tow-bar energy audit (P.towAudit) takes that back out.
 ##   40 coasting trials on the GP: fly 2-6 s on a random lever and split, then cut everything for
 ##   8 s and let it hit the walls. Counted each second: total energy (speed + spin) rising by more
-##   than 2% and 20 kJ, the pod's worst speed gain, wrecks. Audit on: none, none, none. Audit off:
-##   the same trials must still show the bug, so this test can see it.
+##   than 2% and 20 kJ, the pod's worst speed gain, wrecks. Current tuning must stay bounded.
+##   A paired low-damping reproducer must stay bounded with audit on and show the bug off.
 ##   Handling untouched: yaw response to a 0.05 split at ~490 mph and coast-down from ~950 mph
 ##   match the audit-off sim.
 ## Prints ENERGY PASS. Run: Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_energy.gd
@@ -22,24 +22,34 @@ func _initialize() -> void:
 	# the tow-bar audit on its own: banking off (a banked corner trades height for speed, which
 	# this 2D sim can't see as height; that gets its own bound below)
 	var on := _coast({"bank": 0.0})
-	var off := _coast({"towAudit": false, "bank": 0.0})
+	# Retain the original low-damping reproducer: current Starfighter yaw damping
+	# prevents this particular wall-hit instability even without the energy audit.
+	var legacy := {"yawDamp": 20000.0, "podAlignK": 6.0e6, "bank": 0.0}
+	var legacy_on := _coast(legacy)
+	var legacy_off := legacy.duplicate()
+	legacy_off.towAudit = false
+	var off := _coast(legacy_off)
 	var banked := _coast({})
 	_check("audit on: coasting into the walls, energy never rises (%d of %d s, biggest %.0f kJ), the pod never gains more than 100 km/h (worst %.0f), no wrecks (%d s), no blow-ups (%d)" % [
 		on.rises, on.seconds, on.big_kj, on.worst_kmh, on.wreck_s, on.blowups],
 		on.rises == 0 and on.worst_kmh < 100.0 and on.wreck_s == 0 and on.blowups == 0)
-	_check("audit off: the same trials still show the bug (%d s gaining energy, up to %.0f kJ in one; pod up to +%.0f km/h; %d s wrecked)" % [
+	_check("legacy low damping, audit on: energy remains bounded", legacy_on.rises == 0 and legacy_on.worst_kmh < 100.0 and legacy_on.wreck_s == 0 and legacy_on.blowups == 0)
+	_check("legacy low damping, audit off: the same trials still show the bug (%d s gaining energy, up to %.0f kJ in one; pod up to +%.0f km/h; %d s wrecked)" % [
 		off.rises, off.big_kj, off.worst_kmh, off.wreck_s], off.rises >= 10 and off.worst_kmh > 100.0)
 	_check("on the banked GP: coasting gains only what sliding down a bank can give (biggest %.0f kJ in a second, pod at most +%.0f km/h), no wrecks (%d s), no blow-ups (%d)" % [
 		banked.big_kj, banked.worst_kmh, banked.wreck_s, banked.blowups],
 		banked.big_kj < 200.0 and banked.worst_kmh < 100.0 and banked.wreck_s == 0 and banked.blowups == 0)
-	var y_on := _yaw({})
-	var y_off := _yaw({"towAudit": false})
+	var y_on := _yaw(legacy)
+	var y_off := _yaw(legacy_off)
 	_check("steering untouched: 0.05 split at %.0f mph yaws %.2f deg/s with the audit, %.2f without" % [y_on[1], y_on[0], y_off[0]],
 		absf(y_on[0] - y_off[0]) < 0.2 and y_off[0] > 5.0)
 	var c_on := _coast_down({})
 	var c_off := _coast_down({"towAudit": false})
 	_check("coast-down untouched: %.0f mph after 8 s with the audit, %.0f without" % [c_on, c_off], absf(c_on - c_off) < c_off * 0.03)
-	var good := fails == 0 and passed == 5
+	var current_y_on := _yaw({})
+	var current_y_off := _yaw({"towAudit": false})
+	_check("current Starfighter steering is also unaffected by the audit", absf(current_y_on[0] - current_y_off[0]) < 0.2 and current_y_off[0] > 0.0)
+	var good := fails == 0 and passed == 7
 	print("ENERGY ", "PASS" if good else "FAIL (%d failed, %d passed)" % [fails, passed])
 	quit(0 if good else 1)
 

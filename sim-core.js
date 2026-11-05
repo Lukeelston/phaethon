@@ -56,8 +56,8 @@
   // speed: the v3 model above, built for the 100-mile sprint.
   // starfighter (2026-10-17, retuned per Luke: "top out at maybe 1200"): tight. Less thrust and
   // more drag cap it at ~990 mph on the lever and 1,200 on the burner (still supersonic); 50 g
-  // grip, light yaw damping and small fins bring the nose round ~56 deg/s at 320 mph and ~60
-  // flat out; a stiffer tow bar keeps pod sway under 3 deg.
+  // grip, damped yaw and progressive200-500mph air brakes suit the narrow courses;
+  // a stiffer tow bar keeps the pod tracking the engines.
   // tools/handling_test.js '{"handling":"starfighter"}' measures it.
   // Track settings: named overrides per track, on top of DEFAULTS and the handling (explicit
   // overrides still win). The GP's walls deflect rather than wreck (Luke, 2026-10-17): at
@@ -83,9 +83,10 @@
     speed: {},
     starfighter: {
       thrustMax: 180000, engineCd: 0.725, podCd: 0.3625,
-      frontBrakeCd: 0.05, frontBrakeV0: 670.6, frontBrakeV1: 1117.6, frontBrakeMaxG: 0, brakeTurnG: 0,
-      gripCapG: 50, engineGrip: 90, podGrip: 30, podCapG: 30, finK: 3, yawDamp: 20000,
-      podAlignK: 6e6, podYawDamp: 250000, towK: 5e6, towC: 200000
+      // Bounded brake/turn response at200-500mph, with damped grip reversals.
+      frontBrakeCd: 4.5, frontBrakeV0: 89.408, frontBrakeV1: 223.52, frontBrakeMaxG: 24, brakeTurnG: 15,
+      gripCapG: 50, engineGrip: 90, podGrip: 30, podCapG: 30, finK: 3, yawDamp: 150000,
+      podAlignK: 1.2e7, podYawDamp: 250000, towK: 5e6, towC: 200000
     }
   };
 
@@ -1157,6 +1158,20 @@
       }
     }
 
+    // Evaluate endpoint responses before blending; coefficient interpolation can
+    // create a mid-transition brake/grip spike. Explicit overrides fall back to P.
+    function brakeProfile(profile, speed, mass) {
+      const get = k => k in profile ? profile[k] : P[k];
+      const active = smooth01((speed-get('frontBrakeV0'))/(get('frontBrakeV1')-get('frontBrakeV0')));
+      let cd = get('frontBrakeCd');
+      const maxG = get('frontBrakeMaxG');
+      if (maxG > 0) cd = Math.min(cd,mass*maxG*G/Math.max(speed*speed,1));
+      return [cd > 0 ? active : 0,cd*active,get('brakeTurnG')*active];
+    }
+    function brakeResponse(speed,mass) {
+      const a=brakeProfile(H0,speed,mass), b=brakeProfile(H1,speed,mass);
+      return a.map((v,i) => v+(b[i]-v)*S.hblend);
+    }
     function step(inp, dt) {
       const L = S.eL, R = S.eR, Pd = S.pod;
       for (const o of S.obstacles) { o.x += o.vx * dt; o.y += o.vy * dt; }
@@ -1202,7 +1217,8 @@
       const speed = Math.hypot(Pd.vx, Pd.vy);
 
       const gm = inp.thrMul ?? 1;   // the gearbox's pull (its ratio, at its revs; 1 without one)
-      const brakeGrip = P.brakeTurnG * Math.max(inp.brkL, inp.brkR) * smooth01((speed - P.frontBrakeV0) / (P.frontBrakeV1 - P.frontBrakeV0));
+      let brakeGrip = P.brakeTurnG * Math.max(inp.brkL, inp.brkR) * smooth01((speed - P.frontBrakeV0) / (P.frontBrakeV1 - P.frontBrakeV0));
+      if (S.hblend>0 && S.hblend<1) brakeGrip=Math.max(inp.brkL,inp.brkR)*brakeResponse(speed,L.m)[2];
       let cruiseDrag = 1;
       if (inp.gearOverdrive) {
         // Fourth's baseline drag approaches full-throttle thrust, giving logarithmic
@@ -1236,7 +1252,13 @@
         const v = Math.hypot(e.vx, e.vy);
         e.front = P.frontBrakeCd > 0 ? brk * smooth01((v - P.frontBrakeV0) / (P.frontBrakeV1 - P.frontBrakeV0)) : 0;
         const frontCd = P.frontBrakeMaxG > 0 ? Math.min(P.frontBrakeCd, e.m * P.frontBrakeMaxG * G / Math.max(v * v, 1)) : P.frontBrakeCd;
-        const cd = (P.engineCd * cruiseDrag + P.brakeCd * brk + frontCd * e.front) * P.forceScale;
+        let frontDrag=frontCd*e.front;
+        if (S.hblend>0 && S.hblend<1) {
+          const response=brakeResponse(v,e.m);
+          e.front=brk*response[0];
+          frontDrag=brk*response[1];
+        }
+        const cd = (P.engineCd * cruiseDrag + P.brakeCd * brk + frontDrag) * P.forceScale;
         const bl = (P.brakeLin * brk + P.brakeConst * brk / Math.max(v, 2)) * P.forceScale;
         e.fx -= cd * v * e.vx + bl * e.vx; e.fy -= cd * v * e.vy + bl * e.vy;
         const fxp = e.x - c * P.finOffset, fyp = e.y - s * P.finOffset;
@@ -1321,9 +1343,10 @@
         const latC = P.engineGap / 2 - P.podAnchorW * P.podWidth / 2;
         const rest = Math.sqrt(P.cableLen * P.cableLen - latC * latC) + P.podLen / 2 + P.engineLen / 2;
         const el = (Pd.x - tx) * pf + (Pd.y - ty) * ps2 - (back - rest) - P.towLongSlack;
-        if (el > 0 && P.towLongK > 0) {
-          const elv = (Pd.vx - (L.vx + R.vx) / 2) * pf + (Pd.vy - (L.vy + R.vy) / 2) * ps2;
-          const fl = Math.min(0, -P.towLongK * el - P.towLongC * elv);
+        const elv = (Pd.vx - (L.vx + R.vx) / 2) * pf + (Pd.vy - (L.vy + R.vy) / 2) * ps2;
+        if (P.towLongK > 0 && (el > 0 || (S.hblend > 0 && elv > 0))) {
+          // SF pre-damps closing motion before the slack ends; Speedcraft unchanged.
+          const fl = el > 0 ? Math.min(0, -P.towLongK * el - P.towLongC * elv) : -P.towLongC * elv * S.hblend;
           Pd.fx += fl * pf; Pd.fy += fl * ps2;
           L.fx -= fl * pf / 2; L.fy -= fl * ps2 / 2; R.fx -= fl * pf / 2; R.fy -= fl * ps2 / 2;
         }
