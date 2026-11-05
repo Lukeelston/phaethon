@@ -16,6 +16,34 @@ func cyl(parts: Array, top: float, bottom: float, h: float, p: Vector3, c: Color
 func ball(parts: Array, size: Vector3, p: Vector3, c: Color) -> void:
 	parts.append([Kit.ball(1.0,8),Kit.at(p,Vector3.ZERO,size),c])
 
+## Split, uneven rock faces instead of smooth inflated ellipsoids. Flat normals
+## retain a readable silhouette at speed; every instance shares this one mesh.
+func stone(parts: Array, size: Vector3, at: Vector3, color: Color) -> void:
+	var st:=SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var rings:=[]
+	for level in 3:
+		for k in 7:
+			var angle:=TAU*k/7.0+level*0.13
+			var radius: float=[0.95,1.0,0.65][level]*(0.87+0.13*sin(k*7.13+level*3.1))
+			rings.append(Vector3(cos(angle)*size.x*radius,(-0.55+level*0.7)*size.y+sin(k*2.7+level)*size.y*0.12,sin(angle)*size.z*radius))
+	for level in 2:
+		for k in 7:
+			var a: Vector3=rings[level*7+k]
+			var b: Vector3=rings[level*7+(k+1)%7]
+			var c: Vector3=rings[(level+1)*7+(k+1)%7]
+			var d: Vector3=rings[(level+1)*7+k]
+			for tri in [[a,b,c],[a,c,d]]:
+				st.set_normal((tri[2]-tri[0]).cross(tri[1]-tri[0]).normalized())
+				for v in tri: st.add_vertex(v)
+	for k in range(1,6):
+		var a: Vector3=rings[14]
+		var b: Vector3=rings[14+k]
+		var c: Vector3=rings[15+k]
+		st.set_normal((c-a).cross(b-a).normalized())
+		for v in [a,b,c]: st.add_vertex(v)
+	parts.append([st.commit(),Kit.at(at),color])
+
 func _make(kind: String) -> ArrayMesh:
 	var p := []
 	var bark := Color(0.27,0.22,0.16)
@@ -36,6 +64,15 @@ func _make(kind: String) -> ArrayMesh:
 			box(p,Vector3(200,1,1),Vector3(10,27,47),Color(1.0,0.55,0.12))
 			cyl(p,1,2,75,Vector3(115,37.5,-65),metal)
 			box(p,Vector3(22,10,3),Vector3(115,73,-65),Color(0.8,0.48,0.17))
+			# Delivery bay, roof equipment and a few parked service vehicles.
+			box(p,Vector3(12,13,0.8),Vector3(-80,6.5,-26.5),metal)
+			for k in 3:
+				box(p,Vector3(7,3,8),Vector3(-80+k*18,27,-47),concrete)
+				var parked:=Vector3(-85+k*31,2,-80)
+				box(p,Vector3(19,4,8),parked,Color(0.32+k*0.15,0.37,0.36))
+				box(p,Vector3(8,2.7,7),parked+Vector3(-1,3,0),window)
+				for side in [-1,1]:
+					box(p,Vector3(23,0.15,0.6),parked+Vector3(0,-1.8,side*7),Color(0.78,0.73,0.57))
 		"solar":
 			box(p,Vector3(240,12,240),Vector3(0,-6,0),Color(0.44,0.39,0.29))
 			for x in 6:
@@ -59,10 +96,13 @@ func _make(kind: String) -> ArrayMesh:
 		"oak", "mangrove":
 			var swamp := kind == "mangrove"
 			cyl(p,1.2,2.7,22,Vector3(0,11,0),bark)
-			for k in 5:
-				var a := k*TAU/5.0
-				var at := Vector3(cos(a)*10,25+(k%3)*4,sin(a)*10)
-				ball(p,Vector3(12,9,12),at,green*(0.75+0.06*k))
+			for k in 7:
+				var a := k*2.399
+				var at := Vector3(cos(a)*(6+k),22+(k%3)*5,sin(a)*(6+k))
+				var scale:=0.75+0.11*(k%3)
+				ball(p,Vector3(10,8,11)*scale,at,green*(0.72+0.055*k))
+				var branch:=at-Vector3(0,13,0)
+				p.append([Kit.cyl(0.35,1.0,branch.length(),5),Transform3D(Basis(Quaternion(Vector3.UP,branch.normalized())),Vector3(0,13,0)+branch*0.5),bark])
 				if swamp:
 					p.append([Kit.cyl(0.6,1.2,12,5),Kit.at(Vector3(cos(a)*3,5,sin(a)*3),Vector3(sin(a)*0.5,0,cos(a)*0.5)),bark])
 		"pine", "snowpine":
@@ -91,8 +131,9 @@ func _make(kind: String) -> ArrayMesh:
 				box(p,Vector3(7,2,2),Vector3(s*3,8+s*2,0),Color(0.25,0.35,0.20))
 				cyl(p,0.7,1,7,Vector3(s*6,11+s*2,0),green)
 		"rock":
-			ball(p,Vector3(16,11,13),Vector3(0,6,0),Color(0.41,0.40,0.37))
-			ball(p,Vector3(8,7,11),Vector3(12,3,6),Color(0.47,0.45,0.40))
+			stone(p,Vector3(16,11,13),Vector3(0,6,0),Color(0.41,0.40,0.37))
+			stone(p,Vector3(8,7,11),Vector3(12,3,6),Color(0.47,0.45,0.40))
+			stone(p,Vector3(5,3,4),Vector3(-12,1,9),Color(0.35,0.35,0.33))
 		"farm":
 			box(p,Vector3(96,8,105),Vector3(0,-3,0),Color(0.48,0.43,0.29))
 			box(p,Vector3(38,18,24),Vector3(-14,9,0),Color(0.61,0.40,0.26))
@@ -118,8 +159,12 @@ func _make(kind: String) -> ArrayMesh:
 				box(p,Vector3(46,h,45),at+Vector3.UP*h/2,concrete*(0.80+k*0.03))
 				box(p,Vector3(50,3,49),at+Vector3.UP*h,metal)
 				for floor_id in range(1,int(h/5)):
-					box(p,Vector3(39,2,0.5),at+Vector3(0,floor_id*5,22.6),window)
+					for side in [-1,1]:
+						box(p,Vector3(39,2,0.5),at+Vector3(0,floor_id*5,side*22.6),window)
+						box(p,Vector3(0.5,2,37),at+Vector3(side*23.1,floor_id*5,0),window)
 				box(p,Vector3(8,4,8),at+Vector3(8,h+3,-5),metal)
+				box(p,Vector3(6,8,0.6),at+Vector3(-9,4,22.7),window)
+				box(p,Vector3(13,1,5),at+Vector3(-9,9,24),metal)
 			# Quiet feeder streets, pavements and planted courtyards.
 			for s in [-1,1]:
 				box(p,Vector3(245,0.2,2),Vector3(0,0.2,s*27),Color(0.65,0.65,0.58))

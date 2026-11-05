@@ -35,22 +35,33 @@ func _probe(world,sim,r: int,i: int) -> void:
 	var indices: PackedInt32Array=world._grid_index(grid.rows,grid.cols)
 	var normal: Vector3=world.shaft.at(r,float(i))[5] if world.shaft.on(r,float(i)) else Vector3.UP
 	for way in [-1.0,1.0]:
-		for kind in 2:
+		for kind in 4:
 			var st:=SurfaceTool.new()
 			st.begin(Mesh.PRIMITIVE_TRIANGLES)
 			if kind==0: world._chevron(st,road,ox,oy,i,world._h(r,i),way)
-			else: world._approach_arrow(st,road,ox,oy,i,world._h(r,i),way,0)
+			elif kind==1: world._approach_arrow(st,road,ox,oy,i,world._h(r,i),way,0)
+			elif kind==2:
+				world._up=normal
+				world._strip(st,road,ox,oy,i,road.w[i]*0.275-1.75,road.w[i]*0.275+1.75,world._h(r,i)+0.12,world._h(r,i+1)+0.12,Color.WHITE)
+			else:
+				var along: Vector3=Vector3(road.tx[i],0,-road.ty[i])*way
+				world._across(st,road,ox,oy,i,world._h(r,i),along*25,along*39,Color.WHITE)
 			var mesh:=st.commit()
 			var verts: PackedVector3Array=mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
+			var normals: PackedVector3Array=mesh.surface_get_arrays(0)[Mesh.ARRAY_NORMAL]
 			for k in range(0,verts.size(),3):
 				for point in [verts[k],verts[k+1],verts[k+2],(verts[k]+verts[k+1]+verts[k+2])/3.0]:
+					# Move a fraction into the painted triangle to avoid float rounding at
+					# the deck's exact outer edge; cast along this paint face's normal.
+					point=point.lerp((verts[k]+verts[k+1]+verts[k+2])/3.0,0.002)
+					var ray_normal:=normals[k]
 					var best:=INF
 					for t in range(0,indices.size(),3):
-						var hit=Geometry3D.ray_intersects_triangle(point+normal*10,-normal,grid.rv[indices[t]],grid.rv[indices[t+1]],grid.rv[indices[t+2]])
+						var hit=Geometry3D.ray_intersects_triangle(point+ray_normal*10,-ray_normal,grid.rv[indices[t]],grid.rv[indices[t+1]],grid.rv[indices[t+2]])
 						if hit!=null:
-							var distance: float=normal.dot(point-hit)
+							var distance: float=ray_normal.dot(point-hit)
 							if absf(distance)<absf(best): best=distance
-					if best<0.03 or best>0.32:
+					if absf(best-0.1)>0.005:
 						if failed<6: print("PAINT PROBE r=",r," i=",i," point=",point," clearance=",best)
 						failed+=1
 					worst=maxf(worst,absf(best-0.1))

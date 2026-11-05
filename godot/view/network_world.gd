@@ -50,8 +50,8 @@ const HALL_RIB_EVERY := 8         # samples: a steel rib across the roof and dow
 const HALL_STRIP_H := 18.0        # the lit strip down each wall
 const DECK := 5.0                 # a deck's thickness, m
 const LINE_W := 0.6
-const EDGE_SEGS := 4              # facets across each edge's ramp (CraftSim.net_edge: the sims' quarter-pipe)
-const JOIN_EDGE_SEGS := 6         # finer at launch/highway overlaps; ordinary junctions retain their normal density
+const EDGE_SEGS := 6              # identical shoulder topology on both sides of every chunk boundary
+const JOIN_EDGE_SEGS := EDGE_SEGS # overlap chunks must not change cross-section tessellation
 const EDGE_FOOT := Color(0.5, 0.52, 0.56)   # a dim line where each ramp starts up
 const STRIP_LIGHT := Color(0.9, 0.94, 1.0)
 const WALL_STRIP := Color(0.42, 0.68, 1.0)    # the walls' lit strips: sky blue (white ones lay along the horizon as a white line)
@@ -126,10 +126,13 @@ var _heights := []        # immutable exact sample heights, shared by all stream
 var _height_curves := {}  # current Hermite interval per road for fractional junction queries
 var _deco_templates := {} # repeated straight, flat road furniture; asphalt UVs remain per chunk
 var _asph: ShaderMaterial
-var _mat: StandardMaterial3D
+var _mat: ShaderMaterial
 var _lit: StandardMaterial3D
 var _bright: StandardMaterial3D
 var _strip_mat: StandardMaterial3D   # the walls' strips: lit, but not HDR-bright
+var _paint_key := []
+var _paint_rows := {}
+var _paint_fine := false
 var _sec_cache := {}               # road widths -> their sections (_section)
 var _idx_cache := {}               # Vector2i(rows, cols) -> the road grid's triangles (_grid_index)
 var _beam: ShaderMaterial
@@ -160,6 +163,8 @@ func build(s, v) -> void:
 	var t0 := Time.get_ticks_msec()
 	sim = s
 	view = v
+	_paint_key.clear()
+	_paint_rows.clear()
 	_pillar_specs_cache.clear()
 	_pillar_cells.clear()
 	_pillars_indexed = false
@@ -168,7 +173,8 @@ func build(s, v) -> void:
 	shaft.setup(sim)
 	for r in shaft.maps:
 		_smap[sim.roads[int(r)]] = int(r)
-	_mat = Kit.vertex_colors()
+	_mat = ShaderMaterial.new()
+	_mat.shader = preload("res://view/network_structure.gdshader")
 	_lit = Kit.vertex_colors(true)
 	_bright = Kit.vertex_colors(true)
 	_bright.albedo_color = Color(2.4, 2.4, 2.4)
@@ -255,6 +261,13 @@ func build(s, v) -> void:
 	scenery.build(sim, self)
 	_warm_fonts()
 	_warm_deco_templates()
+	# Prepare nearby detail while the map is loading. Accurate junction paint
+	# costs more to construct; the pilot should start on finished pavement,
+	# rather than spend their first seconds watching that work stream in.
+	var warm_deadline:=Time.get_ticks_usec()+220000
+	for warm_frame in 28:
+		sync(sim.pod.x,sim.pod.y)
+		if (wanted==0 and _job.is_empty()) or Time.get_ticks_usec()>=warm_deadline: break
 	setup_ms = Time.get_ticks_msec() - t0
 
 
@@ -743,8 +756,13 @@ func _sample(J: Dictionary, R: CraftSim.TrackPath, i: int) -> void:
 	var span := _deco_span(J, R, i)
 	if span == 0:
 		return # asphalt retains every sample; only identical coplanar decoration is joined
+	if span==1:
+		_paint_row(R,r,ox,oy,i,J) # reuse the asphalt already generated above
 	j = i + span
 	hj = _h(r, j)
+	var up_j: Vector3 = shaft.at(r,float(j))[5] if shaft.on(r,float(j)) else Vector3.UP
+	var hw_j: float = R.w[j]*0.5
+	var te_j: float = CraftSim.net_edge(R.w[j],hw_j).x
 	var open_i := [false, false]
 	var open_j := [false, false]
 	if J.joins and not _joining_at(r, i).is_empty():
@@ -776,9 +794,9 @@ func _sample(J: Dictionary, R: CraftSim.TrackPath, i: int) -> void:
 			if open_i[side] or open_j[side]:
 				continue
 			var ea := _p(R, ox, oy, i, sgn * hw, hi)
-			var eb := _p(R, ox, oy, j, sgn * hw, hj)
-			_quad(deco, [ea - _up * DECK, eb - _up * DECK, eb + _up * te, ea + _up * te], Color(0.55, 0.55, 0.53))
-			_quad(lglow, [ea - _up * DECK, eb - _up * DECK, eb - _up * (DECK - 0.8), ea - _up * (DECK - 0.8)], STRIP_LIGHT)   # a lit line along its foot
+			var eb := _p(R, ox, oy, j, sgn * hw_j, hj)
+			_quad(deco, [ea - _up * DECK, eb - up_j * DECK, eb + up_j * te_j, ea + _up * te], Color(0.55, 0.55, 0.53))
+			_quad(lglow, [ea - _up * DECK, eb - up_j * DECK, eb - up_j * (DECK - 0.8), ea - _up * (DECK - 0.8)], STRIP_LIGHT)
 		_quad(deco, [_p(R, ox, oy, i, hw, hi - DECK), _p(R, ox, oy, i, -hw, hi - DECK), _p(R, ox, oy, j, -hw, hj - DECK), _p(R, ox, oy, j, hw, hj - DECK)], Color(0.32, 0.32, 0.31))
 		for pillar in pillar_specs(r, i):
 			var thick: float = pillar.halfSize * 2.0
@@ -793,19 +811,19 @@ func _sample(J: Dictionary, R: CraftSim.TrackPath, i: int) -> void:
 	# the walls, the strip on top, the masts
 	for sgn in [-1.0, 1.0]:
 		var side := 0 if sgn < 0.0 else 1
-		if open_i[side]:
+		if open_i[side] or open_j[side]:
 			walls_open += 1
 			continue
 		var wa := _p(R, ox, oy, i, sgn * hw, hi + te)   # (on the ramp's top)
-		var wb := _p(R, ox, oy, j, sgn * hw, hj + te)
+		var wb := _p(R, ox, oy, j, sgn * hw_j, hj + te_j)
 		var top := BAND_H
-		_wall(deco, wa, wb, 0.0, WALL_H, Color(0.72, 0.71, 0.68))
-		_wall(deco, wa, wb, WALL_H, BAND_H, (BAND_SF if city else BAND)[(i / 4) % 2])
+		_wall(deco, wa, wb, 0.0, WALL_H, Color(0.72, 0.71, 0.68), up_j)
+		_wall(deco, wa, wb, WALL_H, BAND_H, (BAND_SF if city else BAND)[(i / 4) % 2], up_j)
 		if city:
 			var slate := 0.2 + 0.035 * ((i / 4) % 2)
-			_wall(deco, wa, wb, BAND_H, FENCE_H, Color(slate, slate + 0.01, slate + 0.03))
+			_wall(deco, wa, wb, BAND_H, FENCE_H, Color(slate, slate + 0.01, slate + 0.03), up_j)
 			top = FENCE_H
-		_wall(lglow, wa, wb, top, top + STRIP_H, WALL_STRIP_SF if city else WALL_STRIP)
+		_wall(lglow, wa, wb, top, top + STRIP_H, WALL_STRIP_SF if city else WALL_STRIP, up_j)
 		if i % (8 if city else MAST_EVERY) == 0 and not on_shaft:
 			var foot := _p(R, ox, oy, i, sgn * (hw + 0.4), hi + te)
 			_box(deco, foot + Vector3.UP * (MAST_H / 2.0), Vector3(0.6, MAST_H, 0.6), Color(0.3, 0.31, 0.33))
@@ -918,59 +936,92 @@ func _hoop(J: Dictionary, R: CraftSim.TrackPath, i: int, hw: float, h: float, li
 ## A twisted road is triangulated, not a bilinear surface: interpolating row frames
 ## alone can put paint underneath the diagonal between two differently banked rows.
 func _paint_arrow(st: SurfaceTool, R: CraftSim.TrackPath, ox: float, oy: float, i: int, way: float, off: float, half_width: float, run: float, thickness: float) -> void:
-	var r: int = sim.roads.find(R)
 	var tip := float(i)
 	var tail := tip - way * run / CraftSim.NET_STEP
 	var wide := way * thickness / CraftSim.NET_STEP
-	var first := maxi(0, floori(minf(tip,tail)+minf(0.0,wide)))
-	var last := mini(R.N-1, ceili(maxf(tip,tail)+maxf(0.0,wide)))
-	if last <= first: return
-	var sec := _section(R.w[i])
-	var grid := {"r":r,"ox":ox,"oy":oy,"u0":0.0,"rv":PackedVector3Array(),"rn":PackedVector3Array(),"ru":PackedVector2Array(),"rows":0,"cols":0,"joins":true}
-	for row in range(first,last+1): _road_row(grid,R,sec,row,_h(r,row))
-	var cols: int = grid.cols
 	for side in [-1.0,1.0]:
 		var edge: float = off + side * half_width
-		var arm := PackedVector2Array([Vector2(tip,off),Vector2(tip+wide,off),Vector2(tail+wide,edge),Vector2(tail,edge)])
-		for row in range(first,last):
-			for col in cols-1:
-				var lo: float = sec.o[col]
-				var hi: float = sec.o[col+1]
-				if hi < minf(off,edge) or lo > maxf(off,edge): continue
-				var cell := [Vector2(row,lo),Vector2(row,hi),Vector2(row+1,hi),Vector2(row+1,lo)]
-				var start := (row-first)*cols+col
-				var corners := [start,start+1,start+cols+1,start+cols]
-				for indices in [[0,1,2],[0,2,3]]:
-					var a: Vector2 = cell[indices[0]]
-					var b: Vector2 = cell[indices[1]]
-					var c: Vector2 = cell[indices[2]]
-					var va: Vector3 = grid.rv[corners[indices[0]]]
-					var vb: Vector3 = grid.rv[corners[indices[1]]]
-					var vc: Vector3 = grid.rv[corners[indices[2]]]
-					var normal := (vc-va).cross(vb-va).normalized()
-					var ab := b-a
-					var ac := c-a
-					var determinant := ab.cross(ac)
-					for polygon in Geometry2D.intersect_polygons(arm,PackedVector2Array([a,b,c])):
-						var points := PackedVector3Array()
-						for point in polygon:
-							var d: Vector2 = point-a
-							var wb := d.cross(ac)/determinant
-							var wc := ab.cross(d)/determinant
-							points.append(va+(vb-va)*wb+(vc-va)*wc+normal*0.1)
-						st.set_color(JUMP_AMBER)
-						st.set_normal(normal)
-						for k in range(1,points.size()-1):
-							var pa := points[0]
-							var pb := points[k]
-							var pc := points[k+1]
-							if (pb-pa).cross(pc-pa).dot(normal)>0.0:
-								var swap := pb
-								pb=pc
-								pc=swap
-							st.add_vertex(pa)
-							st.add_vertex(pb)
-							st.add_vertex(pc)
+		_paint_polygon(st,R,ox,oy,PackedVector2Array([Vector2(tip,off),Vector2(tip+wide,off),Vector2(tail+wide,edge),Vector2(tail,edge)]),JUMP_AMBER)
+
+
+## Project marking polygons onto the SAME triangles used by each road chunk.
+## Coordinates are continuous sample index and metres left of the centreline.
+func _paint_polygon(st: SurfaceTool, R: CraftSim.TrackPath, ox: float, oy: float, shape: PackedVector2Array, color: Color) -> void:
+	var r: int = sim.roads.find(R)
+	var bounds := Rect2(shape[0],Vector2.ZERO)
+	for point in shape: bounds = bounds.expand(point)
+	var first := maxi(0,floori(bounds.position.x))
+	var last := mini(R.N-1,ceili(bounds.end.x))
+	for row in range(first,last):
+		var geometry := _paint_row(R,r,ox,oy,row)
+		var sec: Dictionary=geometry[0]
+		var grid: Dictionary=geometry[1]
+		var cols: int = grid.cols
+		for col in cols-1:
+			var lo: float = sec.o[col]
+			var hi: float = sec.o[col+1]
+			if hi < bounds.position.y or lo > bounds.end.y: continue
+			var cell := [Vector2(row,lo),Vector2(row,hi),Vector2(row+1,hi),Vector2(row+1,lo)]
+			var corners := [col,col+1,col+cols+1,col+cols]
+			for indices in [[0,1,2],[0,2,3]]:
+				var a: Vector2 = cell[indices[0]]
+				var b: Vector2 = cell[indices[1]]
+				var c: Vector2 = cell[indices[2]]
+				var va: Vector3 = grid.rv[corners[indices[0]]]
+				var vb: Vector3 = grid.rv[corners[indices[1]]]
+				var vc: Vector3 = grid.rv[corners[indices[2]]]
+				var normal := (vc-va).cross(vb-va).normalized()
+				var ab := b-a
+				var ac := c-a
+				var determinant := ab.cross(ac)
+				for polygon in Geometry2D.intersect_polygons(shape,PackedVector2Array([a,b,c])):
+					var points := PackedVector3Array()
+					for point in polygon:
+						var d: Vector2 = point-a
+						points.append(va+(vb-va)*d.cross(ac)/determinant+(vc-va)*ab.cross(d)/determinant+normal*0.1)
+					st.set_color(color)
+					st.set_normal(normal)
+					for k in range(1,points.size()-1):
+						var pa := points[0]
+						var pb := points[k]
+						var pc := points[k+1]
+						if (pb-pa).cross(pc-pa).dot(normal)>0.0:
+							var swap := pb
+							pb=pc
+							pc=swap
+						st.add_vertex(pa)
+						st.add_vertex(pb)
+						st.add_vertex(pc)
+
+
+## Bound this CPU cache to one chunk. Multiple markings share the same pavement
+## rows; no GPU readback and no repeated nearest-road projections per stripe.
+func _paint_row(R: CraftSim.TrackPath,r: int,ox: float,oy: float,row: int,source: Dictionary={}) -> Array:
+	var chunk_start := (row / CH)*CH
+	var key := [r,chunk_start,ox,oy]
+	if key != _paint_key:
+		_paint_key=key
+		_paint_rows.clear()
+		_paint_fine=false
+		var chunk_end:=mini(chunk_start+CH,R.N-1)
+		for ji in R.sjx:
+			if ji<sim.junctions.size(): continue
+			var join: Array=sim.surface_junctions[ji]
+			var lo:=int(join[1]) if int(join[0])==r else int(join[4])
+			var hi:=int(join[2]) if int(join[0])==r else int(join[5])
+			if chunk_start<=hi+4 and chunk_end>=lo-4: _paint_fine=true
+	if not _paint_rows.has(row):
+		var sec:=_section(R.w[row],_paint_fine)
+		var grid: Dictionary={"r":r,"ox":ox,"oy":oy,"u0":0.0,"rv":PackedVector3Array(),"rn":PackedVector3Array(),"ru":PackedVector2Array(),"rows":0,"cols":0,"joins":true}
+		if not source.is_empty():
+			grid.cols=source.cols
+			grid.rows=2
+			grid.rv=(source.rv as PackedVector3Array).slice(source.rv.size()-2*int(source.cols))
+		else:
+			_road_row(grid,R,sec,row,_h(r,row))
+			_road_row(grid,R,sec,row+1,_h(r,row+1))
+		_paint_rows[row]=[sec,grid]
+	return _paint_rows[row]
 
 
 ## Broad launch chevrons and narrow exit-lane arrows share the actual road frame.
@@ -1031,18 +1082,21 @@ func _finish(J: Dictionary, R: CraftSim.TrackPath) -> void:
 		arr[Mesh.ARRAY_INDEX] = _grid_index(int(J.rows), int(J.cols))
 		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
 		mesh.surface_set_material(0, _asph)
+	var cpu_surfaces := []
 	if not J.template.is_empty():
-		var cached: ArrayMesh = J.template[0]
-		for surface in range(1, cached.get_surface_count()):
+		var cached: Array = J.template[0]
+		for surface in cached:
 			var index := mesh.get_surface_count()
-			mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, cached.surface_get_arrays(surface))
-			mesh.surface_set_material(index, cached.surface_get_material(surface))
+			mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, surface[0])
+			mesh.surface_set_material(index, surface[1])
 	else:
 		for pair in [[deco, _mat], [glow, _lit], [lglow, _strip_mat]]:
 			var n0 := mesh.get_surface_count()
-			(pair[0] as SurfaceTool).commit(mesh)
-			if mesh.get_surface_count() > n0:
-				mesh.surface_set_material(n0, pair[1])
+			var arrays := (pair[0] as SurfaceTool).commit_to_arrays()
+			if arrays[Mesh.ARRAY_VERTEX] != null and arrays[Mesh.ARRAY_VERTEX].size() > 0:
+				mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES,arrays)
+				mesh.surface_set_material(n0,pair[1])
+				cpu_surfaces.append([arrays,pair[1]])
 	var mi := MeshInstance3D.new()
 	mi.name = "road"
 	mi.mesh = mesh
@@ -1058,7 +1112,7 @@ func _finish(J: Dictionary, R: CraftSim.TrackPath) -> void:
 		bm.extra_cull_margin = 400.0
 		node.add_child(bm)
 	if J.template_key != "" and J.template.is_empty():
-		_deco_templates[J.template_key] = [mesh, beacon_mesh]
+		_deco_templates[J.template_key] = [cpu_surfaces, beacon_mesh]
 
 
 ## Does a junction take road r on at its sample e (one of its ends)?
@@ -1311,11 +1365,9 @@ func _sign(node: Node3D, R: CraftSim.TrackPath, r: int, ox: float, oy: float, sp
 	var b := Basis(Vector3.UP, atan2(ty, tx))
 	var mid := _p(R, ox, oy, i, 0.0, h0)
 	if kind == "terminal":   # a lit line across the road, and a gantry with the city's name
-		var la := _p(R, ox, oy, i, -R.w[i] / 2.0, h0 + 0.06)
-		var lb := _p(R, ox, oy, i, R.w[i] / 2.0, h0 + 0.06)
 		var st := SurfaceTool.new()
 		st.begin(Mesh.PRIMITIVE_TRIANGLES)
-		_quad(st, [la - t * 3.0, lb - t * 3.0, lb + t * 3.0, la + t * 3.0], Color(1.0, 1.0, 1.0))
+		_across(st,R,ox,oy,i,h0,-t*3.0,t*3.0,Color.WHITE)
 		var mi := MeshInstance3D.new()
 		mi.mesh = st.commit()
 		mi.material_override = _bright
@@ -1423,6 +1475,12 @@ func _build_skylines() -> void:
 					near_pts[Vector2i(int(floor(R.px[i] / 500.0)), int(floor(R.py[i] / 500.0)))] = true
 					break
 	var sh := preload("res://view/skyline.gdshader")
+	# Shared stepped architecture: podium, main floors and a recessed crown.
+	# Keep the old unit-box envelope so existing road clearances still apply.
+	var tower_mesh:=Kit.compound([
+		[Kit.box(Vector3(1.0,0.10,1.0)),Kit.at(Vector3(0,-0.45,0)),Color.WHITE],
+		[Kit.box(Vector3(0.84,0.78,0.84)),Kit.at(Vector3(0,-0.01,0)),Color.WHITE],
+		[Kit.box(Vector3(0.64,0.12,0.64)),Kit.at(Vector3(0,0.44,0)),Color.WHITE]])
 	for ci in sim.cities.size():
 		var city: Dictionary = sim.cities[ci]
 		var pal: Array = PALETTE.get(city.biome, PALETTE.verdant)
@@ -1454,7 +1512,7 @@ func _build_skylines() -> void:
 		var mm := MultiMesh.new()
 		mm.transform_format = MultiMesh.TRANSFORM_3D
 		mm.use_colors = true
-		mm.mesh = Kit.box(Vector3.ONE)
+		mm.mesh = tower_mesh
 		mm.instance_count = xfs.size()
 		for k in xfs.size():
 			mm.set_instance_transform(k, xfs[k])
@@ -1613,14 +1671,13 @@ func _grid_index(rows: int, cols: int) -> PackedInt32Array:
 
 ## A band across the road's end sample e (its open end's marks), from `d0` to `d1` off it, over the
 ## section (the ramps too).
-func _across(st: SurfaceTool, R: CraftSim.TrackPath, ox: float, oy: float, e: int, he: float, d0: Vector3, d1: Vector3, c: Color) -> void:
-	var sec := _section(R.w[e])
-	var o: PackedFloat32Array = sec.o
-	var hh: PackedFloat32Array = sec.h
-	for k in o.size() - 1:
-		var a := _p(R, ox, oy, e, o[k], he + hh[k] + 0.05)
-		var b := _p(R, ox, oy, e, o[k + 1], he + hh[k + 1] + 0.05)
-		_quad(st, [a + d0, b + d0, b + d1, a + d1], c)
+func _across(st: SurfaceTool, R: CraftSim.TrackPath, ox: float, oy: float, e: int, _he: float, d0: Vector3, d1: Vector3, c: Color) -> void:
+	var forward := Vector3(R.tx[e],0,-R.ty[e])
+	var a := float(e)+d0.dot(forward)/CraftSim.NET_STEP
+	var b := float(e)+d1.dot(forward)/CraftSim.NET_STEP
+	var hw: float = R.w[e]*0.5
+	_paint_polygon(st,R,ox,oy,PackedVector2Array([Vector2(a,-hw),Vector2(a,hw),Vector2(b,hw),Vector2(b,-hw)]),c)
+
 
 
 ## A lip's lit face: down DECK from the road's end, its ramps too.
@@ -1634,22 +1691,69 @@ func _lip(st: SurfaceTool, R: CraftSim.TrackPath, ox: float, oy: float, e: int, 
 
 ## A strip along sample i, from o0 to o1 m left of the centreline, raised e0 and e1 there (on the
 ## edges' ramps).
-func _strip(st: SurfaceTool, R: CraftSim.TrackPath, ox: float, oy: float, i: int, o0: float, o1: float, h0: float, h1: float, c: Color, e0 := 0.0, e1 := 0.0, span := 1) -> void:
-	var a := _p(R, ox, oy, i, o0, h0 + e0)
-	var b := _p(R, ox, oy, i, o1, h0 + e1)
-	var cc := _p(R, ox, oy, i + span, o1, h1 + e1)
-	var d := _p(R, ox, oy, i + span, o0, h1 + e0)
-	st.set_color(c)
-	st.set_normal(_up)
-	for q in [a, b, cc, a, cc, d]:
-		st.add_vertex(q)
+func _strip(st: SurfaceTool, R: CraftSim.TrackPath, ox: float, oy: float, i: int, o0: float, o1: float, _h0: float, _h1: float, c: Color, _e0 := 0.0, _e1 := 0.0, span := 1) -> void:
+	var r: int=sim.roads.find(R)
+	var j:=i+span
+	# Exact fast path for coplanar strips. Curved/banked/joining surfaces use
+	# triangle clipping; straight stretches need only split at section facets.
+	if not _smap.has(R) and absf(R.tx[i]-R.tx[j])+absf(R.ty[i]-R.ty[j])<0.0000001 and R.w[i]==R.w[j] and _joining_at(r,i).is_empty() and _joining_at(r,j).is_empty():
+		var sec:=_section(R.w[i])
+		for k in sec.o.size()-1:
+			var lo: float=maxf(o0,sec.o[k])
+			var hi: float=minf(o1,sec.o[k+1])
+			if hi<=lo: continue
+			var h_lo: float=lerpf(sec.h[k],sec.h[k+1],inverse_lerp(sec.o[k],sec.o[k+1],lo))
+			var h_hi: float=lerpf(sec.h[k],sec.h[k+1],inverse_lerp(sec.o[k],sec.o[k+1],hi))
+			var a:=_p(R,ox,oy,i,lo,_h(r,i)+h_lo+0.02)
+			var b:=_p(R,ox,oy,i,hi,_h(r,i)+h_hi+0.02)
+			var cc:=_p(R,ox,oy,j,hi,_h(r,j)+h_hi+0.02)
+			var d:=_p(R,ox,oy,j,lo,_h(r,j)+h_lo+0.02)
+			var normal: Vector3=(cc-a).cross(b-a).normalized()
+			st.set_color(c)
+			st.set_normal(normal)
+			for point in [a,b,cc,a,cc,d]: st.add_vertex(point+normal*0.1)
+		return
+	# A rectangular stripe has a closed-form intersection with each grid
+	# triangle. This avoids invoking a general polygon boolean per facet.
+	for row in range(i,i+span):
+		var geometry:=_paint_row(R,r,ox,oy,row)
+		var sec: Dictionary=geometry[0]
+		var grid: Dictionary=geometry[1]
+		var cols: int=grid.cols
+		for k in cols-1:
+			var lo: float=maxf(o0,sec.o[k])
+			var hi: float=minf(o1,sec.o[k+1])
+			if hi<=lo: continue
+			var low: float=inverse_lerp(sec.o[k],sec.o[k+1],lo)
+			var high: float=inverse_lerp(sec.o[k],sec.o[k+1],hi)
+			var a: Vector3=grid.rv[k]
+			var b: Vector3=grid.rv[k+1]
+			var cc: Vector3=grid.rv[k+cols+1]
+			var d: Vector3=grid.rv[k+cols]
+			var normal: Vector3=(cc-a).cross(b-a).normalized()
+			if absf((d-a).dot(normal))<0.00001:
+				_paint_quad(st,[a.lerp(b,low),a.lerp(b,high),d.lerp(cc,high),d.lerp(cc,low)],normal,c)
+				continue
+			var diagonal_low:=a.lerp(cc,low)
+			var diagonal_high:=a.lerp(cc,high)
+			_paint_quad(st,[a.lerp(b,low),a.lerp(b,high),diagonal_high,diagonal_low],(cc-a).cross(b-a).normalized(),c)
+			_paint_quad(st,[diagonal_low,diagonal_high,d.lerp(cc,high),d.lerp(cc,low)],(d-a).cross(cc-a).normalized(),c)
+
+func _paint_quad(st: SurfaceTool,points: Array,normal: Vector3,color: Color) -> void:
+	st.set_color(color)
+	st.set_normal(normal)
+	for tri in [[0,1,2],[0,2,3]]:
+		if points[tri[0]].is_equal_approx(points[tri[1]]) or points[tri[1]].is_equal_approx(points[tri[2]]): continue
+		for k in tri: st.add_vertex(points[k]+normal*0.1)
 
 
-func _wall(st: SurfaceTool, a: Vector3, b: Vector3, h0: float, h1: float, c: Color) -> void:
+
+func _wall(st: SurfaceTool, a: Vector3, b: Vector3, h0: float, h1: float, c: Color, end_up := Vector3.ZERO) -> void:
+	var up_b := _up if end_up==Vector3.ZERO else end_up
 	var nrm := (b - a).cross(_up).normalized()
 	st.set_color(c)
 	st.set_normal(nrm)
-	for q in [a + _up * h0, b + _up * h0, b + _up * h1, a + _up * h0, b + _up * h1, a + _up * h1]:
+	for q in [a + _up * h0, b + up_b * h0, b + up_b * h1, a + _up * h0, b + up_b * h1, a + _up * h1]:
 		st.add_vertex(q)
 
 

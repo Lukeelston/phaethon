@@ -19,6 +19,8 @@ func _run() -> void:
 	v._skill_label.hide()
 	v._skill_award_label.hide()
 	var out := ProjectSettings.globalize_path("res://../evidence/v024-environment")
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--out="): out=arg.trim_prefix("--out=")
 	DirAccess.make_dir_recursive_absolute(out)
 	for region in v.landscape.REGIONS:
 		var p: Vector2 = region[1]

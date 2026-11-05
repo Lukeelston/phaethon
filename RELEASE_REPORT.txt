@@ -1458,3 +1458,64 @@ Both42-file package allowlists validated. All historical archives retained.
 Local release branch only; no store publication, remote push or merge.
 Physical headset appearance, sound and feel remain unverified - needs user
 confirmation. Source changes and local artifacts are ready for that evaluation.
+
+
+v0.2.7 - cockpit, road geometry and world quality - 2026-11-04
+===========================================================
+All longitudinal stripes and landing/terminal bars now follow actual banked
+pavement triangles, like the ramp arrows, with 0.10m normal clearance.
+Road chunks share edge subdivision at joins. Walls open if either segment end
+joins another road; rolled walls use each endpoint's frame and width.
+Cockpit floor clears the seat; throttle quadrants have real slots throughout
+lever travel. Ribs, conduits and rim lights clear occupied console surfaces.
+Harness straps sit forward of the seat instead of cutting through it.
+
+Terrain adds filtered geological layering, exposed rock and sand variation.
+Fractured rocks, branched trees, service-court loading bays, parked vehicles,
+roof plant, entrances and four-sided windows enrich existing shared batches.
+City towers gain podiums and crowns within their original bounds. Concrete
+structures gain subtle weathering. Region placement, road clearance, streaming
+distance, driving physics, gearing, controls, traffic and scoring are preserved.
+
+PERFORMANCE
+CPU decoration arrays replace per-copy GPU mesh readback. Matched settled mono
+1440x900 Vulkan/MSAA4 scenery benchmark on RTX5080, same70km route:
+road CPU mean3.3333->1.39068ms, p9533.881->1.920ms;
+mesh finish maximum33774->592us; stream CPU mean4.87458->2.95745ms;
+render GPU mean0.46555->0.46258ms; frame-wall p9537.953->16.905ms.
+Occasional sign generation stalls remain (maximum34.928ms).
+Exact paint adds geometry work; optimized intersections and a bounded220ms
+loading warmup restore the unchanged streaming gate. Final headless setup1701ms;
+full GPU world setup2806ms. Neither is a headset/compositor performance result.
+
+VERIFICATION
+Paint44288 actual-triangle probes: no failures; worst lift deviation0.368mm
+against5mm tolerance. Seams140 boundaries: matching topology, <=7.813mm world
+float rounding. Eight far-end-only openings clear. Cached/fresh geometry,
+normals, colors, indices and materials match, including floating-origin shift.
+Actual assembled lever sweep754 segments clears both quadrants. Cable68933 and
+dashboard10434 vertices clear hull. Final assembled cockpit renders inspected.
+Landscape33 checks include121530 road probes. Final9 regional and3 road views
+inspected. GPU fade checks,30 canopy contrast conditions and237 shaft checks pass.
+Jump matrix60 cases, landings200 positive/8 negative, fast capture81, twists4197,
+brake feather20, speed brakes and shield28 pass. Partner28 maneuver checks and
+19529 recorded-player frames pass with zero overlaps. Score display17, VRmenu61
+and collision menu101 pass. Final independent review: no unresolved findings.
+Reviewer-requested tighter paint tolerance and cached-node origin/attribute
+assertions were applied and rerun successfully.
+
+ARTIFACTS
+Fresh extracted desktop186/186 and PCVR XR-off305/305 rendered diagnostics pass.
+Both42-file allowlists validated. Historical archives retained and hashes checked.
+Phaethon-Experimental-0.2.7-Windows.zip
+  bytes 61446807; SHA256 c6b0e0229c0cac1c094ea75eed02af6e20ba909a9fd3fe06800e2eaf2898c4e7
+Phaethon-Experimental-0.2.7-Windows-PCVR.zip
+  bytes 61537632; SHA256 99de1ceff7658f442201b7ca55e4a97fc9508577a60da6f1e8d13968b897b824
+Local release branch only; no remote push, merge or store upload.
+Physical headset appearance, comfort, sound and sustained performance remain
+unverified - needs user confirmation. Exported software/rendering checks passed.
+Evidence: v027-gpu-checks.json, v027-benchmark-final.log, v027-test_*.log,
+v027-build-0.json and versioned cockpit/vehicle/landscape screenshot directories.
+Fresh PCVR v0.2.7 launched with Network/partner selected; process responds and
+Oculus OpenXR reached idle pending headset wake. All test/build helper processes
+exited before this intentional interactive playtest. Log: v027-headset.log.

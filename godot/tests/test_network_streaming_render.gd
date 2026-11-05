@@ -47,6 +47,8 @@ func _run() -> void:
 	land.sync(p.x,p.y)
 	check("creation fade finishes at full opacity",float(tile.deco.get_child(0).get_instance_shader_parameter("stream_reveal"))==1.0)
 	var out:=ProjectSettings.globalize_path("res://../evidence/v025-flow")
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--out="): out=arg.trim_prefix("--out=")
 	DirAccess.make_dir_recursive_absolute(out)
 	for jump in 3:
 		var r: int=v.sim.jumps[jump][0]

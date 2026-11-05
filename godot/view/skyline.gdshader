@@ -44,9 +44,11 @@ void fragment() {
 	base = mix(base,lin(vec3(0.18,0.31,0.39))*(0.65+0.35*ly),windows*0.72);
 	float fins = (1.0-smoothstep(0.02,0.07,abs(fract(facade.x/36.0)-0.5)))*(1.0-roof);
 	base *= 1.0+fins*0.18;
-	float top = smoothstep(1.0 - 14.0 / tall, 1.0, ly);
+	// Light the crown's vertical band; roofs retain their material instead
+	// of becoming huge white emitters that flatten the skyline's contrast.
+	float top = smoothstep(1.0 - 14.0 / tall, 1.0, ly)*(1.0-roof);
 	ALBEDO = base * (1.0 - h) * (1.0 - top);
-	EMISSION = lin(haze_col) * h * 0.85 + lin(crown) * top * 3.0 * (1.0 - 0.7 * h);
+	EMISSION = lin(haze_col) * h * 0.85 + lin(crown) * top * 1.6 * (1.0 - 0.7 * h);
 	ROUGHNESS = 0.55;
 	SPECULAR = 0.4;
 }

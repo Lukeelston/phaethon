@@ -48,8 +48,9 @@ func build() -> void:
 
 	# floor: a deck plate with raised treads, under the seat and the feet (to the cage's edge)
 	var floor_y := UP - 0.47
-	solid.append([Kit.box(Vector3(0.84, 0.025, 1.7)), Kit.at(Vector3(0, floor_y, 0.3)), dark])
-	for k in 15:
+	# Stop ahead of the cushion; the previous plate continued through its volume.
+	solid.append([Kit.box(Vector3(0.84, 0.025, 1.1)), Kit.at(Vector3(0, floor_y, 0.0)), dark])
+	for k in 10:
 		solid.append([Kit.box(Vector3(0.8, 0.012, 0.035)), Kit.at(Vector3(0, floor_y + 0.018, -0.48 + k * 0.11)), gunmetal])
 	# footrest bar and pedals, out over the open cage
 	metal.append([Kit.cyl(0.022, 0.022, 0.86, 12), Kit.at(Vector3(0, UP - 0.4, -0.95), Vector3(0, 0, PI / 2.0)), steel])
@@ -87,9 +88,13 @@ func build() -> void:
 	# throttle quadrant: a gate plate round each lever, slot and burner gate
 	for s in [-1.0, 1.0]:
 		var q := Vector3(0.46 * s, 0.125, 0.2)   # just above the lever pivots (the floor curves up out here)
-		solid.append([Finish.beveled_plate(Vector3(0.09, 0.05, 0.36), 0.004), Kit.at(q + Vector3(0, -0.01, 0)), Color(0.12, 0.12, 0.13)])
-		solid.append([Kit.box(Vector3(0.022, 0.01, 0.3)), Kit.at(q + Vector3(0, 0.016, 0)), Color(0.02, 0.02, 0.02)])   # the slot
-		paint.append([Kit.box(Vector3(0.07, 0.006, 0.012)), Kit.at(q + Vector3(0, 0.02, -0.105)), Color(1.0, 0.5, 0.1)])   # burner gate
+		# Four rails surround an actual opening. A dark rectangle over a solid
+		# plate looked like a slot until the lever visibly passed through it.
+		for dx in [-0.031,0.031]:
+			solid.append([Finish.beveled_plate(Vector3(0.028,0.05,0.36),0.003),Kit.at(q+Vector3(dx,-0.01,0)),Color(0.12,0.12,0.13)])
+			paint.append([Kit.box(Vector3(0.024,0.006,0.012)),Kit.at(q+Vector3(dx,0.02,-0.105)),Color(1.0,0.5,0.1)])
+		for z in [-0.165,0.165]:
+			solid.append([Kit.box(Vector3(0.034,0.05,0.03)),Kit.at(q+Vector3(0,-0.01,z)),Color(0.12,0.12,0.13)])
 		for z in [-0.155, 0.155]:
 			for dx in [-0.032, 0.032]:
 				_fastener(q + Vector3(dx, 0.016, z), metal, rubber)
@@ -97,7 +102,7 @@ func build() -> void:
 	# harness on the seat: shoulder straps down the seat back, a lap belt across the cushion
 	var strap := Color(0.6, 0.08, 0.06)
 	for s in [-1.0, 1.0]:
-		rubber.append([Kit.box(Vector3(0.05, 0.62, 0.012)), Transform3D(Basis.from_euler(Vector3(-0.12, 0, 0.05 * s)), Vector3(0.11 * s, 0.6, 1.025)), strap])
+		rubber.append([Kit.box(Vector3(0.05, 0.62, 0.012)), Transform3D(Basis.from_euler(Vector3(-0.12, 0, 0)), Vector3(0.11 * s, 0.6, 1.012)), strap])
 		rubber.append([Kit.box(Vector3(0.25, 0.05, 0.012)), Transform3D(Basis.from_euler(Vector3(-PI / 2.0, 0.35 * s, 0)), Vector3(0.14 * s, 0.215, 0.76)), strap])
 	metal.append([Kit.rounded_box(Vector3(0.08, 0.06, 0.02), 5.0, 5), Kit.at(Vector3(0, 0.222, 0.72), Vector3(-PI / 2.0, 0, 0)), steel])
 
@@ -115,7 +120,7 @@ func build() -> void:
 		var rib := []
 		for j in 25:
 			rib.append(wall(z, deg_to_rad(198.0 + j * 6.0), 0.03))
-		CM._tube(st, rib, 0.014, gunmetal)
+		_clear_tube(st, rib, 0.014, gunmetal)
 	var hoses := [[deg_to_rad(205.0), Color(0.75, 0.12, 0.08), 0.045], [deg_to_rad(212.0), Color(0.85, 0.65, 0.1), 0.05],
 		[deg_to_rad(335.0), Color(0.15, 0.35, 0.8), 0.045], [deg_to_rad(328.0), Color(0.18, 0.18, 0.2), 0.05]]
 	for hs in hoses:
@@ -123,8 +128,9 @@ func build() -> void:
 		for m in 31:
 			var z := lerpf(-0.5, 1.25, float(m) / 30.0)
 			run.append(wall(z, hs[0], hs[2] + 0.012 * sin(m * 0.7)))
-		CM._tube(st, run, 0.011, hs[1])
+		_clear_tube(st, run, 0.011, hs[1])
 	var tubes := MeshInstance3D.new()
+	tubes.name = "RecessedConduits"
 	tubes.mesh = st.commit()
 	tubes.material_override = Finish.rubber()
 	add_child(tubes)
@@ -138,8 +144,9 @@ func build() -> void:
 		var x := (CM.OPEN_AX - 0.05) * cos(ph)
 		var z := CM.OPEN_ZC + (CM.OPEN_AZ - 0.05) * sin(ph)
 		ring.append(Vector3(x, CM.hull_top(x, z) - 0.16 + UP, z))
-	CM._tube(rim, ring, 0.0035, Color.WHITE, 6)
+	_clear_tube(rim, ring, 0.0035, Color.WHITE, 6)
 	var rmi := MeshInstance3D.new()
+	rmi.name = "RimLighting"
 	rmi.mesh = rim.commit()
 	rim_mat = StandardMaterial3D.new()
 	rim_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
@@ -147,6 +154,28 @@ func build() -> void:
 	rmi.material_override = rim_mat
 	add_child(rmi)
 	parts_built = solid.size() + metal.size() + rubber.size() + paint.size() + lit.size() + 5 + hoses.size() + 1
+
+
+## Hide structural runs behind occupied fittings, including their tube radius.
+## End caps disappear inside the console rather than emerging through its face.
+func _occupied(p: Vector3, margin: float) -> bool:
+	for side in [-1.0,1.0]:
+		var console := AABB(Vector3(side*0.615-0.065,0.105,-0.055),Vector3(0.13,0.29,0.95)).grow(margin)
+		if console.has_point(p): return true
+	var floor_box := AABB(Vector3(-0.42,0.117,-0.55),Vector3(0.84,0.045,1.1)).grow(margin)
+	var seat_box := AABB(Vector3(-0.31,0.08,0.60),Vector3(0.62,0.85,0.59)).grow(margin)
+	return floor_box.has_point(p) or seat_box.has_point(p)
+
+func _clear_tube(st: SurfaceTool, points: Array, radius: float, color: Color, sides := 8) -> void:
+	var run := []
+	for i in points.size():
+		var blocked := _occupied(points[i],radius+0.008)
+		if i>0: blocked=blocked or _occupied((points[i-1]+points[i])*0.5,radius+0.008)
+		if blocked:
+			if run.size()>1: CM._tube(st,run,radius,color,sides)
+			run=[]
+		else: run.append(points[i])
+	if run.size()>1: CM._tube(st,run,radius,color,sides)
 
 
 func _batch(parts: Array, material: Material, node_name: String) -> void:

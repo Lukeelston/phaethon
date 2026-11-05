@@ -26,6 +26,8 @@ func _difference(a: Image,b: Image,rect: Rect2i) -> float:
 func _run() -> void:
 	baseline = "--baseline" in OS.get_cmdline_user_args()
 	out=ProjectSettings.globalize_path("res://../evidence/v026-contrast"+("-before" if baseline else "-after"))
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--out="): out=arg.trim_prefix("--out=")
 	DirAccess.make_dir_recursive_absolute(out)
 	root.msaa_3d=Viewport.MSAA_4X
 	var env := WorldEnvironment.new()
