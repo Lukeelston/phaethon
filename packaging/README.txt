@@ -1,5 +1,5 @@
 PHAETHON
-Experimental Desktop Racer - Windows x64 - v0.2.7
+Experimental Desktop Racer - Windows x64 - v0.2.8
 ElstonWorks
 
 Two engines. One cockpit. We know it's a little fucky.
@@ -19,6 +19,7 @@ Road stripes and landing bars now conform to the pavement, and merge edges
 are cleaner. Cockpit fittings have better clearance and real throttle slots.
 Geological detail, fractured rocks, branched trees, stepped city towers and
 settlement hardware add character. Road decoration streams more efficiently.
+VR cockpit lean is gentler, with slower rotation and smooth air-brake reversals.
 
 Skill points reward sustained speed, clean fast turns, close calls and settled
 jump landings. Chain clean maneuvers for up to a 5x multiplier. Impacts break
@@ -112,7 +113,7 @@ copyright. Third-party components and the CC BY engine audio retain their
 own licenses and permissions. See THIRD_PARTY_NOTICES.txt and licenses/.
 Adapted engine audio is also supplied separately in audio/engines/.
 
-Build: 0.2.7-experimental | 2026-11-04
+Build: 0.2.8-experimental | 2026-11-04
 
 IN THIS LOCAL BUILD
 Central highway transfers and long side-road sweeps now alternate bends with

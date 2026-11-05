@@ -47,6 +47,11 @@ var canopy: Node3D   # view/canopy.gd: the windscreen ahead and the forcefield r
 var minimap_panel: Node3D   # vr/minimap_panel.gd
 var menu_panel: Node3D      # the main menu's panel (view/main_menu.gd)
 var _ride := {}   # CraftModel.ride's smoothing state
+const COCKPIT_ROLL_MAX := deg_to_rad(30.0)
+const COCKPIT_ROLL_RATE := deg_to_rad(30.0)
+const COCKPIT_ROLL_ACCEL := deg_to_rad(90.0)
+var _comfort_roll := 0.0
+var _comfort_roll_rate := 0.0
 var _buzz_hold := {}   # controller -> seconds an event buzz still owns it (the shudder waits)
 const SHAKE_M := 0.004   # cockpit shake per unit of air-brake shudder, metres
 const GRAB_SHAKE_M := 0.007   # the gear's grab: the cockpit's jolt, metres (fore and aft, a little up)
@@ -775,6 +780,22 @@ static func next_track(cur: String) -> String:
 	return order[(order.find(cur) + 1) % order.size()]
 
 
+## Visual lean only. Preserve physical steering and the road's full corkscrew
+## frame. A damped spring limits both roll speed and acceleration: reversing a
+## brake must decelerate the old lean before rolling the other way.
+func _ease_cockpit_roll(raw_roll: float, delta: float) -> float:
+	var target := clampf(raw_roll / CraftModelScript.ROLL_MAX, -1.0, 1.0) * COCKPIT_ROLL_MAX
+	var remaining := clampf(delta, 0.0, 0.05)
+	while remaining > 0.000001:
+		var step := minf(remaining, 1.0 / 240.0)
+		var accel := clampf(36.0 * (target - _comfort_roll) - 12.0 * _comfort_roll_rate,
+			-COCKPIT_ROLL_ACCEL, COCKPIT_ROLL_ACCEL)
+		_comfort_roll_rate = clampf(_comfort_roll_rate + accel * step, -COCKPIT_ROLL_RATE, COCKPIT_ROLL_RATE)
+		_comfort_roll = clampf(_comfort_roll + _comfort_roll_rate * step, -COCKPIT_ROLL_MAX, COCKPIT_ROLL_MAX)
+		remaining -= step
+	return _comfort_roll
+
+
 func _place_camera(_k: float) -> void:
 	# The cockpit lists with the pod, rolled about your head rather than the floor: the view
 	# tilts but your eyes don't swing sideways (a floor pivot moves them ~0.9 m at 60 deg).
@@ -782,7 +803,7 @@ func _place_camera(_k: float) -> void:
 	var b_yaw := Basis(Vector3.UP, yaw)
 	# the ride over the banking, smoothed (CraftModel.ride: Luke, "going over hills makes the camera very shaky")
 	var r := CraftModelScript.ride(self, sim, _ride, get_process_delta_time())
-	var roll := clampf(craft.bank[2] + r.z, -CraftModelScript.ROLL_MAX, CraftModelScript.ROLL_MAX)   # the cap: the lean only
+	var roll := _ease_cockpit_roll(craft.bank[2] + r.z, get_process_delta_time())
 	var pitch := r.y   # up and down the banking
 	var head := origin.position + cam.position
 	if sim.pod.path > 0 and sim.kind != "network":

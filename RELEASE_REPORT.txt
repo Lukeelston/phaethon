@@ -1519,3 +1519,39 @@ v027-build-0.json and versioned cockpit/vehicle/landscape screenshot directories
 Fresh PCVR v0.2.7 launched with Network/partner selected; process responds and
 Oculus OpenXR reached idle pending headset wake. All test/build helper processes
 exited before this intentional interactive playtest. Log: v027-headset.log.
+
+
+v0.2.8 - gentler cockpit roll and air-brake reversals - 2026-11-04
+================================================================
+Luke reported violent side-to-side view shake when quickly alternating brakes.
+The VR rig directly followed the visual bank, whose unwind path can reverse at
+85deg/s. Added a cockpit-only critically damped roll spring after turn/road bank:
+maximum30deg lean (was70 combined), maximum30deg/s speed (was85 unwind),
+90deg/s2 acceleration limit. Ordinary maximum flat-road lean62->26.57deg.
+The old lean must slow through a reversal instead of instantly reversing rate.
+Substeps keep integration stable; a long frame advances at most50ms of lean.
+Physics steering, brake pressure, head tracking, pitch and full road-carry
+barrel rolls remain unchanged. The rig still rotates about the tracked eye.
+Yaw remains the physical pod heading; this change specifically damps roll.
+
+VERIFICATION
+New regression drives the production VR _place_camera from real ease_bank
+turn loads: hold, alternate every200ms, opposite hold, release. Original
+build failed angle/rate/acceleration limits (62deg,85deg/s, abrupt reversals).
+Final10 checks pass at30/60/90/120Hz. Maximum26.571deg/30deg/s; measured
+reversal acceleration85.75-90.01deg/s2 (float basis rounding included).
+Eye drift<1mm, release settles, carried180deg roll retained. Additional checks
+cover combined bank30deg cap, zero dt and a500ms frame without a roll jump.
+Test uses the same Node delta as production; SceneTree's fixed test-clock
+interval differs under engine time smoothing and initially skewed acceleration.
+Existing ride replay8, craftmodel10, brake feather20 and speedbrakes pass.
+Independent read-only review approved with no unresolved findings.
+Fresh desktop186/186 and PCVR XR-off305/305 packaged diagnostics pass.
+Both42-file allowlists and all historical archive hashes verified.
+Phaethon-Experimental-0.2.8-Windows.zip
+  bytes 61446845; SHA256 9444ed83cc6a180d0133f1c015fdb1dc286170346972c334d4ca843b8fc9dc1b
+Phaethon-Experimental-0.2.8-Windows-PCVR.zip
+  bytes 61538696; SHA256 bfd1f698cf2acaa8b7095eb516176aaf1f75afdd27c0810619d39c67980fb1ce
+Physical headset comfort and resolution of Luke's specific city symptom remain
+unverified - needs user confirmation. Local builds only; no store upload/push.
+Evidence: v028-roll-*.log, v028-checks.json, v028-build-0.json.

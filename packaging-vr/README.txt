@@ -1,5 +1,5 @@
 PHAETHON - EXPERIMENTAL PC VR EDITION
-Windows x64 / OpenXR - v0.2.7 - ElstonWorks
+Windows x64 / OpenXR - v0.2.8 - ElstonWorks
 
 Two engines. One cockpit. We know it's a little fucky.
 
@@ -18,6 +18,7 @@ Road stripes and landing bars now conform to the pavement, and merge edges
 are cleaner. Cockpit fittings have better clearance and real throttle slots.
 Geological detail, fractured rocks, branched trees, stepped city towers and
 settlement hardware add character. Road decoration streams more efficiently.
+VR cockpit lean is gentler, with slower rotation and smooth air-brake reversals.
 
 START HERE
 1. Extract the whole ZIP. Keep PhaethonVR.exe and PhaethonVR.pck together.
@@ -161,7 +162,7 @@ copyright. Third-party components and the CC BY engine audio retain their
 own licenses and permissions. See THIRD_PARTY_NOTICES.txt and licenses/.
 Adapted engine audio is supplied separately in audio/engines/.
 
-Build: 0.2.7-experimental | 2026-11-04
+Build: 0.2.8-experimental | 2026-11-04
 
 IN THIS LOCAL BUILD
 Central highway transfers and long side-road sweeps now alternate bends with
