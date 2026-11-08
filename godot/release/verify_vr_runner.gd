@@ -5,7 +5,7 @@ const View := preload("res://view/craft_view.gd")
 const Cockpit := preload("res://vr/vr_cockpit.gd")
 const Boot := preload("res://release/vr_boot.gd")
 const Settings := preload("res://release/game_settings.gd")
-const Stops := ["range", "gp", "eridanus", "emergency", "network", "network", "range"]
+const Stops := ["range", "gp", "eridanus", "emergency", "network", "carving", "network", "range"]
 
 var checks := 0
 var failures := 0
@@ -111,6 +111,10 @@ func _run() -> void:
 		check(stop + " obstacle checkbox persists", Settings.obstacle_collisions_enabled() == collisions)
 		check(stop + " partner checkbox persists", Settings.driving_partner_enabled() == partner_enabled)
 		menu.choose_course(stop)
+		if stop == "carving" and DisplayServer.get_name() != "headless":
+			await frames(2)
+			await RenderingServer.frame_post_draw
+			check("six-course VR panel captured", menu.panel_view.get_texture().get_image().save_png(evidence.path_join("carving-menu-panel.png")) == OK)
 		check(stop + " selection keeps menu open", get_tree().current_scene == menu and menu.selected_course == stop)
 		menu.focus_row(menu.start_index)
 		menu.consume_controller(0.0, true, true)
@@ -124,6 +128,8 @@ func _run() -> void:
 			return
 		check(stop + " native track selection is correct", view._track() == stop)
 		check(stop + " job selection is correct", not view.sim.job.is_empty() if stop == "emergency" else view.sim.job.is_empty())
+		if stop == "carving":
+			check("Carving starts in Speedcraft with visible corner guidance",view.sim.P.handling=="speed" and view.gp_world!=null and view.gp_world.corners.size()>10 and view.gp_world.chevrons>0)
 		check(stop + " launch respects obstacle checkbox", view.sim.P.obstacleCollisions == collisions)
 		check(stop + " launch builds the selected partner state", view.partner_on == partner_enabled and (view.partner != null) == partner_enabled)
 		check(stop + " skill tracker and audio loaded", view.skill_score != null and view.skill_audio != null)

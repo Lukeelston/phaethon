@@ -33,7 +33,7 @@ func _run() -> void:
 	_check("Escape cannot pause the menu", not paused and not overlay.is_paused)
 	menu.start_course("missing")
 	_check("an unknown course keeps the menu open", current_scene == menu)
-	for course in ["range", "gp", "eridanus", "emergency", "network"]:
+	for course in ["range", "gp", "eridanus", "emergency", "network", "carving"]:
 		menu = current_scene
 		menu.start_course(course)
 		await scene_changed

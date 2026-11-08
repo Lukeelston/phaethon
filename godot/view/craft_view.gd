@@ -1057,10 +1057,10 @@ func _build_world() -> void:
 	en.fog_light_color = hz
 	# (the valley's air is clearer than the desert's dust: Eridanus' 12 km boards come up readable)
 	en.fog_density = 0.0012 if sim.kind == "circuit" and not sim.course else (0.0002 if green else 0.00035)
-	if sim.kind == "network":
+	if sim.kind == "network" or sim.track_name == "carving":
 		en.fog_density = 0.00016   # the roads stream in 20 km out: the haze takes them there (the skylines carry their own)
 	en.fog_sky_affect = 0.0
-	en.fog_sun_scatter = 0.05 if sim.kind == "network" else 0.18   # the haze brightens toward the suns (the Network's, less: no white band)
+	en.fog_sun_scatter = 0.05 if sim.kind == "network" or sim.track_name == "carving" else 0.18   # preserve contrast on fast roads
 	if tw:
 		en.ambient_light_sky_contribution = 1.0
 		en.ambient_light_energy = TWILIGHT_AMBIENT
@@ -1197,13 +1197,23 @@ func _build_world() -> void:
 		horizon.build_course(self, hz, c, half * k, true)
 		return
 
-	if sim.track_name == "gp" or gp_biome != "":
+	if sim.track_name == "gp" or sim.track_name == "carving" or gp_biome != "":
 		gp_world = GpWorldScript.new()
 		add_child(gp_world)
 		gp_world.build(sim, self)
 		horizon = HorizonScript.new()
 		add_child(horizon)
-		horizon.build(self, hz)
+		if sim.track_name == "carving":
+			# Fixed landscape enclosing the entire long circuit, not the old GP's
+			# small origin-centered ring, which would intersect these sweeps.
+			var lo := Vector2(INF, INF)
+			var hi := Vector2(-INF, -INF)
+			for i in sim.N:
+				lo = lo.min(Vector2(sim.tpx[i], sim.tpy[i]))
+				hi = hi.max(Vector2(sim.tpx[i], sim.tpy[i]))
+			horizon.build_course(self, hz, (lo+hi)/2.0, (hi-lo)*0.75, false)
+		else:
+			horizon.build(self, hz)
 		if gp_biome != "":   # a city's GP: its landscape underfoot, its towers round the circuit
 			for b in ["ice", "basalt", "mesa"]:
 				ground_mat.set_shader_parameter(b, 1.0 if b == gp_biome else 0.0)

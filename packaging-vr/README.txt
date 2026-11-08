@@ -1,5 +1,5 @@
 PHAETHON - EXPERIMENTAL PC VR EDITION
-Windows x64 / OpenXR - v0.2.9 - ElstonWorks
+Windows x64 / OpenXR - v0.3.0 - ElstonWorks
 
 Two engines. One cockpit. We know it's a little fucky.
 
@@ -162,7 +162,7 @@ copyright. Third-party components and the CC BY engine audio retain their
 own licenses and permissions. See THIRD_PARTY_NOTICES.txt and licenses/.
 Adapted engine audio is supplied separately in audio/engines/.
 
-Build: 0.2.9-experimental | 2026-11-04
+Build: 0.3.0-experimental | 2026-11-07
 
 IN THIS LOCAL BUILD
 Central highway transfers and long side-road sweeps now alternate bends with
@@ -176,3 +176,9 @@ Starfighter air brakes now work at course speeds, building from 200 to 500 mph.
 Squeeze one side to tighten the turn; squeeze both to slow straight ahead.
 Progressive grips and steadier cockpit alignment suit the narrower courses.
 Starfighter keeps its lower top speed and single gear.
+
+S5 CARVING CIRCUIT
+A161km closed circuit built from the Network S5 road's sweeping curves.
+Starts in Speedcraft. Chase clean laps with ramjet power and progressive
+air brakes; the200m road rewards an accurate line. Approach boards show
+feet to the next bend. Lap records and skill scores save separately.

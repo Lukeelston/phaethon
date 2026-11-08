@@ -5,7 +5,7 @@ extends Node
 const View := preload("res://view/craft_view.gd")
 const Settings := preload("res://release/game_settings.gd")
 const MENU_SCENE := "res://release/menu.tscn"
-const COURSES := ["range", "gp", "eridanus", "emergency", "network", "network"]
+const COURSES := ["range", "gp", "eridanus", "emergency", "network", "carving", "network"]
 
 var failures := 0
 var checks := 0
@@ -114,9 +114,14 @@ func _run() -> void:
 		check(course + " skill tracker and audio loaded", view.skill_score != null and view.skill_audio != null)
 		if course == "gp":
 			check("Grand Prix starts in starfighter mode", view.sim.P.handling == "starfighter")
+		if course == "carving":
+			check("Carving starts in Speedcraft with race dressing", view.sim.P.handling == "speed" and view.gp_world != null and view.gp_world.corners.size()>10)
 		var start := Vector2(view.sim.pod.x, view.sim.pod.y)
-		key(KEY_E, true)
-		await frames(150)
+		# Background window focus changes can clear a synthetic held key.
+		# Feed the intended hold each frame, as the VR diagnostic already does.
+		for frame in 150:
+			key(KEY_E, true)
+			await frames(1)
 		key(KEY_E, false)
 		var position := Vector2(view.sim.pod.x, view.sim.pod.y)
 		check(course + " keyboard accelerates craft", position.distance_to(start) > 1.0 and view.inp.thrL > 0.0 and view.inp.thrR > 0.0)

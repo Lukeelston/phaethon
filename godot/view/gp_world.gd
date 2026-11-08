@@ -144,6 +144,7 @@ func build(s, v) -> void:
 ## Corners: runs of samples turning faster than a 2 km radius, merged across short gaps.
 func _find_corners() -> void:
 	var n: int = sim.N
+	var threshold := 1.0 / 20000.0 if sim.track_name == "carving" else 1.0 / 2000.0
 	var kap := PackedFloat64Array()
 	kap.resize(n)
 	for i in n:
@@ -153,10 +154,10 @@ func _find_corners() -> void:
 	var k := 0
 	var num := 1
 	while k < n:
-		if absf(kap[k]) > 1.0 / 2000.0:
+		if absf(kap[k]) > threshold:
 			var sgn := signf(kap[k])
 			var st := k
-			while k < n and absf(kap[k]) > 1.0 / 2000.0 and signf(kap[k]) == sgn:
+			while k < n and absf(kap[k]) > threshold and signf(kap[k]) == sgn:
 				k += 1
 			var en := k - 1
 			var k_avg := 0.0
@@ -164,6 +165,8 @@ func _find_corners() -> void:
 				k_avg += absf(kap[q])
 			k_avg /= (en - st + 1)
 			var r := 1.0 / k_avg
+			if sim.track_name == "carving" and (en-st+1)*k_avg*12.0 < deg_to_rad(6.0):
+				continue # tiny counter-bends shape the line without a forest of turn numbers
 			var v := minf(OMEGA * r, sqrt(A_LAT * r)) * 2.236936
 			corners.append([st, (st + en) / 2, en, sgn, r, v, num])
 			num += 1
@@ -189,8 +192,9 @@ func _chevron_flags() -> PackedInt32Array:
 	var n: int = sim.N
 	var f := PackedInt32Array()
 	f.resize(n)
+	var lead := 100 if sim.track_name == "carving" else CHEVRON_LEAD
 	for c in corners:
-		for q in range(c[0] - CHEVRON_LEAD, c[2] + 1):
+		for q in range(c[0] - lead, c[2] + 1):
 			f[posmod(q, n)] = -int(c[3])
 	return f
 
@@ -326,7 +330,7 @@ func _gantry() -> void:
 	li.mesh = Kit.compound(lights)
 	li.material_override = Kit.vertex_colors(true)
 	add_child(li)
-	_label(mid + Vector3(-1.8, 19.6, 0), "PHAETHON GRAND PRIX", 260, 0.012, Color(1.0, 0.72, 0.38), -PI / 2.0 + yaw)
+	_label(mid + Vector3(-1.8, 19.6, 0), "S5 CARVING CIRCUIT" if sim.track_name == "carving" else "PHAETHON GRAND PRIX", 260, 0.012, Color(1.0, 0.72, 0.38), -PI / 2.0 + yaw)
 
 
 ## Stepped grandstands outside the main straight, crowds in colour.
@@ -370,13 +374,14 @@ func _boards_and_numbers() -> void:
 		var apex: int = c[1]
 		var pa := _edge(apex, out * (sim.tw[apex] / 2.0 + 14.0))
 		_label(pa + Vector3(0, 16.0, 0), "T%d" % c[6], 400, 0.025, Color(1.0, 1.0, 1.0), 0.0, true)
-		if c[5] >= SLOW_MPH:
+		if c[5] >= SLOW_MPH and sim.track_name != "carving":
 			continue
 		var s_total := 0.0
 		var q: int = c[0]
 		var marks := [1000.0, 2000.0, 3000.0]   # feet (imperial: they were 300 / 600 / 1000 m)
+		if sim.track_name == "carving": marks = [1500.0, 3000.0, 6000.0]
 		var mi := 0
-		while mi < marks.size() and s_total < 1200.0:
+		while mi < marks.size() and s_total < (2200.0 if sim.track_name == "carving" else 1200.0):
 			q = posmod(q - 1, n)
 			s_total += sim.tlen[q]
 			if s_total >= marks[mi] * 0.3048:

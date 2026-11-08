@@ -29,7 +29,7 @@ func _ready() -> void:
 	columns.add_theme_constant_override("separation", 52)
 	margin.add_child(columns)
 	var left := VBoxContainer.new()
-	left.add_theme_constant_override("separation", 8)
+	left.add_theme_constant_override("separation", 6)
 	left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	columns.add_child(left)
 	left.add_child(UI.label("EXPERIMENTAL DESKTOP BUILD", 15, UI.AMBER))
@@ -41,7 +41,7 @@ func _ready() -> void:
 	left.add_child(UI.label("CHOOSE YOUR BAD IDEA", 14, UI.MUTED))
 	var sprint: Button
 	for course in UI.COURSES:
-		var button := UI.button(course.name, start_course.bind(course.id), 46)
+		var button := UI.button(course.name, start_course.bind(course.id), 42)
 		left.add_child(button)
 		if course.id == "range":
 			sprint = button

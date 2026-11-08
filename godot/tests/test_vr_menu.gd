@@ -62,7 +62,7 @@ func _run() -> void:
 	tracker.name = "right_hand"
 	tracker.set_pose("default", Transform3D.IDENTITY, Vector3.ZERO, Vector3.ZERO, 2)
 	XRServer.add_tracker(tracker)
-	for course in ["range", "gp", "eridanus", "emergency", "network"]:
+	for course in ["range", "gp", "eridanus", "emergency", "network", "carving"]:
 		menu = current_scene
 		menu.set_process(false)
 		menu.choose_course(course)

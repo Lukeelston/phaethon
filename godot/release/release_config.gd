@@ -16,6 +16,7 @@ const COURSES := [
 	{"id": "eridanus", "name": "Eridanus", "detail": "A 199 km course with a fast loop\nand two Starfighter towns."},
 	{"id": "emergency", "name": "Emergency Run", "detail": "An emergency delivery on Eridanus.\nAn additional experimental mode."},
 	{"id": "network", "name": "The Network", "detail": "Explore linked roads and cities.\nAn additional experimental map."},
+	{"id": "carving", "name": "S5 Carving Circuit", "detail": "S5's sweeping rhythm, built for racing.\nSpeedcraft, ramjet, and your cleanest lap."},
 ]
 
 static func course_index(id: String) -> int:

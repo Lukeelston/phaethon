@@ -1605,3 +1605,44 @@ All42 installed release files match the recorded PC VR package inventory.
 Launched the actual desktop shortcut: Oculus OpenXR initialized successfully,
 xr_ready=true, PCVR STARTUP: menu, VR MENU: ready. Headset appearance and input
 still require user observation; software launch verified. No gameplay changes.
+
+
+v0.3.0 - S5 Carving Circuit - 2026-11-07
+======================================
+Luke identified Network road S5 as the best ramjet carving rhythm.
+Added a dedicated 160.863 km closed lap, 200 m wide, starting in Speedcraft.
+The generator reuses design_network.varied_arc with S5's 6 km minimum radius,
+7 km tightening crook and 11 km opening counter-sweep. Broader return bends
+join two opposite halves without crossings or a finish-line kink. Flat road
+isolates the carving feel; existing vehicle physics and Network are unchanged.
+Race dressing includes pit buildings, grandstands, luminous guardrails,
+turn numbers for substantial bends, 1.2 km chevron lead-in and approach boards
+at 1,500 / 3,000 / 6,000 feet. Desert horizon encloses the complete circuit;
+reduced haze matches the Network. Desktop and VR menus expose the new course.
+Lap records and skill scores use their own carving files. Desktop menu spacing
+was tightened so all six maps and Quit remain inside the 1280x720 viewport.
+
+VERIFICATION
+Generator closure/nonintersection and runtime geometry checks pass. JS and
+Godot replay the same real-simulation lap in 124.429 s with zero wall impacts,
+3,485 mph peak and 2,892 mph average. Ramjet is active throughout the lap,
+including 102 seconds on curves. This uses full throttle and variable air
+brakes without Quest gearbox simulation; human headset feel is still unverified.
+Godot course replay, legacy GP parity/world, mode gears, 71 VR menu and 68
+desktop menu checks pass. Independent review found one headless screenshot
+guard issue; fixed. Two initial exported desktop runs lost a synthetic held
+key on different unchanged maps. The runner now reasserts the hold per frame,
+matching the VR runner; movement assertions are unchanged. Final results below.
+
+EXPORTED RELEASE PASS (215 checks, 0 failures)
+Phaethon-Experimental-0.3.0-Windows.zip
+  61449354 bytes; SHA256 0812ceb589b516048e79ba1b6cb547167a54d2439c73c8f2644e7f59505772d2
+
+EXPORTED VR RELEASE PASS (348 checks, 0 failures)
+Phaethon-Experimental-0.3.0-Windows-PCVR.zip
+  61542363 bytes; SHA256 27f99b19195639fe7aca6bd2c6d3f1bde5cd52d2f1016ff97ac1afa36aea43b5
+Both 42-file packages verified against their inventories. Screenshots inspected
+for menu fit and circuit rendering. Physical headset feel remains unverified -
+needs user confirmation. Local source/build only, no store upload or remote push.
+Evidence: v030-build-0.json, v030-carving.log, v030-test_*.log, carving-layout.png,
+v030-desktop/ and v030-pcvr/.
