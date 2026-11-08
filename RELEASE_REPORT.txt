@@ -1593,3 +1593,15 @@ Physical headset steering feel remains unverified - needs user confirmation.
 Local release only; no remote push or store upload.
 Evidence: v029-checks-final.json, v029-reference-results.json,
 v029-mode-comparison.json, v029-build-0.json and v029-test_*.log.
+
+2026-11-07 - desktop PC VR launch
+================================
+Existing Desktop/AI Builds/VR/Phaethon.lnk pointed at the original development
+workspace launch_vr.ps1. Repointed it directly to the packaged v0.2.9
+PhaethonVR.exe, with its release working directory and Network preselected.
+tools/install_desktop_shortcut.ps1 reproduces this setup for an extracted build.
+Original shortcut backed up under ignored evidence before replacement.
+All42 installed release files match the recorded PC VR package inventory.
+Launched the actual desktop shortcut: Oculus OpenXR initialized successfully,
+xr_ready=true, PCVR STARTUP: menu, VR MENU: ready. Headset appearance and input
+still require user observation; software launch verified. No gameplay changes.
