@@ -21,19 +21,19 @@
 - Exported runtime must load the same lobby, scripts and assets as development.
 
 ## Task 1: Session and snapshots
-- [ ] Add `godot/tests/test_online_protocol.gd`, asserting finite bounded body transforms, sanitization, interpolation, respawn snapping and stale state behavior; run RED.
-- [ ] Add `godot/online/pose_buffer.gd` with `valid_packet`, `push`, `sample`; add `session.gd` autoload with `host_game`, `join_game`, `leave_game`, `publish_pose` and reliable handshake.
-- [ ] Add two-process `test_online_peer.gd` and `tools/test_online.py`: verify handshake, both players' moving poses, mismatch, timeout and disconnect; run GREEN.
+- [x] Add `godot/tests/test_online_protocol.gd`, asserting finite bounded body transforms, sanitization, interpolation, respawn snapping and stale state behavior; run RED.
+- [x] Add `godot/online/pose_buffer.gd` with `valid_packet`, `push`, `sample`; add `session.gd` autoload with `host_game`, `join_game`, `leave_game`, `publish_pose` and reliable handshake.
+- [x] Add two-process `test_online_peer.gd` and `tools/test_online.py`: verify handshake, both players' moving poses, mismatch, timeout and disconnect; run GREEN.
 
 ## Task 2: Rendered game and lobby
-- [ ] Add `test_online_view.gd` with real CraftView capture/apply checks across origins and online world options; run RED.
-- [ ] Add `remote_craft.gd` and `online_view.gd`; integrate into CraftView and VR menu, without changing offline behavior.
-- [ ] Add native `lobby.gd` / `lobby.tscn`, launchers, host track/spawn options and visible errors. Disable online local traffic and online track changes.
-- [ ] Verify actual two-client views, protocol suite and relevant existing view/control/track tests.
+- [x] Add `test_online_view.gd` with real CraftView capture/apply checks across origins and online world options; run RED.
+- [x] Add `remote_craft.gd` and `online_view.gd`; integrate into CraftView and VR menu, without changing offline behavior.
+- [x] Add native `lobby.gd` / `lobby.tscn`, launchers, host track/spawn options and visible errors. Disable online local traffic and online track changes.
+- [x] Verify actual two-client views, protocol suite and relevant existing view/control/track tests.
 
 ## Task 3: Distribution
-- [ ] Audit source/assets, add attribution and user guide, export preset and build helper.
-- [ ] Export Windows bundle and smoke-test its lobby and two-client gameplay.
-- [ ] Fresh review against f6b3041; resolve important findings and rerun affected checks.
-- [ ] Commit source, create/push GitHub repo and upload release; verify remote commit and release download.
-- [ ] Confirm spawned test processes exited; record limitations and host/join instructions.
+- [x] Audit source/assets, add attribution and user guide, export preset and build helper.
+- [x] Export Windows bundle and smoke-test its lobby and two-client gameplay.
+- [x] Fresh review against f6b3041; resolve important findings and rerun affected checks.
+- [x] Commit source, create/push GitHub repo and upload release; verify remote commit and release download.
+- [x] Confirm spawned test processes exited; record limitations and host/join instructions.

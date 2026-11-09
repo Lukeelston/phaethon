@@ -15,6 +15,10 @@ Built with official Godot 4.7.1 Windows x64 export templates, verified against t
 
 The release executable ignores the editor's `--script` testing flag. The exported test therefore uses an opt-in `--online-game-test` observer through the normal game startup, rather than reporting an editor-only result as package verification.
 
+## Publication check
+
+Public repository: https://github.com/Lukeelston/phaethon (default branch `master`). Release: https://github.com/Lukeelston/phaethon/releases/tag/v0.1.0-online . Downloaded both release assets without credentials, verified the ZIP's SHA256 matches the locally tested package, checked every ZIP member's CRC, and started the downloaded executable's lobby successfully.
+
 ## Not verified
 
 A friend joining from another internet connection, their device-sharing/firewall configuration, and actual headset presentation have not been tested. The two-client Tailscale-address test ran on one physical PC; it is not evidence of traffic crossing the public internet. Physical VR play is **unverified — needs user confirmation**.
