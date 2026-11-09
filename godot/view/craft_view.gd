@@ -45,6 +45,7 @@ const NetworkWorldScript := preload("res://view/network_world.gd")
 const NetworkTrafficScript := preload("res://view/network_traffic.gd")
 const DrivingPartnerScript := preload("res://view/driving_partner.gd")
 const MainMenuScript := preload("res://view/main_menu.gd")
+const OnlineViewScript := preload("res://online/online_view.gd")
 const DT := 1.0 / 480.0
 const HAZE := Color(0.78, 0.66, 0.52)
 const GROUND_PERIOD := 4096.0             # view/ground.gdshader's PERIOD
@@ -133,9 +134,13 @@ var partner_on := false      # the main menu's DRIVING PARTNER (saved: best_dir 
 var menu = MainMenuScript.new()   # the main menu (view/main_menu.gd): the flight waits while it's open
 var menu_label: Label             # the flat view's panel
 var _menu_edges := {}
+var online_mode := false
+var online
 
 
 func _ready() -> void:
+	var session = get_node_or_null("/root/RaceSession")
+	online_mode = session != null and session.active
 	var opts := {}
 	var seek := 0.0
 	var mute := false
@@ -183,7 +188,7 @@ func _ready() -> void:
 	var job := resolve_job(OS.get_cmdline_user_args(), job_override)
 	if job != "" and opts.get("track", "") != "network":
 		opts["job"] = job
-	if opts.get("track", "") == "network":   # back where you last arrived; what you've found, your bests
+	if opts.get("track", "") == "network" and not online_mode:   # solo save only
 		var saved = JSON.parse_string(FileAccess.get_file_as_string(_net_path())) if FileAccess.file_exists(_net_path()) else null
 		if saved is Dictionary:
 			for k in saved.get("found", []):
@@ -200,7 +205,15 @@ func _ready() -> void:
 	if "--pod=heavy" in OS.get_cmdline_user_args():   # the heavy pod (Luke: "giving the pod some weight"): 1,500 kg, not
 		opts["podMass"] = 1500.0                       # 500, with thrust and drag scaled to the total mass so the
 		opts["forceScale"] = 3900.0 / 2900.0          # speed and acceleration are as before
+	if online_mode:
+		opts = {"track": session.world.track, "startCity": 0}
+		start_at = -1
+		branch_at = -1
+		seek = 0.0
+		replay = []
+		partner_on = false
 	sim = CraftSimScript.new(opts)
+	_online_grid_offset()
 	if sim.kind == "network":
 		for k in sim.net.found:
 			net_found[k] = true
@@ -257,6 +270,10 @@ func _ready() -> void:
 	_follow_origin()
 	_place_camera(1.0)
 	set_partner(partner_on)
+	if online_mode:
+		online = OnlineViewScript.new()
+		add_child(online)
+		online.build(self)
 
 
 func _sim_step() -> void:
@@ -267,7 +284,11 @@ func _sim_step() -> void:
 	sub += 1
 	if handling_ask != "":
 		inp["handling"] = handling_ask
+	var was_respawning: bool = online_mode and sim.crash_t > 0.0
 	sim.step(inp, DT)
+	if was_respawning and sim.crash_t <= 0.0:
+		get_node("/root/RaceSession").epoch += 1.0
+		_online_grid_offset()
 	for e in sim.events:
 		_on_event(e)
 	sim.events.clear()
@@ -467,6 +488,9 @@ func net_city_gp() -> String:
 
 ## Into the city's GP: the scene again on its track (the menu hold brings you back to the Network).
 func enter_city_gp() -> void:
+	if online_mode:
+		_flash("Leave and host the city GP from the lobby to switch together.")
+		return
 	var gp := net_city_gp()
 	if gp == "":
 		return
@@ -559,6 +583,8 @@ func _net_arrived(e: Dictionary) -> void:
 
 
 func _net_save(last: int) -> void:
+	if online_mode:
+		return
 	var fj := FileAccess.open(_net_path(), FileAccess.WRITE)
 	if fj:
 		fj.store_string(JSON.stringify({"found": net_found.keys(), "last": last, "best": net_best, "beaten": net_beaten}))
@@ -662,6 +688,8 @@ func _flash(msg: String) -> void:
 ## Y: a fresh start. The range restarts the sprint at the start line, a circuit puts you back
 ## on the grid; both with whole engines (wall damage otherwise stays until you repair it).
 func _respawn() -> void:
+	if online_mode:
+		get_node("/root/RaceSession").epoch += 1.0
 	# off the roads (a missed jump), the restart is the nearest start point: the nearest city you've
 	# found (Luke: "reset to the nearest start-point"); on them, the last city as ever
 	var near := -1
@@ -676,6 +704,7 @@ func _respawn() -> void:
 	if near >= 0:
 		sim.net.from = near
 	sim.restart()
+	_online_grid_offset()
 	net_air_t0 = -1.0
 	if minimap:
 		minimap.waypoint = {}
@@ -685,6 +714,16 @@ func _respawn() -> void:
 
 
 # --- the main menu and the driving partner ---
+
+func _online_grid_offset() -> void:
+	if not online_mode or multiplayer.is_server():
+		return
+	# Start side by side; retain all three bodies' relative constraints.
+	var dx := -sin(float(sim.pair_th)) * 12.0
+	var dy := cos(float(sim.pair_th)) * 12.0
+	for body in [sim.pod, sim.eL, sim.eR]:
+		body.x += dx
+		body.y += dy
 
 func _settings_path() -> String:
 	return best_dir + "settings.json"
@@ -719,8 +758,10 @@ func set_partner(on: bool, save := false) -> void:
 
 ## Overridable: the menu's items.
 func _menu_items() -> Array:
+	if online_mode:
+		return [{"key": "resume", "label": "RESUME"}, {"key": "lobby", "label": "LEAVE SESSION"}]
 	return [{"key": "partner", "label": "DRIVING PARTNER", "value": "ON" if partner_on else "OFF"},
-		{"key": "resume", "label": "RESUME"}]
+		{"key": "resume", "label": "RESUME"}, {"key": "lobby", "label": "MULTIPLAYER / LOBBY"}]
 
 
 func menu_open(on: bool) -> void:
@@ -734,6 +775,13 @@ func menu_open(on: bool) -> void:
 ## Act on the item under the cursor. -> false if that closed the menu.
 func menu_choose() -> bool:
 	match menu.key():
+		"lobby":
+			get_node("/root/RaceSession").leave_game()
+			track_override = ""
+			job_override = ""
+			get_viewport().use_xr = false
+			get_tree().call_deferred("change_scene_to_file", "res://online/lobby.tscn")
+			return false
 		"partner":
 			set_partner(not partner_on, true)
 			menu.items = _menu_items()
@@ -816,6 +864,8 @@ func _process(delta: float) -> void:
 		dust.visible = _shaft_f(sim.pod.x, sim.pod.y) < 0.0
 	_place_camera(1.0 - exp(-delta * 6.0))
 	craft.sync_cables(sim, delta)   # after the camera: in VR the cables' pod end rides the cockpit
+	if online:
+		online.update(delta)
 	var t_world := Time.get_ticks_usec()
 	_sync_world()   # after the camera: distant anchors scale about its current position
 	cpu.world = (Time.get_ticks_usec() - t_world) / 1000.0
@@ -1133,9 +1183,10 @@ func _build_world() -> void:
 		landmark = LandmarkScript.new()
 		add_child(landmark)
 		landmark.build(self)
-		traffic = TrafficScript.new()
-		add_child(traffic)
-		traffic.build(self)
+		if not online_mode:
+			traffic = TrafficScript.new()
+			add_child(traffic)
+			traffic.build(self)
 		horizon = HorizonScript.new()
 		add_child(horizon)
 		horizon.build(self, HORIZON)
@@ -1146,9 +1197,10 @@ func _build_world() -> void:
 		network_world = NetworkWorldScript.new()
 		add_child(network_world)
 		network_world.build(sim, self)
-		traffic_net = NetworkTrafficScript.new()
-		add_child(traffic_net)
-		traffic_net.build(sim, self, network_world)
+		if not online_mode:
+			traffic_net = NetworkTrafficScript.new()
+			add_child(traffic_net)
+			traffic_net.build(sim, self, network_world)
 		horizon = HorizonScript.new()
 		add_child(horizon)
 		horizon.build(self, hz)

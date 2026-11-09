@@ -4,7 +4,11 @@ config_version=5
 [application]
 
 config/name="Phaethon"
-run/main_scene="res://main.tscn"
+run/main_scene="res://online/lobby.tscn"
+
+[autoload]
+
+RaceSession="*res://online/session.gd"
 
 [display]
 

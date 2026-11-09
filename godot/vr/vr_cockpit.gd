@@ -613,10 +613,14 @@ func _menu_hands(l: XRController3D, r: XRController3D) -> void:
 
 
 func _menu_items() -> Array:
+	if online_mode:
+		return [{"key": "resume", "label": "RESUME"},
+			{"key": "scheme", "label": "CONTROLS", "value": String(quest.scheme).to_upper()},
+			{"key": "lobby", "label": "LEAVE SESSION"}]
 	return [{"key": "partner", "label": "DRIVING PARTNER", "value": "ON" if partner_on else "OFF"},
 		{"key": "scheme", "label": "CONTROLS", "value": String(quest.scheme).to_upper()},
 		{"key": "track", "label": "NEXT TRACK", "value": String(next_track(_track())).to_upper()},
-		{"key": "resume", "label": "RESUME"}]
+		{"key": "resume", "label": "RESUME"}, {"key": "lobby", "label": "MULTIPLAYER / LOBBY"}]
 
 
 func menu_choose() -> bool:
@@ -650,6 +654,9 @@ func _menu_show() -> void:
 ## the next track (the OpenXR session carries on; CraftView.track_override and job_override survive
 ## the reload and win over --track and --job).
 func switch_track() -> void:
+	if online_mode:
+		_flash("Leave and host another track from the lobby to switch together.")
+		return
 	var to := next_track(_track())
 	print("TRACK: switching %s -> %s" % [_track(), to])
 	var o := overrides_for(to)

@@ -1,5 +1,15 @@
 # Phaethon
 
+## Play online with a friend
+
+Two-player native desktop / PC VR free driving is available from the new **Host session / Join friend** lobby. Download the Windows ZIP from Releases, extract it, and open `Phaethon.exe`; use `Play-VR.cmd` for Quest Link/OpenXR. Source users can run `launch_online.ps1` with Godot 4.7.1.
+
+**[Read the host/join guide](docs/ONLINE-PLAY.md)** for Tailscale, UDP forwarding, firewall setup and controls. GitHub hosts the files; the host player's PC runs the session. Online sessions share the host's track, show named racers with interpolated movement, and support desktop and VR together. This first release has no player collisions, shared race classification, or AI traffic online. Solo keeps the existing game.
+
+Build a Windows ZIP with `python tools/build_windows.py PATH_TO_GODOT` after installing the matching Godot 4.7.1 export templates. Test the network with `python tools/test_online.py PATH_TO_GODOT`, or both rendered clients with `python tools/test_online_game.py PATH_TO_GODOT --rendered`.
+
+## The original game
+
 A seated VR podracer flown with two 3D-printed throttle levers, one per engine.
 Spec: https://claude.ai/artifact/VeY5CdSPzxcEq568JgkJh8 (source: `phaethon.html`).
 
