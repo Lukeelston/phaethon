@@ -298,7 +298,9 @@ func _menu(sim) -> void:
 	var carried: bool = v2.partner_on and v2.partner != null
 	v.menu_choose()   # and off again
 	var off_saved: bool = v._load_settings().get("partner", true) == false
-	v.menu.at = v.menu.items.size() - 1
+	for k in v.menu.items.size():   # RESUME, by its key (it isn't the last item)
+		if v.menu.items[k].key == "resume":
+			v.menu.at = k
 	v.menu_choose()
 	v2.queue_free()
 	_check("menu: \"%s\"; the flight waits (%s); DRIVING PARTNER on (was %s), saved %s, a new view has it (%s); off again saved (%s); RESUME closes it (%s)" % [txt.replace("\n", " / "), waited, on_before, saved, carried, off_saved, not v.menu.open],
