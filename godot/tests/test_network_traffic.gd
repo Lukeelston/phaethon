@@ -14,7 +14,8 @@
 ##               STARFIGHTER zone (they decide on an exit 40 km out and slow for it)
 ##   obstacles   off by default (Luke: "please turn off collision"); on, the vehicles near the craft are the sim's obstacles, moving at their speed; one put
 ##               in the craft's path is a bump
-##   cost        the traffic's frame under COST_MS on average, a city's crowd round it (100+)
+##   cost        the traffic's fastest frame under COST_MS, a city's crowd round it (100+). The fastest, not the
+##               average: that rides on whatever else the machine is doing (the same pass averages 1.6-2.5 ms)
 ##   racers      after a while on a highway a racer shadows you ("RACER BEHIND"); the ramjet starts the race;
 ##               faster than it you win (the tally saved), slower you lose, and ignored it peels off
 ## Prints NETWORK TRAFFIC PASS.
@@ -24,7 +25,8 @@ extends SceneTree
 const ViewScript := preload("res://view/craft_view.gd")
 const MPH := 2.236936
 const CHECKS := 12
-const COST_MS := 2.5
+const COST_MS := 1.8   # the fastest frame: 1.55-1.65 as it is; 1.94-2.02 with every car reading its road ahead every frame (CAP_EVERY 1)
+const COST_FRAMES := 360   # timed: enough that dozens run clear of the machine's other work (of 120, as few as one did)
 var fails := 0
 var passed := 0
 var v
@@ -248,8 +250,9 @@ func _process(_d: float) -> bool:
 			break
 	_check("obstacles: off by default, none fed (%s); on, %d near vehicles fed to the sim at their speeds %s mph; one in the craft's path bumped it (%s)" % [no_feed, sim.obstacles.size(), sps, bumped], no_feed and ok_obs and bumped)
 	T.collide = false
-	# the cost
+	# the cost: the fastest of the frames (their work is much the same; the slow ones are the machine)
 	var tot := 0.0
+	var fastest := INF
 	road = _road("Eridanus")   # through Eridanus: a city's crowd
 	fi = float(sim.cities[0].i) - 400.0
 	speed = 1100.0 / MPH
@@ -257,13 +260,14 @@ func _process(_d: float) -> bool:
 	T.cars.clear()
 	T.spawned = 0
 	_run(10.0)   # filled in round it first (just arrived, it's a handful: that measured nothing)
-	for k in 120:
+	for k in COST_FRAMES:
 		fi += speed / 60.0 / 24.0
 		_carry()
 		T.update(1.0 / 60.0)
 		tot += T.update_ms
-	print("    cost: %.2f ms per 100 vehicles" % (tot / 120.0 / maxf(1.0, T.cars.size()) * 100.0))
-	_check("cost: the traffic's frame %.2f ms on average (%d vehicles)" % [tot / 120.0, T.cars.size()], tot / 120.0 < COST_MS and T.cars.size() >= 100)
+		fastest = minf(fastest, T.update_ms)
+	print("    cost: %.2f ms per 100 vehicles" % (tot / COST_FRAMES / maxf(1.0, T.cars.size()) * 100.0))
+	_check("cost: the traffic's fastest frame %.2f ms, %.2f on average (%d vehicles)" % [fastest, tot / COST_FRAMES, T.cars.size()], fastest < COST_MS and T.cars.size() >= 100)
 	# racers: shadowed, then a race won
 	_reset_racers()
 	sim.mode = "normal"
