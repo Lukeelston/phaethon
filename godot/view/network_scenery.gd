@@ -4,6 +4,7 @@
 extends Node3D
 
 const Kit := preload("res://view/mesh_kit.gd")
+const SolarWorks := preload("res://view/eridanus_solar.gd")
 const CELL := 1000.0
 const RADIUS := 1100.0
 const VIS := 140000.0
@@ -11,6 +12,8 @@ var landmarks: Array = [] # {node, x, y, biome, radius}
 var occupied := {}
 var _body: ShaderMaterial
 var _glow: ShaderMaterial
+var _galleries: MeshInstance3D
+var _exit_origin := Vector2.ZERO
 
 func build(sim, world) -> void:
 	_body = ShaderMaterial.new()
@@ -27,18 +30,56 @@ func build(sim, world) -> void:
 		var city: Dictionary = sim.cities[ci]
 		var palette: Array = world.PALETTE[city.biome]
 		for k in 3:
-			var p := _anchor(Vector2(city.cx, city.cy), ci, k)
+			var hero: bool = city.name == "ERIDANUS" and k == 0
+			var p: Vector2
+			var facing := 0.0
+			if hero:
+				var road: CraftSim.TrackPath = sim.roads[city.road]
+				var exit_i: int = world.halls[city.road][1]
+				var fwd := Vector2(road.tx[exit_i], road.ty[exit_i])
+				_exit_origin = world._wxy(city.road, exit_i)
+				# Five miles from the portal. The bend carries the aperture
+				# across the pilot's bow as the terminal columns open up.
+				p = _exit_origin + 8750.0 * fwd + 500.0 * Vector2(road.nx[exit_i], road.ny[exit_i])
+				facing = atan2(-fwd.x, fwd.y)
+				_build_galleries(world, road, city.road, exit_i)
+			else:
+				p = _anchor(Vector2(city.cx, city.cy), ci, k)
 			if p == Vector2.INF:
 				continue
-			var mesh := _landmark(city.biome, k, palette)
+			var mesh := SolarWorks.array_mesh(_body, _glow) if hero else _landmark(city.biome, k, palette)
 			var instance := MeshInstance3D.new()
-			instance.name = "%s_landmark_%d" % [city.biome, k]
+			instance.name = "EridanusSolarAperture" if hero else "%s_landmark_%d" % [city.biome, k]
 			instance.mesh = mesh
+			instance.rotation.y = facing
 			instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 			instance.visibility_range_end = VIS
 			add_child(instance)
 			landmarks.append({"node": instance, "x": p.x, "y": p.y,
 				"biome": city.biome, "radius": RADIUS})
+
+func _build_galleries(world, road: CraftSim.TrackPath, road_index: int, exit_i: int) -> void:
+	var parts: Array = []
+	var lamps: Array = []
+	# Alternate shoulders so the near structures give a clear sense of speed.
+	# Centres are over 230 m outside the nearest pavement. The longest
+	# base is 104 m, leaving room for both the roadway and a service apron.
+	var sites := [[16, 335], [64, -380], [165, 440]]
+	for k in sites.size():
+		var i := exit_i + int(sites[k][0])
+		var shoulder := Vector2(road.nx[i], road.ny[i]) * float(sites[k][1])
+		var local: Vector2 = world._wxy(road_index, i) + shoulder - _exit_origin
+		var frame := Transform3D(Basis(Vector3.UP, atan2(road.ty[i], road.tx[i])), Vector3(local.x, 0, -local.y))
+		SolarWorks.add_gallery(parts, lamps, frame, k)
+	_galleries = MeshInstance3D.new()
+	_galleries.name = "EridanusCoolingGalleries"
+	var mesh := Kit.compound(parts)
+	Kit.compound(lamps, mesh)
+	mesh.surface_set_material(0, _body)
+	mesh.surface_set_material(1, _glow)
+	_galleries.mesh = mesh
+	_galleries.visibility_range_end = 19000.0
+	add_child(_galleries)
 
 func _cell(p: Vector2) -> Vector2i:
 	return Vector2i(floori(p.x / CELL), floori(p.y / CELL))
@@ -136,3 +177,5 @@ func _landmark(biome: String, variant: int, pal: Array) -> ArrayMesh:
 func sync(ox: float, oy: float, ground_height := 0.0) -> void:
 	for landmark in landmarks:
 		landmark.node.position = Vector3(landmark.x - ox, ground_height, -(landmark.y - oy))
+	if _galleries != null:
+		_galleries.position = Vector3(_exit_origin.x - ox, ground_height, -(_exit_origin.y - oy))

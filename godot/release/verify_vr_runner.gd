@@ -137,6 +137,14 @@ func _run() -> void:
 		check(stop + " has both controller nodes", view.hands.get("left") is XRController3D and view.hands.get("right") is XRController3D)
 		check(stop + " controller trackers are assigned", view.hands.left.tracker == &"left_hand" and view.hands.right.tracker == &"right_hand")
 		check(stop + " cockpit instruments are constructed", view.interior != null and view.dashboard != null and view.mode_switch != null and view.canopy != null and view.minimap_panel != null)
+		if index == 0:
+			for fitting in ["SegmentedCoaming", "InstrumentBezel"]:
+				var panel := view.interior.get_node_or_null(fitting) as MeshInstance3D
+				var finish: Material = panel.get_active_material(0) if panel and panel.mesh else null
+				check(fitting + " has its imported PBR finish", finish is BaseMaterial3D and finish.albedo_texture != null and finish.normal_texture != null)
+			for side in 2:
+				check("engine %d carries its imported nacelle" % side, view.craft.engines[side].has_node("NacelleShell"))
+				check("lever %d carries its grip and gate indicator" % side, view.lever_pivots[side].has_node("PilotGrip/GateIndicator"))
 		check(stop + " uses default or saved control scheme", view.quest.scheme == expected_scheme)
 		check(stop + " starts in its handling's first gear", view.quest.gear == (0 if view.sim.P.handling == "starfighter" else 1))
 		check(stop + " remains an explicitly flat diagnostic", not get_viewport().use_xr)
@@ -150,6 +158,10 @@ func _run() -> void:
 			await frames(1)
 		key(KEY_E, false)
 		check(stop + " simulation advances", view.sim.time > before)
+		if stop == "network":
+			check("Eridanus solar aperture and cooling galleries are present", view.network_world.scenery.has_node("EridanusSolarAperture") and view.network_world.scenery.has_node("EridanusCoolingGalleries"))
+			check("Eridanus bay frames are live in streamed road chunks", view.network_world.find_child("ShelterBays", true, false) is MultiMeshInstance3D)
+			check("moving craft receives the local terminal light", view.terminal_lighting != null and view.terminal_lighting.fixture.is_visible_in_tree())
 		if view.quest.scheme == "triggers":
 			view.quest.set_gear(4)
 			await frames(2)

@@ -1,7 +1,11 @@
 PHAETHON - EXPERIMENTAL PC VR EDITION
-Windows x64 / OpenXR - v0.3.0 - ElstonWorks
+Windows x64 / OpenXR - v0.3.1 - ElstonWorks
 
 Two engines. One cockpit. We know it's a little fucky.
+
+To see the new cockpit and terminal, choose The Network and start a flight.
+From Eridanus, follow the road through the shelter into daylight. Look for
+the shutter of the solar works ahead and the cooling galleries along the road.
 
 The Network now has fixed geographic landscapes: grassy plains and farms,
 tundra, rocky ranges, desert, snowy mountains, wetlands, jungle and urban
@@ -162,7 +166,7 @@ copyright. Third-party components and the CC BY engine audio retain their
 own licenses and permissions. See THIRD_PARTY_NOTICES.txt and licenses/.
 Adapted engine audio is supplied separately in audio/engines/.
 
-Build: 0.3.0-experimental | 2026-11-07
+Build: 0.3.1-experimental | 2026-11-18
 
 IN THIS LOCAL BUILD
 Central highway transfers and long side-road sweeps now alternate bends with

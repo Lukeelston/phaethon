@@ -19,6 +19,9 @@ uniform vec3 base = vec3(0.30, 0.295, 0.29);   // sRGB (converted once, below)
 uniform float lane_half = 20.0;    // the rubber lies within this of the centreline
 uniform float joint_every = 25.0;
 uniform float spec = 0.4;           // the sheen toward the suns (the Network's: 0.2)
+// Start station, length and spacing (m) of the fixed shelter light wells. Only
+// the Eridanus terminal's pavement material supplies a positive spacing.
+uniform vec3 shelter = vec3(0.0);
 
 varying vec2 tp;
 
@@ -79,6 +82,17 @@ void fragment() {
 	}
 
 	ALBEDO = srgb(col);
+	if (shelter.z > 0.0) {
+		float station = mod(p.x - shelter.x + 0.5 * period, period) - 0.5 * period;
+		float indoors = smoothstep(-8.0, 32.0, min(station, shelter.y - station));
+		float lamp_distance = abs(fract(station / shelter.z + 0.5) - 0.5) * shelter.z;
+		float across = (abs(p.y) - 37.0) / 52.0;
+		float along = lamp_distance / 33.0;
+		float pool = exp(-across * across - along * along);
+		// Baked diffuse floor illumination. The same real fixtures light both eyes
+		// and the stone wear remains visible through the pools.
+		EMISSION = ALBEDO * vec3(0.45, 0.75, 0.88) * (1.25 * indoors * pool);
+	}
 	ROUGHNESS = rough;
 	SPECULAR = spec;
 }

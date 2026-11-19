@@ -19,6 +19,7 @@ extends Node3D
 const CM := preload("res://view/craft_model.gd")
 const Kit := preload("res://view/mesh_kit.gd")
 const Finish := preload("res://view/craft_materials.gd")
+static var _flight_deck_meshes: Dictionary = {}
 const UP := CM.POD_FRAME_UP
 const MODE_LIGHT := {"normal": Color(0.25, 0.6, 1.0), "burner": Color(1.0, 0.55, 0.12), "ramjet": Color(0.7, 0.3, 1.0)}
 
@@ -36,7 +37,29 @@ static func wall(z: float, th: float, inset: float) -> Vector3:
 		h[1] + (h[2] - CM.SKIN - inset) * Kit._sp(sin(th), 2.0 / CM.HULL_N) + UP, z)
 
 
+## Exported at the rig's scale and origin. Reuse the imported meshes (and their UVs,
+## tangents and shared PBR atlas) on both levers and on replacement cockpits.
+static func deck_mesh(part: String) -> Mesh:
+	if _flight_deck_meshes.is_empty():
+		var deck_scene := load("res://art/cockpit/flight_deck.glb") as PackedScene
+		var source := deck_scene.instantiate()
+		for child in source.find_children("*", "MeshInstance3D", true, false):
+			_flight_deck_meshes[str(child.name)] = (child as MeshInstance3D).mesh
+		source.free()
+	return _flight_deck_meshes[part]
+
+
 func build() -> void:
+	var coaming := MeshInstance3D.new()
+	coaming.name = "SegmentedCoaming"
+	coaming.mesh = deck_mesh("Coaming")
+	# This fitting wraps the existing exterior hull lip like the windscreen seal.
+	coaming.add_to_group("exterior")
+	add_child(coaming)
+	var bezel := MeshInstance3D.new()
+	bezel.name = "InstrumentBezel"
+	bezel.mesh = deck_mesh("Bezel")
+	add_child(bezel)
 	var dark := Color(0.09, 0.09, 0.1)
 	var gunmetal := Color(0.28, 0.29, 0.31)
 	var steel := Color(0.62, 0.64, 0.68)
@@ -50,8 +73,7 @@ func build() -> void:
 	var floor_y := UP - 0.47
 	# Stop ahead of the cushion; the previous plate continued through its volume.
 	solid.append([Kit.box(Vector3(0.84, 0.025, 1.1)), Kit.at(Vector3(0, floor_y, 0.0)), dark])
-	for k in 10:
-		solid.append([Kit.box(Vector3(0.8, 0.012, 0.035)), Kit.at(Vector3(0, floor_y + 0.018, -0.48 + k * 0.11)), gunmetal])
+	# The two replaceable tread inserts on this backing are in the textured bezel mesh.
 	# footrest bar and pedals, out over the open cage
 	metal.append([Kit.cyl(0.022, 0.022, 0.86, 12), Kit.at(Vector3(0, UP - 0.4, -0.95), Vector3(0, 0, PI / 2.0)), steel])
 	for s in [-1.0, 1.0]:

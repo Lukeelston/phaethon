@@ -133,6 +133,7 @@ var _prev_v := []                    # last frame's [vx, vy] per body
 
 
 func build(v) -> void:
+	var nacelle_scene := load("res://art/engine/nacelle.glb") as PackedScene
 	view = v
 	var sim = v.sim
 	var shaded := Kit.vertex_colors()
@@ -147,6 +148,11 @@ func build(v) -> void:
 		body.mesh = _engine_body(out)
 		body.material_override = finish
 		eng.add_child(body)
+		# One shared UV-mapped shell on each engine. The hot section, brakes and
+		# vectoring vanes still use their independent pivots and materials.
+		var shell := nacelle_scene.instantiate()
+		shell.name = "NacelleShell"
+		eng.add_child(shell)
 		var lights := MeshInstance3D.new()   # nav, tail, landing lights and the repulsor underglow
 		lights.mesh = _engine_lights(out)
 		lights.material_override = lit_mat

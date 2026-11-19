@@ -46,6 +46,7 @@ const CourseWorldScript := preload("res://view/course_world.gd")
 const DawnScript := preload("res://view/dawn.gd")
 const VerdantWorldScript := preload("res://view/verdant_world.gd")
 const NetworkWorldScript := preload("res://view/network_world.gd")
+const TerminalLighting := preload("res://view/terminal_lighting.gd")
 const NetworkTrafficScript := preload("res://view/network_traffic.gd")
 const DrivingPartnerScript := preload("res://view/driving_partner.gd")
 const MainMenuScript := preload("res://view/main_menu.gd")
@@ -995,6 +996,7 @@ func _grain(c: Color, tiles: float) -> StandardMaterial3D:
 
 
 var landscape: Node3D
+var terminal_lighting: TerminalLighting
 
 func _build_world() -> void:
 	# Sky: dusty blue overhead, washing out to the haze at the horizon. The fog skips the sky
@@ -1283,6 +1285,8 @@ func _sync_world() -> void:
 		course_world.sync(org_x, org_y)
 	if network_world:
 		network_world.sync(org_x, org_y)
+		if terminal_lighting:
+			terminal_lighting.sync(sim, org_x, org_y)
 		_net_biome()
 		if course_audio and course_audio.net_halls.is_empty():
 			course_audio.net_halls = network_world.halls
@@ -1345,6 +1349,12 @@ func _build_craft() -> void:
 	craft.build(self)
 	pod_mesh = craft.pod
 	_make_view()
+	if network_world:
+		TerminalLighting.mark_craft(craft)
+		terminal_lighting = TerminalLighting.new()
+		add_child(terminal_lighting)
+		terminal_lighting.build(sim, network_world)
+		terminal_lighting.sync(sim, org_x, org_y)
 
 
 ## Overridable: the flat view's chase camera and 2D HUD.

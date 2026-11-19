@@ -1646,3 +1646,23 @@ for menu fit and circuit rendering. Physical headset feel remains unverified -
 needs user confirmation. Local source/build only, no store upload or remote push.
 Evidence: v030-build-0.json, v030-carving.log, v030-test_*.log, carving-layout.png,
 v030-desktop/ and v030-pcvr/.
+
+v0.3.1 - Eridanus terminal and cockpit - 2026-11-18
+===================================================
+The Network starts at Eridanus. The outbound shelter has modular steel frames,
+service galleries, broad pools of light and two storm portals. Beyond the exit,
+three cooling galleries lead the eye to a louvered solar works 5.45 miles away.
+The cockpit has a segmented orange sill, stitched padding, instrument bezel,
+tread plates, and grips with moving gate indicators. Both engines carry new
+textured ceramic and metal nacelles on their original animation mounts.
+
+Verified the Windows PCVR ZIP by extraction and SHA-256. The extracted build
+passed 360 XR-off checks through the shipped menu and cockpit. The desktop VR
+shortcut selects the Network and points to the same tested game data.
+The reference file is evidence/package-inventory-pcvr-0.3.1.json.
+
+The matched seat test used 1600 x 900, one eye, 4x MSAA and 480 measured frames
+after two warm passes. GPU p95 was 1.285 ms in v0.3.0 and 1.376 ms in v0.3.1.
+CPU view-update p95 was 8.735 and 8.321 ms, respectively. Reproduce with
+godot/tests/render_terminal_art.gd. A physical Quest Link flight is still
+needed to establish 120 Hz performance, text legibility and comfort in stereo.

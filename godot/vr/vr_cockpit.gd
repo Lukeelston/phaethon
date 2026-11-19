@@ -287,6 +287,8 @@ func _make_view() -> void:
 		m.material_override = _mat(Color(0.2, 0.22, 0.25))
 		c.add_child(m)
 	_build_cockpit()
+	if network_world:
+		TerminalLighting.mark_craft(rig)
 	_build_fade(xr_cam)
 	pod_mesh.visible = false   # you are sitting inside it
 	craft.pod_frame = rig      # so the cables hook to the cockpit's own nose
@@ -411,7 +413,6 @@ func _rbox(parent: Node3D, size: Vector3, pos: Vector3, c: Color, rot_x := 0.0, 
 
 func _build_cockpit() -> void:
 	var leather := Color(0.13, 0.12, 0.12)
-	var finishes := preload("res://view/craft_materials.gd")
 	# You sit in the pod itself: the same polished hull the flat view shows, open cockpit,
 	# rubber lip, matte trim inside, the nose and its cable hardpoints out ahead.
 	shell = Node3D.new()
@@ -442,16 +443,19 @@ func _build_cockpit() -> void:
 		shaft.position = Vector3(0, 0.16, 0)
 		pivot.add_child(shaft)
 		var knob := MeshInstance3D.new()
-		var grip_parts := [[Kit.rounded_box(Vector3(0.064, 0.108, 0.078), 3.2, 10), Transform3D.IDENTITY, Color.WHITE]]
-		for rib in 5:
-			grip_parts.append([Kit.rounded_box(Vector3(0.067, 0.006, 0.080), 3.5, 6), Kit.at(Vector3(0, -0.035 + rib * 0.017, 0)), Color(0.67, 0.68, 0.70)])
-		grip_parts.append([Kit.rounded_box(Vector3(0.039, 0.018, 0.046), 4.0, 6), Kit.at(Vector3(-s * 0.021, 0.044, -0.012)), Color(0.55, 0.58, 0.61)])
-		knob.mesh = Kit.compound(grip_parts)
-		var km: StandardMaterial3D = finishes.rubber().duplicate()
-		km.albedo_color = Color(0.16, 0.17, 0.19)
-		knob.material_override = km
+		knob.name = "PilotGrip"
+		knob.mesh = CockpitInteriorScript.deck_mesh("Grip")
 		knob.position = Vector3(0, 0.36, 0)
 		pivot.add_child(knob)
+		var indicator := MeshInstance3D.new()
+		indicator.name = "GateIndicator"
+		indicator.mesh = Kit.rounded_box(Vector3(0.036, 0.012, 0.045), 4.0, 6)
+		indicator.position = Vector3(-s * 0.009, 0.054, 0.004)
+		var km := StandardMaterial3D.new()
+		km.albedo_color = Color(0.16, 0.17, 0.19)
+		km.roughness = 0.35
+		indicator.material_override = km
+		knob.add_child(indicator)
 		lever_pivots.append(pivot)
 		lever_tips.append(km)
 	# instrument panel: curved round the eye, inside the cockpit opening (clear of the hull),

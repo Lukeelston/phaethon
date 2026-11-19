@@ -126,6 +126,12 @@ var _heights := []        # immutable exact sample heights, shared by all stream
 var _height_curves := {}  # current Hermite interval per road for fractional junction queries
 var _deco_templates := {} # repeated straight, flat road furniture; asphalt UVs remain per chunk
 var _asph: ShaderMaterial
+var _shelter_road := -1
+var _shelter_asphalt: ShaderMaterial
+var _shelter_bay: Mesh
+var _shelter_portal: Mesh
+var _shelter_well: Mesh
+var _shelter_gallery: Mesh
 var _mat: ShaderMaterial
 var _lit: StandardMaterial3D
 var _bright: StandardMaterial3D
@@ -251,6 +257,21 @@ func build(s, v) -> void:
 	_plan_signs()
 	for c in sim.cities:   # a hall over each city's terminal: the Network's tunnels
 		halls[int(c.road)] = [int(c.i) - HALL_HALF, int(c.i) + HALL_HALF]
+		if c.name == "ERIDANUS":
+			_shelter_road = int(c.road)
+			var bounds: Array = halls[_shelter_road]
+			var start: float = _s[_shelter_road][int(bounds[0])]
+			var end: float = _s[_shelter_road][int(bounds[1])]
+			var pitch_m := (end - start) * HALL_LIGHT_EVERY / (2.0 * HALL_HALF)
+			_shelter_asphalt = _asph.duplicate()
+			_shelter_asphalt.set_shader_parameter("shelter", Vector3(fposmod(start, ASPHALT_PERIOD), end - start, pitch_m))
+	var shelter_kit := load("res://art/terminal/shelter.gltf") as PackedScene
+	var shelter_models := shelter_kit.instantiate()
+	_shelter_bay = (shelter_models.get_node("BayFrame") as MeshInstance3D).mesh
+	_shelter_portal = (shelter_models.get_node("StormGate") as MeshInstance3D).mesh
+	_shelter_well = (shelter_models.get_node("LightWell") as MeshInstance3D).mesh
+	_shelter_gallery = (shelter_models.get_node("ServiceGallery") as MeshInstance3D).mesh
+	shelter_models.free()
 	_build_skylines()
 	_build_far_shafts()
 	far_roads = preload("res://view/network_far_roads.gd").new()
@@ -742,6 +763,7 @@ func _sample(J: Dictionary, R: CraftSim.TrackPath, i: int) -> void:
 	var hi := _h(r, i)
 	var hj := _h(r, j)
 	var city: bool = R.mode[i] == 0
+	var in_shelter := r == _shelter_road and i >= int(halls[r][0]) and i < int(halls[r][1])
 	var sec := _section(R.w[i], bool(J.fine_joins))
 	var te: float = sec.te   # the edges' ramps' top: the walls stand on it
 	var on_shaft: bool = shaft.on(r, float(i))
@@ -817,13 +839,20 @@ func _sample(J: Dictionary, R: CraftSim.TrackPath, i: int) -> void:
 		var wa := _p(R, ox, oy, i, sgn * hw, hi + te)   # (on the ramp's top)
 		var wb := _p(R, ox, oy, j, sgn * hw_j, hj + te_j)
 		var top := BAND_H
-		_wall(deco, wa, wb, 0.0, WALL_H, Color(0.72, 0.71, 0.68), up_j)
-		_wall(deco, wa, wb, WALL_H, BAND_H, (BAND_SF if city else BAND)[(i / 4) % 2], up_j)
+		var curb_color := Color(0.28, 0.30, 0.30) if in_shelter else Color(0.72, 0.71, 0.68)
+		var wall_band: Color = (BAND_SF if city else BAND)[(i / 4) % 2]
+		if in_shelter:
+			wall_band = Color(0.32, 0.25, 0.30) if (i / 4) % 2 == 0 else Color(0.22, 0.25, 0.27)
+		_wall(deco, wa, wb, 0.0, WALL_H, curb_color, up_j)
+		_wall(deco, wa, wb, WALL_H, BAND_H, wall_band, up_j)
 		if city:
 			var slate := 0.2 + 0.035 * ((i / 4) % 2)
 			_wall(deco, wa, wb, BAND_H, FENCE_H, Color(slate, slate + 0.01, slate + 0.03), up_j)
 			top = FENCE_H
-		_wall(lglow, wa, wb, top, top + STRIP_H, WALL_STRIP_SF if city else WALL_STRIP, up_j)
+		var guide_color := WALL_STRIP_SF if city else WALL_STRIP
+		if in_shelter:
+			guide_color = Color(0.56, 0.27, 0.44)
+		_wall(lglow, wa, wb, top, top + STRIP_H, guide_color, up_j)
 		if i % (8 if city else MAST_EVERY) == 0 and not on_shaft:
 			var foot := _p(R, ox, oy, i, sgn * (hw + 0.4), hi + te)
 			_box(deco, foot + Vector3.UP * (MAST_H / 2.0), Vector3(0.6, MAST_H, 0.6), Color(0.3, 0.31, 0.33))
@@ -884,6 +913,22 @@ func _hall(J: Dictionary, R: CraftSim.TrackPath, i: int, hw: float, hi: float, h
 	var up := Vector3.UP * HALL_H
 	_quad(deco, [a1 + up, b1 + up, b0 + up, a0 + up], HALL_COL.darkened(0.15))   # the roof's underside
 	_quad(deco, [a0 + up + Vector3.UP * 4.0, b0 + up + Vector3.UP * 4.0, b1 + up + Vector3.UP * 4.0, a1 + up + Vector3.UP * 4.0], Color(0.36, 0.37, 0.39))   # its top
+	if r == _shelter_road:
+		# The backing shell follows every road sample. Bolt the imported bays to their
+		# own cross-sections so they follow the bend and share the owning chunk's origin.
+		var first: int = halls[r][0]
+		var last: int = halls[r][1]
+		if (i - first) % HALL_LIGHT_EVERY == 0:
+			var bay := (i - first) / HALL_LIGHT_EVERY
+			var group := "bays" if bay % 2 == 0 else "wells"
+			if bay in [5, 17, 23, 37]:
+				group = "galleries"
+			_shelter_frame(J, R, i, hi, group)
+		if i == first:
+			_shelter_frame(J, R, i, hi, "portals")
+		elif j == last:
+			_shelter_frame(J, R, j, hj, "portals")
+		return
 	for e in [[a0, b0, 1.0], [a1, b1, -1.0]]:   # a lit strip down each wall, just off it
 		var ea: Vector3 = e[0]
 		var eb: Vector3 = e[1]
@@ -911,6 +956,35 @@ func _hall(J: Dictionary, R: CraftSim.TrackPath, i: int, hw: float, hi: float, h
 		_wall(lglow, q0, q1, HALL_H - 3.0, HALL_H, WALL_STRIP_SF)
 		for q in [q0, q1]:
 			_box(lglow, q + Vector3.UP * (HALL_H / 2.0), Vector3(3.0, HALL_H - FENCE_H, 3.0), WALL_STRIP_SF)
+
+
+## Authored local X spans a 200 m road, local Y is up, and -Z follows travel.
+func _shelter_frame(J: Dictionary, R: CraftSim.TrackPath, row: int, height: float, group: String) -> void:
+	var forward := Vector3(R.tx[row], 0.0, -R.ty[row]).normalized()
+	var right := forward.cross(Vector3.UP)
+	var frame := Basis(right * (R.w[row] / 200.0), Vector3.UP, -forward)
+	var center := _p(R, J.ox, J.oy, row, 0.0, height)
+	if not J.has(group):
+		J[group] = []
+	J[group].append(Transform3D(frame, center))
+
+
+## One surface and one draw per module type in this chunk. The paved road stays
+## at its original height and the kit carries no collision or per-frame updates.
+func _shelter_batch(parent: Node3D, name_tag: String, mesh: Mesh, frames: Array) -> void:
+	if frames.is_empty():
+		return
+	var instances := MultiMesh.new()
+	instances.transform_format = MultiMesh.TRANSFORM_3D
+	instances.mesh = mesh
+	instances.instance_count = frames.size()
+	for i in frames.size():
+		instances.set_instance_transform(i, frames[i])
+	var batch := MultiMeshInstance3D.new()
+	batch.name = name_tag
+	batch.multimesh = instances
+	batch.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	parent.add_child(batch)
 
 
 ## A shaft's hoop round sample i: two legs and a beam over the road, HOOP_H clear, faced both ways so
@@ -1081,7 +1155,8 @@ func _finish(J: Dictionary, R: CraftSim.TrackPath) -> void:
 		arr[Mesh.ARRAY_TEX_UV] = J.ru
 		arr[Mesh.ARRAY_INDEX] = _grid_index(int(J.rows), int(J.cols))
 		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
-		mesh.surface_set_material(0, _asph)
+		var in_shelter := r == _shelter_road and c1 >= int(halls[r][0]) and c0 <= int(halls[r][1])
+		mesh.surface_set_material(0, _shelter_asphalt if in_shelter else _asph)
 	var cpu_surfaces := []
 	if not J.template.is_empty():
 		var cached: Array = J.template[0]
@@ -1102,6 +1177,11 @@ func _finish(J: Dictionary, R: CraftSim.TrackPath) -> void:
 	mi.mesh = mesh
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	node.add_child(mi)
+	if r == _shelter_road:
+		_shelter_batch(node, "ShelterBays", _shelter_bay, J.get("bays", []))
+		_shelter_batch(node, "StormPortals", _shelter_portal, J.get("portals", []))
+		_shelter_batch(node, "LightWells", _shelter_well, J.get("wells", []))
+		_shelter_batch(node, "ServiceGalleries", _shelter_gallery, J.get("galleries", []))
 	var beacon_mesh: ArrayMesh = J.template[1] if not J.template.is_empty() else (lamps.commit() if int(J.n_lamps) > 0 else null)
 	if beacon_mesh:
 		var bm := MeshInstance3D.new()
