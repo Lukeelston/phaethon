@@ -42,6 +42,20 @@ func frames(count: int) -> void:
 	for i in count:
 		await get_tree().process_frame
 
+func has_textured_road(world: Node) -> bool:
+	if world == null:
+		return false
+	for instance: MeshInstance3D in world.find_children("*", "MeshInstance3D", true, false):
+		if not instance.mesh:
+			continue
+		for i in instance.mesh.get_surface_count():
+			var material := instance.get_active_material(i) as ShaderMaterial
+			if material and material.shader == preload("res://view/asphalt.gdshader"):
+				var detail := material.get_shader_parameter("pavement_detail") as Texture2D
+				if detail and detail.get_width() > 0:
+					return true
+	return false
+
 func key(code: Key, pressed: bool) -> void:
 	var event := InputEventKey.new()
 	event.keycode = code
@@ -209,6 +223,12 @@ func _run() -> void:
 		overlay.return_to_menu()
 		await frames(2)
 		check(stop + " desktop pause cannot reroute VR", get_tree().current_scene == view and not get_tree().paused and not overlay.is_paused)
+		var road_world: Node = view.range_world if stop == "range" else view.gp_world
+		if stop == "network":
+			road_world = view.network_world
+		elif stop in ["eridanus", "emergency"]:
+			road_world = view.course_world
+		check(stop + " renders the packed surface on a road mesh", has_textured_road(road_world))
 		if index < Stops.size() - 1:
 			await shot(stop)
 		view._respawn()

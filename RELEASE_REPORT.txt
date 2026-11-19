@@ -1666,3 +1666,35 @@ after two warm passes. GPU p95 was 1.285 ms in v0.3.0 and 1.376 ms in v0.3.1.
 CPU view-update p95 was 8.735 and 8.321 ms, respectively. Reproduce with
 godot/tests/render_terminal_art.gd. A physical Quest Link flight is still
 needed to establish 120 Hz performance, text legibility and comfort in stereo.
+
+v0.3.2 - Roads and racing surfaces - 2026-11-18
+================================================
+The Network has weathered lane dividers at the boundaries between traffic
+lanes. They clear junctions, shafts, terminals and amber jump approaches.
+Cast shoulders include slot drains, concrete formwork and inspection covers.
+The paved courses share a mipmapped aggregate texture, sealed repairs and
+polished wheel paths. Circuit wear runs from the outside to the apex. Range
+has threshold keys and a three-two-one countdown to the braking box.
+
+The extracted Windows PC VR build passed 368 checks with zero failures
+through the normal menu, including a populated pavement material on each
+selected course. All 42 files reached by the desktop shortcut match the
+tested extraction and inventory. The SHA-256 of the 70,061,213-byte ZIP is
+c671d91ae14e69bc9cf7cbf169da1b120c63dfdfc9cafd46ce1f450efc50a7dd.
+
+The Network geometry checks covered 140 joined chunk boundaries and 153
+simulated junction drives with zero wall contacts. The road tests covered
+the 64 km texture wrap, both traffic lane counts and their seven exclusions.
+Separate course checks measured 2,933 runway dashes, including 29 across a
+streaming seam, and inspected racing-line direction through 66 corners.
+An existing optional Starfighter braking-prediction check also fails on
+v0.3.1 with the same values (0.60 miles vs. 0.24 miles).
+
+Matched pilot-seat runs used an RTX PRO 4500 Blackwell, 1600 x 900, one
+view, 4x MSAA, two warm-up passes and 360 measured moving frames per road.
+GPU p95 on the S5 highway went from 1.979 to 1.975 ms, with 1,235 draw
+calls at p95 in both builds. On Carving, GPU p95 went from 0.669 to
+0.677 ms, with 379 draw calls at p95 in both. New physical headset
+stereo appearance, comfort and frame timing still need a headset flight.
+Evidence: evidence/v032-art/, v032-pcvr/, road-art-lanes-final.log and
+package-inventory-pcvr-0.3.2.json. Reproduce using render_road_art.gd.

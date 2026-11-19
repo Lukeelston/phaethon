@@ -2,9 +2,9 @@
 ## country of highways too big to build at once, so it's streamed round the pod. The roads come in
 ## chunks of CH samples, found through a CELL grid: each frame the chunks within VIS of the pod that
 ## aren't built yet are built (nearest first, at most BUDGET_MS of work a frame), and chunks past DROP
-## are freed. A chunk is the road (asphalt, edge lines), its walls as the Eridanus speed loop's
-## (concrete, a blue and white band, the lit strip on top; a city's STARFIGHTER zone in the towns'
-## pink with tall panels), masts with beacons, and on a flyover (the sim's NET_HEIGHTS) the deck's
+## are freed. A chunk is the road (asphalt, cast shoulders and slot drains), its formed concrete
+## barriers with steel caps and blue guides (taller panels and rose guides in a STARFIGHTER zone),
+## masts with beacons, and on a flyover (the sim's NET_HEIGHTS) the deck's
 ## edges, its underside and pillars. Walls stay open where another road joins (inside its corridor).
 ## Its signs come with it: a board before every junction naming where that exit goes (road miles,
 ## from the junction table), END OF THE ROAD before each shaft, braking boards before each
@@ -54,10 +54,11 @@ const EDGE_SEGS := 6              # identical shoulder topology on both sides of
 const JOIN_EDGE_SEGS := EDGE_SEGS # overlap chunks must not change cross-section tessellation
 const EDGE_FOOT := Color(0.5, 0.52, 0.56)   # a dim line where each ramp starts up
 const STRIP_LIGHT := Color(0.9, 0.94, 1.0)
-const WALL_STRIP := Color(0.42, 0.68, 1.0)    # the walls' lit strips: sky blue (white ones lay along the horizon as a white line)
-const WALL_STRIP_SF := Color(1.0, 0.42, 0.78)   # ... pink through a city's STARFIGHTER zone
-const BAND := [Color(0.16, 0.45, 0.95), Color(0.95, 0.95, 0.93)]
-const BAND_SF := [Color(1.0, 0.3, 0.75), Color(0.95, 0.95, 0.93)]
+const WALL_STRIP := Color(0.36, 0.61, 0.86)
+const WALL_STRIP_SF := Color(0.87, 0.43, 0.67)
+const BAND := [Color(0.38, 0.46, 0.50), Color(0.46, 0.52, 0.54)]
+const BAND_SF := [Color(0.48, 0.39, 0.43), Color(0.54, 0.47, 0.49)]
+const RAIL_CAP := Color(0.24, 0.27, 0.28)
 const ASPHALT_PERIOD := 64000.0
 const BOARD_W := 80.0
 const BOARD_H := 40.0
@@ -119,6 +120,7 @@ var skylines := []        # [node, cx, cy]
 var far_shafts := []      # [node, ox, oy]: each shaft's shape from far off, before its chunks stream in
 var _signs := {}
 var _approaches := {}     # road -> [first, last, direction, lateral centre] for amber exit guidance
+var _traffic_paint := []  # byte per road station: hidden, four lanes or eight lanes
 var halls := {}            # road -> [first, last sample] of its hall (the cities' terminals; CourseAudio reads it)
 var hall_samples := 0      # samples built under a hall's roof (tests)          # Vector2i(road, chunk) -> Array of sign specs
 var _s := []              # per road: distance along it at each sample (PackedFloat64Array)
@@ -212,8 +214,7 @@ func build(s, v) -> void:
 	_arrow_mat.set_shader_parameter("flash_hz", 0.0) # accepted steady text; only the arrow and lamps animate
 	_fork_mat = _arrow_mat.duplicate()  # ... over the fork: straight on
 	_fork_mat.set_shader_parameter("angle", PI / 2.0)
-	_asph = ShaderMaterial.new()
-	_asph.shader = preload("res://view/asphalt.gdshader")
+	_asph = preload("res://art/road/asphalt.tres").duplicate() as ShaderMaterial
 	_asph.set_shader_parameter("period", ASPHALT_PERIOD)
 	_asph.set_shader_parameter("base", Vector3(0.21, 0.205, 0.205))
 	_asph.set_shader_parameter("spec", 0.2)
@@ -265,6 +266,7 @@ func build(s, v) -> void:
 			var pitch_m := (end - start) * HALL_LIGHT_EVERY / (2.0 * HALL_HALF)
 			_shelter_asphalt = _asph.duplicate()
 			_shelter_asphalt.set_shader_parameter("shelter", Vector3(fposmod(start, ASPHALT_PERIOD), end - start, pitch_m))
+	_prepare_traffic_paint()
 	var shelter_kit := load("res://art/terminal/shelter.gltf") as PackedScene
 	var shelter_models := shelter_kit.instantiate()
 	_shelter_bay = (shelter_models.get_node("BayFrame") as MeshInstance3D).mesh
@@ -290,6 +292,30 @@ func build(s, v) -> void:
 		sync(sim.pod.x,sim.pod.y)
 		if (wanted==0 and _job.is_empty()) or Time.get_ticks_usec()>=warm_deadline: break
 	setup_ms = Time.get_ticks_msec() - t0
+
+
+## Store a paint class per station while the city, shaft, merge and amber approach
+## intervals are already known. Streaming a road row then costs one packed append.
+func _prepare_traffic_paint() -> void:
+	for r in sim.roads.size():
+		var R: CraftSim.TrackPath = sim.roads[r]
+		var rows := PackedByteArray()
+		rows.resize(R.N)
+		if R.role == "" and R.w[0] >= 200.0:
+			# NetworkTraffic selects its four or eight lane centres by starting width.
+			rows.fill(2 if R.w[0] >= 300.0 else 1)
+			for i in _prepared_join_hints[r]: # includes the four-row padding on either side
+				rows[i] = 0
+			var exclusions: Array = _approaches.get(r, []).duplicate()
+			if halls.has(r):
+				exclusions.append(halls[r])
+			if shaft.maps.has(r):
+				var shaft_span: Dictionary = shaft.maps[r]
+				exclusions.append([shaft_span.i0, shaft_span.i1])
+			for span in exclusions:
+				for i in range(maxi(0, span[0]), mini(R.N - 1, span[1]) + 1):
+					rows[i] = 0
+		_traffic_paint.append(rows)
 
 
 ## Junction centreline projections are static and reused by each shoulder offset.
@@ -611,11 +637,13 @@ func _start_chunk(r: int, k: int) -> void:
 	for q in 5:   # the road, deco, glow, lit strips, beacons
 		var t := SurfaceTool.new()
 		t.begin(Mesh.PRIMITIVE_TRIANGLES)
+		if q == 1:
+			t.set_uv(Vector2.ZERO) # the formed barrier faces author UVs on this shared surface
 		st.append(t)
 	_job = {"key": key, "r": r, "c0": c0, "c1": c1, "i": c0, "ox": ox, "oy": oy, "node": node, "st": st, "joins": joins, "fine_joins": fine_joins,
 		"deco_spans": {},
 		"n_lamps": 0, "made": false, "signs": _signs.get(key, []), "si": 0, "us": 0, "d": 0.0,
-		"rv": PackedVector3Array(), "rn": PackedVector3Array(), "ru": PackedVector2Array(), "rows": 0, "cols": 0,
+		"rv": PackedVector3Array(), "rn": PackedVector3Array(), "ru": PackedVector2Array(), "shoulder_uv": PackedVector2Array(), "traffic_colors": PackedColorArray(), "rows": 0, "cols": 0,
 		"u0": fposmod(_s[r][c0], ASPHALT_PERIOD) - _s[r][c0]}   # (the asphalt's u, continuous along the chunk)
 	var template_key := _deco_template_key(_job, R)
 	_job.template_key = template_key
@@ -763,11 +791,17 @@ func _sample(J: Dictionary, R: CraftSim.TrackPath, i: int) -> void:
 	var hi := _h(r, i)
 	var hj := _h(r, j)
 	var city: bool = R.mode[i] == 0
-	var in_shelter := r == _shelter_road and i >= int(halls[r][0]) and i < int(halls[r][1])
+	var in_hall := halls.has(r) and i >= int(halls[r][0]) and i < int(halls[r][1])
+	var in_shelter := r == _shelter_road and in_hall
 	var sec := _section(R.w[i], bool(J.fine_joins))
 	var te: float = sec.te   # the edges' ramps' top: the walls stand on it
 	var on_shaft: bool = shaft.on(r, float(i))
-	_up = (shaft.at(r, float(i))[5] as Vector3) if on_shaft else Vector3.UP
+	var across_i := Vector3(R.nx[i], 0.0, -R.ny[i])
+	_up = Vector3.UP
+	if on_shaft:
+		var frame: Array = shaft.at(r, float(i))
+		across_i = frame[4]
+		_up = frame[5]
 	# the road: a flat middle and a ramp up each side (the sims' net_edge), a row of the chunk's grid
 	# a sample (its normals banked with the ramps)
 	if i == int(J.c0):
@@ -782,7 +816,12 @@ func _sample(J: Dictionary, R: CraftSim.TrackPath, i: int) -> void:
 		_paint_row(R,r,ox,oy,i,J) # reuse the asphalt already generated above
 	j = i + span
 	hj = _h(r, j)
-	var up_j: Vector3 = shaft.at(r,float(j))[5] if shaft.on(r,float(j)) else Vector3.UP
+	var up_j := Vector3.UP
+	var across_j := Vector3(R.nx[j], 0.0, -R.ny[j])
+	if shaft.on(r, float(j)):
+		var end_frame: Array = shaft.at(r, float(j))
+		across_j = end_frame[4]
+		up_j = end_frame[5]
 	var hw_j: float = R.w[j]*0.5
 	var te_j: float = CraftSim.net_edge(R.w[j],hw_j).x
 	var open_i := [false, false]
@@ -791,7 +830,7 @@ func _sample(J: Dictionary, R: CraftSim.TrackPath, i: int) -> void:
 		open_i = [_open(r, i, -1.0), _open(r, i, 1.0)]
 	if J.joins and not _joining_at(r, j).is_empty():
 		open_j = [_open(r, j, -1.0), _open(r, j, 1.0)]
-	for ln in sec.lines:   # the edge lines on the ramps' tops, a dim one at each ramp's foot
+	for ln in sec.lines:   # the line at each bank foot; the shoulder material carries the outside stripe
 		# An internal shoulder is the junction's drivable opening, not a lane edge.
 		var side := 0 if ln[0] < 0.0 else 1
 		if open_i[side] or open_j[side]:
@@ -824,13 +863,17 @@ func _sample(J: Dictionary, R: CraftSim.TrackPath, i: int) -> void:
 			var thick: float = pillar.halfSize * 2.0
 			var center := Vector3(pillar.x - ox, pillar.zMax / 2.0, -(pillar.y - oy))
 			_box(deco, center, Vector3(thick, pillar.zMax, thick), Color(0.6, 0.6, 0.58))
-	if halls.has(r) and i >= int(halls[r][0]) and i < int(halls[r][1]):
+	if in_hall:
 		_hall(J, R, i, hw, hi + te, hj + te)
 	if on_shaft and i % HOOP_EVERY == 0:
 		_hoop(J, R, i, hw, hi + te, i % (HOOP_EVERY * 2) == 0)
 	if R.role == "launch" and i % CHEV_EVERY == 0 and i < R.N - 4:
 		_chevron(lglow, R, ox, oy, i, hi, 1.0)
-	# the walls, the strip on top, the masts
+	# The concrete deflector leans outward above its foot. The cap and its
+	# inset guide sit beyond the drivable edge, including in a rolling shaft.
+	# Both coordinates repeat with the CPU furniture template's 120-row phase.
+	var station := float(i % 120) * 24.0
+	var next_station := station + float(span) * 24.0
 	for sgn in [-1.0, 1.0]:
 		var side := 0 if sgn < 0.0 else 1
 		if open_i[side] or open_j[side]:
@@ -839,25 +882,40 @@ func _sample(J: Dictionary, R: CraftSim.TrackPath, i: int) -> void:
 		var wa := _p(R, ox, oy, i, sgn * hw, hi + te)   # (on the ramp's top)
 		var wb := _p(R, ox, oy, j, sgn * hw_j, hj + te_j)
 		var top := BAND_H
-		var curb_color := Color(0.28, 0.30, 0.30) if in_shelter else Color(0.72, 0.71, 0.68)
+		var curb_color := Color(0.28, 0.30, 0.30) if in_shelter else Color(0.57, 0.58, 0.56)
 		var wall_band: Color = (BAND_SF if city else BAND)[(i / 4) % 2]
 		if in_shelter:
 			wall_band = Color(0.32, 0.25, 0.30) if (i / 4) % 2 == 0 else Color(0.22, 0.25, 0.27)
-		_wall(deco, wa, wb, 0.0, WALL_H, curb_color, up_j)
-		_wall(deco, wa, wb, WALL_H, BAND_H, wall_band, up_j)
+		_barrier_face(deco, wa, wb, wb + up_j * WALL_H, wa + _up * WALL_H, station, next_station, 0.0, WALL_H, curb_color)
+		var flank_a: Vector3 = wa + sgn * across_i * 1.15
+		var flank_b: Vector3 = wb + sgn * across_j * 1.15
+		_barrier_face(deco, wa + _up * WALL_H, wb + up_j * WALL_H, flank_b + up_j * BAND_H, flank_a + _up * BAND_H, station, next_station, WALL_H, BAND_H, wall_band)
 		if city:
-			var slate := 0.2 + 0.035 * ((i / 4) % 2)
-			_wall(deco, wa, wb, BAND_H, FENCE_H, Color(slate, slate + 0.01, slate + 0.03), up_j)
-			top = FENCE_H
+			var slate := (0.28 if in_hall else 0.41) + 0.022 * ((i / 4) % 2)
+			var panel := Color(slate, slate + 0.01, slate + 0.03)
+			if in_hall:
+				# The shell begins at the original margin at FENCE_H. Return
+				# the recessed face to that plane just below its guide lens.
+				top = FENCE_H - STRIP_H
+				_barrier_face(deco, flank_a + _up * BAND_H, flank_b + up_j * BAND_H, wb + up_j * top, wa + _up * top, station, next_station, BAND_H, top, panel)
+				flank_a = wa
+				flank_b = wb
+			else:
+				_barrier_face(deco, flank_a + _up * BAND_H, flank_b + up_j * BAND_H, flank_b + up_j * FENCE_H, flank_a + _up * FENCE_H, station, next_station, BAND_H, FENCE_H, panel)
+				top = FENCE_H
 		var guide_color := WALL_STRIP_SF if city else WALL_STRIP
 		if in_shelter:
 			guide_color = Color(0.56, 0.27, 0.44)
-		_wall(lglow, wa, wb, top, top + STRIP_H, guide_color, up_j)
+		_wall(lglow, flank_a, flank_b, top, top + STRIP_H, guide_color, up_j)
+		if not in_hall:
+			var cap_a := flank_a + _up * (top + STRIP_H)
+			var cap_b := flank_b + up_j * (top + STRIP_H)
+			_quad(deco, [cap_a, cap_b, cap_b + sgn * across_j * 1.4, cap_a + sgn * across_i * 1.4], RAIL_CAP)
 		if i % (8 if city else MAST_EVERY) == 0 and not on_shaft:
 			var foot := _p(R, ox, oy, i, sgn * (hw + 0.4), hi + te)
 			_box(deco, foot + Vector3.UP * (MAST_H / 2.0), Vector3(0.6, MAST_H, 0.6), Color(0.3, 0.31, 0.33))
 			_box(glow, foot + Vector3.UP * (MAST_H + 0.45), Vector3(0.9, 0.9, 0.9), STRIP_LIGHT)
-			_beacon(lamps, foot + Vector3.UP * (MAST_H + 0.45), BAND_SF[0] if city else STRIP_LIGHT)
+			_beacon(lamps, foot + Vector3.UP * (MAST_H + 0.45), WALL_STRIP_SF if city else STRIP_LIGHT)
 			J.n_lamps += 1
 
 
@@ -1153,6 +1211,8 @@ func _finish(J: Dictionary, R: CraftSim.TrackPath) -> void:
 		arr[Mesh.ARRAY_VERTEX] = J.rv
 		arr[Mesh.ARRAY_NORMAL] = J.rn
 		arr[Mesh.ARRAY_TEX_UV] = J.ru
+		arr[Mesh.ARRAY_TEX_UV2] = J.shoulder_uv
+		arr[Mesh.ARRAY_COLOR] = J.traffic_colors
 		arr[Mesh.ARRAY_INDEX] = _grid_index(int(J.rows), int(J.cols))
 		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
 		var in_shelter := r == _shelter_road and c1 >= int(halls[r][0]) and c0 <= int(halls[r][1])
@@ -1656,7 +1716,7 @@ func _build_far_shafts() -> void:
 ## A road `w` wide across (cached by width: a chunk asks every sample), right edge to left, EDGE_SEGS
 ## facets up each ramp and the flat middle between: o (offsets left of the centreline), h (the ramp's
 ## height there), c and s (the normal's up and inward parts: banked toward the middle), te (the
-## ramps' top), lines ([o0, o1, its height at each, colour]: the edge lines, the ramps' feet).
+## ramps' top), lines (the marker at each ramp foot), shoulder (distance inward from the edge).
 func _section(w: float, joined := false) -> Dictionary:
 	var facets := JOIN_EDGE_SEGS if joined else EDGE_SEGS
 	var key := Vector2(w, facets)
@@ -1677,13 +1737,30 @@ func _section(w: float, joined := false) -> Dictionary:
 		h.append(e.x)
 		c.append(cos(e.y))
 		s.append(signf(x) * sin(e.y))
+	# Four complete UV rows cover both closed shoulders, either opening and
+	# a crossing open on both sides. Stream one packed append per road row.
+	var shoulder_rows := []
+	for openings in 4:
+		var shoulder := PackedVector2Array()
+		for x in o:
+			var side := 1 if x < 0.0 else 2
+			shoulder.append(Vector2(hw - absf(x), float((openings & side) == 0)))
+		shoulder_rows.append(shoulder)
 	var lines := []
 	for sgn in [-1.0, 1.0]:
-		for ln in [[hw - 1.5 - LINE_W, hw - 1.5, Color(0.92, 0.92, 0.9)], [hw - E, hw - E + LINE_W, EDGE_FOOT]]:
-			var o0: float = minf(sgn * ln[0], sgn * ln[1])   # (o0 < o1 on both sides: the right side's ran outward-in,
-			var o1: float = maxf(sgn * ln[0], sgn * ln[1])   # facing down, lit from below: its lines were dim)
-			lines.append([o0, o1, CraftSim.net_edge(w, o0).x, CraftSim.net_edge(w, o1).x, ln[2]])
-	var out := {"o": o, "h": h, "c": c, "s": s, "te": CraftSim.net_edge(w, hw).x, "lines": lines}
+		var from: float = sgn * (hw - E)
+		var to: float = sgn * (hw - E + LINE_W)
+		var o0 := minf(from, to)
+		var o1 := maxf(from, to)
+		lines.append([o0, o1, CraftSim.net_edge(w, o0).x, CraftSim.net_edge(w, o1).x, EDGE_FOOT])
+	var traffic_rows := []
+	for traffic_class in 3:
+		var colors := PackedColorArray()
+		colors.resize(o.size())
+		var visible: bool = (traffic_class == 1 and w >= 200.0) or (traffic_class == 2 and w >= 300.0)
+		colors.fill(Color(0.0, 0.0, float(traffic_class == 2), 0.0 if visible else 1.0))
+		traffic_rows.append(colors)
+	var out := {"o": o, "h": h, "c": c, "s": s, "te": CraftSim.net_edge(w, hw).x, "lines": lines, "shoulder_rows": shoulder_rows, "traffic_rows": traffic_rows}
 	_sec_cache[key] = out
 	return out
 
@@ -1707,12 +1784,15 @@ func _road_row(J: Dictionary, R: CraftSim.TrackPath, sec: Dictionary, s: int, h:
 	var rv: PackedVector3Array = J.rv
 	var rn: PackedVector3Array = J.rn
 	var ru: PackedVector2Array = J.ru
+	var openings := 0
 	if not J.joins or _joining_at(int(J.r), s).is_empty():
 		for k in o.size():
 			rv.append(mid + left * o[k] + up * hh[k])
 			rn.append(up * cc[k] - left * ss[k])
 			ru.append(Vector2(u, o[k]))
 	else:
+		if J.has("shoulder_uv"):
+			openings = int(_open(int(J.r), s, -1.0)) + 2 * int(_open(int(J.r), s, 1.0))
 		for k in o.size():
 			var height := h + hh[k]
 			var normal := up * cc[k] - left * ss[k]
@@ -1730,6 +1810,9 @@ func _road_row(J: Dictionary, R: CraftSim.TrackPath, sec: Dictionary, s: int, h:
 	J.rv = rv
 	J.rn = rn
 	J.ru = ru
+	if J.has("shoulder_uv"): # temporary rows for clipping paint only need positions
+		J.shoulder_uv.append_array(sec.shoulder_rows[openings])
+		J.traffic_colors.append_array(sec.traffic_rows[_traffic_paint[J.r][s]])
 	J.rows = int(J.rows) + 1
 	J.cols = o.size()
 
@@ -1843,6 +1926,31 @@ func _quad(st: SurfaceTool, q: Array, c: Color) -> void:
 	st.set_normal(nrm)
 	for k in [0, 1, 2, 0, 2, 3]:
 		st.add_vertex(q[k])
+
+
+## Positive UV heights distinguish barrier faces from the other structures in
+## this same draw. Coordinates follow the road grade and are shared across chunks.
+func _barrier_face(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, d: Vector3,
+		station_a: float, station_b: float, bottom: float, top: float, color: Color) -> void:
+	st.set_color(color)
+	st.set_normal((b - a).cross(d - a).normalized())
+	var u0 := Vector2(station_a, 16.0 + bottom)
+	var u1 := Vector2(station_b, 16.0 + bottom)
+	var u2 := Vector2(station_b, 16.0 + top)
+	var u3 := Vector2(station_a, 16.0 + top)
+	st.set_uv(u0)
+	st.add_vertex(a)
+	st.set_uv(u1)
+	st.add_vertex(b)
+	st.set_uv(u2)
+	st.add_vertex(c)
+	st.set_uv(u0)
+	st.add_vertex(a)
+	st.set_uv(u2)
+	st.add_vertex(c)
+	st.set_uv(u3)
+	st.add_vertex(d)
+	st.set_uv(Vector2.ZERO)
 
 
 func _box(st: SurfaceTool, ctr: Vector3, size: Vector3, c: Color) -> void:

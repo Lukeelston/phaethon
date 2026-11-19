@@ -67,8 +67,7 @@ func build(s, v) -> void:
 	normals.resize(n)
 	for i in n:
 		normals[i] = _frame(i)[2]
-	var asph := ShaderMaterial.new()
-	asph.shader = preload("res://view/asphalt.gdshader")
+	var asph := preload("res://art/road/asphalt.tres").duplicate() as ShaderMaterial
 	asph.set_shader_parameter("period", 64000.0)
 	asph.set_shader_parameter("base", Vector3(0.23, 0.225, 0.225))
 	asph.set_shader_parameter("lane_half", 20.0)

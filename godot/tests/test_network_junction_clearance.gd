@@ -17,6 +17,10 @@ func _run() -> void:
 	world = World.new()
 	root.add_child(world)
 	world.build(sim, null)
+	# The countdown for the initial streaming pass can expire between
+	# registering a chunk and committing its road mesh.
+	if not world._job.is_empty():
+		world._work(Time.get_ticks_usec() + 60000000)
 	var bad := 0
 	var checked := 0
 	var worst := 0.0

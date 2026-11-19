@@ -143,7 +143,7 @@ func _asphalt() -> void:
 		var end_u := fposmod(cx, RW.ASPHALT_PERIOD) + RW.CHUNK
 		var next_u := fposmod(cx + RW.CHUNK, RW.ASPHALT_PERIOD)
 		seam = maxf(seam, absf(fposmod(end_u, RW.ASPHALT_PERIOD) - next_u))
-	var lattices := [0.04, 0.25, 4.0, 16.0, 25.0, 40.0, 50.0]   # view/asphalt.gdshader's cells
+	var lattices := [0.4, 2.0, 8.0, 20.0, 25.0, 40.0, 128.0, 160.0, 256.0, 400.0]   # pavement and shoulder scales along wrapped roads
 	var divide := fposmod(RW.ASPHALT_PERIOD, RW.CHUNK) == 0.0
 	for c in lattices:
 		divide = divide and is_zero_approx(fposmod(RW.ASPHALT_PERIOD / c, 1.0))

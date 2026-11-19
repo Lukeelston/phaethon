@@ -71,8 +71,7 @@ func build(s, v) -> void:
 ## Asphalt (view/asphalt.gdshader): base colour, and how far either side of the centreline the
 ## rubber is laid. Its UVs are (metres along mod ASPHALT_PERIOD, metres across): see _quad_uv.
 func _asphalt(base: Color, lane_half: float) -> ShaderMaterial:
-	var m := ShaderMaterial.new()
-	m.shader = preload("res://view/asphalt.gdshader")
+	var m := preload("res://art/road/asphalt.tres").duplicate() as ShaderMaterial
 	m.set_shader_parameter("period", ASPHALT_PERIOD)
 	m.set_shader_parameter("base", Vector3(base.r, base.g, base.b))   # sRGB as-is (a Color would arrive linearised)
 	m.set_shader_parameter("lane_half", lane_half)
@@ -121,6 +120,17 @@ func _quad(st: SurfaceTool, x0: float, x1: float, y0: float, y1: float, h := 0.0
 		st.add_vertex(v)
 
 
+## Lay the same dash through a streaming boundary, including the remainder of a
+## dash that began in the previous chunk. All stations are measured from launch.
+func _dashes(st: SurfaceTool, cx: float, x0: float, x1: float, y0: float, y1: float, spacing: float, length: float, h: float) -> void:
+	var dash := floorf((cx + x0) / spacing) * spacing - cx
+	while dash < x1:
+		var end := minf(dash + length, x1)
+		if end > x0:
+			_quad(st, maxf(x0, dash), end, y0, y1, h)
+		dash += spacing
+
+
 ## A flat quad with asphalt UVs: u = metres along (the chunk's start mod ASPHALT_PERIOD, plus
 ## chunk-local x), v = metres across from `centre`.
 func _quad_uv(st: SurfaceTool, cx: float, x0: float, x1: float, y0: float, y1: float, centre: float, h := 0.02) -> void:
@@ -157,13 +167,23 @@ func _make_chunk(idx: int) -> Node3D:
 	paint.begin(Mesh.PRIMITIVE_TRIANGLES)
 	for s in [-1.0, 1.0]:
 		_quad(paint, x0, x1, s * RUNWAY_HALF - 0.75, s * RUNWAY_HALF + 0.75)
-	var dash := ceilf((cx + x0) / 60.0) * 60.0 - cx
-	while dash < x1:
-		_quad(paint, dash, minf(dash + 30.0, x1), -0.5, 0.5)
-		dash += 60.0
+	_dashes(paint, cx, x0, x1, -0.65, 0.65, 60.0, 30.0, 0.02)
 	if idx == 0:
 		for k in 8:   # start line
 			_quad(paint, 0.0, 4.0, -RUNWAY_HALF + k * 15.0, -RUNWAY_HALF + k * 15.0 + 7.5)
+		for side in [-1.0, 1.0]:
+			for k in 6:   # threshold keys flanking the launch centreline
+				var key_y: float = side * (15.0 + 7.0 * k)
+				_quad(paint, 18.0, 54.0, key_y - 1.7, key_y + 1.7)
+			_quad(paint, 280.0, 326.0, side * 29.0 - 3.5, side * 29.0 + 3.5)
+	# Three, two, then one pair of touchdown bars beside the braking boards.
+	for k in 3:
+		var bx: float = Sim.BOX_X - COUNTDOWN_FT[k] * 0.3048 - cx
+		if bx < x1 and bx + 24.0 > x0:
+			for side in [-1.0, 1.0]:
+				for bar in 3 - k:
+					var by: float = side * (34.0 + 6.0 * bar)
+					_quad(paint, maxf(x0, bx), minf(x1, bx + 24.0), by - 1.6, by + 1.6)
 	_mesh(node, paint, mats.line)
 
 	# jump lane edges and kickers
@@ -219,10 +239,7 @@ func _make_chunk(idx: int) -> Node3D:
 	lanes.begin(Mesh.PRIMITIVE_TRIANGLES)
 	for s in [-1.0, 1.0]:
 		_quad(lanes, x0, x1, HWY_Y + s * 6.8 - 0.12, HWY_Y + s * 6.8 + 0.12, 0.03)
-	var hd := ceilf((cx + x0) / 12.0) * 12.0 - cx
-	while hd < x1:
-		_quad(lanes, hd, minf(hd + 3.0, x1), HWY_Y - 0.1, HWY_Y + 0.1, 0.03)
-		hd += 12.0
+	_dashes(lanes, cx, x0, x1, HWY_Y - 0.1, HWY_Y + 0.1, 12.0, 3.0, 0.03)
 	_mesh(node, lanes, mats.line)
 
 	# mile signs between the runway and the jump lane

@@ -18,6 +18,7 @@
 extends Node3D
 
 const Kit := preload("res://view/mesh_kit.gd")
+const Circuit := preload("res://view/circuit_surface.gd")
 const Props := preload("res://view/props.gd")
 const WALL_H := 1.6           # concrete
 const FENCE_H := 5.5          # the tall panels above it
@@ -28,8 +29,7 @@ const CHEVRON_LEAD := 10      # samples (120 m) of chevrons before a corner star
 const LEFT_LIGHT := Color(1.0, 0.16, 0.12)
 const RIGHT_LIGHT := Color(0.15, 1.0, 0.35)
 const CHEVRON := Color(1.0, 0.82, 0.08)
-const KERB_W := 3.0
-const LINE_W := 0.6
+const LINE_W := 0.75
 const OMEGA := 1.0            # STARFIGHTER turn-rate limit used to estimate corner speeds
 const A_LAT := 40.0 * 9.81
 const SLOW_MPH := 820.0       # corners slower than this get braking boards
@@ -37,6 +37,7 @@ const SLOW_MPH := 820.0       # corners slower than this get braking boards
 var sim
 var view
 var corners: Array = []       # [start i, apex i, end i, sign (+1 left), radius, est mph, number]
+var _groove := PackedColorArray()
 var chevrons := 0             # how many chevrons were built (the test reads these)
 var berm_samples := 0
 var masts := 0
@@ -59,6 +60,9 @@ func build(s, v) -> void:
 	var glow := SurfaceTool.new()   # lit: unshaded, so it reads at distance and in shadow
 	glow.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var n: int = sim.N
+	_groove.resize(n)
+	for corner in corners:
+		Circuit.bake_turn(_groove, sim.tw, corner[0], corner[2], corner[3])
 	var kerb := _kerb_flags()
 	var chev := _chevron_flags()
 	for i in n:
@@ -70,12 +74,12 @@ func build(s, v) -> void:
 		along += sim.tlen[i]
 		# edge lines
 		for sgn in [-1.0, 1.0]:
-			_strip(deco, i, j, sgn * (hw - 1.5 - LINE_W), sgn * (hw - 1.5), sgn * (hw2 - 1.5 - LINE_W), sgn * (hw2 - 1.5), 0.04, Color(0.92, 0.92, 0.9))
+			_strip(deco, i, j, sgn * (hw - Circuit.EDGE_INSET - LINE_W), sgn * (hw - Circuit.EDGE_INSET), sgn * (hw2 - Circuit.EDGE_INSET - LINE_W), sgn * (hw2 - Circuit.EDGE_INSET), 0.045, Circuit.EDGE_WHITE)
 		# kerbs on the inside of corners: red and white blocks
 		if kerb[i] != 0:
 			var side: float = kerb[i]
-			var col := Color(0.85, 0.1, 0.08) if i % 2 == 0 else Color(0.95, 0.95, 0.93)
-			_strip(deco, i, j, side * (hw - KERB_W), side * hw, side * (hw2 - KERB_W), side * hw2, 0.06, col)
+			Circuit.kerb(deco, _edge(i, side * (hw - Circuit.KERB_WIDTH)), _edge(i, side * hw),
+				_edge(j, side * (hw2 - Circuit.KERB_WIDTH)), _edge(j, side * hw2), i)
 		# walls: concrete with a painted band, sponsor colours alternating every ~48 m
 		for sgn in [-1.0, 1.0]:
 			var a := _edge(i, sgn * hw)
@@ -110,11 +114,10 @@ func build(s, v) -> void:
 			_patch(deco, 0, w0, w0 + sim.tw[0] / 16.0, r * 2.0, r * 2.0 + 2.0, 0.07, c)
 	var m0 := MeshInstance3D.new()
 	m0.mesh = asph.commit()
-	var am := ShaderMaterial.new()
-	am.shader = preload("res://view/asphalt.gdshader")
+	var am := preload("res://art/road/asphalt.tres").duplicate() as ShaderMaterial
 	am.set_shader_parameter("period", 1.0e6)
 	am.set_shader_parameter("base", Vector3(0.25, 0.245, 0.245))   # sRGB (a Color would arrive linearised)
-	am.set_shader_parameter("lane_half", 34.0)
+	am.set_shader_parameter("lane_half", 34.0 if sim.track_name == "carving" else 23.0)
 	m0.material_override = am
 	m0.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(m0)
@@ -248,10 +251,7 @@ func _strip(st: SurfaceTool, i: int, j: int, o0: float, o1: float, p0: float, p1
 	var b := _edge(i, o1) + Vector3.UP * h
 	var cc := _edge(j, p1) + Vector3.UP * h
 	var d := _edge(j, p0) + Vector3.UP * h
-	for p in [a, b, cc, a, cc, d]:
-		st.set_color(c)
-		st.set_normal(Vector3.UP)
-		st.add_vertex(p)
+	Circuit.strip(st, a, b, cc, d, c)
 
 
 ## The track surface between samples i and j, with UVs (metres along the lap, metres across).
@@ -263,7 +263,8 @@ func _asphalt(st: SurfaceTool, i: int, j: int, hw: float, hw2: float, s0: float,
 	var nrm := (b - a).cross(d - a).normalized()
 	if nrm.y < 0.0:
 		nrm = -nrm
-	for v in [[a, Vector2(s0, -hw)], [b, Vector2(s0, hw)], [cc, Vector2(s1, hw2)], [a, Vector2(s0, -hw)], [cc, Vector2(s1, hw2)], [d, Vector2(s1, -hw2)]]:
+	for v in [[a, Vector2(s0, -hw), i], [b, Vector2(s0, hw), i], [cc, Vector2(s1, hw2), j], [a, Vector2(s0, -hw), i], [cc, Vector2(s1, hw2), j], [d, Vector2(s1, -hw2), j]]:
+		st.set_color(_groove[v[2]])
 		st.set_normal(nrm)
 		st.set_uv(v[1])
 		st.add_vertex(v[0])

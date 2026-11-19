@@ -50,6 +50,7 @@
 extends Node3D
 
 const Kit := preload("res://view/mesh_kit.gd")
+const Circuit := preload("res://view/circuit_surface.gd")
 const Props := preload("res://view/props.gd")
 const SpeedGuideScript := preload("res://view/speed_guide.gd")
 const ShadeLineScript := preload("res://view/shade_line.gd")
@@ -70,8 +71,8 @@ const STRIP_LIGHT := Color(0.9, 0.94, 1.0)   # the walls' lit strips and mast he
 const CHEVRON := Color(1.0, 0.82, 0.08)
 const SF_COL := Color(1.0, 0.3, 0.75)     # the zone signs in each mode's colour (ModeSwitch)
 const SP_COL := Color(0.25, 0.65, 1.0)
-const KERB_W := 3.0
-const LINE_W := 0.6
+const LINE_W := 0.75
+const LOOP_MARK := Color(0.68, 0.73, 0.74)
 const ASPHALT_PERIOD := 64000.0
 const BOARDS_MI := [8, 6, 4, 2, 1]   # braking boards, miles before each town (imperial: Luke)
 const MILE := 1609.344
@@ -98,6 +99,7 @@ var sim
 var view
 var chunks := []                  # [node, centre x, centre y]
 var corners := []                 # towns: [start i, end i, sign]
+var _groove := PackedColorArray()
 var zones := []                   # [sample i, "sf" entering a town / "sp" leaving one]
 var boards := 0                   # tests read these
 var chevrons := 0
@@ -129,6 +131,9 @@ func build(s, v) -> void:
 		acc += sim.tlen[i]
 	_s[n] = acc
 	_find_corners()
+	_groove.resize(n)
+	for corner in corners:
+		Circuit.bake_turn(_groove, sim.tw, corner[0], corner[1], corner[2])
 	_find_zones()
 	guide = SpeedGuideScript.new()
 	guide.setup(sim)
@@ -151,8 +156,7 @@ func build(s, v) -> void:
 	_auth_mat = ShaderMaterial.new()
 	_auth_mat.shader = preload("res://view/authorized.gdshader")
 	_auth_mat.set_shader_parameter("col", Vector3(SP_COL.r, SP_COL.g, SP_COL.b))
-	var asph := ShaderMaterial.new()
-	asph.shader = preload("res://view/asphalt.gdshader")
+	var asph := preload("res://art/road/asphalt.tres").duplicate() as ShaderMaterial
 	asph.set_shader_parameter("period", ASPHALT_PERIOD)
 	asph.set_shader_parameter("base", Vector3(0.25, 0.245, 0.245))
 	asph.set_shader_parameter("lane_half", 40.0)
@@ -190,15 +194,19 @@ func build(s, v) -> void:
 			var hw: float = sim.tw[i] / 2.0
 			var hw2: float = sim.tw[j] / 2.0
 			_asphalt(surf, cx, cy, i, j, hw, hw2)
-			for sgn in [-1.0, 1.0]:
-				_strip(deco, cx, cy, i, j, sgn * (hw - 1.5 - LINE_W), sgn * (hw - 1.5), sgn * (hw2 - 1.5 - LINE_W), sgn * (hw2 - 1.5), 0.04, Color(0.92, 0.92, 0.9))
 			if kerb[i] != 0:
 				var side: float = kerb[i]
-				_strip(deco, cx, cy, i, j, side * (hw - KERB_W), side * hw, side * (hw2 - KERB_W), side * hw2, 0.06,
-					Color(0.85, 0.1, 0.08) if i % 2 == 0 else Color(0.95, 0.95, 0.93))
+				Circuit.kerb(deco, _p(cx, cy, i, side * (hw - Circuit.KERB_WIDTH)), _p(cx, cy, i, side * hw),
+					_p(cx, cy, j, side * (hw2 - Circuit.KERB_WIDTH)), _p(cx, cy, j, side * hw2), i)
 			for sgn in [-1.0, 1.0]:
 				if _gap[i] & (1 if sgn < 0.0 else 2):
 					continue   # a branch road leaves (or joins) through here: its gate stands in the gap
+				_strip(deco, cx, cy, i, j, sgn * (hw - Circuit.EDGE_INSET - LINE_W), sgn * (hw - Circuit.EDGE_INSET), sgn * (hw2 - Circuit.EDGE_INSET - LINE_W), sgn * (hw2 - Circuit.EDGE_INSET), 0.045, Circuit.EDGE_WHITE)
+				if not town and i % 40 < 4:
+					# Paired 48 m paint bars frame the fast corridor every 480 m, well
+					# inside its far walls. The guide's signal colours belong to its lamps.
+					_strip(deco, cx, cy, i, j, sgn * hw * 0.35, sgn * (hw * 0.35 + 1.8),
+						sgn * hw2 * 0.35, sgn * (hw2 * 0.35 + 1.8), 0.05, LOOP_MARK)
 				var a := _p(cx, cy, i, sgn * hw)
 				var b := _p(cx, cy, j, sgn * hw2)
 				var band := Color(0.86, 0.27, 0.09) if (i / 4) % 2 == 0 else Color(0.95, 0.95, 0.93)
@@ -539,10 +547,7 @@ func _strip(st: SurfaceTool, cx: float, cy: float, i: int, j: int, o0: float, o1
 	var b := _p(cx, cy, i, o1) + Vector3.UP * h
 	var cc := _p(cx, cy, j, p1) + Vector3.UP * h
 	var d := _p(cx, cy, j, p0) + Vector3.UP * h
-	for q in [a, b, cc, a, cc, d]:
-		st.set_color(c)
-		st.set_normal(Vector3.UP)
-		st.add_vertex(q)
+	Circuit.strip(st, a, b, cc, d, c)
 
 
 func _asphalt(st: SurfaceTool, cx: float, cy: float, i: int, j: int, hw: float, hw2: float) -> void:
@@ -555,7 +560,8 @@ func _asphalt(st: SurfaceTool, cx: float, cy: float, i: int, j: int, hw: float, 
 		nrm = -nrm
 	var u0 := fposmod(_s[i], ASPHALT_PERIOD)   # periodic: every lattice in the shader divides it
 	var u1: float = u0 + sim.tlen[i]
-	for v in [[a, Vector2(u0, -hw)], [b, Vector2(u0, hw)], [cc, Vector2(u1, hw2)], [a, Vector2(u0, -hw)], [cc, Vector2(u1, hw2)], [d, Vector2(u1, -hw2)]]:
+	for v in [[a, Vector2(u0, -hw), i], [b, Vector2(u0, hw), i], [cc, Vector2(u1, hw2), j], [a, Vector2(u0, -hw), i], [cc, Vector2(u1, hw2), j], [d, Vector2(u1, -hw2), j]]:
+		st.set_color(_groove[v[2]])
 		st.set_normal(nrm)
 		st.set_uv(v[1])
 		st.add_vertex(v[0])
