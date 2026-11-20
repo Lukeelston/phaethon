@@ -122,6 +122,13 @@ func _run() -> void:
 	var before: int = mirror.pictures
 	mirror._process(Mirror.EVERY + 0.1)
 	_check("pictures: %d by now, and another after %.0f s" % [before, Mirror.EVERY], before >= 1 and mirror.pictures == before + 1)
+	# in the dark it eases off
+	var day: float = mirror.surface.get_shader_parameter("strength")
+	mirror.set_dark(1.0)
+	var hall: float = mirror.surface.get_shader_parameter("strength")
+	mirror.set_dark(0.0)
+	_check("it eases off where the view outside is dark: strength %.1f by day, %.1f in a hall" % [day, hall],
+		is_equal_approx(day, Mirror.strength) and is_equal_approx(hall, Mirror.strength * Mirror.DARK) and is_equal_approx(float(mirror.surface.get_shader_parameter("strength")), day))
 	# the view with and without it
 	if DisplayServer.get_name() != "headless":
 		v.cam.rotation_degrees = Vector3(14.0, 0.0, 0.0)

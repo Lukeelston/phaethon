@@ -34,6 +34,7 @@ const HEADS: Array[Vector3] = [Vector3.ZERO, Vector3(0.08, 0, 0), Vector3(-0.08,
 const RIM := Vector2(0.74, -0.5)             # the coaming and the rim light: the cabin's plan from this share of the way out to its edge, ahead of this z
 const CEILING := 0.5                         # the most of the picture the glass ever gives back (the shader's `ceiling`)
 const LAMPS := 1.0                           # how much brighter than white the cockpit's own lights are (the shader's `lamps`)
+const DARK := 0.4                            # the strength's share kept where the view outside is dark: there a bare pane's own is plenty, and more is a ghost over the road
 const EVERY := 3.0                           # seconds between pictures
 static var every := EVERY                    # (timings: 0 takes a picture every frame, to weigh one)
 static var enabled := true                   # (timings: false before the cockpit is built leaves it out)
@@ -52,6 +53,7 @@ var share := 0.0                             # ... and their share of the whole 
 var sights: Array = []                       # what the glass is to show besides the rim: [centre (canopy space), radius], ...
 var _wait := 0.0
 var _canopy: Node3D
+var _dark := 0.0
 var _cockpit: Node3D
 
 
@@ -193,6 +195,14 @@ func _lay_sheet() -> void:
 				st.add_vertex(at[corners[k]])
 	share = float(cells) / float(COLS * ROWS)
 	sheet.mesh = st.commit() if cells > 0 else null
+
+
+## How dark the view outside is, 0 (day) .. 1 (a hall, night): the reflection eases off with it.
+func set_dark(dark: float) -> void:
+	dark = clampf(dark, 0.0, 1.0)
+	if absf(dark - _dark) > 0.01:
+		_dark = dark
+		surface.set_shader_parameter("strength", strength * lerpf(1.0, DARK, dark))
 
 
 ## Take the picture again, now.

@@ -13,6 +13,7 @@ var anchor_x := 0.0
 var anchor_y := 0.0
 var shade: MeshInstance3D
 var fixture: OmniLight3D
+var enclosure := 0.0      # how far inside the hall the pod is: 0 outside, 1 well in
 
 
 static func mark_craft(root: Node3D) -> void:
@@ -81,6 +82,7 @@ func sync(sim, origin_x: float, origin_y: float) -> void:
 		return
 	# The shadow atlas only reaches 450 m. A 3.5 km radius contains both
 	# ends of this 4 km hall plus its longest visible cast shadow.
+	enclosure = 0.0
 	shade.visible = maxf(absf(anchor_x - origin_x), absf(anchor_y - origin_y)) < 3500.0
 	if not shade.visible:
 		fixture.visible = false
@@ -96,7 +98,7 @@ func sync(sim, origin_x: float, origin_y: float) -> void:
 	var along: float = (pod.x - road.px[i]) * road.tx[i] + (pod.y - road.py[i]) * road.ty[i]
 	var sample: float = i + along / road.len[i]
 	# A broad penumbra lets the last bay spill out of the portal.
-	var enclosure := smoothstep(-1.4, 1.4, minf(sample - first_sample, last_sample - sample))
+	enclosure = smoothstep(-1.4, 1.4, minf(sample - first_sample, last_sample - sample))
 	fixture.visible = enclosure > 0.001
 	if not fixture.visible:
 		return

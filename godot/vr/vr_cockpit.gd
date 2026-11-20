@@ -1069,6 +1069,8 @@ func _update_hud() -> void:
 		"gear": quest.display_gear(), "overdrive": bool(inp.get("gearOverdrive", false)),
 		"blink": (Time.get_ticks_msec() / 250) % 2 == 0,
 	})
+	if screen_reflection:      # in the terminal's hall and before dawn the glass needs less to show
+		screen_reflection.set_dark(maxf(terminal_lighting.enclosure if terminal_lighting else 0.0, 0.7 if light_preset == "twilight" else 0.0))
 	if chase_hud and chase_hud.visible:
 		var guide: String = approach_display.message if approach_display else ""   # (what the projector over the nose is showing)
 		var lit: String = {"ramjet": "RAMJET", "burner": "AFTERBURNER"}.get(sim.mode, "RAMJET ARMED" if sim.armed else "")
