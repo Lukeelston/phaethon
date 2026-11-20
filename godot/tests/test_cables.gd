@@ -110,8 +110,9 @@ func _fittings_clear(rig: Node3D) -> void:
 	var n := 0
 	var parts := {}
 	var example := ""
-	for node in rig.find_children("*", "VisualInstance3D", true, false):
-		var vi := node as VisualInstance3D
+	# Lights also inherit VisualInstance3D. Their influence volumes are not fittings.
+	for node in rig.find_children("*", "GeometryInstance3D", true, false):
+		var vi := node as GeometryInstance3D
 		if vi is MeshInstance3D and (vi as MeshInstance3D).mesh == CM.pod_hull():
 			continue   # the hull itself
 		if vi.find_parent("*") is XROrigin3D or _under(vi, "XROrigin3D"):
@@ -129,12 +130,9 @@ func _fittings_clear(rig: Node3D) -> void:
 			for k in 8:
 				pts.append(box.get_endpoint(k))
 		var path := str(rig.get_path_to(vi))
-		# The ascent display added in v0.1.8 floats above the nose, outside the
-		# cockpit opening. It must clear the top of the hull, not fit inside it.
-		var floating_hud: bool = vi == v._jump_guidance or vi == v._jump_guidance_backing
 		for q in pts:
 			var pod: Vector3 = to_rig * (vi.global_transform * q) - Vector3(0, CM.POD_FRAME_UP, 0)
-			var why: String = ("" if pod.y > 0.25 else "floating HUD below hull clearance") if floating_hud else CM.hull_clearance(pod)
+			var why: String = CM.hull_clearance(pod)
 			n += 1
 			if why != "":
 				parts[path] = parts.get(path, 0) + 1

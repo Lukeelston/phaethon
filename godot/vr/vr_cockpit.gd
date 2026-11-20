@@ -64,8 +64,6 @@ var hands := {}
 var lever_pivots: Array[Node3D] = []
 var lever_tips: Array[StandardMaterial3D] = []
 var dashboard   # the instrument panel (vr/dashboard.gd)
-var _jump_guidance: Label3D   # rig-mounted ascent readout above the dash; never follows the pilot's eyes
-var _jump_guidance_backing: MeshInstance3D
 var _skill_readout: Label3D
 var _skill_award: Label3D
 var wag = WagMeterScript.new()        # the nose wag since the last report (a WAG: line every 10 s)
@@ -470,6 +468,8 @@ func _build_cockpit() -> void:
 	canopy = CanopyScript.build()
 	canopy.position = Vector3(0, CraftModelScript.POD_FRAME_UP, 0)
 	shell.add_child(canopy)
+	if sim.kind == "network":
+		_mount_approach_projector(canopy)
 	dashboard = DashboardScript.new()
 	shell.add_child(dashboard)
 	dashboard.transform = DashboardScript.mount()
@@ -933,44 +933,8 @@ func _report_cpu() -> void:
 	_w_sum.clear()
 
 
-func _update_jump_guidance() -> void:
-	if not _jump_guidance:
-		_jump_guidance = Label3D.new()
-		_jump_guidance.name = "AscentGuidance"
-		_jump_guidance.font_size = 36
-		_jump_guidance.pixel_size = 0.0025
-		_jump_guidance.outline_size = 8
-		_jump_guidance.outline_modulate = Color(0.025, 0.03, 0.035, 0.96)
-		_jump_guidance.position = Vector3(0.0, 1.45, -1.8)
-		_jump_guidance.double_sided = false
-		rig.add_child(_jump_guidance)
-		_jump_guidance_backing = MeshInstance3D.new()
-		_jump_guidance_backing.name = "AscentGuidanceBacking"
-		var face := QuadMesh.new()
-		face.size = Vector2(2.2, 0.42)
-		_jump_guidance_backing.mesh = face
-		var mat := StandardMaterial3D.new()
-		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		mat.albedo_color = Color(0.015, 0.025, 0.04, 0.96)
-		_jump_guidance_backing.material_override = mat
-		_jump_guidance_backing.position = _jump_guidance.position + Vector3(0.0, 0.0, -0.01)
-		_jump_guidance_backing.scale = _jump_guidance.scale
-		rig.add_child(_jump_guidance_backing)
-	var text := _net_jump_approach_text()
-	_jump_guidance.visible = text != ""
-	_jump_guidance_backing.visible = _jump_guidance.visible
-	_jump_guidance.text = text
-	if text.contains("TOO SLOW") or text.contains("WRONG WAY"):
-		_jump_guidance.modulate = Color(1.0, 0.55, 0.12)
-	elif text.contains("ASCENT"):
-		_jump_guidance.modulate = Color(0.45, 1.0, 0.6)
-	else:
-		_jump_guidance.modulate = Color(0.55, 0.85, 1.0)
-
-
 func _update_hud() -> void:
-	_update_jump_guidance()
+	var progress := _hud_progress(true)
 	_update_skill_readout()
 	var kmh := _kmh()
 	_scheme_flash = maxf(0.0, _scheme_flash - get_process_delta_time())
@@ -978,7 +942,7 @@ func _update_hud() -> void:
 	if minimap_panel.visible:
 		minimap_panel.show_frame(minimap.update(sim.pod.th, get_process_delta_time()))
 	dashboard.show_state({
-		"mph": kmh / 1.609344, "kmh": kmh, "mach_line": cues.readout(), "progress": "" if _jump_guidance.visible else _progress_text(),
+		"mph": kmh / 1.609344, "kmh": kmh, "mach_line": cues.readout(), "progress": progress,
 		"footer": "%s   /   %s" % [handling_text(), ctl],
 		"thr": [inp.thrL, inp.thrR], "brk": [inp.brkL, inp.brkR], "heat": [sim.eL.heat, sim.eR.heat],
 		"health": [sim.eL.health, sim.eR.health],
@@ -1005,14 +969,16 @@ func _update_skill_readout() -> void:
 			label.double_sided = false
 			label.no_depth_test = true
 			cam.add_child(label)
-		# Two metres from the eyes; a view-relative corner stays a corner when
-		# looking around. The active readout sits above the road/ramp guidance.
-		_skill_award.position = Vector3(0.0, 0.81, -2.0)
-		_skill_award.scale = Vector3.ONE * 0.82
 	if skill_score:
 		var display := _skill_display.update(skill_score)
 		var weight: float = display.emphasis
-		_skill_readout.position = Vector3(1.25, 0.92, -2.0).lerp(Vector3(0.0, 0.96, -2.0), weight)
+		# Leave the centre of the windscreen free while the projector is deployed.
+		var guidance_visible := approach_display != null and approach_display.panel.visible
+		var active_x := 1.25 if guidance_visible else 0.0
+		_skill_readout.position = Vector3(1.25, 0.92, -2.0).lerp(Vector3(active_x, 0.96, -2.0), weight)
+		_skill_award.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT if guidance_visible else HORIZONTAL_ALIGNMENT_CENTER
+		_skill_award.position = Vector3(0.98 if guidance_visible else 0.0, 0.81, -2.0)
+		_skill_award.scale = Vector3.ONE * (0.58 if guidance_visible else 0.82)
 		_skill_readout.scale = Vector3.ONE * lerpf(0.7, 1.15, weight)
 		_skill_readout.text = display.total
 		_skill_readout.modulate = Color(0.65, 0.96, 0.9, lerpf(0.52, 1.0, weight))
