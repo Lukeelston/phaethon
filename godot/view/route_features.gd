@@ -34,6 +34,7 @@ var features: Array = []      # [kind, x, y]
 var blockers: Array = []      # [x0, x1, y0, y1, kind]
 var anim: Array = []          # [node, kind, phase]
 var mats := {}
+var guides := preload("res://view/highway_signs.gd").new()
 
 
 func _init() -> void:
@@ -214,14 +215,20 @@ func _overpass(node: Node3D, lx: float, x_abs: float) -> void:
 	emb.material_override = mats.shaded
 	emb.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	node.add_child(emb)
-	# the sign, on the face you approach: how far is left
-	var green := Color(0.05, 0.36, 0.17)
-	_add(node, [[Kit.box(Vector3(0.3, SIGN_H, SIGN_W)), Kit.at(Vector3(lx - ROAD_HALF - 0.4, DECK_TOP + 0.4, 0)), green],
-		[Kit.box(Vector3(0.32, SIGN_H - 0.4, SIGN_W - 0.4)), Kit.at(Vector3(lx - ROAD_HALF - 0.42, DECK_TOP + 0.4, 0)), Color(0.9, 0.92, 0.9)],
-		[Kit.box(Vector3(0.34, SIGN_H - 0.7, SIGN_W - 0.7)), Kit.at(Vector3(lx - ROAD_HALF - 0.44, DECK_TOP + 0.4, 0)), green]])
-	var left := maxf(0.0, (Sim.BOX_X - x_abs) / MILE)
-	_text(node, Vector3(lx - ROAD_HALF - 0.65, DECK_TOP + 1.3, 0), "MILE %.1f" % (x_abs / MILE), 300, 0.008, Color(0.97, 0.97, 0.95), true)
-	_text(node, Vector3(lx - ROAD_HALF - 0.65, DECK_TOP - 0.7, 0), "%.1f TO GO" % left, 220, 0.008, Color(0.97, 0.97, 0.95), true)
+	# A bridge-mounted distance board, scaled to the road over the Sprint.
+	var size := Vector2(SIGN_W,SIGN_H)
+	var panel_root := Node3D.new()
+	panel_root.name = "BridgeMileage"
+	panel_root.rotation.y = -PI/2.0
+	panel_root.position = Vector3(lx-ROAD_HALF-0.53,DECK_TOP+0.4,0)
+	node.add_child(panel_root)
+	var body := guides.add_hardware(panel_root,"Channels",guides.hardware.carrier(size),Transform3D.IDENTITY)
+	body.scale.z = 0.075
+	body.position.z = -0.27
+	var face := guides.panel(panel_root,"MileagePanel",size,Vector3.ZERO,guides.sheet(size,guides.GREEN))
+	var left := maxf(0.0,(Sim.BOX_X-x_abs)/MILE)
+	guides.legend(face,"MILE %.1f" % (x_abs/MILE),Vector2(0,0.92),SIGN_W*0.83,1.32,guides.D)
+	guides.legend(face,"Finish   %.1f mi" % left,Vector2(0,-0.94),SIGN_W*0.86,1.10,guides.EM)
 
 
 func _water_tower(node: Node3D, lx: float, y: float) -> void:

@@ -44,3 +44,6 @@ to make these effects are not included in the player download.
 The wind, traffic and course effects are synthesized by the game's scripts.
 
 License source URLs and retrieval date are recorded in licenses/SOURCES.txt.
+
+Highway sign lettering uses Roadgeek 2014 Series D and E(M) by Sammi De Guzman.
+The MIT license and font source are in licenses/ROADGEEK-2014.txt.

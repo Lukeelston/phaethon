@@ -9,7 +9,7 @@
 ## Its signs come with it: a board before every junction naming where that exit goes (road miles,
 ## from the junction table), END OF THE ROAD before each shaft, braking boards before each
 ## city's STARFIGHTER zone, the city's name over its terminal (a lit line across the road), a jump's
-## boards with a big lit arrow (view/arrow_board.gdshader) on the highway before its exit and over the
+## boards with reflective arrows and amber sequencers on the highway before its exit and over the
 ## fork where its spur runs straight on off the ramp, a speed and a gear before each side road's corner.
 ## A shaft's stretch is built on the shape it is in the world (view/network_shaft.gd): every point
 ## through _p, "up" the road's own (_up), hoops round it in place of masts.
@@ -60,25 +60,18 @@ const BAND := [Color(0.38, 0.46, 0.50), Color(0.46, 0.52, 0.54)]
 const BAND_SF := [Color(0.48, 0.39, 0.43), Color(0.54, 0.47, 0.49)]
 const RAIL_CAP := Color(0.24, 0.27, 0.28)
 const ASPHALT_PERIOD := 64000.0
-const BOARD_W := 80.0
-const BOARD_H := 40.0
+const BOARD_W := 138.0
+const BOARD_H := 46.0
 const BOARD_CLEAR := 28.0
 const SIGN_BEFORE := 250          # samples (6 km) before a junction: its board
 const JUMP_AMBER := Color(1.0, 0.55, 0.08)
 const BRAKE_MI := [4, 2, 1]       # braking boards, miles before a city's STARFIGHTER zone
 const MILE := 1609.344
-# the signs' glyphs: rendered at these sizes (px) and scaled up (SIGN_PX m a pixel), so a streamed
-# board's first letters cost little to rasterise; all of them warmed at the start (_warm_fonts).
-# (At 200 px each new glyph cost ~200 ms in the middle of a run.)
-const FONT := [72, 43, 36, 79, 25]   # a board's title, its lines, three lines' lines; a braking board's miles, its words
-const SIGN_PX := 0.139
-const SIGN_CHARS := "ABCDEFGHIJKLMNOPQRSTUVWXYZ 0123456789/:+-.>,"
-const JUMP_W := 300.0             # a jump's board: wider, its arrow on a panel at the right
-const JUMP_H := 78.0
-const ARROW_PANEL := 0.36
+const Signs := preload("res://view/highway_signs.gd")
+const JUMP_W := 178.0
+const JUMP_H := 55.0
 const SIGN_FAR := 536             # samples (8 mi) before a jump's exit: time to choose at highway speed
 const SIGN_NEAR := 268             # samples (4 mi) before the exit
-const ARROW_WORDS := 2.1          # a jump's board's words, this much bigger (the same glyphs, scaled)
 const FORK_BEFORE := 22           # samples before the fork: the board over it, the arrow straight on
 const CHEV_EVERY := 14            # samples between the lit chevrons on a launch spur
 const HOOP_EVERY := 8             # samples between a shaft's hoops (~190 m); every second one lit
@@ -144,12 +137,8 @@ var _paint_fine := false
 var _sec_cache := {}               # road widths -> their sections (_section)
 var _idx_cache := {}               # Vector2i(rows, cols) -> the road grid's triangles (_grid_index)
 var _beam: ShaderMaterial
-var _board_mat: ShaderMaterial
-var _end_mat: ShaderMaterial
-var _jump_mat: ShaderMaterial
-var _city_mat: ShaderMaterial
-var _arrow_mat: ShaderMaterial
-var _fork_mat: ShaderMaterial
+var _guides := Signs.new()
+var _exits := {}  # Vector3i(parent, branch, branch endpoint) -> signed physical exit
 var _job := {}            # the chunk being built, a slice a frame (_start_chunk, _work)
 var _join_surface_cache := {}     # Vector2(sample, offset), for the current chunk's road
 var _join_projections := {}       # one nearest-road query shared by exact walls and the shaping apron
@@ -196,24 +185,6 @@ func build(s, v) -> void:
 	_beam.set_shader_parameter("min_ang", 0.0018)
 	_beam.set_shader_parameter("energy", 2.2)
 	_beam.set_shader_parameter("far_dim", 0.15)
-	_board_mat = ShaderMaterial.new()
-	_board_mat.shader = preload("res://view/board.gdshader")
-	_end_mat = ShaderMaterial.new()
-	_end_mat.shader = preload("res://view/authorized.gdshader")
-	_end_mat.set_shader_parameter("col", Vector3(1.0, 0.55, 0.1))
-	_jump_mat = _end_mat.duplicate() as ShaderMaterial
-	_jump_mat.set_shader_parameter("flash_hz", 0.0) # stable amber remains legible; border lamps still chase
-	_city_mat = ShaderMaterial.new()
-	_city_mat.shader = preload("res://view/authorized.gdshader")
-	_city_mat.set_shader_parameter("col", Vector3(0.25, 0.65, 1.0))
-	_arrow_mat = ShaderMaterial.new()   # a jump's board on the highway: the arrow up and to the right, to the exit
-	_arrow_mat.shader = preload("res://view/arrow_board.gdshader")
-	_arrow_mat.set_shader_parameter("aspect", JUMP_W / JUMP_H)
-	_arrow_mat.set_shader_parameter("panel", ARROW_PANEL)
-	_arrow_mat.set_shader_parameter("angle", deg_to_rad(52.0))
-	_arrow_mat.set_shader_parameter("flash_hz", 0.0) # accepted steady text; only the arrow and lamps animate
-	_fork_mat = _arrow_mat.duplicate()  # ... over the fork: straight on
-	_fork_mat.set_shader_parameter("angle", PI / 2.0)
 	_asph = preload("res://art/road/asphalt.tres").duplicate() as ShaderMaterial
 	_asph.set_shader_parameter("period", ASPHALT_PERIOD)
 	_asph.set_shader_parameter("base", Vector3(0.21, 0.205, 0.205))
@@ -282,7 +253,7 @@ func build(s, v) -> void:
 	scenery = SceneryScript.new()
 	add_child(scenery)
 	scenery.build(sim, self)
-	_warm_fonts()
+	_warm_signs()
 	_warm_deco_templates()
 	# Prepare nearby detail while the map is loading. Accurate junction paint
 	# costs more to construct; the pilot should start on finished pavement,
@@ -1271,6 +1242,7 @@ func _joined_at(r: int, e: int) -> bool:
 
 ## Where every sign stands, by chunk: [i, dir (the way the traffic it faces goes), kind, lines].
 func _plan_signs() -> void:
+	_index_exits()
 	var seen_turn := {}
 	for k in sim.junctions.size():
 		var J: Array = sim.junctions[k]
@@ -1287,37 +1259,51 @@ func _plan_signs() -> void:
 		if C.role == "launch":
 			_plan_jump(c, p, ca, dp)
 			continue
-		var at := ca - dp * SIGN_BEFORE
-		if at < 1 or at > P.N - 2:
-			continue
-		var lines := []
-		var kind := "exit"
 		if C.role != "":
-			continue   # a catch deck or an on-ramp, taken backwards: nowhere but an open end
-		elif C.name.begins_with("T"):
-			if seen_turn.has(c):
+			continue  # A catch deck or an on-ramp taken backwards leads to an open end.
+		if C.name.begins_with("T"):
+			var at := ca - dp * SIGN_BEFORE
+			if seen_turn.has(c) or at < 1 or at > P.N - 2:
 				continue
 			seen_turn[c] = true
-			kind = "end"
-			lines = ["END OF THE ROAD", "SHAFT  %d MI" % roundi(SIGN_BEFORE * 24.0 / MILE)]
-		elif C.name.begins_with("S"):
-			lines = ["SIDE ROAD", "%d MI" % roundi(C.length / MILE)]
-		else:
-			var d := _dists(c, cb, dq)
-			var best := []
+			var miles := roundi(absf(_s[p][ca] - _s[p][at]) / MILE)
+			_add_sign(p, at, dp, "end", ["END OF THE ROAD", "SHAFT  %d MI" % miles])
+			continue
+		var entry: Dictionary = _exits[Vector3i(p, c, cb)]
+		var lengths: PackedFloat64Array = _s[p]
+		# Give the pilot distinct reading opportunities between the 4-mile ascent
+		# warning and the ramp mouth. Use road distance even on curved approaches.
+		var advance := lengths.bsearch(lengths[entry.mouth] - dp * 2.0 * MILE)
+		var turn_at := clampi(int(entry.mouth) - dp * 5, 1, P.N - 2)
+		var city := _city_of(c)
+		var kind := "city" if city >= 0 else "exit"
+		var destinations := []
+		if not C.name.begins_with("S"):
+			var distances := _dists(c, cb, dq)
 			for ci in sim.cities.size():
-				if d[ci] < INF:
-					best.append([d[ci], ci])
-			best.sort_custom(func(x, y): return x[0] < y[0])
-			var city := _city_of(c)
-			if city >= 0:
-				lines = [sim.cities[city].name, "EXIT  %d MI" % maxi(1, roundi((d[city] + SIGN_BEFORE * 24.0) / MILE))]
-				kind = "city"
+				if distances[ci] < INF and (city < 0 or ci == city):
+					destinations.append([distances[ci], sim.cities[ci].name])
+			destinations.sort_custom(func(a, b): return a[0] < b[0])
+		for station in [advance, turn_at]:
+			if station < 1 or station > P.N - 2:
+				continue
+			var remaining := absf(lengths[station] - lengths[entry.mouth])
+			var info := entry.duplicate()
+			if station == turn_at:
+				info["decision"] = true
+			else:
+				info["miles"] = maxi(1, roundi(remaining / MILE))
+			var lines := []
+			if C.name.begins_with("S"):
+				lines = ["SIDE ROAD", "%d MI" % roundi(C.length / MILE)]
+			elif city >= 0:
+				var mile := maxi(1, roundi((destinations[0][0] + remaining) / MILE))
+				lines = [sim.cities[city].name, "EXIT  %d MI" % mile]
 			else:
 				lines = ["EXIT"]
-				for q in best.slice(0, 2):
-					lines.append("%s  %d MI" % [sim.cities[q[1]].name, maxi(1, roundi((q[0] + SIGN_BEFORE * 24.0) / MILE))])
-		_add_sign(p, at, dp, kind, lines)
+				for dest in destinations.slice(0, 2):
+					lines.append("%s  %d MI" % [dest[1], maxi(1, roundi((dest[0] + remaining) / MILE))])
+			_add_sign(p, station, dp, kind, lines, info)
 	# braking boards before each city's STARFIGHTER zone, both ways; its name over the terminal
 	for ci in sim.cities.size():
 		var city: Dictionary = sim.cities[ci]
@@ -1340,6 +1326,59 @@ func _plan_signs() -> void:
 	for r in sim.roads.size():
 		if sim.roads[r].name.begins_with("S"):
 			_plan_corners(r)
+
+
+## Use the branch endpoint within its real junction overlap. Opposing ramps at
+## one mile get separate suffixes, shared by their advance, turn and ascent signs.
+func _index_exits() -> void:
+	var stations := {}
+	for J in sim.junctions:
+		var p := int(J[0])
+		var c := int(J[3])
+		var P = sim.roads[p]
+		var C = sim.roads[c]
+		if C.role != "" or C.name.begins_with("T"):
+			continue
+		var start: bool = int(J[4]) == 0
+		var end: int = 0 if start else C.N-1
+		var way := int(J[6]) * (1 if start else -1)
+		var mouth := _map(J,end)
+		var nearest := INF
+		for i in range(int(J[1]),int(J[2])+1):
+			var gap := Vector2(P.px[i]-C.px[end],P.py[i]-C.py[end]).length_squared()
+			if gap < nearest:
+				mouth = i
+				nearest = gap
+		var lateral: float = (C.px[end]-P.px[mouth])*P.nx[mouth] + (C.py[end]-P.py[mouth])*P.ny[mouth]
+		var mile := maxi(1, roundi(_s[p][mouth]/MILE))
+		var info := {"mouth":mouth,"side":-1 if lateral*way > 0.0 else 1,"number":str(mile),"route":"","cardinal":""}
+		if C.name.begins_with("S"):
+			info.route = C.name
+		elif C.name.begins_with("R"):
+			for ji in C.jx:
+				var merge: Array = sim.junctions[ji]
+				var other_end: int = C.N-1-end
+				if int(merge[3]) != c or other_end < int(merge[4]) or other_end > int(merge[5]):
+					continue
+				var road = sim.roads[int(merge[0])]
+				var i := _map(merge,other_end)
+				var onward := int(merge[6]) * (1 if start else -1)
+				info.route = road.name
+				if absf(road.tx[i]) > absf(road.ty[i]):
+					info.cardinal = "EAST" if road.tx[i]*onward > 0 else "WEST"
+				else:
+					info.cardinal = "NORTH" if road.ty[i]*onward > 0 else "SOUTH"
+				break
+		var key := Vector3i(p,way,mile)
+		if not stations.has(key):
+			stations[key] = []
+		stations[key].append(info)
+		_exits[Vector3i(p,c,end)] = info
+	for choices: Array in stations.values():
+		if choices.size() > 1:
+			choices.sort_custom(func(a,b): return a.side < b.side if a.side != b.side else a.mouth < b.mouth)
+			for j in choices.size():
+				choices[j].number += String.chr(65+j)
 
 
 ## A jump's boards: launch spur c forks off exit ramp p at the ramp's sample `fork`, going dp along it.
@@ -1375,7 +1414,7 @@ func _plan_jump(c: int, p: int, fork: int, dp: int) -> void:
 			var at: int = at_mouth - way * back
 			if at > 0 and at < H.N - 1:
 				var entry := "ENTER RIGHT" if back < 30 else "RIGHT EXIT  %d MI" % roundi(float(back) * 24.0 / MILE)
-				_add_sign(h, at, way, "jump", [title, minimum, entry])
+				_add_sign(h, at, way, "jump", [title, minimum, entry], _exits.get(Vector3i(h,p,e),{}))
 	_add_sign(c, mini(300, C.N - 2), 1, "fork", [title, minimum, "FOLLOW AMBER"])
 	_add_sign(c, maxi(1, C.N - 61), 1, "fork", [title, minimum, "LIFT-OFF  1 MI"])
 
@@ -1416,11 +1455,16 @@ static func gear_for(mph: float) -> int:
 	return QuestControls.GEARS.size() - 1
 
 
-func _add_sign(r: int, i: int, dir: int, kind: String, lines: Array) -> void:
+func _add_sign(r: int, i: int, dir: int, kind: String, lines: Array, info := {}) -> void:
 	var key := Vector2i(r, mini(i / CH, (sim.roads[r].N - 2) / CH))
 	if not _signs.has(key):
 		_signs[key] = []
-	_signs[key].append([i, dir, kind, lines])
+	if kind == "corner":
+		for prior in _signs[key]:
+			if prior[0] == i and prior[1] == -dir and prior[2] == kind:
+				prior[4]["reverse_lines"] = lines
+				return
+	_signs[key].append([i, dir, kind, lines, info])
 
 
 func _map(J: Array, cb: int) -> int:
@@ -1459,7 +1503,7 @@ func _dists(road: int, i: int, dir: int) -> Array:
 		for ci in sim.cities.size():
 			var city: Dictionary = sim.cities[ci]
 			if int(city.road) == r and (int(city.i) - at) * d >= 0:
-				out[ci] = minf(out[ci], c + absi(int(city.i) - at) * 24.0)
+				out[ci] = minf(out[ci], c + absf(_s[r][int(city.i)] - _s[r][at]))
 		for k in sim.roads[r].jx:
 			var J: Array = sim.junctions[k]
 			var on_a: bool = int(J[0]) == r
@@ -1479,7 +1523,7 @@ func _dists(road: int, i: int, dir: int) -> Array:
 				continue
 			if qz1 == Q.N - 1 and dq > 0:
 				continue
-			var nc := c + absi(zc - at) * 24.0
+			var nc: float = c + absf(_s[r][zc] - _s[r][at])
 			var key := Vector3i(q, iq, dq)
 			if nc < best.get(key, INF):
 				best[key] = nc
@@ -1502,7 +1546,7 @@ func _sign(node: Node3D, R: CraftSim.TrackPath, r: int, ox: float, oy: float, sp
 	var tx: float = R.tx[i] * dir
 	var ty: float = R.ty[i] * dir
 	var t := Vector3(tx, 0.0, -ty)
-	var b := Basis(Vector3.UP, atan2(ty, tx))
+	var facing := Basis(Vector3.UP, atan2(-t.x,-t.z))
 	var mid := _p(R, ox, oy, i, 0.0, h0)
 	if kind == "terminal":   # a lit line across the road, and a gantry with the city's name
 		var st := SurfaceTool.new()
@@ -1512,92 +1556,52 @@ func _sign(node: Node3D, R: CraftSim.TrackPath, r: int, ox: float, oy: float, sp
 		mi.mesh = st.commit()
 		mi.material_override = _bright
 		node.add_child(mi)
-	var small: bool = kind == "brake" or kind == "corner"
-	var arrow: bool = kind == "jump" or kind == "fork"
-	var w := JUMP_W if arrow else (BOARD_W if not small else 40.0)
-	var h := JUMP_H if arrow else (BOARD_H if not small else 24.0)
-	var foot := h0 + BOARD_CLEAR
-	var steel := Color(0.22, 0.23, 0.25)
-	var parts := []
-	for sd in [-1.0, 1.0]:
-		var q := _p(R, ox, oy, i, sd * hw, 0.0)
-		parts.append([Kit.box(Vector3(2.4, foot + 4.0, 2.4)), Kit.at(q + Vector3(0, (foot + 4.0) / 2.0, 0)), steel])
-	parts.append([Kit.box(Vector3(3.0, 4.0, hw * 2.0 + 2.4)), Transform3D(b, Vector3(mid.x, foot + 2.0, mid.z)), steel])
-	var sc := Vector3(mid.x, foot + 4.0 + h / 2.0, mid.z)
-	parts.append([Kit.box(Vector3(2.0, h + 4.0, w + 4.0)), Transform3D(b, sc), Color(0.1, 0.1, 0.12)])
-	var frame := MeshInstance3D.new()
-	frame.mesh = Kit.compound(parts)
-	frame.material_override = _mat
-	frame.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	node.add_child(frame)
-	_sign_face(node, sc, t, kind, lines, w, h, false)
-	var rear := lines
-	if kind == "jump" or kind == "fork":
-		rear = [lines[0], lines[1], "APPROACH OTHER SIDE"]
-	elif kind != "terminal":
-		rear = [lines[1] if kind == "brake" else lines[0], "OPPOSITE APPROACH"]
-	_sign_face(node, sc, -t, kind, rear, w, h, true)
+	var info: Dictionary = spec[4]
+	var small := kind in ["brake","corner"]
+	var size := Vector2(BOARD_W,BOARD_H)
+	if kind in ["jump","fork"]:
+		size = Vector2(JUMP_W,JUMP_H)
+	elif small:
+		size = Vector2(52,23)
+	elif kind == "terminal":
+		size = Vector2(91,32)
+	# Build one span for a station. A paired junction has one panel over each
+	# branch side. Reverse-direction corner advisories also get their own slot.
+	var span_name := "SignSpan_%d" % i
+	if not node.has_node(NodePath(span_name)):
+		_guides.add_hardware(node,span_name,_guides.hardware.span(hw),Transform3D(facing,mid))
+	var side := int(info.get("side",1 if small else 0))
+	var offset := float(side) * minf(hw*0.65,maxf(0.0,hw-size.x*0.5-2.0))
+	var center := mid + facing.x*offset + Vector3.UP*(BOARD_CLEAR+4.0+size.y/2.0)
+	var holder := Node3D.new()
+	holder.name = "Sign_%s_%d_%d_%d" % [kind,i,dir,side]
+	node.add_child(holder,true)
+	_guides.add_hardware(holder,"Mount",_guides.hardware.carrier(size),Transform3D(facing,center))
+	for rear in [false,true]:
+		var basis := facing.rotated(Vector3.UP,PI) if rear else facing
+		var pos := center + basis.z*Signs.Gantry.FACE_Z
+		var paired_corner: bool = rear and info.has("reverse_lines")
+		var words: Array = info.reverse_lines if paired_corner else lines
+		_guides.face(holder,Transform3D(basis,pos),size,kind,words,info,rear,paired_corner)
 	boards += 1
 
 
-## Each face has its own outward normal and sits outside the solid two-metre backing.
-## A double-sided label alone would be mirrored from behind and buried inside that backing.
-func _sign_face(node: Node3D, sc: Vector3, t: Vector3, kind: String, lines: Array, w: float, h: float, rear: bool) -> void:
-	var facing := Basis(Vector3.UP, atan2(-t.x, -t.z))   # +Z toward this side's approaching craft
-	var face := MeshInstance3D.new()
-	var quad := QuadMesh.new()
-	quad.size = Vector2(w, h)
-	face.mesh = quad
-	face.transform = Transform3D(facing, sc - t * 1.1)
-	var small: bool = kind == "brake" or kind == "corner"
-	var arrow: bool = (kind == "jump" or kind == "fork") and not rear
-	face.material_override = (_arrow_mat if kind == "jump" else _fork_mat) if arrow else (_jump_mat if kind == "jump" or kind == "fork" else (_end_mat if kind == "end" else (_city_mat if kind == "terminal" or kind == "city" else _board_mat)))
-	node.add_child(face)
-	var n := lines.size()
-	for li in n:
-		var l := Label3D.new()
-		l.text = lines[li]
-		l.font_size = (FONT[0] if li == 0 else FONT[1]) if not small else (FONT[3] if li == 0 else FONT[4])
-		if n >= 3 and li > 0:
-			l.font_size = FONT[2]
-		if rear and small:
-			l.font_size = FONT[4] # rear has a zone name, not the front's large mile numeral
-		l.pixel_size = SIGN_PX
-		if kind == "jump" or kind == "fork":
-			l.pixel_size *= ARROW_WORDS
-		var width := ThemeDB.fallback_font.get_string_size(l.text, HORIZONTAL_ALIGNMENT_LEFT, -1, l.font_size).x
-		var text_w := w * (1.0 - ARROW_PANEL) if arrow else w
-		l.pixel_size = minf(l.pixel_size, (text_w - 8.0) / maxf(width, 1.0))
-		l.outline_size = 0
-		l.modulate = Color(0.03, 0.03, 0.04)
-		l.double_sided = false
-		var up := (h / 2.0 - h / (n + 1.0) * (li + 1.0)) if n > 1 else 0.0
-		var aside := facing * Vector3.RIGHT * (-w * ARROW_PANEL / 2.0) if arrow else Vector3.ZERO   # (the words left of the arrow's panel)
-		l.transform = Transform3D(facing, sc + Vector3.UP * up - t * 1.4 + aside)
-		node.add_child(l)
-
-
-## Every glyph the signs use, at every size, rasterised now (labels under the ground, freed a few
-## frames on), not when a board streams in at 4,000 mph.
-func _warm_fonts() -> void:
+## Cache canonical spans, aluminum extrusions and the two sign alphabets before
+## streaming. Build each mesh once per width, regardless of how often it is passed.
+func _warm_signs() -> void:
+	for key: Vector2i in _signs:
+		var R = sim.roads[key.x]
+		for spec in _signs[key]:
+			_guides.hardware.span(R.w[spec[0]]/2.0+4.0)
+	for size in [Vector2(BOARD_W,BOARD_H),Vector2(JUMP_W,JUMP_H),Vector2(52,23),Vector2(91,32)]:
+		_guides.hardware.carrier(size)
+		for ratio in [1.14,1.78]:
+			_guides.hardware.carrier(Vector2(size.y*ratio,size.y*0.30))
 	var holder := Node3D.new()
-	holder.name = "font_warm"
 	add_child(holder)
-	for fs in FONT:
-		var l := Label3D.new()
-		l.text = SIGN_CHARS
-		l.font_size = fs
-		l.pixel_size = SIGN_PX
-		l.position = Vector3(0.0, -400.0, 0.0)
-		holder.add_child(l)
-	for m in [_arrow_mat, _fork_mat, _end_mat, _city_mat, _board_mat]:   # ... and the boards' shaders, drawn once under the ground
-		var q := MeshInstance3D.new()
-		var qm := QuadMesh.new()
-		qm.size = Vector2(4.0, 4.0)
-		q.mesh = qm
-		q.material_override = m
-		q.position = Vector3(0.0, -60.0, -40.0)
-		holder.add_child(q)
+	for font in [Signs.EM,Signs.D]:
+		var chars := "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz 0123456789/-,"
+		_guides.legend(holder,chars,Vector2(0,-400),120.0,1.0,font)
 	get_tree().create_timer(1.0).timeout.connect(holder.queue_free)
 
 
