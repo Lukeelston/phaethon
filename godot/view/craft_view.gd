@@ -1349,6 +1349,23 @@ func _build_craft() -> void:
 	craft.build(self)
 	pod_mesh = craft.pod
 	_make_view()
+	if network_world or range_world:
+		# The lamp follows the vehicle's nose, including on banked decks. The
+		# cockpit can look across the road independently of the light in XR.
+		var mount: Node3D = craft.pod_frame if craft.pod_frame else pod_mesh
+		var lamp := SpotLight3D.new()
+		lamp.name = "GuideSignHeadlight"
+		lamp.light_cull_mask = NetworkWorldScript.Signs.SHEETING_LAYER
+		lamp.light_bake_mode = Light3D.BAKE_DISABLED
+		lamp.light_volumetric_fog_energy = 0.0
+		lamp.light_specular = 0.10
+		lamp.light_energy = 0.93
+		lamp.spot_range = 1350.0
+		lamp.spot_angle = 58.0
+		lamp.spot_angle_attenuation = 1.5
+		lamp.spot_attenuation = 0.0
+		mount.add_child(lamp)
+		lamp.position = Vector3(0, 1.2, -1.8)
 	if network_world:
 		TerminalLighting.mark_craft(craft)
 		terminal_lighting = TerminalLighting.new()

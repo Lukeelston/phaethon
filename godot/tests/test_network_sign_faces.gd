@@ -110,6 +110,16 @@ func _check_faces(holder: Node3D,spec: Array,outward: Vector3) -> void:
 		var arrow := int(mat.get_shader_parameter("arrow_side"))
 		if reverse:
 			check("reverse face never directs into a ramp",arrow==0 and not root_face.has_node("ExitPlaque"))
+			var front: MeshInstance3D = holder.get_node("Approach/LegendPanel")
+			if kind == "terminal" or info.has("reverse_lines"):
+				check("both valid approaches receive a full-size sign", panel.mesh.size == front.mesh.size)
+			else:
+				check("opposing traffic sees exposed hardware and an identification plate", panel.mesh.size == front.mesh.size * World.Signs.Gantry.ID_SCALE and mat.get_shader_parameter("field") == World.Signs.ID_SILVER)
+		var shield := panel.get_node_or_null("RouteMarker") as MeshInstance3D
+		if shield:
+			var stock: ShaderMaterial = shield.material_override
+			check("shield uses the receiving road class", stock.get_shader_parameter("expressway") == not str(info.route).begins_with("S"))
+			check("route number and shield receive the craft light", (shield.layers & shield.get_child(0).layers & World.Signs.SHEETING_LAYER) != 0)
 		if kind in ["jump","fork"]:
 			check("jump keeps its name and minimum",str(spec[3][0]).replace("ASCENT ","Ascent ") in words and spec[3][1] in words)
 			var entry := World.Signs._entry_text(spec[3][2])
@@ -153,9 +163,13 @@ func _render_arrows() -> void:
 		for f in 5: await process_frame
 		await RenderingServer.frame_post_draw
 		var first := root.get_texture().get_image()
-		var center := Vector3(size.x/2.0-size.y*0.48,size.y*0.245/2.0,0)
-		var a := camera.unproject_position(face.to_global(center+Vector3(-0.35,0.35,0)*size.y))
-		var b := camera.unproject_position(face.to_global(center+Vector3(0.35,-0.35,0)*size.y))
+		var side := float(face.material_override.get_shader_parameter("arrow_side"))
+		var center := Vector3(side*(size.x/2.0-size.y*0.48),size.y*0.245/2.0,0)
+		# The projected points use logical viewport units. The readback uses
+		# framebuffer pixels, which differ under canvas_items window stretching.
+		var pixels := Vector2(first.get_size()) / root.get_visible_rect().size
+		var a := pixels * camera.unproject_position(face.to_global(center+Vector3(-0.35,0.35,0)*size.y))
+		var b := pixels * camera.unproject_position(face.to_global(center+Vector3(0.35,-0.35,0)*size.y))
 		await create_timer(0.4).timeout
 		await RenderingServer.frame_post_draw
 		var second := root.get_texture().get_image()

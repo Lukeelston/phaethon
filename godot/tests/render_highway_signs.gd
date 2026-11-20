@@ -27,23 +27,30 @@ func _run() -> void:
 		quit(1)
 		return
 	var city_at := 0
+	var city_turn := 0
 	var split_at := 0
 	for key in seat.network_world._signs:
 		if key.x != e2:
 			continue
 		for spec in seat.network_world._signs[key]:
-			if spec[1] != 1 or (spec.size() > 4 and spec[4].get("decision",false)):
+			if spec[1] != 1:
+				continue
+			if spec.size() > 4 and spec[4].get("decision",false):
+				if spec[2] == "city" and spec[3][0] == "ERIDANUS":
+					city_turn = spec[0]
 				continue
 			if spec[2] == "city" and spec[3][0] == "ERIDANUS":
 				city_at = spec[0]
 			if spec[2] == "exit" and spec[3][0] == "EXIT" and absi(spec[0]-10750)<250:
 				split_at = spec[0]
-	if city_at==0 or split_at==0:
+	if city_at==0 or city_turn==0 or split_at==0:
 		quit(1)
 		return
 	# Same eye height, lane and distance to the corresponding sign across both builds.
 	for v in [["city", e2, city_at-11, 1, -60.0, 0.0, 6.0],
+			["turn", e2, city_turn-11, 1, -60.0, 0.0, 6.0],
 			["split", e2, split_at-7, 1, 0.0, 0.0, 12.0],
+			["reverse", e2, split_at+8, -1, 0.0, 0.0, 12.0],
 			["ascent", e2, 10926, 1, 105.0, -38.0, 11.0],
 			["advance", e2, 10375, 1, -72.0, 0.0, 2.0]]:
 		_place(v)

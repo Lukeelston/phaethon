@@ -11,6 +11,9 @@ const BLACK := Color("#182121")
 const GREEN := Color("#076344")
 const SERVICE := Color("#18507a")
 const YELLOW := Color("#edb637")
+const ID_SILVER := Color("#c6cac3")
+const EXPRESSWAY_BLUE := Color("#123b74")
+const SHEETING_LAYER := 1 << 9
 const GLYPH_SIZE := 128
 var hardware := Gantry.new()
 var sheets := {}
@@ -22,7 +25,7 @@ func sheet(size: Vector2, field: Color, side := 0, angle := 0.0, chase := false,
 		var mat := ShaderMaterial.new()
 		mat.shader = Sheet
 		mat.set_shader_parameter("field", field)
-		mat.set_shader_parameter("ink", BLACK if field == YELLOW else WHITE)
+		mat.set_shader_parameter("ink", BLACK if field in [YELLOW, ID_SILVER] else WHITE)
 		mat.set_shader_parameter("aspect", size.x/size.y)
 		mat.set_shader_parameter("arrow_side", float(side))
 		mat.set_shader_parameter("arrow_angle", angle)
@@ -30,6 +33,7 @@ func sheet(size: Vector2, field: Color, side := 0, angle := 0.0, chase := false,
 		mat.set_shader_parameter("advisory", band)
 		mat.set_shader_parameter("left_patch", left_patch)
 		mat.set_shader_parameter("route_marker", marker)
+		mat.set_shader_parameter("expressway", marker and field == EXPRESSWAY_BLUE)
 		sheets[key] = mat
 	return sheets[key]
 
@@ -43,6 +47,7 @@ func panel(parent: Node3D, tag: String, size: Vector2, pos: Vector3, mat: Shader
 	face.mesh = quads[size]
 	face.position = pos
 	face.material_override = mat
+	face.layers |= SHEETING_LAYER
 	face.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	parent.add_child(face)
 	return face
@@ -58,6 +63,7 @@ func legend(parent: Node3D, words: String, center: Vector2, width: float, cap: f
 	label.position = Vector3(center.x,center.y - 0.07*label.pixel_size*GLYPH_SIZE,0.22)
 	label.outline_size = 0
 	label.modulate = color
+	label.layers |= SHEETING_LAYER
 	label.shaded = true
 	label.double_sided = false
 	label.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
@@ -95,6 +101,9 @@ func face(parent: Node3D, pose: Transform3D, size: Vector2, kind: String, lines:
 	root.transform = pose
 	parent.add_child(root)
 	var jump := kind in ["jump","fork"]
+	if rear and kind != "terminal" and not paired_corner:
+		_reverse_id(root, size, kind, lines)
+		return
 	var direction := 0 if rear else int(info.get("side",1))
 	var arrow := direction if jump or (not rear and info.get("decision",false)) else 0
 	var warning := kind in ["corner","brake","end"]
@@ -103,7 +112,6 @@ func face(parent: Node3D, pose: Transform3D, size: Vector2, kind: String, lines:
 	var board := panel(root,"LegendPanel",size,Vector3.ZERO,sheet(size,field,arrow,angle,jump and not rear,0.245 if jump else 0.0))
 	var w := size.x
 	var h := size.y
-	var ink := BLACK if warning else WHITE
 	if not rear and info.has("number"):
 		number_tab(root,size,info)
 	if jump:
@@ -111,15 +119,9 @@ func face(parent: Node3D, pose: Transform3D, size: Vector2, kind: String, lines:
 		var x := -arrow*h*0.48
 		var title := str(lines[0]).replace("ASCENT ","Ascent ")
 		legend(board,title,Vector2(x,h*0.23),text_w*0.90,h*0.265,EM)
-		var entry := "OPPOSITE APPROACH" if rear else _entry_text(lines[2])
+		var entry := _entry_text(lines[2])
 		legend(board,entry,Vector2(x,-h*0.078),text_w*0.88,h*0.155,D)
 		legend(board,lines[1],Vector2(0,-h*0.367),w*0.89,h*0.143,D,BLACK)
-	elif rear and kind != "terminal" and not paired_corner:
-		var title := str(lines[1] if kind=="brake" else lines[0])
-		if title == "EXIT" and lines.size() > 1:
-			title = str(lines[1]).get_slice("  ",0)
-		legend(board,title.capitalize(),Vector2(0,h*0.14),w*0.86,h*0.26,EM,ink)
-		legend(board,"OPPOSITE APPROACH",Vector2(0,-h*0.18),w*0.86,h*0.14,D,ink)
 	elif kind == "terminal":
 		legend(board,lines[0].capitalize(),Vector2(0,h*0.095),w*0.88,h*0.35,EM)
 		legend(board,"TERMINAL",Vector2(0,-h*0.24),w*0.75,h*0.13,D)
@@ -132,9 +134,25 @@ func face(parent: Node3D, pose: Transform3D, size: Vector2, kind: String, lines:
 	else:
 		_destinations(board,size,kind,lines,info,arrow)
 
+## Preserve the return-trip identification without presenting an oncoming
+## driver's exit as a second green destination board.
+func _reverse_id(root: Node3D, size: Vector2, kind: String, lines: Array) -> void:
+	var plate := size * Gantry.ID_SCALE
+	var board := panel(root, "LegendPanel", plate, Vector3.UP*size.y*Gantry.ID_HEIGHT, sheet(plate, ID_SILVER))
+	var title := str(lines[1] if kind == "brake" else lines[0])
+	if title == "EXIT" and lines.size() > 1:
+		title = str(lines[1]).get_slice("  ", 0)
+	var launch := kind in ["jump", "fork"]
+	title = title.replace("ASCENT ", "Ascent ") if launch else title.capitalize()
+	legend(board, "OPPOSITE APPROACH", Vector2(0,plate.y*0.29), plate.x*0.89, plate.y*0.17, D, BLACK)
+	legend(board, title, Vector2(0,0 if launch else -plate.y*0.13), plate.x*0.89, plate.y*0.27, EM, BLACK)
+	if launch:
+		legend(board, lines[1], Vector2(0,-plate.y*0.30), plate.x*0.90, plate.y*0.15, D, BLACK)
+
 static func _entry_text(words: String) -> String:
 	if words.begins_with("RIGHT EXIT  "):
-		return words.trim_prefix("RIGHT EXIT  ").replace(" MI", " MILES")
+		var miles := words.trim_prefix("RIGHT EXIT  ").trim_suffix(" MI")
+		return miles + (" MILE" if miles == "1" else " MILES")
 	return words.replace("  1 MI", "  1 MILE")
 
 
@@ -146,14 +164,16 @@ func _destinations(board: Node3D, size: Vector2, kind: String, lines: Array, inf
 	var route := str(info.get("route",""))
 	var cardinal := str(info.get("cardinal",""))
 	if not route.is_empty():
-		var route_w := minf(content*0.30,h*0.68)
-		var heading_w := route_w + (h*0.64 if not cardinal.is_empty() else 0.0)
+		var expressway := not route.begins_with("S")
+		var route_w := h*(0.39 if route.length() <= 2 else 0.48)
+		var heading_w := route_w + (h*0.62 if not cardinal.is_empty() else 0.0)
 		var marker_x := cx + (route_w-heading_w)*0.5
-		var marker_size := Vector2(route_w,h*0.228)
-		var marker := panel(board,"RouteMarker",marker_size,Vector3(marker_x,h*0.321,0.09),sheet(marker_size,WHITE,0,0.0,false,0.0,0.0,true))
-		legend(marker,route,Vector2(0,h*0.006),route_w*0.75,h*0.136,D,BLACK)
+		var marker_size := Vector2(route_w,h*0.265)
+		var stock := EXPRESSWAY_BLUE if expressway else WHITE
+		var marker := panel(board,"RouteMarker",marker_size,Vector3(marker_x,h*0.315,0.09),sheet(marker_size,stock,0,0.0,false,0.0,0.0,true))
+		legend(marker,route,Vector2(0,-h*0.008),route_w*0.75,h*0.143,D,WHITE if expressway else BLACK)
 		if not cardinal.is_empty():
-			legend(board,cardinal,Vector2(cx+route_w*0.5,h*0.316),h*0.59,h*0.123,D)
+			legend(board,cardinal,Vector2(cx+route_w*0.5+h*0.02,h*0.316),h*0.56,h*0.148,D)
 	if lines[0] == "EXIT" and lines.size() > 1:
 		for index in range(1, lines.size()):
 			var pair := str(lines[index]).split("  ",false)
@@ -165,12 +185,17 @@ func _destinations(board: Node3D, size: Vector2, kind: String, lines: Array, inf
 			mile_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 			mile_label.position.x = cx + content*0.417
 	else:
-		var title := "Side Road" if lines[0]=="SIDE ROAD" else str(lines[0]).capitalize()
+		var title := str(lines[0]).capitalize()
 		var center_y := h*0.06 if not route.is_empty() else h*0.20
 		legend(board,title,Vector2(cx,center_y),content*0.85,h*0.245,EM)
-		var distance := str(lines[1]).trim_prefix("EXIT  ").replace(" MI"," mi")
-		var detail := distance+" to terminal" if kind=="city" else distance+" via side road"
-		legend(board,detail,Vector2(cx,-h*0.126),content*0.84,h*0.119,D)
+		# The advance sign gives one distance: how far until the exit. At the
+		# turn, use the secondary line for the onward distance instead.
+		var detail := "Terminal" if kind == "city" else ""
+		if arrow != 0 and lines.size() > 1:
+			var distance := str(lines[1]).trim_prefix("EXIT  ").replace(" MI"," mi")
+			detail = "Terminal  " + distance if kind == "city" else distance + " long"
+		if not detail.is_empty():
+			legend(board,detail,Vector2(cx,-h*0.116),content*0.84,h*0.153,D)
 	if arrow == 0 and info.has("miles"):
 		var miles := int(info.miles)
 		legend(board,"%d MILE%s" % [miles,"" if miles==1 else "S"], Vector2(cx,-h*0.345),content*0.80,h*0.135,D)

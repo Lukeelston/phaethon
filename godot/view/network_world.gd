@@ -1576,7 +1576,10 @@ func _sign(node: Node3D, R: CraftSim.TrackPath, r: int, ox: float, oy: float, sp
 	var holder := Node3D.new()
 	holder.name = "Sign_%s_%d_%d_%d" % [kind,i,dir,side]
 	node.add_child(holder,true)
-	_guides.add_hardware(holder,"Mount",_guides.hardware.carrier(size),Transform3D(facing,center))
+	var back := Signs.Gantry.Back.SECOND_FACE if kind == "terminal" or info.has("reverse_lines") else Signs.Gantry.Back.ID_PLATE
+	_guides.add_hardware(holder,"Mount",_guides.hardware.carrier(size,back),Transform3D(facing,center))
+	if kind in ["exit", "city", "jump"]:
+		_guides.add_hardware(holder,"ServiceWalk",_guides.hardware.service_rail(size),Transform3D(facing,center))
 	for rear in [false,true]:
 		var basis := facing.rotated(Vector3.UP,PI) if rear else facing
 		var pos := center + basis.z*Signs.Gantry.FACE_Z
@@ -1594,7 +1597,11 @@ func _warm_signs() -> void:
 		for spec in _signs[key]:
 			_guides.hardware.span(R.w[spec[0]]/2.0+4.0)
 	for size in [Vector2(BOARD_W,BOARD_H),Vector2(JUMP_W,JUMP_H),Vector2(52,23),Vector2(91,32)]:
-		_guides.hardware.carrier(size)
+		_guides.hardware.carrier(size, Signs.Gantry.Back.ID_PLATE)
+		if size.x >= BOARD_W:
+			_guides.hardware.service_rail(size)
+		if size in [Vector2(52,23), Vector2(91,32)]:
+			_guides.hardware.carrier(size, Signs.Gantry.Back.SECOND_FACE)
 		for ratio in [1.14,1.78]:
 			_guides.hardware.carrier(Vector2(size.y*ratio,size.y*0.30))
 	var holder := Node3D.new()

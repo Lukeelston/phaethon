@@ -14,6 +14,7 @@ uniform float arrow_side = 0.0;
 uniform float arrow_angle = 0.785398;
 uniform bool beacons = false;
 uniform bool route_marker = false;
+uniform bool expressway = false;
 
 float rounded_rect(vec2 p, vec2 half_size, float r) {
 	vec2 q = abs(p) - half_size + r;
@@ -28,8 +29,12 @@ void fragment() {
 	float aa = max(max(fwidth(p.x), fwidth(p.y)) * 0.55, 0.0002);
 	float edge = rounded_rect(p, half_size, radius);
 	if (route_marker) {
-		// A fictional Network route marker: square shoulders above a shallow shield tip.
-		edge = max(edge, -p.y - 0.49 + abs(p.x / half_size.x) * 0.19);
+		// Sides roll inward to the shield tip. The expressway crest has a
+		// shallow scallop on each side of its center peak.
+		float x = abs(p.x) / half_size.x;
+		float lower = -0.48 + (expressway ? 0.46 : 0.23) * pow(x, 1.8);
+		float upper = 0.47 - (expressway ? 0.070 : 0.0) * sin(x * PI);
+		edge = max(edge, max(lower - p.y, p.y - upper));
 	}
 	if (edge > 0.0) { discard; }
 	vec3 base = field.rgb;
@@ -45,7 +50,12 @@ void fragment() {
 	}
 	float outline = cover(abs(edge + border * 1.7) - border * 0.5, aa);
 	if (route_marker) {
-		base = mix(base, vec3(0.028, 0.063, 0.047), cover(abs(edge + 0.058) - 0.022, aa));
+		if (expressway) {
+			base = mix(base, vec3(0.44, 0.018, 0.022), smoothstep(0.227-aa, 0.227+aa, p.y));
+			base = mix(base, pigment, cover(abs(p.y - 0.226) - 0.012, aa));
+		}
+		vec3 keyline = expressway ? pigment : vec3(0.028, 0.043, 0.034);
+		base = mix(base, keyline, cover(abs(edge + 0.037) - 0.020, aa));
 		outline = 0.0;
 	}
 	float letters = outline;
@@ -75,11 +85,18 @@ void fragment() {
 	float strip_x = UV.x * strips;
 	float seam = (1.0 - smoothstep(0.001, 0.005 + aa, abs(fract(strip_x + 0.5) - 0.5))) * (1.0 - smoothstep(0.003, 0.012, aa));
 	float sheet = fract(sin(floor(strip_x) * 71.41 + 9.1) * 4375.24);
-	color *= (0.973 + 0.042 * sheet) * (1.0 - 0.17 * seam);
 	float metal = 0.0;
 	if (!route_marker) {
-		vec2 pin = vec2((fract(strip_x) - 0.5) * aspect / strips, abs(p.y) - 0.441);
-		float screw = cover(length(pin) - 0.007, aa) * (1.0 - smoothstep(0.003, 0.020, aa));
+		color *= (0.978 + 0.035 * sheet) * (1.0 - 0.13 * seam);
+		float pin_x = (fract(strip_x) - 0.5) * aspect / strips;
+		vec2 pin = vec2(pin_x, abs(p.y) - 0.441);
+		float detail = 1.0 - smoothstep(0.003, 0.018, aa);
+		float screw = cover(length(pin) - 0.005, aa) * detail;
+		// Dust gathers at the bottom hem. Short runoff trails only resolve
+		// close up, where the washer casting each one can also be seen.
+		float drop = 0.441 - p.y;
+		float runoff = exp(-abs(pin_x)*145.0) * exp(-max(drop,0.0)*22.0) * step(0.0,drop);
+		color *= 1.0 - 0.065 * smoothstep(0.40,0.50,-p.y) - 0.095 * runoff * detail;
 		color = mix(color, vec3(0.35, 0.38, 0.36), screw);
 		metal += screw * 0.68;
 	}
@@ -87,9 +104,16 @@ void fragment() {
 	ROUGHNESS = 0.72 + sheet * 0.05;
 	METALLIC = metal;
 	SPECULAR = 0.10;
-	// Approximate the pilot's forward lights returning toward the eye. Distance and
-	// incidence gate the return; the sun and sky still light a distant or oblique board.
-	float d = length(VERTEX);
-	float retro = pow(max(0.0, dot(normalize(NORMAL), VIEW)), 6.0) / (1.0 + d*d/280000.0);
-	EMISSION = color * (0.14 + 0.43 * retro) + lamps * amber * 1.1;
+	// Passive sheeting and its printed type share the craft's forward light.
+	// Only the electrically driven arrow studs emit their own light.
+	EMISSION = lamps * amber * 1.1;
+}
+
+void light() {
+	float incidence = max(dot(NORMAL, LIGHT), 0.0);
+	// A local source close to the viewer's sightline gets a stronger return.
+	// Sunlight supplies ordinary daylight illumination across the whole board.
+	float aligned = max(dot(LIGHT, VIEW), 0.0);
+	float backscatter = LIGHT_IS_DIRECTIONAL ? 0.0 : 0.48 * pow(aligned, 72.0) * incidence;
+	DIFFUSE_LIGHT += LIGHT_COLOR * ATTENUATION * incidence * (1.0 + backscatter) / PI;
 }

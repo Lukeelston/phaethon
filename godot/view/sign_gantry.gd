@@ -9,8 +9,12 @@ const COLLAR := Color(0.73, 0.75, 0.72)
 const CONCRETE := Color(0.52, 0.50, 0.45, 0.0)
 const RAIL_Y := 42.0
 const FACE_Z := 3.5
+enum Back { EXPOSED, ID_PLATE, SECOND_FACE }
+const ID_SCALE := Vector2(0.57, 0.43)
+const ID_HEIGHT := 0.20
 var spans := {}
 var carriers := {}
+var service_rails := {}
 var metal := ShaderMaterial.new()
 
 func _init() -> void:
@@ -54,23 +58,57 @@ func span(half_width: float) -> Mesh:
 	spans[key] = Kit.compound(parts)
 	return spans[key]
 
-## Twin aluminum blanks with folded edges and bolted vertical channels between them.
-## Local origin is the center of the front legend, z=0 the truss centerline.
-func carrier(size: Vector2) -> Mesh:
-	if carriers.has(size):
-		return carriers[size]
+## The reverse side exposes the extruded panel flanges and the beams clamping
+## the assembly to the truss. Only genuinely two-way signs get a second full blank.
+func carrier(size: Vector2, back := Back.EXPOSED) -> Mesh:
+	var key := Vector3(size.x, size.y, back)
+	if carriers.has(key):
+		return carriers[key]
 	var parts := []
 	var blank := _blank(size)
-	for side in [-1.0, 1.0]:
-		parts.append([blank, Kit.at(Vector3(0,0,side * (FACE_Z-0.23))), COLLAR])
-		for row in [-0.33, 0.32]:
-			parts.append([Kit.box(Vector3(size.x*0.97, 0.78, 0.9)), Kit.at(Vector3(0,row*size.y,side*2.69)), CHANNEL])
-	var n := maxi(2, roundi(size.x / 22.0))
-	for j in n:
-		var x := size.x * ((float(j)+0.5)/n-0.5)
-		parts.append([Kit.box(Vector3(0.94,size.y*0.90,4.72)), Kit.at(Vector3(x,0,0)), ZINC])
-	carriers[size] = Kit.compound(parts)
-	return carriers[size]
+	parts.append([blank, Kit.at(Vector3(0, 0, FACE_Z-0.23)), COLLAR])
+	var rows := maxi(2, roundi(size.y / 4.6))
+	var flange := Kit.box(Vector3(size.x*0.985, 0.30, 0.68))
+	for row in range(1, rows):
+		var y := size.y * (float(row)/rows - 0.5)
+		parts.append([flange, Kit.at(Vector3(0, y, 2.78)), ZINC])
+	var count := maxi(2, roundi(size.x / 24.0))
+	var web := Kit.box(Vector3(0.54, size.y*0.92, 4.92))
+	var lip := Kit.box(Vector3(1.72, size.y*0.92, 0.30))
+	var clamp_bar := Kit.box(Vector3(2.65, 0.52, 0.54))
+	for column in count:
+		var x := size.x * ((float(column)+0.5)/count - 0.5)
+		parts.append([web, Kit.at(Vector3(x, 0, -0.04)), CHANNEL])
+		parts.append([lip, Kit.at(Vector3(x, 0, -2.58)), ZINC])
+		for y in [-0.30, 0.30]:
+			parts.append([clamp_bar, Kit.at(Vector3(x, y*size.y, -2.92)), COLLAR])
+	if back == Back.SECOND_FACE:
+		parts.append([blank, Kit.at(Vector3(0, 0, 0.23-FACE_Z)), COLLAR])
+	elif back == Back.ID_PLATE:
+		parts.append([_blank(size*ID_SCALE), Kit.at(Vector3(0, size.y*ID_HEIGHT, 0.23-FACE_Z)), COLLAR])
+	carriers[key] = Kit.compound(parts)
+	return carriers[key]
+
+## Folded maintenance tread on triangulated outriggers. Model the openings
+## between the longitudinal bars so the sky shows through from underneath.
+func service_rail(size: Vector2) -> Mesh:
+	if service_rails.has(size):
+		return service_rails[size]
+	var parts := []
+	var width := size.x * 0.94
+	var y := -size.y * 0.5 - 0.88
+	var depth := size.y * 0.115
+	var outside := FACE_Z + depth
+	var bays := maxi(3, roundi(width / 17.0))
+	for index in range(bays + 1):
+		var x := width * (float(index)/bays - 0.5)
+		parts.append([Kit.box(Vector3(0.45,0.45,outside+1.0)), Kit.at(Vector3(x,y,(outside-1.0)*0.5)), ZINC])
+		_tube(parts,Vector3(x,y-1.85,0.0),Vector3(x,y,outside-0.40),0.24,CHANNEL)
+	for bar in 5:
+		var z := FACE_Z + depth * bar/4.0
+		parts.append([Kit.box(Vector3(width,0.34,0.28)), Kit.at(Vector3(0,y+0.26,z)), COLLAR])
+	service_rails[size] = Kit.compound(parts)
+	return service_rails[size]
 
 ## Sheet silhouette and shallow extruded rim. Its center fan avoids alpha edges on the metal.
 func _blank(size: Vector2) -> ArrayMesh:

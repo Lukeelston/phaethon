@@ -1,8 +1,9 @@
 PHAETHON
-Experimental Desktop Racer - Windows x64 - v0.3.3
+Experimental Desktop Racer - Windows x64 - v0.3.4
 ElstonWorks
 
 On the Network, green guide signs name the destinations, receiving routes and numbered exits. A yellow LEFT tab identifies a left exit. Launch signs carry the minimum lip speed in an amber strip.
+Expressway shields have a red crest and blue field. Silver plates on the backs identify the opposing approach.
 
 Two engines. One cockpit. We know it's a little fucky.
 
@@ -115,7 +116,7 @@ copyright. Third-party components and the CC BY engine audio retain their
 own licenses and permissions. See THIRD_PARTY_NOTICES.txt and licenses/.
 Adapted engine audio is also supplied separately in audio/engines/.
 
-Build: 0.3.3-experimental | 2026-11-19
+Build: 0.3.4-experimental | 2026-11-19
 
 IN THIS LOCAL BUILD
 Central highway transfers and long side-road sweeps now alternate bends with
