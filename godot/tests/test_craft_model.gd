@@ -37,9 +37,10 @@ func _process(delta: float) -> bool:
 			fails += _check_cage()
 			fails += _check_slab()
 			fails += _check_plume()
+			fails += _check_loaded_engines()
 			fails += _check_bank()
-			var good := fails == 0 and passed == LEGS.size() + 4
-			print("CRAFT MODEL ", "PASS" if good else "FAIL (%d failed, %d of %d ran)" % [fails, passed + fails, LEGS.size() + 4])
+			var good := fails == 0 and passed == LEGS.size() + 5
+			print("CRAFT MODEL ", "PASS" if good else "FAIL (%d failed, %d of %d ran)" % [fails, passed + fails, LEGS.size() + 5])
 			quit(0 if good else 1)
 			return true
 	var L: Array = LEGS[leg]
@@ -174,6 +175,44 @@ func _check_plume() -> int:
 	return _check("plume: shader on both cones of both engines; dry burner share %.2f, %.1f m long, light %.1f; burner share %.2f, %.1f m long, light %.1f; flamed out: plume %s, light %.1f" % [
 		dry[0], dry[1], dry[2], hot[0], hot[1], hot[2], "shown" if out[3] else "hidden", out[2]],
 		wired and dry[0] < 0.05 and dry[2] == 0.0 and hot[0] > 0.95 and hot[1] > 2.0 * dry[1] and hot[2] > 1.0 and not out[3] and out[2] == 0.0)
+
+
+## Read the actual moving leaves and plume transforms at speed and standing still.
+func _check_loaded_engines() -> int:
+	var c = v.craft
+	var sim = v.sim
+	var input := {"thrL": 0.8, "thrR": 0.8, "brkL": 1.0, "brkR": 0.0}
+	sim.eL.thrust = 0.8
+	sim.eR.thrust = 0.8
+	sim.eL.front = 1.0
+	sim.eR.front = 0.0
+	for body in sim.bodies:
+		body.vx = 850.0
+		body.vy = 0.0
+	var low := INF
+	var high := -INF
+	var other := 0.0
+	var front_motion := 0.0
+	var wake := 0.0
+	for frame in 160:
+		c.sync(sim,input,1.0/120.0)
+		wake = maxf(wake, absf(c.flame_mats[0][0].get_shader_parameter("wake_bend")))
+		if frame < 25: continue
+		var angle := rad_to_deg(c.flaps[0][0].rotation.x + c.FLAP_OPEN)
+		low = minf(low,angle)
+		high = maxf(high,angle)
+		other = maxf(other, absf(c.flaps[1][0].rotation.x))
+		front_motion = maxf(front_motion,absf(rad_to_deg(absf(c.front_flaps[0][0].rotation.y)-c.FRONT_OPEN)))
+	var axis: Vector3 = c.flames[0].transform.basis.z
+	var vane: Vector3 = c.vanes[0][0].transform.basis.z
+	var leaf: MeshInstance3D = c.flaps[0][0].get_child(0)
+	var mat := leaf.mesh.surface_get_material(0) as StandardMaterial3D
+	var textured := mat != null and mat.albedo_texture != null and mat.normal_texture != null and mat.roughness_texture != null
+	for body in sim.bodies: body.vx = 0.0
+	c.sync(sim,input,1.0/60.0)
+	var settled := is_equal_approx(absf(c.flaps[0][0].rotation.x),c.FLAP_OPEN)
+	return _check("textured leaves flutter %.2f..%.2f degrees; forward leaf %.2f, opposite %.2f; jet follows vane, wake bends %.2f m" %
+		[low,high,front_motion,other,wake], textured and low < -1.0 and high > 1.0 and low >= -1.86 and high <= 1.86 and front_motion > 0.7 and other < 0.001 and settled and axis.dot(vane)>0.9999 and axis.x < -0.2 and wake > 0.1)
 
 
 ## The lean into turns (CraftModel.ease_bank), at 72 Hz with a hard 15 g turn held 3 s, then

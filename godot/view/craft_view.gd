@@ -822,6 +822,7 @@ func _process(delta: float) -> void:
 	if network_world:   # no road spray up a shaft
 		dust.visible = _shaft_f(sim.pod.x, sim.pod.y) < 0.0
 	_place_camera(1.0 - exp(-delta * 6.0))
+	craft.update_jet_clearance()
 	craft.sync_cables(sim, delta)   # after the camera: in VR the cables' pod end rides the cockpit
 	var t_world := Time.get_ticks_usec()
 	_sync_world()   # after the camera: distant anchors scale about its current position

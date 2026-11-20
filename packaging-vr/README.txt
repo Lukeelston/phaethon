@@ -1,5 +1,9 @@
 PHAETHON - EXPERIMENTAL PC VR EDITION
-Windows x64 / OpenXR - v0.3.5 - ElstonWorks
+Windows x64 / OpenXR - v0.3.6 - ElstonWorks
+
+Watch the engines ahead during a fast braking turn. Their ribbed flaps flutter
+under load, the jet follows its steering vanes, and the trailing pod swings
+a few degrees to the outside. The nozzle glow changes again in ramjet.
 
 On the Network, look just above the road at the upper windscreen frame.
 Its projector draws a translucent guide down from the roof as you approach
@@ -175,7 +179,7 @@ copyright. Third-party components and the CC BY engine audio retain their
 own licenses and permissions. See THIRD_PARTY_NOTICES.txt and licenses/.
 Adapted engine audio is supplied separately in audio/engines/.
 
-Build: 0.3.5-experimental | 2026-11-19
+Build: 0.3.6-experimental | 2026-11-20
 
 IN THIS LOCAL BUILD
 Central highway transfers and long side-road sweeps now alternate bends with

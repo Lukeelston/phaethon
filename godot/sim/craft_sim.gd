@@ -580,6 +580,7 @@ var _h0 := {}
 var _h1 := {}
 var binder_broken := false
 var _tow_u := -1.0          # tow bar's stored energy last substep (-1 = none yet), for the energy audit
+var tow_swing := 0.0        # signed articulation of the tow neutral under cornering load
 var crash_t := 0.0
 var time := 0.0
 var lap := 0
@@ -1716,6 +1717,7 @@ func _place(ax: float, ay: float, atx: float, aty: float, anx: float, any: float
 		pod.health = 1.0
 	binder_broken = false
 	_tow_u = -1.0
+	tow_swing = 0.0
 	crash_t = 0.0
 	progress_i = idx
 	gate = []
@@ -2164,12 +2166,20 @@ func step(inp: Dictionary, dt: float) -> void:
 		var mxp := (L.x + R.x) / 2.0
 		var myp := (L.y + R.y) / 2.0
 		var wpair := (L.w + R.w) / 2.0
+		# Let the trailer settle just outside a loaded, driver-commanded turn.
+		# Move the tow spring's rest pose, leaving contact, cables and grip live.
+		var turn_g := wpair * maxf(0.0, Pd.vx * pf + Pd.vy * ps2) / G
+		var steer: float = inp.thrR - inp.thrL + inp.brkL - inp.brkR
+		var load_factor := smoothstep(2.5, 11.0, absf(turn_g)) * smoothstep(0.15, 0.65, steer * signf(turn_g))
+		var prev_swing := tow_swing
+		tow_swing = lerpf(tow_swing, signf(turn_g) * deg_to_rad(3.0) * load_factor, 1.0 - exp(-dt / 0.28))
+		var swing_rate := (tow_swing - prev_swing) / dt
 		var tx := mxp - pf * back
 		var ty := myp - ps2 * back
 		var tvx := (L.vx + R.vx) / 2.0 + wpair * ps2 * back
 		var tvy := (L.vy + R.vy) / 2.0 - wpair * pf * back
-		var te := (Pd.x - tx) * lx + (Pd.y - ty) * ly
-		var tev := (Pd.vx - tvx) * lx + (Pd.vy - tvy) * ly
+		var te := (Pd.x - tx) * lx + (Pd.y - ty) * ly + back * sin(tow_swing)
+		var tev := (Pd.vx - tvx) * lx + (Pd.vy - tvy) * ly + back * cos(tow_swing) * swing_rate
 		var ft: float = -P.towK * te - P.towC * tev
 		Pd.fx += ft * lx
 		Pd.fy += ft * ly
@@ -2199,7 +2209,8 @@ func step(inp: Dictionary, dt: float) -> void:
 			L.fy -= fl * ps2 / 2.0
 			R.fx -= fl * pf / 2.0
 			R.fy -= fl * ps2 / 2.0
-		var pod_tw: float = P.podAlignK * wrap_angle(Pd.th - pair_th) + P.podYawDamp * (Pd.w - wpair)
+		var dth := wrap_angle(Pd.th - pair_th - tow_swing)
+		var pod_tw: float = P.podAlignK * dth + P.podYawDamp * (Pd.w - wpair - swing_rate)
 		Pd.t -= pod_tw
 		# Energy audit. The tow bar is one-way on purpose (the pod follows the engines without
 		# yawing them back: that trailer feedback made the pair sway), so its pull and the pod's
@@ -2213,7 +2224,6 @@ func step(inp: Dictionary, dt: float) -> void:
 			var mvx := (L.vx + R.vx) / 2.0
 			var mvy := (L.vy + R.vy) / 2.0
 			var p_in: float = ft * ((Pd.vx - mvx) * lx + (Pd.vy - mvy) * ly) - pod_tw * Pd.w
-			var dth := wrap_angle(Pd.th - pair_th)
 			var u: float = 0.5 * P.towK * te * te + 0.5 * P.podAlignK * dth * dth
 			if _tow_u >= 0.0:
 				var created: float = p_in + (u - _tow_u) / dt
