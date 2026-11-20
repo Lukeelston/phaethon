@@ -23,10 +23,13 @@ const SEAT := Vector3(0.0, 0.72, 0.6)  # eye point in pod space (pod forward = -
                                         # cockpit rim (Luke: "sit a bit lower", then "view higher by default")
 const FLOOR_H := 0.7                    # pod floor above the ground
 const QuestControlsScript := preload("res://input/quest_controls.gd")
+const SeatFinish := preload("res://view/craft_materials.gd")
+const SeatLoft := preload("res://view/traffic_models.gd")
 const PREFS := "user://vr_prefs.json"
 const Y_HOLD := 1.0
 const MENU_HOLD := 1.5   # hold the left menu button this long to return to map selection
 const DashboardScript := preload("res://vr/dashboard.gd")
+const GaugeClusterScript := preload("res://vr/gauge_cluster.gd")
 const WagMeterScript := preload("res://vr/wag_meter.gd")
 const CockpitInteriorScript := preload("res://vr/cockpit_interior.gd")
 const ModeSwitchScript := preload("res://vr/mode_switch.gd")
@@ -63,7 +66,7 @@ var origin: XROrigin3D
 var hands := {}
 var lever_pivots: Array[Node3D] = []
 var lever_tips: Array[StandardMaterial3D] = []
-var dashboard   # the instrument panel (vr/dashboard.gd)
+var dashboard   # the instruments: the gauge cluster (vr/gauge_cluster.gd), or the flat panel (vr/dashboard.gd)
 var _jump_guidance: Label3D   # rig-mounted ascent readout above the dash; never follows the pilot's eyes
 var _jump_guidance_backing: MeshInstance3D
 var _skill_readout: Label3D
@@ -88,6 +91,7 @@ var _switch_at := -1     # --switch-track-at=FRAMES: switch track by itself (tes
 var _frames := 0
 var _y_fired := false
 var _scheme_flash := 0.0
+var _turbines := false   # the second stage is running (EngineAudio.turbines_at): the cluster's TURBINES lamp
 var hands_live := true   # false while the OpenXR session isn't focused (_on_xr_event); never in a flat run
 
 
@@ -398,6 +402,28 @@ func _box(parent: Node3D, size: Vector3, pos: Vector3, c: Color, rot_x := 0.0) -
 	return m
 
 
+## Realism spike: a bucket seat in the old one's envelope: a cushion with a thigh roll, a back
+## that narrows to the headrest, and bolsters down both, all in pebbled leather.
+func _shaped_seat(colour: Color) -> void:
+	var white := Color.WHITE
+	var cushion := [[SeatLoft.loft([[0.60, 0.27, 0.10, 0.19, 3.0], [0.66, 0.30, 0.085, 0.215, 3.5], [0.80, 0.30, 0.085, 0.205, 4.0],
+		[1.0, 0.30, 0.09, 0.20, 4.0], [1.08, 0.28, 0.115, 0.195, 3.4], [1.12, 0.23, 0.14, 0.185, 3.0]], 28), Transform3D.IDENTITY, white]]   # the tail lifts clear of the hull floor, which rises aft (test_cables)
+	var upright := Transform3D(Basis(Vector3.RIGHT, -0.12) * Basis(Vector3.RIGHT, -PI / 2.0), Vector3(0, 0.54, 1.1))
+	var back := [[SeatLoft.loft([[-0.39, 0.28, -0.06, 0.06, 3.5], [-0.25, 0.31, -0.065, 0.065, 4.0], [0.15, 0.30, -0.065, 0.065, 4.0],
+		[0.30, 0.24, -0.06, 0.06, 3.5], [0.39, 0.17, -0.05, 0.05, 3.0]], 28), upright, white]]
+	for s in [-1.0, 1.0]:
+		cushion.append([SeatLoft.loft([[0.64, 0.045, 0.14, 0.235, 2.5], [0.75, 0.055, 0.13, 0.26, 2.6], [1.0, 0.055, 0.13, 0.265, 2.6],
+			[1.1, 0.045, 0.14, 0.24, 2.5]], 16), Kit.at(Vector3(0.265 * s, 0, 0)), white])
+		back.append([SeatLoft.loft([[-0.3, 0.04, 0.02, 0.11, 2.5], [0.0, 0.05, 0.02, 0.13, 2.6], [0.2, 0.04, 0.02, 0.11, 2.5]], 16),
+			upright * Kit.at(Vector3(0.27 * s, 0, 0)), white])
+	for piece in [["seat_back", back], ["seat_cushion", cushion]]:
+		var m := MeshInstance3D.new()
+		m.name = piece[0]
+		m.mesh = Kit.compound(piece[1])
+		m.material_override = SeatFinish.tinted("leather", colour)
+		shell.add_child(m)
+
+
 func _rbox(parent: Node3D, size: Vector3, pos: Vector3, c: Color, rot_x := 0.0, n := 6.0, rough := 0.7) -> MeshInstance3D:
 	var m := MeshInstance3D.new()
 	m.mesh = Kit.rounded_box(size, n)
@@ -427,19 +453,25 @@ func _build_cockpit() -> void:
 		mark.name = "hardpoint_%s" % ("l" if s < 0.0 else "r")
 		mark.position = Vector3(0.18 * s, CraftModelScript.POD_FRAME_UP + CraftModelScript.POD_EYE_H, -2.1)
 		rig.add_child(mark)   # anchors, not fittings: on the rig, steady through the shudder
-	_rbox(shell, Vector3(0.62, 0.78, 0.13), Vector3(0, 0.54, 1.1), leather, -0.12, 5.0).name = "seat_back"   # its top is the headrest
-	_rbox(shell, Vector3(0.6, 0.12, 0.52), Vector3(0, 0.145, 0.86), leather, 0.0, 5.0).name = "seat_cushion"   # both clear the hull floor (test_cables)
+	if SeatFinish.hd:
+		_shaped_seat(leather)
+	else:
+		_rbox(shell, Vector3(0.62, 0.78, 0.13), Vector3(0, 0.54, 1.1), leather, -0.12, 5.0).name = "seat_back"   # its top is the headrest
+		_rbox(shell, Vector3(0.6, 0.12, 0.52), Vector3(0, 0.145, 0.86), leather, 0.0, 5.0).name = "seat_cushion"   # both clear the hull floor (test_cables)
 	for s in [-1.0, 1.0]:
 		var pivot := Node3D.new()
 		pivot.position = Vector3(0.46 * s, 0.1, 0.2)   # beside the seat, clear of the instrument panel
 		shell.add_child(pivot)
 		var shaft := MeshInstance3D.new()
 		shaft.mesh = Kit.cyl(0.016, 0.016, 0.32, 12)
+		if SeatFinish.hd:   # realism spike: a round satin shaft with a ferrule under the grip
+			shaft.mesh = Kit.compound([[Kit.cyl(0.016, 0.016, 0.32, 28), Transform3D.IDENTITY, Color(0.75, 0.77, 0.8)],
+				[Kit.cyl(0.021, 0.0225, 0.018, 28), Kit.at(Vector3(0, 0.132, 0)), Color(0.42, 0.44, 0.47)]])
 		var steel := StandardMaterial3D.new()
 		steel.albedo_color = Color(0.75, 0.77, 0.8)
 		steel.metallic = 0.9
 		steel.roughness = 0.25
-		shaft.material_override = steel
+		shaft.material_override = SeatFinish.satin() if SeatFinish.hd else steel
 		shaft.position = Vector3(0, 0.16, 0)
 		pivot.add_child(shaft)
 		var knob := MeshInstance3D.new()
@@ -460,6 +492,7 @@ func _build_cockpit() -> void:
 		lever_tips.append(km)
 	# instrument panel: curved round the eye, inside the cockpit opening (clear of the hull),
 	# low enough that the nose and its cable hardpoints still show over the top
+	CockpitInteriorScript.instrument_rails = not GaugeClusterScript.available()
 	interior = CockpitInteriorScript.new()   # floor, frames, consoles, harness, rim light
 	shell.add_child(interior)
 	interior.build()
@@ -470,7 +503,7 @@ func _build_cockpit() -> void:
 	canopy = CanopyScript.build()
 	canopy.position = Vector3(0, CraftModelScript.POD_FRAME_UP, 0)
 	shell.add_child(canopy)
-	dashboard = DashboardScript.new()
+	dashboard = GaugeClusterScript.new() if GaugeClusterScript.available() else DashboardScript.new()
 	shell.add_child(dashboard)
 	dashboard.transform = DashboardScript.mount()
 	dashboard.build()
@@ -478,7 +511,7 @@ func _build_cockpit() -> void:
 	shell.add_child(minimap_panel)
 	minimap_panel.transform = MinimapPanelScript.mount(SEAT)
 	minimap_panel.build()
-	minimap_panel.visible = sim.kind == "circuit" or sim.kind == "network"
+	minimap_panel.set_live(sim.kind == "circuit" or sim.kind == "network")
 	menu_panel = Node3D.new()   # the main menu: a dark panel and its words, a metre out, never behind anything
 	menu_panel.name = "main_menu"
 	menu_panel.position = SEAT + Vector3(0.0, 0.02, -1.1)
@@ -756,7 +789,7 @@ func _menu_show() -> void:
 func return_to_menu() -> void:
 	menu_open(false)
 	var menu_script = load("res://release/vr_menu.gd")
-	menu_script.remembered_course = "network" if GP_BIOME.has(_track()) else _track()
+	menu_script.remembered_course = "network" if GP_BIOME.has(_track()) else preload("res://release/release_config.gd").course_for(_track(), spot_override)
 	_save_prefs()
 	get_tree().call_deferred("change_scene_to_file", "res://release/vr_menu.tscn")
 
@@ -767,6 +800,7 @@ func switch_track() -> void:
 	var o := overrides_for(to)
 	track_override = o[0]
 	job_override = o[1]   # "none" on the free stops: a -Job emergency launch's --job mustn't follow you round
+	spot_override = ""
 	get_tree().call_deferred("reload_current_scene")
 
 
@@ -973,17 +1007,18 @@ func _update_hud() -> void:
 	_update_jump_guidance()
 	_update_skill_readout()
 	var kmh := _kmh()
+	_turbines = EngineAudio.turbines_at(kmh / 1.609344, _turbines)
 	_scheme_flash = maxf(0.0, _scheme_flash - get_process_delta_time())
 	var ctl: String = QuestControlsScript.HINTS[quest.scheme] if _scheme_flash > 0.0 else QuestControlsScript.NAMES[quest.scheme]
-	if minimap_panel.visible:
+	if minimap_panel.live:
 		minimap_panel.show_frame(minimap.update(sim.pod.th, get_process_delta_time()))
 	dashboard.show_state({
-		"mph": kmh / 1.609344, "kmh": kmh, "mach_line": cues.readout(), "progress": "" if _jump_guidance.visible else _progress_text(),
+		"mph": kmh / 1.609344, "kmh": kmh, "mach": cues.mach, "backlight": 0.5 if light_preset == "twilight" else 1.0, "mach_line": cues.readout(), "progress": "" if _jump_guidance.visible else _progress_text(),
 		"footer": "%s   /   %s" % [handling_text(), ctl],
 		"thr": [inp.thrL, inp.thrR], "brk": [inp.brkL, inp.brkR], "heat": [sim.eL.heat, sim.eR.heat],
 		"health": [sim.eL.health, sim.eR.health],
 		"flameout": [sim.eL.flameout, sim.eR.flameout], "battery": sim.battery,
-		"burner": sim.mode == "burner", "armed": sim.armed, "ramjet": sim.mode == "ramjet",
+		"burner": sim.mode == "burner", "armed": sim.armed, "ramjet": sim.mode == "ramjet", "turbines": _turbines,
 		"gear": quest.display_gear(), "overdrive": bool(inp.get("gearOverdrive", false)),
 		"blink": (Time.get_ticks_msec() / 250) % 2 == 0,
 	})

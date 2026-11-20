@@ -4,6 +4,7 @@ extends RefCounted
 
 const Kit := preload("res://view/mesh_kit.gd")
 static var _finishes: Dictionary = {}
+static var hd := true   # false before the first finish is made: v0.3.2's procedural grain
 
 
 static func powder_coat() -> StandardMaterial3D:
@@ -12,6 +13,39 @@ static func powder_coat() -> StandardMaterial3D:
 
 static func machined() -> StandardMaterial3D:
 	return _finish("machined", 0.94, 0.30, 0.08)
+
+
+## Realism spike: brushed stainless for the nose cage. Mirror chrome turned the tubes into
+## flat strips of sky; a satin tube blurs the sky and ground into a believable round.
+static func satin() -> StandardMaterial3D:
+	return _finish("satin", 1.0, 0.45, 0.10)
+
+
+static func leather() -> StandardMaterial3D:
+	return _finish("leather", 0.0, 0.62, 0.12)
+
+
+static func webbing() -> StandardMaterial3D:
+	return _finish("webbing", 0.0, 0.85, 0.12)
+
+
+## A finish in one flat colour, for parts that carry no vertex colours of their own.
+static func tinted(key: String, colour: Color) -> StandardMaterial3D:
+	var id := "%s:%s" % [key, colour.to_html()]
+	if not _finishes.has(id):
+		var base: StandardMaterial3D
+		match key:
+			"powder": base = powder_coat()
+			"leather": base = leather()
+			"webbing": base = webbing()
+			"satin": base = satin()
+			"machined": base = machined()
+			_: base = rubber()
+		var mat := base.duplicate() as StandardMaterial3D
+		mat.vertex_color_use_as_albedo = false
+		mat.albedo_color = colour
+		_finishes[id] = mat
+	return _finishes[id]
 
 
 static func rubber() -> StandardMaterial3D:
@@ -38,6 +72,22 @@ static func _finish(key: String, metal: float, rough: float, contrast: float) ->
 		return _finishes[key]
 	var mat := Kit.polished(metal, rough)
 	mat.metallic_specular = 0.55 if key == "machined" else 0.35
+	var maps := "res://art/finish/%s" % key
+	if hd and ResourceLoader.exists(maps + "_normal.png"):
+		# Realism spike (tools/art_finishes_hd.py): a 128 mm seamless tile per finish, with
+		# real relief and roughness instead of a shaded 64-pixel grain.
+		mat.albedo_texture = load(maps + "_shade.png")
+		mat.normal_enabled = true
+		mat.normal_texture = load(maps + "_normal.png")
+		mat.roughness = 1.0
+		mat.roughness_texture = load(maps + "_data.png")
+		mat.roughness_texture_channel = BaseMaterial3D.TEXTURE_CHANNEL_GREEN
+		mat.uv1_triplanar = true
+		mat.uv1_triplanar_sharpness = 4.0
+		mat.uv1_scale = Vector3.ONE / 0.128
+		mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
+		_finishes[key] = mat
+		return mat
 	# Triplanar local coordinates survive MeshKit's compound batching (which has no UVs).
 	# A repeating 32 mm tile makes the grain sub-millimetre. Mipmaps prevent headset shimmer.
 	var img := Image.create(64, 64, false, Image.FORMAT_RGB8)

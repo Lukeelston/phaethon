@@ -29,6 +29,7 @@
 extends Node3D
 
 const Kit := preload("res://view/mesh_kit.gd")
+const TrafficModels := preload("res://view/traffic_models.gd")
 const MPH := 2.236936
 const G := 9.81
 const LANES_HWY := [-157.5, -112.5, -67.5, -22.5, 22.5, 67.5, 112.5, 157.5]   # m left of the centreline
@@ -136,6 +137,7 @@ var _hw_time := 0.0       # s on a highway since the last racer
 var _racer_count := 0
 var _p_switches := []     # the craft's road changes: [from road, from sample, to road, to sample, to dir]
 var _pod_prev := Vector2i(-1, -1)
+var grade := true         # vehicles follow the road's grade (off: level at the lead's height, as v0.3.2, for comparisons)
 var collide := false      # traffic's forcefields in the sims (off: the craft passes through; the tests turn them on)
 var proad := -1           # the pilot's road and the way it's going on it: the way all traffic there goes
 var pdir := 0
@@ -953,9 +955,11 @@ func _build_meshes() -> void:
 		if kind == DEMON or kind == RACER:
 			glows[kind].append([Kit.box(Vector3(0.28, 0.1, 10.0)), Kit.at(Vector3(0, 0.35, -0.5)), Color.WHITE])
 	for kind in shapes:
+		if TrafficModels.hd:   # realism spike: formed hulls, canopies and pods; same one mesh per kind
+			TrafficModels.upgrade(kind, shapes[kind], dark, glass, metal)
 		var mesh := Kit.compound(shapes[kind])
 		Kit.compound(glows[kind], mesh)
-		mesh.surface_set_material(0, body)
+		mesh.surface_set_material(0, TrafficModels.material(kind) if TrafficModels.hd else body)
 		mesh.surface_set_material(1, lights)
 		var mm := MultiMesh.new()
 		mm.transform_format = MultiMesh.TRANSFORM_3D
@@ -1013,6 +1017,17 @@ func _render() -> void:
 		var mm: MultiMesh = (_mm[c.kind] as MultiMeshInstance3D).multimesh
 		var h: float = sim.net_height(c.road, c.f) + 1.0
 		var shaft_on: bool = world.shaft.on(c.road, c.f)
+		# A road with a height profile (a hill, a ramp, a deck's approach): every body sits at its
+		# own height and noses up or down with the grade. They used to stay level at the lead's
+		# height, so a transport's train floated off a climb or sank into it (Luke: "busses look
+		# hilarious half sticking out going up hills"). A level road costs nothing more.
+		var graded: bool = grade and not shaft_on and sim._net_h.has(c.road)
+		var last: float = sim.roads[c.road].N - 1.0
+		var step: float = c.dir * TRAIN_GAP / 24.0   # samples from one body's centre to the next
+		var h_ahead := h
+		var h_here := h
+		if graded:
+			h_ahead = sim.net_height(c.road, clampf(c.f + step, 0.0, last)) + 1.0
 		var cx: float = c.x + c.hx * c.v * c.owed   # where it is now (a far one not driven this frame: on along its way)
 		var cy: float = c.y + c.hy * c.v * c.owed
 		var yaw := atan2(-c.hx, c.hy)   # +z (the model's back) against the way it's going
@@ -1026,6 +1041,13 @@ func _render() -> void:
 			var back := k * TRAIN_GAP
 			var p := Vector3(cx - c.hx * back - ox, h, -(cy - c.hy * back - oy))
 			var body_basis := b
+			if graded:
+				# the grade under this body: from a body length ahead of it to one behind
+				var h_behind: float = sim.net_height(c.road, clampf(c.f - step * (k + 1), 0.0, last)) + 1.0
+				p.y = h_here
+				body_basis = (Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, atan((h_ahead - h_behind) / (2.0 * TRAIN_GAP)))).scaled(Vector3.ONE * SCALE)
+				h_ahead = h_here
+				h_here = h_behind
 			if shaft_on:
 				var f: float = c.f - c.dir * back / 24.0
 				p = world.shaft.point(c.road, f, c.lat, 1.0, ox, oy)
@@ -1039,6 +1061,8 @@ func _render() -> void:
 			var coming: bool = c.hx * pod_v.x + c.hy * pod_v.y < 0.0
 			var off := -6.5 * SCALE if coming else 6.5 * SCALE + (cnt - 1) * TRAIN_GAP
 			var lp := Vector3(cx - c.hx * off - ox, h + 1.2 * SCALE, -(cy - c.hy * off - oy))
+			if graded:   # the lamp rides at its own end's height
+				lp.y = sim.net_height(c.road, clampf(c.f - c.dir * off / 24.0, 0.0, last)) + 1.0 + 1.2 * SCALE
 			if shaft_on:
 				lp = world.shaft.point(c.road, c.f - c.dir * off / 24.0, c.lat, 1.0 + 1.2 * SCALE, ox, oy)
 			bmm.set_instance_transform(nb, Transform3D(Basis(), lp))
@@ -1089,8 +1113,9 @@ func _feed() -> void:
 			var x: float = c.x - c.hx * back
 			var y: float = c.y - c.hy * back
 			var h: float = sim.net_height(c.road, c.f)
-			# Flat roads retain a rigid train at the lead height. A shaft carries each car at its
-			# own sample: project the collision footprint to that same sample in the flat sim.
+			# A level road's train is rigid at the lead's height. A shaft carries each car at its
+			# own sample: project the collision footprint to that same sample in the flat sim. On a
+			# graded road each part stands at its own height, as it is drawn (below).
 			if world.shaft.on(c.road, c.f):
 				var center_back := floorf(float(q) / 2.0) * TRAIN_GAP if c.kind == TRANSPORT else 0.0
 				var f: float = c.f - c.dir * center_back / 24.0
@@ -1101,6 +1126,8 @@ func _feed() -> void:
 				x = R.px[i] + R.tx[i] * R.len[i] * t - tangent.y * c.lat - tangent.x * c.dir * (back - center_back)
 				y = R.py[i] + R.ty[i] * R.len[i] * t + tangent.x * c.lat - tangent.y * c.dir * (back - center_back)
 				h = sim.net_height(c.road, f)
+			elif grade and sim._net_h.has(c.road):
+				h = sim.net_height(c.road, clampf(c.f - c.dir * back / 24.0, 0.0, sim.roads[c.road].N - 1.0))
 			obs.append({"id": c.id * 32 + q, "r": parts[q][1], "x": x, "y": y,
 				"vx": vx, "vy": vy, "zMin": h, "zMax": h + (9.6 if c.kind == TRANSPORT else 6.0)})
 	sim.obstacles = obs

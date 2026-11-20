@@ -15,22 +15,22 @@
     {
      "file": "v8_mip1.wav",
      "at": 1600.0,
-     "rho_next": 0.9999
+     "rho_next": 1.0
     },
     {
      "file": "v8_mip2.wav",
      "at": 3200.0,
-     "rho_next": 0.9938
+     "rho_next": 0.9997
     },
     {
      "file": "v8_mip3.wav",
      "at": 6400.0,
-     "rho_next": 0.9578
+     "rho_next": 0.9915
     },
     {
      "file": "v8_mip4.wav",
      "at": 12800.0,
-     "rho_next": 0.7908
+     "rho_next": 0.9581
     },
     {
      "file": "v8_mip5.wav",

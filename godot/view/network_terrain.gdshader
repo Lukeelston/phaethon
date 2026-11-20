@@ -7,6 +7,8 @@ varying float grass;
 varying float elevation;
 varying float slope;
 instance uniform float stream_reveal = 1.0;
+// Realism spike (tools/art_terrain_hd.py): slope east and north in red and green, shelter in blue.
+uniform sampler2D terrain_detail : repeat_enable, filter_linear_mipmap_anisotropic;
 void vertex() {
 	tint = pow(COLOR.rgb, vec3(2.2));
 	local = UV*256.0;
@@ -45,9 +47,22 @@ void fragment() {
 	float ripple_phase = (local.x+local.y*0.32)*0.13+mottling*6.0;
 	float ripples = sin(ripple_phase)*(1.0-smoothstep(0.4,2.0,fwidth(ripple_phase)));
 	base *= 1.0+sand*ripples*0.065;
+	// Ridges, gullies and scree from the relief map: broad forms on every slope, finer ones
+	// close by. The map's mip levels flatten both with distance, so nothing crawls at speed.
+	vec3 broad = texture(terrain_detail, local / 2048.0).rgb;
+	vec3 near_form = texture(terrain_detail, local / 256.0 + broad.bg * 0.25).rgb;
+	float steep = mix(0.22, 1.0, rock);
+	vec2 tilt = (broad.rg - 0.5) * 1.5 * steep + (near_form.rg - 0.5) * 0.6 * fade * steep;
+	vec3 world_normal = normalize((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz);
+	world_normal = normalize(world_normal - vec3(tilt.x, 0.0, -tilt.y));
+	NORMAL = normalize((VIEW_MATRIX * vec4(world_normal, 0.0)).xyz);
+	float shelter = mix(broad.b, near_form.b, 0.35 * fade);
+	base *= 0.80 + 0.42 * shelter;
+	// Bare rock on the steep faces is its own grey-brown, not just a darker field colour.
+	base = mix(base, vec3(0.19, 0.175, 0.16) * (0.75 + 0.6 * shelter), rock * (1.0 - snow) * 0.45);
 	float haze = 1.0-exp(-length(VERTEX)*0.000045);
 	ALBEDO = base*(1.0-haze);
 	EMISSION = pow(vec3(0.58,0.68,0.80),vec3(2.2))*haze*0.85;
-	ROUGHNESS = 0.96;
-	SPECULAR = 0.18;
+	ROUGHNESS = mix(0.96, 0.82, rock);
+	SPECULAR = mix(0.18, 0.3, rock);
 }

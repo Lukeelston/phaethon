@@ -16,6 +16,7 @@ const Kit := preload("res://view/mesh_kit.gd")
 const Finish := preload("res://view/craft_materials.gd")
 const SPEED_COL := Color(0.25, 0.65, 1.0)     # SPEEDCRAFT: the cables' energized blue
 const SF_COL := Color(1.0, 0.3, 0.75)         # STARFIGHTER: magenta (clear of the strain amber/red)
+const HD_SWITCH := "res://art/cockpit/mode_switch_hd.glb"
 const THROW_ANGLE := deg_to_rad(32.0)         # the lever's swing either side of centre
 const ZONE := Vector3(0.075, 0.11, 0.16)      # half-size of the box in front of the face where a tip can throw it
 const THROW_V := 0.3                          # m/s: how fast a push has to be (and under 4 m/s: faster is a tracking jump)
@@ -55,18 +56,24 @@ func build() -> void:
 			metal.append([Finish.slotted_screw(0.0035), Kit.at(Vector3(side * 0.046, y, 0.003), turn), Color(0.55, 0.58, 0.62)])
 	for y in [-0.05, 0.05]:
 		metal.append([Finish.beveled_plate(Vector3(0.04, 0.002, 0.009), 0.0006), Kit.at(Vector3(0, y, 0.0045), turn), Color(0.27, 0.3, 0.34)])
+	# Realism spike (tools/art_mode_switch_hd.py): one authored panel replaces the three batches.
+	var authored := Finish.hd and ResourceLoader.exists(HD_SWITCH)
 	var mi := MeshInstance3D.new()
-	mi.mesh = Kit.compound(panels)
-	mi.material_override = Finish.powder_coat()
-	add_child(mi)
-	var hardware := MeshInstance3D.new()
-	hardware.mesh = Kit.compound(metal)
-	hardware.material_override = Finish.machined()
-	add_child(hardware)
-	var guard := MeshInstance3D.new()
-	guard.mesh = Kit.compound(guards)
-	guard.material_override = Finish.painted_metal()
-	add_child(guard)
+	if authored:
+		mi.mesh = CockpitInterior._hd_mesh(HD_SWITCH, "Panel")
+		add_child(mi)
+	else:
+		mi.mesh = Kit.compound(panels)
+		mi.material_override = Finish.powder_coat()
+		add_child(mi)
+		var hardware := MeshInstance3D.new()
+		hardware.mesh = Kit.compound(metal)
+		hardware.material_override = Finish.machined()
+		add_child(hardware)
+		var guard := MeshInstance3D.new()
+		guard.mesh = Kit.compound(guards)
+		guard.material_override = Finish.painted_metal()
+		add_child(guard)
 	lever = Node3D.new()   # pivots about x; the bat handle sticks out of the face along +z
 	lever.position = Vector3(0, 0, 0.006)
 	add_child(lever)
@@ -74,6 +81,9 @@ func build() -> void:
 	bat.mesh = Kit.compound([[Kit.cyl(0.006, 0.008, 0.06, 10), Kit.at(Vector3(0, 0, 0.03), Vector3(PI / 2.0, 0, 0)), Color(0.82, 0.84, 0.88)],
 		[Kit.cyl(0.011, 0.006, 0.03, 10), Kit.at(Vector3(0, 0, 0.07), Vector3(PI / 2.0, 0, 0)), Color(0.92, 0.93, 0.95)]])
 	bat.material_override = Finish.machined()
+	if authored:
+		bat.mesh = CockpitInterior._hd_mesh(HD_SWITCH, "Bat")
+		bat.material_override = null
 	lever.add_child(bat)
 	lamp_sp = _lamp(Vector3(0, 0.05, 0.004), "SPEED")
 	lamp_sf = _lamp(Vector3(0, -0.05, 0.004), "STAR")

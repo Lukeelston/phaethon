@@ -50,7 +50,7 @@ func _cache(world,sim) -> void:
 	check("cached and freshly generated decoration geometry/materials agree",equal and worst<0.01)
 	var shifted:=origin+Vector2(1200,-3700)
 	world.sync(shifted.x,shifted.y)
-	check("floating origin moves cached road once",world.chunks[key][0].position.distance_to(Vector3(-1200,0,-3700))<0.01)
+	check("floating origin moves cached road once",(world._chunk_root.position+world.chunks[key][0].position).distance_to(Vector3(-1200,0,-3700))<0.01)
 func _openings(world,sim) -> void:
 	var cases:=0
 	var intrusions:=0

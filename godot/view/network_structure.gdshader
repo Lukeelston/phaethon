@@ -55,6 +55,17 @@ void fragment() {
 		ALBEDO = body;
 		ROUGHNESS = mix(0.90, 0.56, door);
 		SPECULAR = mix(0.22, 0.38, door);
+		// Realism spike: the joints, form ties and hatch are cut into the face, not printed on it.
+		// The wall has no tangents, so its own screen-space edges carry the slope; the relief
+		// fades out before its features get near a pixel, so nothing crawls at speed.
+		float relief = (-0.9 * expansion + 0.35 * bevel - 0.8 * tie - 0.5 * surround + 0.25 * door - 0.4 * grille * louvre)
+			* detail(0.5, length(aa) * 2.0);
+		vec3 across = dFdx(VERTEX);
+		vec3 up = dFdy(VERTEX);
+		vec3 r1 = cross(up, NORMAL);
+		vec3 r2 = cross(NORMAL, across);
+		float det = dot(across, r1);
+		NORMAL = normalize(abs(det) * NORMAL - 0.02 * sign(det) * (dFdx(relief) * r1 + dFdy(relief) * r2));
 	} else {
 		// Restrict the existing structural weathering to neutral vertical
 		// faces so paint on the road stays crisp.

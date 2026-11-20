@@ -92,7 +92,43 @@ func _process(_d: float) -> bool:
 	_check("built into the VR cockpit and the pod, every piece marked exterior",
 		vr_c != null and flat_c != null and vr_c.is_in_group("exterior") and vr_c.get_node("windscreen").is_in_group("exterior")
 		and vr_c.get_node("field").is_in_group("exterior") and flat_c.get_parent() == v.craft.pod)
-	var good := fails == 0 and passed == 7
+	# the roof (Luke: "the vehicle needs to have a roof ... it's necessary to the immersion")
+	var roof := vr_c.get_node_or_null("roof") as MeshInstance3D
+	var pane := vr_c.get_node_or_null("roof_glass") as MeshInstance3D
+	_check("a closed canopy is fitted in the VR cockpit and on the pod: roof and glass, both exterior, the oblong screen and its frame put away",
+		roof != null and pane != null and roof.is_in_group("exterior") and pane.is_in_group("exterior")
+		and not (vr_c.get_node("windscreen") as MeshInstance3D).visible and not (vr_c.get_node("frame") as MeshInstance3D).visible
+		and flat_c.get_node_or_null("roof") != null)
+	if roof != null and pane != null:
+		# the roof is authored in the rig's frame: the seated eye is SEAT y 0.72 above the rig floor
+		var head := Vector3(0.0, 0.72, 0.6)
+		var solid := roof.mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX] as PackedVector3Array
+		var near := INF          # the nearest any of the roof's structure comes to the head
+		var over := INF          # the headliner straight above it
+		var ahead_lo := -90.0    # looking forward: the highest structure under the eye line (the rim) ...
+		var ahead_hi := 90.0     # ... and the lowest above it (the header)
+		for p in solid:
+			near = minf(near, p.distance_to(head))
+			if Vector2(p.x - head.x, p.z - head.z).length() < 0.12 and p.y > head.y:
+				over = minf(over, p.y - head.y)
+			var fwd := head.z - p.z
+			if fwd > 0.05 and absf(atan2(p.x - head.x, fwd)) < deg_to_rad(20.0):
+				var el := rad_to_deg(atan2(p.y - head.y, Vector2(p.x - head.x, fwd).length()))
+				if el < 0.0:
+					ahead_lo = maxf(ahead_lo, el)
+				else:
+					ahead_hi = minf(ahead_hi, el)
+		_check("headroom: the headliner %.2f m over the eye, nothing of the roof nearer the head than %.2f m" % [over, near], over > 0.3 and over < 0.6 and near > 0.3)
+		var under := "no structure under the eye line at all" if ahead_lo <= -90.0 else "the rim %.0f deg under the eye line" % -ahead_lo
+		_check("the road ahead is all glass: %s, the header %.0f deg over it" % [under, ahead_hi], ahead_lo < -8.0 and ahead_hi > 14.0)
+		var clear := pane.mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX] as PackedVector3Array
+		var box := AABB(clear[0], Vector3.ZERO)
+		for p in clear:
+			box = box.expand(p)
+		# (only the shade band is glass: the rest of each pane is open to the forcefield, and costs the frame nothing)
+		_check("a shade band along the top of the screen and both windows: %.2f m wide, from %.2f to %.2f m over the eye line (out of the view ahead)" % [box.size.x, box.position.y - head.y, box.end.y - head.y],
+			box.size.x > 0.8 and box.position.y > head.y + 0.15 and box.end.y > head.y + 0.3 and box.position.x < -0.4 and box.end.x > 0.4)
+	var good := fails == 0 and passed == 11
 	print("CANOPY ", "PASS" if good else "FAIL (%d failed, %d passed)" % [fails, passed])
 	quit(0 if good else 1)
 	return true

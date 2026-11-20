@@ -46,7 +46,38 @@ static func deck_mesh(part: String) -> Mesh:
 		for child in source.find_children("*", "MeshInstance3D", true, false):
 			_flight_deck_meshes[str(child.name)] = (child as MeshInstance3D).mesh
 		source.free()
+		if hd_parts:
+			for name in HD_PARTS:
+				if ResourceLoader.exists(HD_PARTS[name]):
+					_flight_deck_meshes[name] = _hd_mesh(HD_PARTS[name], name)
 	return _flight_deck_meshes[part]
+
+
+## Realism spike (tools/art_*_hd.py): fittings rebuilt at headset texel density, each with the
+## original's envelope and node name. Set hd_parts = false before the first deck_mesh() for
+## v0.3.2's originals.
+const HD_PARTS := {
+	"Coaming": "res://art/cockpit/coaming_hd.glb",
+	"Grip": "res://art/cockpit/grip_hd.glb",
+	"Bezel": "res://art/cockpit/bezel_hd.glb",
+}
+static var hd_parts := true
+static var instrument_rails := true   # the flat instrument panel's frame; false when the gauge cluster stands there
+const HD_CONSOLE := "res://art/cockpit/console_hd.glb"
+
+static func _hd_mesh(path: String, node := "*") -> Mesh:
+	var source := (load(path) as PackedScene).instantiate()
+	var mesh: Mesh = (source.find_children(node, "MeshInstance3D", true, false)[0] as MeshInstance3D).mesh
+	source.free()
+	var mat := mesh.surface_get_material(0) as StandardMaterial3D
+	if mat:
+		# The packed map's red channel is baked occlusion; the glTF material doesn't declare it.
+		mat.ao_enabled = true
+		mat.ao_texture = mat.roughness_texture
+		mat.ao_texture_channel = BaseMaterial3D.TEXTURE_CHANNEL_RED
+		mat.ao_light_affect = 0.35
+		mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
+	return mesh
 
 
 func build() -> void:
@@ -60,6 +91,11 @@ func build() -> void:
 	bezel.name = "InstrumentBezel"
 	bezel.mesh = deck_mesh("Bezel")
 	add_child(bezel)
+	if hd_parts and instrument_rails and ResourceLoader.exists(HD_PARTS.Bezel):
+		var rails := MeshInstance3D.new()
+		rails.name = "InstrumentRails"
+		rails.mesh = _hd_mesh(HD_PARTS.Bezel, "InstrumentRails")
+		add_child(rails)
 	var dark := Color(0.09, 0.09, 0.1)
 	var gunmetal := Color(0.28, 0.29, 0.31)
 	var steel := Color(0.62, 0.64, 0.68)
@@ -68,6 +104,7 @@ func build() -> void:
 	var rubber := []
 	var paint := []
 	var lit := []     # ... small indicator lenses
+	var web: Array = [] if Finish.hd else rubber   # harness webbing gets its own weave
 
 	# floor: a deck plate with raised treads, under the seat and the feet (to the cage's edge)
 	var floor_y := UP - 0.47
@@ -82,28 +119,41 @@ func build() -> void:
 
 	# Narrow service consoles beside the working levers. The front of the right console is
 	# deliberately spare: the existing physical MODE switch lives above it at z = 0.08.
+	# Realism spike (tools/art_console_hd.py): authored housings, faceplates, toggles, guards and
+	# knobs replace the boxes and cylinders below. Legends, placards and lenses stay as they were.
+	var hd_console := hd_parts and ResourceLoader.exists(HD_CONSOLE)
 	for s in [-1.0, 1.0]:
 		var cx: float = 0.615 * s
-		solid.append([Kit.rounded_box(Vector3(0.13, 0.26, 0.95), 7.0, 6), Kit.at(Vector3(cx, UP - 0.36, 0.42)), Color(0.12, 0.13, 0.145)])
+		if hd_console:
+			var unit := MeshInstance3D.new()
+			unit.name = "ConsoleR" if s > 0.0 else "ConsoleL"
+			unit.mesh = _hd_mesh(HD_CONSOLE, str(unit.name))
+			add_child(unit)
+		else:
+			solid.append([Kit.rounded_box(Vector3(0.13, 0.26, 0.95), 7.0, 6), Kit.at(Vector3(cx, UP - 0.36, 0.42)), Color(0.12, 0.13, 0.145)])
 		# Separate black gasket, machined edge, and powder-coated removable faceplate.
-		rubber.append([Finish.beveled_plate(Vector3(0.116, 0.008, 0.866)), Kit.at(Vector3(cx, UP - 0.226, 0.435)), Color(0.022, 0.025, 0.028)])
-		metal.append([Finish.beveled_plate(Vector3(0.113, 0.005, 0.858)), Kit.at(Vector3(cx, UP - 0.22, 0.435)), Color(0.37, 0.39, 0.42)])
-		solid.append([Finish.beveled_plate(Vector3(0.108, 0.004, 0.852), 0.0015), Kit.at(Vector3(cx, UP - 0.216, 0.435)), Color(0.065, 0.077, 0.09)])
+		if not hd_console:
+			rubber.append([Finish.beveled_plate(Vector3(0.116, 0.008, 0.866)), Kit.at(Vector3(cx, UP - 0.226, 0.435)), Color(0.022, 0.025, 0.028)])
+			metal.append([Finish.beveled_plate(Vector3(0.113, 0.005, 0.858)), Kit.at(Vector3(cx, UP - 0.22, 0.435)), Color(0.37, 0.39, 0.42)])
+			solid.append([Finish.beveled_plate(Vector3(0.108, 0.004, 0.852), 0.0015), Kit.at(Vector3(cx, UP - 0.216, 0.435)), Color(0.065, 0.077, 0.09)])
 		var face_y := UP - 0.214
 		for dx in [-0.043, 0.043]:
 			for z in [0.026, 0.844]:
-				_fastener(Vector3(cx + dx, face_y, z), metal, rubber)
+				if not hd_console:
+					_fastener(Vector3(cx + dx, face_y, z), metal, rubber)
 		var names: Array = ["AUX PWR", "COMMS", "TRIM"] if s < 0.0 else ["BINDER", "COOLANT", "STAB"]
 		for k in 3:
 			var z := 0.28 + k * 0.14
-			_toggle(Vector3(cx, face_y, z), metal, rubber, paint)
+			if not hd_console:
+				_toggle(Vector3(cx, face_y, z), metal, rubber, paint)
 			_top_legend(Vector3(cx, face_y + 0.001, z - 0.045), names[k])
 			# Tiny inset status lens, with a metal socket: no luminous button slabs.
 			metal.append([Finish.washer(0.0028, 0.0042, 0.0018, 10), Kit.at(Vector3(cx + 0.042 * s, face_y + 0.001, z)), gunmetal])
 			lit.append([Kit.cyl(0.0027, 0.0027, 0.0018, 10), Kit.at(Vector3(cx + 0.042 * s, face_y + 0.0015, z)), Color(0.25, 0.58, 0.34) if k < 2 else Color(0.68, 0.4, 0.15)])
 		for k in 2:
 			var z := 0.70 + k * 0.135
-			_knob(Vector3(cx, face_y, z), metal, rubber, paint)
+			if not hd_console:
+				_knob(Vector3(cx, face_y, z), metal, rubber, paint)
 			_top_legend(Vector3(cx, face_y + 0.001, z - 0.042), ("CABIN" if k == 0 else "DIMMER") if s < 0.0 else ("SENS" if k == 0 else "BALANCE"))
 		_placard(Vector3(cx - 0.066 * s, UP - 0.31, 0.48), "AUXILIARY  /  01" if s < 0.0 else "PROPULSION  /  02", s)
 
@@ -124,8 +174,8 @@ func build() -> void:
 	# harness on the seat: shoulder straps down the seat back, a lap belt across the cushion
 	var strap := Color(0.6, 0.08, 0.06)
 	for s in [-1.0, 1.0]:
-		rubber.append([Kit.box(Vector3(0.05, 0.62, 0.012)), Transform3D(Basis.from_euler(Vector3(-0.12, 0, 0)), Vector3(0.11 * s, 0.6, 1.012)), strap])
-		rubber.append([Kit.box(Vector3(0.25, 0.05, 0.012)), Transform3D(Basis.from_euler(Vector3(-PI / 2.0, 0.35 * s, 0)), Vector3(0.14 * s, 0.215, 0.76)), strap])
+		web.append([Kit.box(Vector3(0.05, 0.62, 0.012)), Transform3D(Basis.from_euler(Vector3(-0.12, 0, 0)), Vector3(0.11 * s, 0.6, 1.012)), strap])
+		web.append([Kit.box(Vector3(0.25, 0.05, 0.012)), Transform3D(Basis.from_euler(Vector3(-PI / 2.0, 0.35 * s, 0)), Vector3(0.14 * s, 0.215, 0.76)), strap])
 	metal.append([Kit.rounded_box(Vector3(0.08, 0.06, 0.02), 5.0, 5), Kit.at(Vector3(0, 0.222, 0.72), Vector3(-PI / 2.0, 0, 0)), steel])
 
 	_batch(solid, Finish.powder_coat(), "PowderCoatedPanels")
@@ -133,6 +183,8 @@ func build() -> void:
 	_batch(rubber, Finish.rubber(), "RubberAndHarness")
 	_batch(paint, Finish.painted_metal(), "GuardAndGatePaint")
 	_batch(lit, Finish.indicator(), "InsetIndicators")
+	if Finish.hd:
+		_batch(web, Finish.webbing(), "HarnessWebbing")
 
 	# frames and hoses: tubes along the inner walls, the lower half (below the deck line)
 	var st := SurfaceTool.new()

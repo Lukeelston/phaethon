@@ -4,10 +4,12 @@ extends RefCounted
 
 const Kit := preload("res://view/mesh_kit.gd")
 const CONCRETE := Color("#9c9d90")
-const STEEL := Color("#454e50")
-const RECESS := Color("#313c40")
-const ALLOY := Color("#a2aba9")
-const BRONZE := Color("#bc7842")
+# Realism spike: alpha names the material for network_scenery.gdshader (1 mineral or paint,
+# 0.8 painted steel, 0.6 bare alloy), so the works' metal catches the sky and the suns.
+const STEEL := Color("#454e50", 0.8)
+const RECESS := Color("#313c40", 0.8)
+const ALLOY := Color("#a2aba9", 0.6)
+const BRONZE := Color("#bc7842", 0.6)
 const CERAMIC := Color("#ddd7bd")
 const AMBER := Color("#ffad52")
 const CENTER := Vector3(0, 1250, 0)
@@ -31,7 +33,7 @@ static func _annular_plate(inner: float, outer: float, depth: float, start: floa
 		Vector2(outer, depth / 2 - 12), Vector2(outer, -depth / 2 + 8),
 		Vector2(outer - 8, -depth / 2), Vector2(inner + 6, -depth / 2),
 		Vector2(inner, -depth / 2 + 6), Vector2(inner, depth / 2 - 8)]
-	var steps := ceili((finish - start) / (PI / 36))
+	var steps := ceili((finish - start) / (PI / 72))   # twice as round: the hoop is the silhouette
 	for i in steps:
 		var a := lerpf(start, finish, float(i) / steps)
 		var b := lerpf(start, finish, float(i + 1) / steps)

@@ -17,7 +17,11 @@ const COURSES := [
 	{"id": "emergency", "name": "Emergency Run", "detail": "An emergency delivery on Eridanus.\nAn additional experimental mode."},
 	{"id": "network", "name": "The Network", "detail": "Explore linked roads and cities.\nAn additional experimental map."},
 	{"id": "carving", "name": "S5 Carving Circuit", "detail": "S5's sweeping rhythm, built for racing.\nSpeedcraft, ramjet, and your cleanest lap."},
+	{"id": "coast", "name": "Coast Road", "detail": "The Network's west edge: 250 km.\nThe sea on your left, a mountain on your right."},
+	{"id": "drop", "name": "The Drop", "detail": "The Network's east edge: up a mountainside,\nthen 2 km down off its rim into the valley."},
 ]
+# A course that is a place on the Network: its road there (the flight starts at the foot of it).
+const SPOTS := {"coast": "SCoast", "drop": "SDrop"}
 
 static func course_index(id: String) -> int:
 	for i in COURSES.size():
@@ -25,8 +29,19 @@ static func course_index(id: String) -> int:
 			return i
 	return -1
 
+## [track, job, the Network road to start on ("" for none)].
 static func course_overrides(id: String) -> Array:
-	return ["eridanus", "emergency"] if id == "emergency" else [id, "none"]
+	if SPOTS.has(id):
+		return ["network", "none", SPOTS[id]]
+	return ["eridanus", "emergency", ""] if id == "emergency" else [id, "none", ""]
+
+
+## The menu's course for a flight: a scenic road's own entry if it started on one.
+static func course_for(track: String, spot: String) -> String:
+	for id in SPOTS:
+		if SPOTS[id] == spot and track == "network":
+			return id
+	return track
 
 static func box(color: Color, border: Color = Color.TRANSPARENT) -> StyleBoxFlat:
 	var style := StyleBoxFlat.new()

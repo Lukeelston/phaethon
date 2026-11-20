@@ -34,24 +34,50 @@ var road_protection := {}
 var road_anchors := {}
 var prop_library
 var water_material: ShaderMaterial
+const CLOUD_BASE := 4200.0   # m: the cumulus deck (the cirrus is drawn through it, higher)
 var clouds: MeshInstance3D
 var _environment: Environment
 var prop_slices_max := 0.0
+var _lattice := {}           # grid vertex -> its height, each worked out once (lattice_height)
+var _tile_root: Node3D       # every tile hangs from this: it is all that moves each frame
+var _anchor_x := INF         # where the tiles' own places are measured from (moved when the craft is ANCHOR_REACH off it)
+var _anchor_y := INF
+const ANCHOR_REACH := 1024.0
+var _revealing: Array[Vector2i] = []        # tiles still fading in
+var _deco_revealing: Array[Vector2i] = []   # ... and tiles whose props are
+var _deco_far := false       # the centre moved: props out of range are to go
+var _deco_want := true       # some tile in range may still lack its props
+const DECOR_SLICE_US := 400  # a prop slice's work (it does a group at least)
+var profiling := false       # (a harness's: this frame's parts into `profile`, usec)
+var profile := {}
 var _decor_job := {}
+var scenic = null            # the scenic roads' land (view/network_scenic.gd), when the world has any
+var _scenic_gap := Vector2(INF, -INF)   # the stretch of x between the scenic roads' reaches: nothing is asked of them there
 const PROP_CELL := 256.0
 
 func build(sim, world) -> void:
 	_sim = sim
 	_world = world
 	world.scenery_ground_height = -4.0
+	world.landscape = self   # the road's banks take this land's colours and material
+	scenic = world.scenic
+	if scenic != null and scenic.boxes.size() == 2:   # (one down each edge of the map: the country between is none of theirs)
+		var lo: float = minf(scenic.boxes[0].end.x, scenic.boxes[1].end.x) * scenic.CELL
+		var hi: float = maxf(scenic.boxes[0].position.x, scenic.boxes[1].position.x) * scenic.CELL
+		if hi > lo:
+			_scenic_gap = Vector2(lo, hi)
 	noise.seed = 28471
 	noise.frequency = 0.00011
 	noise.fractal_octaves = 4
 	detail.seed = 734
 	detail.frequency = 0.0006
 	detail.fractal_octaves = 3
+	_tile_root = Node3D.new()
+	_tile_root.name = "tiles"
+	add_child(_tile_root)
 	material = ShaderMaterial.new()
 	material.shader = preload("res://view/network_terrain.gdshader")
+	material.set_shader_parameter("terrain_detail", load("res://art/terrain/terrain_detail.png"))
 	prop_library = preload("res://view/network_biome_props.gd").new()
 	water_material = ShaderMaterial.new()
 	water_material.shader = preload("res://view/network_water.gdshader")
@@ -67,7 +93,9 @@ func build(sim, world) -> void:
 				if not road_anchors.has(tile_key): road_anchors[tile_key] = []
 				road_anchors[tile_key].append([p,Vector2(road.nx[i],road.ny[i])])
 			var c := Vector2i(floori(p.x / STEP), floori(p.y / STEP))
-			road_cells[c] = maxi(int(road_cells.get(c, 0)), ceili((float(road.w[i]) * 0.5 + 220.0) / STEP) + 1)
+			# a scenic road's land is its own (a mountainside, a sea cliff): flattened only at its ends, where it rejoins the open ground
+			if scenic == null or not (scenic.on(r, i - 120) and scenic.on(r, i + 120)):
+				road_cells[c] = maxi(int(road_cells.get(c, 0)), ceili((float(road.w[i]) * 0.5 + 220.0) / STEP) + 1)
 			var pc := Vector2i(floori(p.x/PROP_CELL),floori(p.y/PROP_CELL))
 			var pr := ceili((float(road.w[i])*0.5+90.0)/PROP_CELL)
 			for dx in range(-pr,pr+1):
@@ -98,10 +126,11 @@ func build(sim, world) -> void:
 	var plane := PlaneMesh.new()
 	plane.size = Vector2(360000,360000)
 	clouds.mesh = plane
-	clouds.position.y = 12000
+	clouds.position.y = CLOUD_BASE
 	clouds.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var cloud_material := ShaderMaterial.new()
 	cloud_material.shader = preload("res://view/network_clouds.gdshader")
+	cloud_material.set_shader_parameter("cloud_cover", load("res://art/sky/cloud_cover.png"))
 	clouds.material_override = cloud_material
 	add_child(clouds)
 	if world.view != null:
@@ -150,8 +179,19 @@ func region_at(p: Vector2) -> String:
 func height_at(p: Vector2) -> float:
 	var c := Vector2i(roundi(p.x / STEP), roundi(p.y / STEP))
 	var factor: float = clearance.get(c, 1.0)
+	if scenic != null and (p.x < _scenic_gap.x or p.x > _scenic_gap.y):
+		var mine: Vector2 = scenic.land(c, p)
+		if mine.x >= 1.0:
+			return mine.y
+		if mine.x > 0.0:
+			return lerpf(-4.0 if factor == 0.0 else _open_height(p, factor), mine.y, mine.x)
 	if factor == 0.0:
 		return -4.0
+	return _open_height(p, factor)
+
+
+## The open country's height at p: the regions' own shapes, graded down toward the roads.
+func _open_height(p: Vector2, factor: float) -> float:
 	var w := weights(p)
 	var n := clampf(0.5 + noise.get_noise_2dv(p) * 0.65, 0.0, 1.0)
 	var small := detail.get_noise_2dv(p)
@@ -170,11 +210,11 @@ func height_at(p: Vector2) -> float:
 	h -= w[5] * 9.0
 	return lerpf(-4.0, h, factor)
 
-func color_at(p: Vector2) -> Color:
+func color_at(p: Vector2, known_height := NAN) -> Color:
 	var w := weights(p)
 	var col := Color(0,0,0,1)
 	var n := detail.get_noise_2dv(p)
-	var h := height_at(p)
+	var h := height_at(p) if is_nan(known_height) else known_height
 	for i in w.size():
 		var c: Color = REGIONS[i][3]
 		if i == 4:
@@ -188,19 +228,34 @@ func color_at(p: Vector2) -> Color:
 		col += c * w[i]
 	col *= 0.90 + n * 0.15
 	col.a = w[0] # grassland fraction for fixed geographic field patterns in the shader
+	# the coast: sand on the beach and the seabed, the sea's own colour under the water's edge
+	if scenic != null and h < 7.0 and p.x < scenic.coast_hi + 700.0 and p.x < scenic.coast_x(p.y) + 700.0:
+		col = (scenic.SAND as Color).lerp(col, smoothstep(4.0, 7.0, h))
 	return col
 
 ## Exact piecewise-linear height of the visible two triangles, also used by prop feet.
 func surface_at(p: Vector2) -> float:
-	var c := Vector2(floorf(p.x / STEP), floorf(p.y / STEP)) * STEP
-	var f := (p - c) / STEP
-	var a := height_at(c)
-	var b := height_at(c + Vector2(STEP,0))
-	var d := height_at(c + Vector2(0,STEP))
+	var ci := Vector2i(floori(p.x / STEP), floori(p.y / STEP))
+	var f := (p - Vector2(ci) * STEP) / STEP
+	var a := lattice_height(ci)
+	var b := lattice_height(ci + Vector2i(1, 0))
+	var d := lattice_height(ci + Vector2i(0, 1))
 	if f.x + f.y <= 1.0:
 		return a + (b-a)*f.x + (d-a)*f.y
-	var e := height_at(c + Vector2(STEP,STEP))
+	var e := lattice_height(ci + Vector2i(1, 1))
 	return e + (d-e)*(1.0-f.x) + (b-e)*(1.0-f.y)
+
+
+## The height at the grid's vertex c (c * STEP), worked out once and kept: a tile's mesh wants each
+## one six times (itself, its colour, four neighbours' normals), a prop's footing up to twelve.
+func lattice_height(c: Vector2i) -> float:
+	var h = _lattice.get(c)
+	if h == null:
+		if _lattice.size() > 160000:   # (two streaming ranges' worth: start over rather than grow for ever)
+			_lattice.clear()
+		h = height_at(Vector2(c) * STEP)
+		_lattice[c] = h
+	return h
 
 func clear_at(p: Vector2, radius := 80.0) -> bool:
 	var lo := Vector2i(floori((p.x-radius)/PROP_CELL),floori((p.y-radius)/PROP_CELL))
@@ -260,6 +315,7 @@ func prop_records(key: Vector2i, first := 0, count := GROUPS) -> Array:
 		for k in number:
 			var p := anchor + Vector2(rng.randf_range(-240,240),rng.randf_range(-240,240))
 			var scale := rng.randf_range(0.75,1.8)
+			if scenic != null and (scenic.is_sea(p) or scenic.covered(p)): continue   # nothing in the sea, nothing under the road's own land
 			if region == "jungle" and kind == "oak": scale *= 1.7
 			var building := kind in ["urban","farm","industrial","outpost","stilt","service","solar","wind"]
 			var radius := (185.0 if kind == "urban" else (180.0 if kind in ["service","solar","wind"] else (90.0 if kind in ["farm","industrial","outpost","basalt"] else 35.0)))*scale
@@ -275,11 +331,14 @@ func _decorate_slice() -> void:
 	var start := Time.get_ticks_usec()
 	var key: Vector2i = _decor_job.key
 	var batches: Dictionary = _decor_job.batches
-	for prop in prop_records(key,_decor_job.group,4):
-		if not batches.has(prop.kind): batches[prop.kind] = []
-		var local: Vector2 = prop.p-Vector2(key)*TILE
-		batches[prop.kind].append(Transform3D(Basis(Vector3.UP,prop.yaw).scaled(Vector3.ONE*prop.scale),Vector3(local.x,prop.height,-local.y)))
-	_decor_job.group += 4
+	while int(_decor_job.group) < GROUPS:   # a group at a time, to a budget (it was always four: up to 2 ms in the jungle)
+		for prop in prop_records(key, _decor_job.group, 1):
+			if not batches.has(prop.kind): batches[prop.kind] = []
+			var local: Vector2 = prop.p-Vector2(key)*TILE
+			batches[prop.kind].append(Transform3D(Basis(Vector3.UP,prop.yaw).scaled(Vector3.ONE*prop.scale),Vector3(local.x,prop.height,-local.y)))
+		_decor_job.group += 1
+		if Time.get_ticks_usec() - start >= DECOR_SLICE_US:
+			break
 	if _decor_job.group == GROUPS:
 		var root := Node3D.new()
 		tiles[key].node.add_child(root)
@@ -287,10 +346,13 @@ func _decorate_slice() -> void:
 		tiles[key].deco_born = Time.get_ticks_msec()
 		for kind in batches:
 			prop_library.batch(root,kind,batches[kind])
+		_deco_revealing.append(key)
+		_deco_want = true   # (the next tile's turn)
 		_decor_job.clear()
 	prop_slices_max = maxf(prop_slices_max,float(Time.get_ticks_usec()-start)/1000.0)
 
 func _water(key: Vector2i, node: Node3D) -> void:
+	if scenic != null and _sea(key, node): return
 	# Below road level. Only wetland tiles, with shoreline supplied by their terrain.
 	if weights((Vector2(key)+Vector2.ONE*0.5)*TILE)[5]<0.60: return
 	var instance := MeshInstance3D.new()
@@ -303,6 +365,51 @@ func _water(key: Vector2i, node: Node3D) -> void:
 	instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	node.add_child(instance)
 
+## The sea over a tile: its water on every square with a corner seaward of the coast (the squares
+## the shore crosses too: their land stands out of it). True if the tile has any.
+func _sea(key: Vector2i, node: Node3D) -> bool:
+	if key.x * TILE > scenic.coast_hi + 100.0:
+		return false
+	var wet := PackedByteArray()
+	wet.resize((GRID + 1) * (GRID + 1))
+	var any := false
+	for y in GRID + 1:
+		for x in GRID + 1:
+			var p := Vector2(key) * TILE + Vector2(x, y) * STEP
+			wet[y * (GRID + 1) + x] = int(p.x < scenic.coast_x(p.y) + 40.0)
+			any = any or wet[y * (GRID + 1) + x] == 1
+	if not any:
+		return false
+	var verts := PackedVector3Array()
+	for y in GRID:
+		for x in GRID:
+			var a := y * (GRID + 1) + x
+			if wet[a] + wet[a + 1] + wet[a + GRID + 1] + wet[a + GRID + 2] == 0:
+				continue
+			var x0 := x * STEP
+			var z0 := -y * STEP
+			verts.append_array(PackedVector3Array([Vector3(x0, 0, z0), Vector3(x0, 0, z0 - STEP), Vector3(x0 + STEP, 0, z0),
+				Vector3(x0 + STEP, 0, z0), Vector3(x0, 0, z0 - STEP), Vector3(x0 + STEP, 0, z0 - STEP)]))
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = verts
+	var normals := PackedVector3Array()
+	normals.resize(verts.size())
+	normals.fill(Vector3.UP)
+	arrays[Mesh.ARRAY_NORMAL] = normals
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	var instance := MeshInstance3D.new()
+	instance.name = "sea"
+	instance.mesh = mesh
+	instance.position = Vector3(0.0, scenic.SEA, 0.0)
+	instance.material_override = water_material
+	instance.set_instance_shader_parameter("world_offset", Vector2(key.x * TILE, -key.y * TILE))
+	instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	node.add_child(instance)
+	return true
+
+
 func vertex_at(key: Vector2i, x: int, y: int) -> Vector3:
 	var p := Vector2(key) * TILE + Vector2(x,y) * STEP
 	return Vector3(x * STEP, height_at(p), -y * STEP)
@@ -312,13 +419,17 @@ func _new_job(key: Vector2i) -> Dictionary:
 
 func _rows(job: Dictionary, count: int) -> void:
 	var key: Vector2i = job.key
+	var corner := key * GRID
 	for y in range(job.row, mini(job.row + count, GRID + 1)):
 		for x in GRID + 1:
 			var p := Vector2(key)*TILE + Vector2(x,y)*STEP
-			job.vertices.append(vertex_at(key,x,y))
-			job.colors.append(color_at(p))
+			var c := corner + Vector2i(x, y)
+			var h := lattice_height(c)
+			job.vertices.append(Vector3(x * STEP, h, -y * STEP))
+			job.colors.append(color_at(p, h))
 			job.uvs.append(Vector2(p.x,-p.y)/256.0)
-			job.normals.append(Vector3(height_at(p-Vector2(STEP,0))-height_at(p+Vector2(STEP,0)), STEP*2.0, height_at(p+Vector2(0,STEP))-height_at(p-Vector2(0,STEP))).normalized())
+			job.normals.append(Vector3(lattice_height(c + Vector2i(-1, 0)) - lattice_height(c + Vector2i(1, 0)), STEP*2.0,
+				lattice_height(c + Vector2i(0, 1)) - lattice_height(c + Vector2i(0, -1))).normalized())
 	job.row = mini(job.row + count, GRID + 1)
 
 func _mesh(job: Dictionary) -> ArrayMesh:
@@ -349,6 +460,8 @@ func sync(ox: float, oy: float) -> void:
 	var c := Vector2i(floori(ox/TILE),floori(oy/TILE))
 	if c != center:
 		center = c
+		_deco_far = true
+		_deco_want = true
 		if not _decor_job.is_empty() and (absi(_decor_job.key.x-c.x)>PROP_RANGE or absi(_decor_job.key.y-c.y)>PROP_RANGE):
 			_decor_job.clear()
 		pending.clear()
@@ -364,6 +477,15 @@ func sync(ox: float, oy: float) -> void:
 				if not tiles.has(key) and (_job.is_empty() or _job.key != key):
 					pending.append(key)
 		pending.sort_custom(func(a,b): return Vector2(a-c).length_squared() < Vector2(b-c).length_squared())
+	# The tiles hang from one node, and that is all that moves with the craft each frame (placing each
+	# of 289 tiles each frame was a quarter of a millisecond of script). Their own places are measured
+	# from an anchor that follows the craft a kilometre at a time, so the numbers stay small and exact.
+	if absf(ox - _anchor_x) > ANCHOR_REACH or absf(oy - _anchor_y) > ANCHOR_REACH:
+		_anchor_x = ox
+		_anchor_y = oy
+		for key in tiles:
+			tiles[key].node.position = _tile_place(key)
+	_tile_root.position = Vector3(_anchor_x - ox, 0.0, oy - _anchor_y)
 	if _job.is_empty() and not pending.is_empty():
 		_job = _new_job(pending.pop_front())
 	if not _job.is_empty():
@@ -375,39 +497,68 @@ func sync(ox: float, oy: float) -> void:
 			mi.material_override = material
 			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 			node.add_child(mi)
-			add_child(node)
+			node.position = _tile_place(_job.key)
+			_tile_root.add_child(node)
 			_water(_job.key,node)
 			tiles[_job.key] = {"node":node, "key":_job.key, "born":Time.get_ticks_msec()}
+			_revealing.append(_job.key)
+			_deco_want = true
 			_job.clear()
-	for key in tiles:
-		tiles[key].node.position = Vector3(key.x*TILE-ox,0,-key.y*TILE+oy)
-		if not tiles[key].has("revealed"):
-			var reveal := clampf(float(Time.get_ticks_msec()-tiles[key].born)/1800.0,0.0,1.0)
-			for surface in tiles[key].node.get_children():
-				if surface is MeshInstance3D: surface.set_instance_shader_parameter("stream_reveal",reveal)
-			if reveal>=1.0: tiles[key].revealed=true
-	for key in tiles:
-		var near := absi(key.x-center.x)<=PROP_RANGE and absi(key.y-center.y)<=PROP_RANGE
+	var t_rows := Time.get_ticks_usec()
+	for k in range(_revealing.size() - 1, -1, -1):   # the tiles still fading in: a handful
+		var key: Vector2i = _revealing[k]
+		if not tiles.has(key):
+			_revealing.remove_at(k)
+			continue
+		var reveal := clampf(float(Time.get_ticks_msec()-tiles[key].born)/1800.0,0.0,1.0)
+		for surface in tiles[key].node.get_children():
+			if surface is MeshInstance3D: surface.set_instance_shader_parameter("stream_reveal",reveal)
+		if reveal>=1.0:
+			tiles[key].revealed=true
+			_revealing.remove_at(k)
+	var t_place := Time.get_ticks_usec()
+	if _deco_far:   # the centre moved: props out of range go
+		_deco_far = false
+		for key in tiles:
+			var tile: Dictionary = tiles[key]
+			if tile.has("deco") and (absi(key.x-center.x)>PROP_RANGE or absi(key.y-center.y)>PROP_RANGE):
+				tile.deco.queue_free()
+				tile.erase("deco")
+				tile.erase("deco_revealed")
+	if _deco_want and _decor_job.is_empty():   # the next tile in range without its props (none: nothing more to look for until something changes)
+		_deco_want = false
+		for key in tiles:
+			if absi(key.x-center.x)<=PROP_RANGE and absi(key.y-center.y)<=PROP_RANGE and not tiles[key].has("deco"):
+				_decor_job = {"key":key,"group":0,"batches":{}}
+				break
+	for k in range(_deco_revealing.size() - 1, -1, -1):
+		var key: Vector2i = _deco_revealing[k]
+		if not tiles.has(key) or not tiles[key].has("deco"):
+			_deco_revealing.remove_at(k)
+			continue
 		var tile: Dictionary = tiles[key]
-		if not near and tile.has("deco"):
-			tile.deco.queue_free()
-			tile.erase("deco")
-			tile.erase("deco_revealed")
-		elif near and not tile.has("deco") and _decor_job.is_empty():
-			_decor_job = {"key":key,"group":0,"batches":{}}
-		if tile.has("deco") and not tile.has("deco_revealed"):
-			var reveal := clampf(float(Time.get_ticks_msec()-tile.deco_born)/1800.0,0.0,1.0)
-			for batch in tile.deco.get_children():
-				batch.set_instance_shader_parameter("stream_reveal",reveal)
-			if reveal>=1.0: tile.deco_revealed=true
+		var reveal := clampf(float(Time.get_ticks_msec()-tile.deco_born)/1800.0,0.0,1.0)
+		for batch in tile.deco.get_children():
+			batch.set_instance_shader_parameter("stream_reveal",reveal)
+		if reveal>=1.0:
+			tile.deco_revealed=true
+			_deco_revealing.remove_at(k)
+	var t_deco := Time.get_ticks_usec()
 	if not _decor_job.is_empty() and Time.get_ticks_usec()-start<1800:
 		_decorate_slice()
+	if profiling:
+		profile = {"rows_us": t_rows - start, "place_us": t_place - t_rows, "deco_loop_us": t_deco - t_place, "decor_slice_us": Time.get_ticks_usec() - t_deco}
 	clouds.material_override.set_shader_parameter("world_offset",Vector2(fposmod(ox,2304000.0),fposmod(-oy,2304000.0)))
 	if _environment != null:
 		var w := weights(Vector2(ox,oy))
 		_environment.fog_density = 0.00011 + w[5]*0.00009 + w[6]*0.00005 + w[3]*0.00002
 		_environment.fog_light_color = Color(0.58,0.68,0.80).lerp(Color(0.63,0.69,0.65),w[5]*0.25+w[6]*0.15).lerp(Color(0.76,0.69,0.58),w[3]*0.3)
 	max_slice_ms = maxf(max_slice_ms, float(Time.get_ticks_usec()-start)/1000.0)
+
+
+## A tile's place under the tiles' node: against the anchor.
+func _tile_place(key: Vector2i) -> Vector3:
+	return Vector3(key.x * TILE - _anchor_x, 0.0, -key.y * TILE + _anchor_y)
 
 func _outside(key: Vector2i) -> bool:
 	return absi(key.x-center.x)>RANGE or absi(key.y-center.y)>RANGE

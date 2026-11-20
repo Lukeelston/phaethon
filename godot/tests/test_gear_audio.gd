@@ -69,7 +69,7 @@ func _run() -> void:
 	_check("desktop without a gearbox keeps its original fast rev and flare",
 		_metrics(legacy, 0).rise90 < 0.2 and _peak(legacy, 0) > 1.04)
 	_check("desktop without a gearbox retains its original RPM ceiling",
-		absf(audio.voices[0].at.v8 - 7600.0) < 50.0)
+		absf(audio.voices[0].at.v8 - float(EngineAudio.TUNE.v8_rpm[1])) < 50.0)
 	_check("audio mapping never changes the physics input",
 		view.inp.thrL == sim.P.gate and not view.inp.has("gearIndex"))
 	_reset()

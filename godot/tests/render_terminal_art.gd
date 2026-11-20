@@ -1,7 +1,8 @@
 ## Render the production pilot seat on the default Network departure with XR disabled.
 ## Run with --xr-mode off --resolution 1600x900 --fixed-fps 120 --audio-driver Dummy
 ## -s res://tests/render_terminal_art.gd -- --track=network --handling=speed --mute --out=DIR
-## Optional: --captures-only, --benchmark-only. Timings are for one desktop eye.
+## Optional: --captures-only, --benchmark-only, --flat-panel (the flat instrument panel and
+## heads-up map instead of the gauge cluster and map pod). Timings are for one desktop eye.
 extends SceneTree
 
 const Seat := preload("res://vr/vr_cockpit.gd")
@@ -32,7 +33,21 @@ func _run() -> void:
 		push_error("Pass --out= and a writable review directory.")
 		quit(1)
 		return
+	if "--flat-panel" in OS.get_cmdline_user_args():   # v0.3.2's flat instrument panel and heads-up map
+		preload("res://vr/gauge_cluster.gd").enabled = false
+		preload("res://vr/minimap_panel.gd").enclosure = false
+	if "--open" in OS.get_cmdline_user_args():   # the open cockpit, before the roof
+		preload("res://view/canopy.gd").roofed = false
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--edge-probe="):   # timings: the scenic roads' open edges undrawn
+			preload("res://view/network_world.gd").open_edge_probe = arg.trim_prefix("--edge-probe=")
+		if arg.begins_with("--roof-probe="):   # timings: the roof without its glass, or without its dome light
+			preload("res://view/canopy.gd").probe = arg.trim_prefix("--roof-probe=")
+	if "--no-scenic" in OS.get_cmdline_user_args():   # the scenic roads' land and edges left out
+		preload("res://view/network_world.gd").scenic_on = false
 	root.msaa_3d = Viewport.MSAA_4X
+	if "--headset" in OS.get_cmdline_user_args():   # twice the window each way: with --resolution 2064x1104, a Quest 3's two eyes' worth of pixels in one flat view
+		root.scaling_3d_scale = 2.0
 	DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
 	Seat.track_override = "network"
 	Seat.job_override = "none"
@@ -48,6 +63,14 @@ func _run() -> void:
 		push_error("This review requires the Eridanus Network road and a monoscopic viewport.")
 		quit(1)
 		return
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--bench-at="):   # road,sample: time the seat along another stretch (open country, a sky bridge)
+			var at := arg.trim_prefix("--bench-at=").split(",")
+			city = {"road": int(at[0]), "i": int(at[1])}
+	if "--as-flown" in OS.get_cmdline_user_args():   # the first spike flight's world: no banks, no fins, level traffic
+		seat.network_world.banks = false
+		seat.network_world.fins = false
+		seat.traffic_net.grade = false
 	_set_pose(0)
 	# Resolve both streamers before capture; their regular sync budgets stay in force while travelling.
 	for i in 5000:

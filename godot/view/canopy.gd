@@ -5,6 +5,13 @@
 ##   forcefield  an ellipsoid round the front of the pod (view/forcefield.gdshader): clear where you
 ##               look through it, glowing edge-on; with speed a bow ring round the nose and streaks
 ##               flowing back; the handling's colour, whiter on the burner
+##   roof        (Luke, after flying it: "I think the vehicle needs to have a roof ... it's necessary
+##               to the immersion") a closed canopy over the opening, authored in tools/art_roof_hd.py:
+##               a header rail, A and B pillars, cant rails, a stitched headliner, and glass from the
+##               rim up to the header and down each side. Swept back ("I think it should be swept
+##               back pretty significantly"): the screen lies back ~70 degrees to a header over the brow. With it the oblong screen and its frame
+##               are hidden (their meshes stay, for the gates that measure them). Canopy.roofed =
+##               false before build() gives the open cockpit back.
 ## Both are built in pod-local coordinates (the hull's: forward -Z) and joined to the "exterior"
 ## group: they sit on the lip and outside the hull by design, so the cockpit-clearance gate leaves
 ## them out (tests/test_canopy.gd checks them instead).
@@ -15,6 +22,11 @@ extends RefCounted
 
 const CM := preload("res://view/craft_model.gd")
 const Kit := preload("res://view/mesh_kit.gd")
+const Finish := preload("res://view/craft_materials.gd")
+const ROOF := "res://art/cockpit/roof_hd.glb"
+static var roofed := true         # the closed canopy; false before build(): the open cockpit and its oblong screen
+static var probe := ""            # (timings only: "no-glass" leaves the roof's glass out)
+const HEADLINER_GLOW := 0.5       # the roof's own light, as a share of its colour
 const PH0 := deg_to_rad(-152.0)    # the screen's arc round the front of the opening ...
 const PH1 := deg_to_rad(-28.0)
 const SCREEN_H := 0.5              # ... and its height at the middle (an ellipse in outline): you look through the glass, the frame well above the horizon
@@ -68,7 +80,43 @@ static func build() -> Node3D:
 	root.add_child(field)
 	for n in [glass, frame, field]:
 		n.add_to_group("exterior")
+	if roof_available():
+		glass.visible = false
+		frame.visible = false
+		# the roof is authored in the rig's frame (the hull's centre POD_FRAME_UP above its floor), like the other fittings
+		var source := (load(ROOF) as PackedScene).instantiate()
+		for part in ["Roof", "RoofGlass"]:
+			var mi := MeshInstance3D.new()
+			mi.name = "roof" if part == "Roof" else "roof_glass"
+			mi.mesh = (source.find_children(part, "MeshInstance3D", true, false)[0] as MeshInstance3D).mesh
+			mi.position = Vector3(0.0, -CM.POD_FRAME_UP, 0.0)
+			if part == "RoofGlass":
+				var pane := ShaderMaterial.new()
+				pane.shader = preload("res://view/roof_glass.gdshader")
+				mi.material_override = pane
+				mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			else:
+				# The headliner faces down, away from the sun and the sky, and with nothing of its own it is a
+				# black slab. It gives back a little of its own colour (a courtesy light's worth). A real lamp
+				# under it did the same and cost every lit pixel of the cockpit a second light: a third of
+				# what the roof cost a headset's frame.
+				var skin := (mi.mesh.surface_get_material(0) as BaseMaterial3D).duplicate() as BaseMaterial3D
+				skin.emission_enabled = true
+				skin.emission = Color(1.0, 0.94, 0.86)
+				skin.emission_texture = skin.albedo_texture
+				skin.emission_operator = BaseMaterial3D.EMISSION_OP_MULTIPLY
+				skin.emission_energy_multiplier = HEADLINER_GLOW
+				mi.material_override = skin
+			root.add_child(mi)
+			mi.add_to_group("exterior")
+			if part == "RoofGlass" and probe == "no-glass":
+				mi.visible = false
+		source.free()
 	return root
+
+
+static func roof_available() -> bool:
+	return roofed and Finish.hd and ResourceLoader.exists(ROOF)
 
 
 ## A point on the screen: arc position u (0..1 across) and v (0 on the lip .. 1 at the top edge).

@@ -49,6 +49,36 @@ const HALL_LIGHT_EVERY := 4       # samples: a lit bar across the roof (overhead
 const HALL_RIB_EVERY := 8         # samples: a steel rib across the roof and down both walls
 const HALL_STRIP_H := 18.0        # the lit strip down each wall
 const DECK := 5.0                 # a deck's thickness, m
+# The land brought up beside the road (Luke, after flying it: "depending on the terrain, sometimes
+# you can't see it and it kind of kills the speed ... find a way for the track to be 'inset' into the
+# surrounding land somehow so you keep the safety edges"). The land is on a 512 m grid and lies
+# flat, 4 m under the road, for a kilometre either side, so over a 3.65 m wall on a 7.8 m ramp
+# there was only sky. A bank now stands behind each wall, in the land's own material and colour:
+# it rises BANK_RUN across to a crest that rolls between BANK_H, then falls away under the land.
+const BANK_SET := 3.2             # m beyond the road's edge: behind the wall and its cap
+const BANK_RUN := 125.0           # m across, foot to crest
+const BANK_BACK := 150.0          # m across, crest to its far foot
+const BANK_H := [16.0, 64.0]      # the crest above the wall's foot (the low stretches let the far country through)
+const BANK_CROPS := 2             # trees or rocks on each side of each 96 m of bank: a smooth slope gives the eye
+                                  # nothing to catch at speed, and they are set unevenly so they never strobe
+const BANK_FLOOR := -14.0         # its far foot: under the land (-4)
+const BANK_EVERY := 4             # samples between its rows (96 m)
+const BANK_SLICE_MS := 0.5        # its build work a frame, out of what the roads left of theirs (never while a road waits)
+const BANK_MAX_H := 5.0           # none on a road this far up: a deck has fins instead
+const BANK_TOWN := 48.0           # samples (1.15 km) over which it comes up outside a town
+const BANK_GAP := 580.0           # m of open ground beside the road for all of it (it reaches 0.45 of the gap at most)
+const BANK_OVER := 70.0           # a road this high overhead is not in its way
+# A sky bridge has no land beside it at all (Luke: "particularly noticeable on the sky bridges"):
+# from FIN_FROM up, a concrete fin stands outside each wall, FIN_H[1] tall at a pylon every
+# MAST_EVERY samples and scalloped down to FIN_H[0] midway, its top edge lit. Nothing in it
+# repeats faster than its pylons (2 Hz at 4,000 mph): closer posts would strobe.
+const FIN_FROM := [45.0, 90.0]    # the deck's height: none below, all of it above
+const FIN_H := [7.0, 58.0]        # above the wall's foot: midway, at a pylon
+const FIN_SET := 3.2
+const FIN_COL := Color(0.5, 0.51, 0.5)
+const SCENIC_NAMES := {"SCoast": "COAST ROAD", "SDrop": "THE DROP"}   # their boards on the highways
+const SCENIC_ROUTES := {"SCoast": "S12", "SDrop": "S13"}               # ... and their route markers (the side roads are S0 to S11)
+const FLANK_ROCK := Color(0.46, 0.44, 0.41, 0.0)   # a scenic road's cut and cliff faces: basalt grey, lighter than the forest over them
 const LINE_W := 0.6
 const EDGE_SEGS := 6              # identical shoulder topology on both sides of every chunk boundary
 const JOIN_EDGE_SEGS := EDGE_SEGS # overlap chunks must not change cross-section tessellation
@@ -93,8 +123,27 @@ var sim: CraftSim
 var view
 var shaft                 # the shafts' shapes (view/network_shaft.gd)
 var _up := Vector3.UP     # the road's up at the sample being built (a shaft's goes round with it)
+var landscape = null      # the NetworkLandscape, when the land is there: its colours and its material dress the banks
+var scenic = null         # the scenic roads' land (view/network_scenic.gd): the coast road, the drop
+static var scenic_on := true   # (off before build(): their land and edges left out, for like-for-like timings elsewhere)
+static var open_edge_probe := ""   # (timings only: "none" leaves the open edges' see-through ramps undrawn)
+var banks := true         # the land brought up beside the road (off: as v0.3.2, for comparisons)
+var fins := true          # the sky bridges' side fins (likewise)
+var bank_chunks := 0      # chunks built with a bank (tests read this)
+var bank_us := 0          # ... and the time building banks has taken in all, usec
+var _bank_queue := []     # chunks whose road is built and whose bank is still to do, in the order they were built
+var _bank_job := {}       # the one in hand
+var _bank_noise := FastNoiseLite.new()
 var _smap := {}           # TrackPath -> road index, the shafts'
-var chunks := {}          # Vector2i(road, chunk) -> [node, ox, oy]
+var chunks := {}          # Vector2i(road, chunk) -> [node, ox, oy, its middle's x, y]
+var _chunk_root: Node3D   # every chunk hangs from this: it is all that moves each frame
+var _anchor_x := INF      # where the chunks' own places are measured from (moved when the craft is ANCHOR_REACH off it)
+var _anchor_y := INF
+const ANCHOR_REACH := 1024.0
+const SCAN_STEP := 240.0  # m the craft moves between looks for chunks to build or drop (with nothing wanted or in hand)
+var _scan_x := INF
+var _scan_y := INF
+var _scan_idle := false   # the last look found nothing to build
 var grid := {}            # Vector2i cell -> Array of [road, chunk, cx, cy, radius]
 var built := 0            # tests read these
 var dropped := 0
@@ -137,6 +186,7 @@ var _paint_fine := false
 var _sec_cache := {}               # road widths -> their sections (_section)
 var _idx_cache := {}               # Vector2i(rows, cols) -> the road grid's triangles (_grid_index)
 var _beam: ShaderMaterial
+var _glass: ShaderMaterial        # a scenic road's open edge: its ramp, see-through (network_glass_deck.gdshader)
 var _guides := Signs.new()
 var _exits := {}  # Vector3i(parent, branch, branch endpoint) -> signed physical exit
 var _job := {}            # the chunk being built, a slice a frame (_start_chunk, _work)
@@ -168,6 +218,12 @@ func build(s, v) -> void:
 	_support_clearance = null
 	shaft = ShaftScript.new()
 	shaft.setup(sim)
+	_chunk_root = Node3D.new()
+	_chunk_root.name = "chunks"
+	add_child(_chunk_root)
+	_bank_noise.seed = 5150
+	_bank_noise.frequency = 1.0 / 700.0
+	_bank_noise.fractal_octaves = 2
 	for r in shaft.maps:
 		_smap[sim.roads[int(r)]] = int(r)
 	_mat = ShaderMaterial.new()
@@ -185,10 +241,12 @@ func build(s, v) -> void:
 	_beam.set_shader_parameter("min_ang", 0.0018)
 	_beam.set_shader_parameter("energy", 2.2)
 	_beam.set_shader_parameter("far_dim", 0.15)
+	_glass = ShaderMaterial.new()
+	_glass.shader = preload("res://view/network_glass_deck.gdshader")
 	_asph = preload("res://art/road/asphalt.tres").duplicate() as ShaderMaterial
 	_asph.set_shader_parameter("period", ASPHALT_PERIOD)
 	_asph.set_shader_parameter("base", Vector3(0.21, 0.205, 0.205))
-	_asph.set_shader_parameter("spec", 0.2)
+	_asph.set_shader_parameter("spec", 0.3)   # realism spike: asphalt's real 4 % reflectance, so it sheens toward the suns
 	_asph.set_shader_parameter("lane_half", 60.0)
 	for r in sim.roads.size():
 		var R: CraftSim.TrackPath = sim.roads[r]
@@ -197,9 +255,26 @@ func build(s, v) -> void:
 		var heights := PackedFloat64Array()
 		heights.resize(R.N)
 		var d := 0.0
+		var keys: Array = sim._net_h.get(r, [])
+		var ki := 0
 		for i in R.N:
 			acc[i] = d
-			heights[i] = sim.net_height(r, float(i))
+			# The sim's own height (net_height's arithmetic exactly), its keys walked in step with the samples:
+			# searched from the first key for every sample, a shaft's hundred keys were most of the set-up.
+			var height := 0.0
+			if keys.size() > 1:
+				while ki < keys.size() - 2 and float(i) > float(keys[ki + 1][0]):
+					ki += 1
+				var a: Array = keys[ki]
+				var b: Array = keys[ki + 1]
+				if float(i) >= float(a[0]) and float(i) <= float(b[0]):
+					var n := maxi(1, int(b[0]) - int(a[0]))
+					var u := (float(i) - float(a[0])) / float(n)
+					var span := float(n) * CraftSim.NET_STEP
+					var u2 := u * u
+					var u3 := u2 * u
+					height = (2.0 * u3 - 3.0 * u2 + 1.0) * float(a[1]) + (u3 - 2.0 * u2 + u) * span * float(a[2]) + (-2.0 * u3 + 3.0 * u2) * float(b[1]) + (u3 - u2) * span * float(b[2])
+			heights[i] = height
 			d += R.len[i]
 		_s.append(acc)
 		_heights.append(heights)
@@ -224,6 +299,9 @@ func build(s, v) -> void:
 						grid[key] = []
 					grid[key].append([r, k, cx, cy, rad])
 			k += 1
+	if scenic_on:   # (after the heights: it takes the roads' from them)
+		scenic = preload("res://view/network_scenic.gd").new()
+		scenic.setup(sim, _heights)
 	_warm_join_hints()
 	_warm_physical_joins()
 	_plan_signs()
@@ -383,21 +461,27 @@ func _warm_deco_templates() -> void:
 func sync(org_x: float, org_y: float) -> void:
 	var t_in := Time.get_ticks_usec()
 	var want := []
-	var gc := Vector2i(int(floor(org_x / CELL)), int(floor(org_y / CELL)))
-	var reach := int(ceil(VIS / CELL)) + 1
-	var seen := {}
-	for gx in range(gc.x - reach, gc.x + reach + 1):
-		for gy in range(gc.y - reach, gc.y + reach + 1):
-			for e in grid.get(Vector2i(gx, gy), []):
-				var key := Vector2i(e[0], e[1])
-				if seen.has(key) or chunks.has(key):
-					continue
-				seen[key] = true
-				var d: float = Vector2(e[2] - org_x, e[3] - org_y).length() - e[4]
-				if d < VIS:
-					want.append([d, key])
-	want.sort_custom(func(a, b): return a[0] < b[0])
+	# With nothing wanted and nothing in hand, what is wanted can only change by the craft moving: look
+	# again every SCAN_STEP of travel (a chunk is wanted from 26 km off; 240 m late is nothing).
+	var moved: bool = absf(org_x - _scan_x) > SCAN_STEP or absf(org_y - _scan_y) > SCAN_STEP
+	if moved or not _scan_idle or not _job.is_empty():
+		var gc := Vector2i(int(floor(org_x / CELL)), int(floor(org_y / CELL)))
+		var reach := int(ceil(VIS / CELL)) + 1
+		var seen := {}
+		for gx in range(gc.x - reach, gc.x + reach + 1):
+			for gy in range(gc.y - reach, gc.y + reach + 1):
+				for e in grid.get(Vector2i(gx, gy), []):
+					var key := Vector2i(e[0], e[1])
+					if seen.has(key) or chunks.has(key):
+						continue
+					seen[key] = true
+					var d: float = Vector2(e[2] - org_x, e[3] - org_y).length() - e[4]
+					if d < VIS:
+						want.append([d, key])
+		want.sort_custom(func(a, b): return a[0] < b[0])
+		_scan_idle = want.is_empty()
 	wanted = want.size()
+	var t_scan := Time.get_ticks_usec()
 	# the chunk in hand, then the nearest wanted, a slice at a time until the frame's budget is spent
 	if want.size() > BACKLOG:
 		_catching_up = true
@@ -415,20 +499,33 @@ func sync(org_x: float, org_y: float) -> void:
 			break
 	if wi >= want.size() and _job.is_empty():
 		_catching_up = false
-	for key in chunks.keys():
-		var c: Array = chunks[key]
-		var R: CraftSim.TrackPath = sim.roads[key.x]
-		var c0: int = key.y * CH
-		var c1: int = mini(c0 + CH, R.N - 1)
-		var cm := (_wxy(key.x, c0) + _wxy(key.x, c1)) / 2.0
-		if Vector2(cm.x - org_x, cm.y - org_y).length() > DROP + CH * 24.0:
-			(c[0] as Node3D).queue_free()
-			chunks.erase(key)
-			dropped += 1
-			if not _job.is_empty() and _job.key == key:   # gone before it was finished
-				_job = {}
-			continue
-		(c[0] as Node3D).position = Vector3(c[1] - org_x, 0.0, -(c[2] - org_y))
+		# the land beside the roads: with no road in hand or waiting, out of what is left of this frame's slice
+		_bank_work(mini(end, Time.get_ticks_usec() + int(BANK_SLICE_MS * 1000.0)))
+	var t_build := Time.get_ticks_usec()
+	if moved:   # free what the craft has left behind (which only moving can change)
+		_scan_x = org_x
+		_scan_y = org_y
+		for key in chunks.keys():
+			var c: Array = chunks[key]
+			if Vector2(c[3] - org_x, c[4] - org_y).length() > DROP + CH * 24.0:
+				(c[0] as Node3D).queue_free()
+				chunks.erase(key)
+				dropped += 1
+				if not _job.is_empty() and _job.key == key:   # gone before it was finished
+					_job = {}
+				if not _bank_job.is_empty() and _bank_job.key == key:
+					_bank_job = {}
+	# The chunks hang from one node, and that is all that moves with the craft each frame. Their own
+	# places are measured from an anchor that follows the craft a kilometre at a time, so the numbers
+	# stay as small, and as exact, as when each was placed against the craft itself.
+	if absf(org_x - _anchor_x) > ANCHOR_REACH or absf(org_y - _anchor_y) > ANCHOR_REACH:
+		_anchor_x = org_x
+		_anchor_y = org_y
+		for key in chunks:
+			var c: Array = chunks[key]
+			(c[0] as Node3D).position = Vector3(c[1] - _anchor_x, 0.0, -(c[2] - _anchor_y))
+	_chunk_root.position = Vector3(_anchor_x - org_x, 0.0, org_y - _anchor_y)
+	var t_place := Time.get_ticks_usec()
 	for sk in skylines:
 		(sk[0] as Node3D).position = Vector3(sk[1] - org_x, scenery_ground_height, -(sk[2] - org_y))
 	for sk in far_shafts:
@@ -438,6 +535,11 @@ func sync(org_x: float, org_y: float) -> void:
 	if far_roads:
 		far_roads.sync(org_x,org_y)
 	sync_ms = (Time.get_ticks_usec() - t_in) / 1000.0
+	if profile_streaming:   # this frame's parts, usec: finding what is wanted, building, placing the chunks, the rest
+		stream_profile["scan_us"] = t_scan - t_in
+		stream_profile["build_us"] = t_build - t_scan
+		stream_profile["place_us"] = t_place - t_build
+		stream_profile["rest_us"] = Time.get_ticks_usec() - t_place
 
 
 ## The deck's height at sample i of road r (0 but on a flyover).
@@ -600,9 +702,14 @@ func _start_chunk(r: int, k: int) -> void:
 	var oy: float = w0.y
 	var node := Node3D.new()
 	node.name = "%s_%d" % [R.name, k]
-	add_child(node)
+	if is_inf(_anchor_x):   # (a chunk built before the first sync: a test's)
+		_anchor_x = ox
+		_anchor_y = oy
+	node.position = Vector3(ox - _anchor_x, 0.0, -(oy - _anchor_y))
+	_chunk_root.add_child(node)
 	var key := Vector2i(r, k)
-	chunks[key] = [node, ox, oy]
+	var mid := (w0 + _wxy(r, c1)) / 2.0
+	chunks[key] = [node, ox, oy, mid.x, mid.y]
 	built += 1
 	var st := []
 	for q in 5:   # the road, deco, glow, lit strips, beacons
@@ -623,6 +730,8 @@ func _start_chunk(r: int, k: int) -> void:
 
 func _deco_template_key(J: Dictionary, R: CraftSim.TrackPath) -> String:
 	if R.role != "" or _smap.has(R) or int(J.c1) - int(J.c0) != CH or int(J.c0) == 0 or int(J.c1) == R.N - 1:
+		return ""
+	if scenic != null and (scenic.on(J.r, int(J.c0)) or scenic.on(J.r, int(J.c1))):
 		return ""
 	var start: int = J.c0
 	var finish: int = J.c1
@@ -706,6 +815,8 @@ func pillar_specs(r: int, i: int) -> Array:
 	var high := h > 150.0
 	if h <= DECK + 2.0 or i % (40 if high else PILLAR_EVERY) != 0:
 		return []
+	if scenic != null and scenic.on(r, i) and not scenic.bridged(r, i):
+		return []   # a scenic road lies on its own land: a mountainside's bench, a sea cliff's top
 	var R: CraftSim.TrackPath = sim.roads[r]
 	var thick := 20.0 + h * 0.02 if high else 14.0
 	if _support_clearance == null:
@@ -819,21 +930,45 @@ func _sample(J: Dictionary, R: CraftSim.TrackPath, i: int) -> void:
 			_strip(lglow, R, ox, oy, i, centre + side * 12.0 - 1.5, centre + side * 12.0 + 1.5, hi + 0.12, hj + 0.12, JUMP_AMBER, 0.0, 0.0, span)
 		if i % 20 == 0:
 			_approach_arrow(lglow, R, ox, oy, i, hi, float(guide[2]), centre)
-	# a flyover's deck: its edges, its underside, its pillars
-	if hi > 4.0 or hj > 4.0:
+	# a flyover's deck: its edges, its underside, its pillars. A scenic road lies on its own land and
+	# has none, but on its viaduct: there the slab stops at the feet of the open ramps (you see past it).
+	var scenic_here: bool = scenic != null and scenic.on(r, i)
+	var bridged: bool = scenic_here and scenic.bridged(r, i)
+	if (hi > 4.0 or hj > 4.0) and (not scenic_here or bridged):
+		var slab: float = hw - (CraftSim.net_edge_span(R.w[i]) if bridged else 0.0)
+		var slab_j: float = hw_j - (CraftSim.net_edge_span(R.w[j]) if bridged else 0.0)
 		for sgn in [-1.0, 1.0]:
 			var side := 0 if sgn < 0.0 else 1
 			if open_i[side] or open_j[side]:
 				continue
-			var ea := _p(R, ox, oy, i, sgn * hw, hi)
-			var eb := _p(R, ox, oy, j, sgn * hw_j, hj)
-			_quad(deco, [ea - _up * DECK, eb - up_j * DECK, eb + up_j * te_j, ea + _up * te], Color(0.55, 0.55, 0.53))
+			var ea := _p(R, ox, oy, i, sgn * slab, hi)
+			var eb := _p(R, ox, oy, j, sgn * slab_j, hj)
+			_quad(deco, [ea - _up * DECK, eb - up_j * DECK, eb + up_j * (0.0 if bridged else te_j), ea + _up * (0.0 if bridged else te)], Color(0.55, 0.55, 0.53))
 			_quad(lglow, [ea - _up * DECK, eb - up_j * DECK, eb - up_j * (DECK - 0.8), ea - _up * (DECK - 0.8)], STRIP_LIGHT)
-		_quad(deco, [_p(R, ox, oy, i, hw, hi - DECK), _p(R, ox, oy, i, -hw, hi - DECK), _p(R, ox, oy, j, -hw, hj - DECK), _p(R, ox, oy, j, hw, hj - DECK)], Color(0.32, 0.32, 0.31))
+		_quad(deco, [_p(R, ox, oy, i, slab, hi - DECK), _p(R, ox, oy, i, -slab, hi - DECK), _p(R, ox, oy, j, -slab_j, hj - DECK), _p(R, ox, oy, j, slab_j, hj - DECK)], Color(0.32, 0.32, 0.31))
 		for pillar in pillar_specs(r, i):
 			var thick: float = pillar.halfSize * 2.0
 			var center := Vector3(pillar.x - ox, pillar.zMax / 2.0, -(pillar.y - oy))
 			_box(deco, center, Vector3(thick, pillar.zMax, thick), Color(0.6, 0.6, 0.58))
+		# a sky bridge: a fin outside each wall, scalloped between pylons (FIN_*)
+		var fin_i := _fin_height(hi, i) if fins and not city and R.role == "" and not on_shaft and not scenic_here else 0.0
+		var fin_j := _fin_height(hj, j) if fin_i > 0.0 else 0.0
+		if fin_i > 0.0 and fin_j > 0.0:
+			var fin_station := float(i % 120) * 24.0
+			for sgn in [-1.0, 1.0]:
+				var fin_side := 0 if sgn < 0.0 else 1
+				if open_i[fin_side] or open_j[fin_side]:
+					continue
+				var fa := _p(R, ox, oy, i, sgn * (hw + FIN_SET), hi + te)
+				var fb := _p(R, ox, oy, j, sgn * (hw_j + FIN_SET), hj + te_j)
+				# (its face's normal toward the road, for the light: the left fin as drawn, the right one turned round)
+				if sgn > 0.0:
+					_barrier_face(deco, fa + _up, fb + up_j, fb + up_j * fin_j, fa + _up * fin_i, fin_station, fin_station + float(span) * 24.0, 1.0, (fin_i + fin_j) * 0.5, FIN_COL)
+				else:
+					_barrier_face(deco, fb + up_j, fa + _up, fa + _up * fin_i, fb + up_j * fin_j, fin_station + float(span) * 24.0, fin_station, 1.0, (fin_i + fin_j) * 0.5, FIN_COL)
+				_quad(lglow, [fa + _up * (fin_i - 0.7), fb + up_j * (fin_j - 0.7), fb + up_j * fin_j, fa + _up * fin_i], STRIP_LIGHT)
+				if posmod(i, MAST_EVERY) == 0:
+					_box(deco, fa + Vector3.UP * ((fin_i + 6.0) / 2.0), Vector3(5.0, fin_i + 6.0, 5.0), Color(0.42, 0.43, 0.45))
 	if in_hall:
 		_hall(J, R, i, hw, hi + te, hj + te)
 	if on_shaft and i % HOOP_EVERY == 0:
@@ -852,6 +987,19 @@ func _sample(J: Dictionary, R: CraftSim.TrackPath, i: int) -> void:
 			continue
 		var wa := _p(R, ox, oy, i, sgn * hw, hi + te)   # (on the ramp's top)
 		var wb := _p(R, ox, oy, j, sgn * hw_j, hj + te_j)
+		if scenic_here and scenic.open(r, i, sgn > 0.0):
+			# The land falls away here: nothing stands in the way of the view. The forcefield that turns
+			# you back is still there (the sims'); what shows is a lit rail, knee high, on slim posts.
+			_wall(lglow, wa, wb, 0.55, 0.85, WALL_STRIP, up_j)
+			if i % 4 == 0:
+				_box(deco, wa + Vector3.UP * 0.42, Vector3(0.35, 0.85, 0.35), Color(0.3, 0.31, 0.33))
+			if i % MAST_EVERY == 0:
+				var post := _p(R, ox, oy, i, sgn * (hw + 0.4), hi + te)
+				_box(deco, post + Vector3.UP * (MAST_H / 2.0), Vector3(0.6, MAST_H, 0.6), Color(0.3, 0.31, 0.33))
+				_box(glow, post + Vector3.UP * (MAST_H + 0.45), Vector3(0.9, 0.9, 0.9), STRIP_LIGHT)
+				_beacon(lamps, post + Vector3.UP * (MAST_H + 0.45), STRIP_LIGHT)
+				J.n_lamps += 1
+			continue
 		var top := BAND_H
 		var curb_color := Color(0.28, 0.30, 0.30) if in_shelter else Color(0.57, 0.58, 0.56)
 		var wall_band: Color = (BAND_SF if city else BAND)[(i / 4) % 2]
@@ -1137,6 +1285,482 @@ func _approach_arrow(st: SurfaceTool, R: CraftSim.TrackPath, ox: float, oy: floa
 
 
 ## The chunk in hand's ends (a barrier where nothing goes on), its meshes committed.
+## ---- The land beside the road, and the fins beside a sky bridge ----
+
+## Banks for the chunks waiting on one, until `end` (usec): each chunk's rows a sample at a time,
+## then its surface (the terrain's own material) onto the chunk's mesh. A chunk freed while it
+## waited is passed over.
+func _bank_work(end: int) -> void:
+	if _bank_job.is_empty() and _bank_queue.is_empty():
+		return
+	var t0 := Time.get_ticks_usec()
+	while Time.get_ticks_usec() < end:
+		if _bank_job.is_empty():
+			if _bank_queue.is_empty():
+				break
+			_bank_job = _bank_queue.pop_front()
+			var key: Vector2i = _bank_job.key
+			if not chunks.has(key) or chunks[key][0] != _bank_job.node:
+				_bank_job = {}
+				continue
+		var J := _bank_job
+		if int(J.i) < int(J.c1):
+			if J.get("flank", false):
+				_flank_step(J, sim.roads[int(J.r)], int(J.i))
+			else:
+				_bank_step(J, sim.roads[int(J.r)], int(J.i))
+			J.i += 1
+			continue
+		var bank = J.get("bank")
+		if bank != null and (bank.idx as PackedInt32Array).size() > 0:
+			var land := []
+			land.resize(Mesh.ARRAY_MAX)
+			land[Mesh.ARRAY_VERTEX] = bank.v
+			land[Mesh.ARRAY_NORMAL] = bank.n
+			land[Mesh.ARRAY_TEX_UV] = bank.uv
+			land[Mesh.ARRAY_COLOR] = bank.c
+			land[Mesh.ARRAY_INDEX] = bank.idx
+			var mesh: ArrayMesh = J.mesh
+			var land_surface := mesh.get_surface_count()
+			mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, land)
+			mesh.surface_set_material(land_surface, landscape.material)
+			bank_chunks += 1
+		_bank_job = {}
+	bank_us += Time.get_ticks_usec() - t0
+
+
+## The bank's rows for the stretch of chunk J that ends at sample i + 1: a row every BANK_EVERY
+## samples and at the chunk's ends, each a function of its road and sample alone, so the next
+## chunk's first row is this one's last.
+func _bank_step(J: Dictionary, R: CraftSim.TrackPath, i: int) -> void:
+	if R.role != "" or _smap.has(R):
+		return
+	var c1: int = J.c1
+	if not J.has("bank"):   # the first sample this job is given (its chunk's first, but for a job built by hand)
+		J.bank = {"v": PackedVector3Array(), "n": PackedVector3Array(), "uv": PackedVector2Array(), "c": PackedColorArray(), "idx": PackedInt32Array(),
+			"prev": [_bank_row(J, R, i, -1.0), _bank_row(J, R, i, 1.0)]}
+	var j := i + 1
+	if j % BANK_EVERY != 0 and j != c1:
+		return
+	var B: Dictionary = J.bank
+	for side in 2:
+		var row := _bank_row(J, R, j, -1.0 if side == 0 else 1.0)
+		var prev: Array = B.prev[side]
+		if not row.is_empty() and not prev.is_empty():
+			var ia := _bank_put(B, prev, J.ox, J.oy)
+			var ib := _bank_put(B, row, J.ox, J.oy)
+			for m in 3:
+				# the terrain's material shows one face only: wind each strip so it is the one the row's normals name
+				var qa: Vector3 = prev[m]
+				var facing: Vector3 = (prev[4 + m] as Vector3) + (prev[5 + m] as Vector3)
+				if ((row[m] as Vector3) - qa).cross((prev[m + 1] as Vector3) - qa).dot(facing) > 0.0:
+					B.idx.append_array(PackedInt32Array([ia + m, ib + m + 1, ib + m, ia + m, ia + m + 1, ib + m + 1]))
+				else:
+					B.idx.append_array(PackedInt32Array([ia + m, ib + m, ib + m + 1, ia + m, ib + m + 1, ia + m + 1]))
+			_bank_crops(B, prev, row, int(J.r), j, side, J.ox, J.oy)
+		B.prev[side] = row
+
+
+## A bank row's four vertices into the mesh (once), in the terrain's own UVs (the world's plan / 256).
+func _bank_put(B: Dictionary, row: Array, ox: float, oy: float) -> int:
+	if int(row[9]) >= 0:
+		return row[9]
+	var base: int = B.v.size()
+	for m in 4:
+		var p: Vector3 = row[m]
+		B.v.append(p)
+		B.n.append(row[4 + m])
+		B.uv.append(Vector2(p.x + ox, p.z - oy) / 256.0)
+		B.c.append(row[8])
+	row[9] = base
+	return base
+
+
+## The bank across road R's side sgn at sample i: [foot, shoulder, crest, far foot (points against
+## the chunk's origin), their four normals, the land's colour there, its place in the mesh (-1: not
+## yet)], or [] where there is none.
+func _bank_row(J: Dictionary, R: CraftSim.TrackPath, i: int, sgn: float) -> Array:
+	var k := _bank_factor(J, R, i, sgn)
+	if k < 0.04:
+		return []
+	var hw: float = R.w[i] / 2.0
+	var base: float = _h(int(J.r), i) + CraftSim.net_edge(R.w[i], hw).x + 0.5   # just over the wall's foot, hidden behind it
+	var foot: float = hw + BANK_SET
+	var crest := Vector2(R.px[i] + R.nx[i] * sgn * (foot + BANK_RUN), R.py[i] + R.ny[i] * sgn * (foot + BANK_RUN))
+	var height: float = k * lerpf(BANK_H[0], BANK_H[1], smoothstep(-0.45, 0.45, _bank_noise.get_noise_2dv(crest)))
+	var run: float = BANK_RUN * k
+	var offs := [foot, foot + 0.45 * run, foot + run, foot + run + BANK_BACK * k]
+	var ys := [base, base + 0.62 * height, base + height, BANK_FLOOR]
+	var out := []
+	for m in 4:
+		out.append(_p(R, J.ox, J.oy, i, sgn * float(offs[m]), float(ys[m])))
+	var outward := Vector3(R.nx[i], 0.0, -R.ny[i]) * sgn
+	var seg := []
+	for m in 3:
+		seg.append((outward * (float(ys[m]) - float(ys[m + 1])) + Vector3.UP * (float(offs[m + 1]) - float(offs[m]))).normalized())
+	out.append(seg[0])
+	out.append(((seg[0] as Vector3) + (seg[1] as Vector3)).normalized())
+	out.append(((seg[1] as Vector3) + (seg[2] as Vector3)).normalized())
+	out.append(seg[2])
+	# the land's colour there (read every eighth sample and at the chunk's ends: it is the dearest thing
+	# here, and it changes over kilometres), in patches: drier and greener stretches a few hundred metres long
+	var side := 0 if sgn < 0.0 else 1
+	if i % 8 == 0 or i == int(J.c0) or i == int(J.c1) or not J.has("bank_tone"):
+		var read: Color = landscape.color_at(crest)
+		if not J.has("bank_tone"):
+			J.bank_tone = [read, read]
+		J.bank_tone[side] = read
+	var tone: Color = J.bank_tone[side]
+	var patch: float = 0.84 + 0.34 * smoothstep(-0.4, 0.4, _bank_noise.get_noise_2d(crest.y * 2.6 + 9000.0, crest.x * 2.6))
+	out.append(Color(tone.r * patch, tone.g * patch, tone.b * patch, tone.a))
+	out.append(-1)
+	return out
+
+
+## What grows and what shows on the bank between two of its rows: BANK_CROPS things on the upper
+## slope, each placed and sized by its road, row and side alone. Conifers where the land is green
+## (two in three there), else a low slab of rock, ridged and askew. In the bank's own surface: no
+## draw of their own. Each is five or six shared vertices put in with one append an array: face by
+## face they were most of the bank's 1.2 ms a chunk, and a respawn's chunks came in late.
+## (Their first form, a four-sided grey spire, read as a row of little pyramids.)
+func _bank_crops(B: Dictionary, a: Array, b: Array, r: int, j: int, side: int, ox: float, oy: float) -> void:
+	var a1: Vector3 = a[1]
+	var a2: Vector3 = a[2]
+	var b1: Vector3 = b[1]
+	var b2: Vector3 = b[2]
+	if a2.y - (a[0] as Vector3).y < 12.0 or b2.y - (b[0] as Vector3).y < 12.0:
+		return   # (a bank tapering away keeps a clean slope)
+	var along := (b2 - a2).normalized()
+	var tone: Color = a[8]
+	var green: bool = tone.g > tone.r * 1.08 and tone.g > tone.b * 1.08
+	for n in BANK_CROPS:
+		var seed := hash(Vector4i(r, j, side, n))
+		var u := float(seed % 997) / 997.0                         # along the stretch
+		var t := 0.1 + 0.9 * float((seed / 997) % 991) / 991.0     # up the upper slope: 0 the shoulder, 1 the crest
+		var size := float((seed / 988027) % 983) / 983.0
+		var at := (a1.lerp(a2, t)).lerp(b1.lerp(b2, t), u) - Vector3.UP * 1.5
+		var d1 := along.rotated(Vector3.UP, float(seed % 628) / 100.0)
+		var d2 := d1.cross(Vector3.UP)
+		var uv := Vector2(at.x + ox, at.z - oy) / 256.0
+		var base: int = B.v.size()
+		if green and seed % 3 != 0:
+			# a conifer: a dark spire. Its normals are turned most of the way up, or the terrain's
+			# material would paint its steep sides as bare rock.
+			var e1 := d1 * (3.0 + 2.4 * size)
+			var e2 := d2 * (3.0 + 2.4 * size)
+			var shade := 0.8 + 0.4 * float(seed % 11) / 10.0
+			var leaf := Color(0.11 * shade, 0.27 * shade, 0.12 * shade, 0.0)
+			var k1 := d1 * 0.16
+			var k2 := d2 * 0.16
+			B.v.append_array(PackedVector3Array([at - e1 - e2, at + e1 - e2, at + e1 + e2, at - e1 + e2, at + Vector3.UP * (15.0 + 13.0 * size)]))
+			B.n.append_array(PackedVector3Array([(Vector3.UP - k1 - k2).normalized(), (Vector3.UP + k1 - k2).normalized(), (Vector3.UP + k1 + k2).normalized(),
+				(Vector3.UP - k1 + k2).normalized(), Vector3.UP]))
+			B.uv.append_array(PackedVector2Array([uv, uv, uv, uv, uv]))
+			B.c.append_array(PackedColorArray([leaf, leaf, leaf, leaf, leaf]))
+			B.idx.append_array(PackedInt32Array([base, base + 1, base + 4, base + 1, base + 2, base + 4, base + 2, base + 3, base + 4, base + 3, base, base + 4]))
+		else:
+			# rock: a slab with a ridge along it, higher at one end, leaning
+			var l1 := d1 * (6.0 + 9.0 * size)
+			var w2 := d2 * (3.5 + 4.5 * float(seed % 13) / 12.0)
+			var high := 3.0 + 6.0 * size
+			var lean := w2 * (float(seed % 17) / 16.0 - 0.5)
+			var dark := 0.5 + 0.22 * float(seed % 7) / 6.0
+			var stone := Color(tone.r * dark, tone.g * dark, tone.b * dark, 0.0)
+			var up := Vector3.UP * 0.35
+			B.v.append_array(PackedVector3Array([at - l1 - w2, at + l1 * 0.8 - w2 * 0.7, at + l1 * 0.9 + w2, at - l1 * 0.7 + w2 * 0.8,
+				at - l1 * 0.45 + Vector3.UP * high + lean, at + l1 * 0.4 + Vector3.UP * high * (0.45 + 0.4 * float(seed % 5) / 4.0) + lean]))
+			B.n.append_array(PackedVector3Array([(up - d1 - d2).normalized(), (up + d1 - d2).normalized(), (up + d1 + d2).normalized(), (up - d1 + d2).normalized(),
+				(Vector3.UP - d1 * 0.4).normalized(), (Vector3.UP + d1 * 0.4).normalized()]))
+			B.uv.append_array(PackedVector2Array([uv, uv, uv, uv, uv, uv]))
+			B.c.append_array(PackedColorArray([stone, stone, stone, stone, stone, stone]))
+			B.idx.append_array(PackedInt32Array([base, base + 1, base + 5, base, base + 5, base + 4, base + 1, base + 2, base + 5,
+				base + 2, base + 3, base + 4, base + 2, base + 4, base + 5, base + 3, base, base + 4]))
+
+
+## A scenic road's own land (view/network_scenic.gd): the cliff under its open edge, the beach, the
+## rock cut and the mountainside over it, out to where the terrain's grid takes over. Built like
+## the banks, after the road and out of what its build left of the frame: a row across each side
+## every BANK_EVERY samples and at the chunk's ends, each a function of its road and sample alone,
+## so the next chunk's first row is this one's last.
+func _flank_step(J: Dictionary, R: CraftSim.TrackPath, i: int) -> void:
+	if not J.has("bank"):
+		J.bank = {"v": PackedVector3Array(), "n": PackedVector3Array(), "uv": PackedVector2Array(), "c": PackedColorArray(), "idx": PackedInt32Array(),
+			"prev": [_flank_row(J, R, i, false), _flank_row(J, R, i, true)]}
+	var j := i + 1
+	if j % BANK_EVERY != 0 and j != int(J.c1):
+		return
+	var B: Dictionary = J.bank
+	for side in 2:
+		var row := _flank_row(J, R, j, side == 1)
+		var prev: Dictionary = B.prev[side]
+		if not row.is_empty() and not prev.is_empty():
+			var ia := _flank_put(B, prev, J.ox, J.oy)
+			var ib := _flank_put(B, row, J.ox, J.oy)
+			var pa: PackedVector3Array = prev.p
+			var pb: PackedVector3Array = row.p
+			var na: PackedVector3Array = prev.n
+			for m in pa.size() - 1:
+				# the terrain's material shows one face only: wind each strip so it is the upper one
+				if (pb[m] - pa[m]).cross(pa[m + 1] - pa[m]).dot(na[m] + na[m + 1]) > 0.0:
+					B.idx.append_array(PackedInt32Array([ia + m, ib + m + 1, ib + m, ia + m, ia + m + 1, ib + m + 1]))
+				else:
+					B.idx.append_array(PackedInt32Array([ia + m, ib + m, ib + m + 1, ia + m, ib + m + 1, ia + m + 1]))
+			_flank_crops(B, prev, row, int(J.r), j, side, J.ox, J.oy)
+		B.prev[side] = row
+
+
+## The land across one side of scenic road R at sample i: {p (points against the chunk's origin),
+## n (their normals), c (their colours), d (m out, height: scenic.row), sea, base (its place in the
+## mesh, -1 until put)}, or {} off the road's scenic stretch.
+func _flank_row(J: Dictionary, R: CraftSim.TrackPath, i: int, left: bool) -> Dictionary:
+	var r: int = J.r
+	if not scenic.on(r, i):
+		return {}
+	var pairs: PackedFloat32Array = scenic.row(r, i, left)
+	var sgn := 1.0 if left else -1.0
+	var outward := Vector3(R.nx[i], 0.0, -R.ny[i]) * sgn
+	var count := pairs.size() / 2
+	var sea: bool = scenic.sea_side(r, i, left)
+	var rising: bool = pairs[5] > pairs[1] + 2.0
+	# the land's colour, near and far (read every eighth sample: it is the dearest thing here). A sea
+	# cliff takes the colour of the land behind the road: its own foot is sand.
+	var key := "tone%d" % int(left)
+	if i % 8 == 0 or not J.has(key):
+		var way := -sgn if sea else sgn
+		J[key] = [landscape.color_at(Vector2(R.px[i] + R.nx[i] * way * 500.0, R.py[i] + R.ny[i] * way * 500.0)),
+			landscape.color_at(Vector2(R.px[i] + R.nx[i] * way * 1500.0, R.py[i] + R.ny[i] * way * 1500.0))]
+	var near: Color = J[key][0]
+	var far: Color = J[key][1]
+	var p := PackedVector3Array()
+	var normals := PackedVector3Array()
+	var colours := PackedColorArray()
+	for m in count:
+		var off := pairs[m * 2]
+		var y := pairs[m * 2 + 1]
+		p.append(_p(R, J.ox, J.oy, i, sgn * off, y))
+		var a := maxi(m - 1, 0)
+		var b := mini(m + 1, count - 1)
+		var run := pairs[b * 2] - pairs[a * 2]
+		var rise := pairs[b * 2 + 1] - pairs[a * 2 + 1]
+		normals.append((Vector3.UP * run - outward * rise).normalized() if run > 0.01 else Vector3.UP)
+		var tone := near.lerp(far, smoothstep(300.0, 1300.0, off))
+		if sea:
+			tone = (scenic.SAND as Color).lerp(tone, smoothstep(4.0, 7.0, y))
+			if m == 4:
+				tone = tone.lerp(FLANK_ROCK, 0.5)   # the sea cliff's face
+		elif (rising and m >= 1 and m <= 2) or (not rising and m >= 1 and m <= 4):
+			tone = tone.lerp(FLANK_ROCK, 0.6)       # a rock cut over the road; a valley wall's face under it
+		var patch: float = 0.86 + 0.3 * smoothstep(-0.4, 0.4, _bank_noise.get_noise_2d((R.py[i] + R.ny[i] * sgn * off) * 2.6 + 9000.0, (R.px[i] + R.nx[i] * sgn * off) * 2.6))
+		colours.append(Color(tone.r * patch, tone.g * patch, tone.b * patch, tone.a))
+	return {"p": p, "n": normals, "c": colours, "d": pairs, "sea": sea, "base": -1}
+
+
+func _flank_put(B: Dictionary, row: Dictionary, ox: float, oy: float) -> int:
+	if int(row.base) >= 0:
+		return row.base
+	var base: int = B.v.size()
+	var pts: PackedVector3Array = row.p
+	B.v.append_array(pts)
+	B.n.append_array(row.n)
+	B.c.append_array(row.c)
+	for q in pts:
+		B.uv.append(Vector2(q.x + ox, q.z - oy) / 256.0)
+	row.base = base
+	return base
+
+
+## What stands on the flank between two of its rows, each thing placed and sized by its road, row
+## and side alone: conifers up the mountainside (larger the further off, so the far slope reads as
+## forest too), rock where it is too high, too steep's left bare; a sea stack now and then off the beach.
+func _flank_crops(B: Dictionary, a: Dictionary, b: Dictionary, r: int, j: int, side: int, ox: float, oy: float) -> void:
+	var pa: PackedVector3Array = a.p
+	var pb: PackedVector3Array = b.p
+	var da: PackedFloat32Array = a.d
+	var last := pa.size() - 1
+	if bool(a.sea):
+		var seed := hash(Vector4i(r, j, side, 77))
+		if seed % 5 == 0:
+			var u := float(seed % 997) / 997.0
+			var t := 0.2 + 0.7 * float((seed / 997) % 991) / 991.0
+			var at := (pa[last - 2].lerp(pa[last], t)).lerp(pb[last - 2].lerp(pb[last], t), u)
+			at.y = scenic.FLOOR
+			_crop_stack(B, at, seed, ox, oy)
+		return
+	var tones: PackedColorArray = a.c
+	for m in range(2, last - 1):   # from 40 m out to where the terrain takes over; not the buried lip
+		var width := da[(m + 1) * 2] - da[m * 2]
+		if absf(da[(m + 1) * 2 + 1] - da[m * 2 + 1]) > 1.1 * maxf(width, 1.0):
+			continue   # a cliff keeps its bare face
+		var size := 1.0 + 0.0012 * da[m * 2]
+		for n in (2 if width < 100.0 else (4 if width < 200.0 else 6)):
+			var seed := hash(Vector4i(r, j, side * 16 + m, n))
+			var u := float(seed % 997) / 997.0
+			var t := float((seed / 997) % 991) / 991.0
+			var at := (pa[m].lerp(pa[m + 1], t)).lerp(pb[m].lerp(pb[m + 1], t), u) - Vector3.UP * 1.5
+			var tone: Color = tones[m]
+			var green: bool = tone.g > tone.r * 1.04 and tone.g > tone.b * 1.04
+			var snowy: bool = minf(tone.r, minf(tone.g, tone.b)) > 0.5
+			if at.y < 5.0:
+				continue
+			if (green or (snowy and at.y < 1500.0)) and at.y < 1900.0 and seed % 4 != 0:
+				_crop_conifer(B, at, seed, size, snowy, ox, oy)
+			else:
+				_crop_rock(B, at, seed, Color(tone.r * 0.6, tone.g * 0.6, tone.b * 0.6, 0.0), size, 1.0, ox, oy)
+
+
+## A conifer: a dark spire, five shared vertices in the land's own surface (no draw of its own). Its
+## normals are turned most of the way up, or the terrain's material would paint its sides as bare rock.
+func _crop_conifer(B: Dictionary, at: Vector3, seed: int, size: float, snowy: bool, ox: float, oy: float) -> void:
+	var s := float((seed / 988027) % 983) / 983.0
+	var d1 := Vector3.RIGHT.rotated(Vector3.UP, float(seed % 628) / 100.0)
+	var d2 := d1.cross(Vector3.UP)
+	var e1 := d1 * (3.0 + 2.4 * s) * size
+	var e2 := d2 * (3.0 + 2.4 * s) * size
+	var shade := 0.8 + 0.4 * float(seed % 11) / 10.0
+	var leaf := Color(0.10 * shade, 0.24 * shade, 0.13 * shade, 0.0)
+	if snowy:
+		leaf = leaf.lerp(Color(0.62, 0.68, 0.70, 0.0), 0.35)
+	var k1 := d1 * 0.16
+	var k2 := d2 * 0.16
+	var uv := Vector2(at.x + ox, at.z - oy) / 256.0
+	var base: int = B.v.size()
+	B.v.append_array(PackedVector3Array([at - e1 - e2, at + e1 - e2, at + e1 + e2, at - e1 + e2, at + Vector3.UP * (15.0 + 13.0 * s) * size]))
+	B.n.append_array(PackedVector3Array([(Vector3.UP - k1 - k2).normalized(), (Vector3.UP + k1 - k2).normalized(), (Vector3.UP + k1 + k2).normalized(),
+		(Vector3.UP - k1 + k2).normalized(), Vector3.UP]))
+	B.uv.append_array(PackedVector2Array([uv, uv, uv, uv, uv]))
+	B.c.append_array(PackedColorArray([leaf, leaf, leaf, leaf, leaf]))
+	B.idx.append_array(PackedInt32Array([base, base + 1, base + 4, base + 1, base + 2, base + 4, base + 2, base + 3, base + 4, base + 3, base, base + 4]))
+
+
+## A sea stack: a column of dark rock standing out of the water, narrower and uneven at its top.
+func _crop_stack(B: Dictionary, at: Vector3, seed: int, ox: float, oy: float) -> void:
+	var s := float((seed / 988027) % 983) / 983.0
+	var d1 := Vector3.RIGHT.rotated(Vector3.UP, float(seed % 628) / 100.0)
+	var d2 := d1.cross(Vector3.UP)
+	var wide := 13.0 + 22.0 * s
+	var deep := wide * (0.6 + 0.5 * float(seed % 13) / 12.0)
+	var high := 22.0 + 50.0 * float((seed / 31) % 100) / 100.0
+	var lean := (d1 * (float(seed % 17) / 16.0 - 0.5) + d2 * (float(seed % 19) / 18.0 - 0.5)) * wide * 0.5
+	var stone := Color(0.25, 0.24, 0.23, 0.0)
+	var uv := Vector2(at.x + ox, at.z - oy) / 256.0
+	var base: int = B.v.size()
+	var corners := [-d1 * wide - d2 * deep, d1 * wide - d2 * deep, d1 * wide + d2 * deep, -d1 * wide + d2 * deep]
+	for q in 4:
+		B.v.append(at + (corners[q] as Vector3))
+		B.n.append(((corners[q] as Vector3).normalized() + Vector3.UP * 0.12).normalized())
+	for q in 4:
+		B.v.append(at + (corners[q] as Vector3) * (0.5 + 0.2 * float((seed >> (q * 3)) % 7) / 6.0) + lean + Vector3.UP * high * (0.72 + 0.28 * float((seed >> (q * 2 + 5)) % 5) / 4.0))
+		B.n.append(((corners[q] as Vector3).normalized() + Vector3.UP * 0.45).normalized())
+	B.v.append(at + lean + Vector3.UP * high * 1.06)
+	B.n.append(Vector3.UP)
+	for q in 9:
+		B.uv.append(uv)
+		B.c.append(stone)
+	for q in 4:
+		var q1 := (q + 1) % 4
+		B.idx.append_array(PackedInt32Array([base + q, base + q1, base + 4 + q1, base + q, base + 4 + q1, base + 4 + q, base + 4 + q, base + 4 + q1, base + 8]))
+
+
+## Rock: a slab with a ridge along it, higher at one end, leaning; `lift` stands it up.
+func _crop_rock(B: Dictionary, at: Vector3, seed: int, stone: Color, size: float, lift: float, ox: float, oy: float) -> void:
+	var s := float((seed / 988027) % 983) / 983.0
+	var d1 := Vector3.RIGHT.rotated(Vector3.UP, float(seed % 628) / 100.0)
+	var d2 := d1.cross(Vector3.UP)
+	var l1 := d1 * (6.0 + 9.0 * s) * size
+	var w2 := d2 * (3.5 + 4.5 * float(seed % 13) / 12.0) * size
+	var high := (3.0 + 6.0 * s) * size * lift
+	var lean := w2 * (float(seed % 17) / 16.0 - 0.5)
+	var up := Vector3.UP * 0.35
+	var uv := Vector2(at.x + ox, at.z - oy) / 256.0
+	var base: int = B.v.size()
+	B.v.append_array(PackedVector3Array([at - l1 - w2, at + l1 * 0.8 - w2 * 0.7, at + l1 * 0.9 + w2, at - l1 * 0.7 + w2 * 0.8,
+		at - l1 * 0.45 + Vector3.UP * high + lean, at + l1 * 0.4 + Vector3.UP * high * (0.45 + 0.4 * float(seed % 5) / 4.0) + lean]))
+	B.n.append_array(PackedVector3Array([(up - d1 - d2).normalized(), (up + d1 - d2).normalized(), (up + d1 + d2).normalized(), (up - d1 + d2).normalized(),
+		(Vector3.UP - d1 * 0.4).normalized(), (Vector3.UP + d1 * 0.4).normalized()]))
+	B.uv.append_array(PackedVector2Array([uv, uv, uv, uv, uv, uv]))
+	B.c.append_array(PackedColorArray([stone, stone, stone, stone, stone, stone]))
+	B.idx.append_array(PackedInt32Array([base, base + 1, base + 5, base, base + 5, base + 4, base + 1, base + 2, base + 5,
+		base + 2, base + 3, base + 4, base + 2, base + 4, base + 5, base + 3, base, base + 4]))
+
+
+## How much of the bank stands at road R's sample i, side sgn: 0 none, 1 all of it. None on a
+## deck, in a town or its hall, or where another road runs alongside or joins.
+func _bank_factor(J: Dictionary, R: CraftSim.TrackPath, i: int, sgn: float) -> float:
+	var r: int = J.r
+	var hi := _h(r, i)
+	if hi >= BANK_MAX_H:
+		return 0.0
+	var k := 1.0 - smoothstep(0.3, BANK_MAX_H, hi)
+	# a town keeps its fences and its skyline: the land comes up over a kilometre outside it
+	for step in [0, 12, 24, 36]:
+		if R.mode[clampi(i - step, 0, R.N - 1)] == 0 or R.mode[clampi(i + step, 0, R.N - 1)] == 0:
+			k *= smoothstep(0.0, 1.0, float(step) / BANK_TOWN)
+			break
+	if k <= 0.0:
+		return 0.0
+	# (a junction's opening needs no test of its own: the road that joins there leaves no gap)
+	return k * clampf(_bank_gap(J, R, i, sgn) / BANK_GAP, 0.0, 1.0)
+
+
+## The open ground (m) beyond road R's edge on side sgn at sample i before another road's surface
+## begins: INF with none about. A road well overhead (an express deck) is no obstacle.
+func _bank_gap(J: Dictionary, R: CraftSim.TrackPath, i: int, sgn: float) -> float:
+	if not J.has("bank_runs"):
+		# The other stretches of road that could come within reach of this chunk's banks, sorted out
+		# once: from the grid's squares round it, those whose own span (a run in one square is nearly
+		# straight: its ends' midpoint, half their distance and some slack) comes near the chunk. Round
+		# a city the squares hold dozens of runs, and reading them all at every row took 3 ms a chunk.
+		var runs := []
+		var mid: int = (int(J.c0) + int(J.c1)) / 2
+		var mx: float = R.px[mid]
+		var my: float = R.py[mid]
+		var reach: float = 0.5 * CH * 24.0 + R.w[mid] * 0.5 + BANK_GAP + 80.0 + 300.0
+		var cx := int(floor(mx / CraftSim.NET_CELL))
+		var cy := int(floor(my / CraftSim.NET_CELL))
+		for dx in [-1, 0, 1]:
+			for dy in [-1, 0, 1]:
+				for run in sim._net_cells.get((cx + dx) * 4096 + cy + dy, []):
+					if int(run[0]) == int(J.r):
+						continue
+					var Q: CraftSim.TrackPath = sim.roads[int(run[0])]
+					var q0: int = run[1]
+					var q1: int = run[2]
+					var span := 0.5 * Vector2(Q.px[q1] - Q.px[q0], Q.py[q1] - Q.py[q0]).length() + 120.0
+					if Vector2((Q.px[q0] + Q.px[q1]) * 0.5 - mx, (Q.py[q0] + Q.py[q1]) * 0.5 - my).length() <= reach + span:
+						runs.append(run)
+		J.bank_runs = runs
+	if (J.bank_runs as Array).is_empty():
+		return INF
+	var hw: float = R.w[i] / 2.0
+	var best := INF
+	for run in J.bank_runs:
+		var other: int = run[0]
+		var O: CraftSim.TrackPath = sim.roads[other]
+		var s: int = run[1]
+		var last: int = run[2]
+		while true:
+			var dx: float = O.px[s] - R.px[i]
+			var dy: float = O.py[s] - R.py[i]
+			var half: float = O.w[s] * 0.5
+			# on this side of us (some of it beyond our edge), and not far over our heads
+			if sgn * (dx * R.nx[i] + dy * R.ny[i]) + half > hw and _h(other, s) < BANK_OVER:
+				best = minf(best, sqrt(dx * dx + dy * dy) - half - hw)
+			if s >= last:
+				break
+			s = mini(s + 6, last)
+	return best - 80.0   # (the other road is read every sixth sample: 72 m of slack, and a margin)
+
+
+## A sky bridge's fin above its wall's foot at sample i (0: none): low between its pylons, which
+## stand at the masts' stations, high at them.
+func _fin_height(h: float, i: int) -> float:
+	var up := smoothstep(FIN_FROM[0], FIN_FROM[1], h)
+	if up <= 0.0:
+		return 0.0
+	var u := float(posmod(i, MAST_EVERY)) / MAST_EVERY * 2.0 - 1.0
+	return up * lerpf(FIN_H[0], FIN_H[1], u * u)
+
+
 func _finish(J: Dictionary, R: CraftSim.TrackPath) -> void:
 	var r: int = J.r
 	var ox: float = J.ox
@@ -1185,9 +1809,17 @@ func _finish(J: Dictionary, R: CraftSim.TrackPath) -> void:
 		arr[Mesh.ARRAY_TEX_UV2] = J.shoulder_uv
 		arr[Mesh.ARRAY_COLOR] = J.traffic_colors
 		arr[Mesh.ARRAY_INDEX] = _grid_index(int(J.rows), int(J.cols))
+		var split := _open_split(r, c0, int(J.rows), int(J.cols)) if scenic != null and (scenic.on(r, c0) or scenic.on(r, c1)) else []
+		if not split.is_empty():
+			arr[Mesh.ARRAY_INDEX] = split[0]
 		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
 		var in_shelter := r == _shelter_road and c1 >= int(halls[r][0]) and c0 <= int(halls[r][1])
 		mesh.surface_set_material(0, _shelter_asphalt if in_shelter else _asph)
+		if not split.is_empty() and open_edge_probe != "none":
+			var glass := arr.duplicate()
+			glass[Mesh.ARRAY_INDEX] = split[1]
+			mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, glass)
+			mesh.surface_set_material(1, _glass)
 	var cpu_surfaces := []
 	if not J.template.is_empty():
 		var cached: Array = J.template[0]
@@ -1203,6 +1835,12 @@ func _finish(J: Dictionary, R: CraftSim.TrackPath) -> void:
 				mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES,arrays)
 				mesh.surface_set_material(n0,pair[1])
 				cpu_surfaces.append([arrays,pair[1]])
+	# The land beside it is built afterwards (_bank_work), so the road itself comes in no later than
+	# it did: built with it, a respawn 60 km off was still short of chunks after 60 frames.
+	if landscape != null and scenic != null and (scenic.on(r, c0) or scenic.on(r, c1)):   # a scenic road's own land: its flank
+		_bank_queue.append({"key": J.key, "r": r, "c0": c0, "c1": c1, "i": c0, "ox": ox, "oy": oy, "mesh": mesh, "node": node, "flank": true})
+	elif banks and landscape != null and R.role == "" and not _smap.has(R):
+		_bank_queue.append({"key": J.key, "r": r, "c0": c0, "c1": c1, "i": c0, "ox": ox, "oy": oy, "mesh": mesh, "node": node})
 	var mi := MeshInstance3D.new()
 	mi.name = "road"
 	mi.mesh = mesh
@@ -1295,7 +1933,7 @@ func _plan_signs() -> void:
 				info["miles"] = maxi(1, roundi(remaining / MILE))
 			var lines := []
 			if C.name.begins_with("S"):
-				lines = ["SIDE ROAD", "%d MI" % roundi(C.length / MILE)]
+				lines = [SCENIC_NAMES.get(C.name, "SIDE ROAD"), "%d MI" % roundi(C.length / MILE)]
 			elif city >= 0:
 				var mile := maxi(1, roundi((destinations[0][0] + remaining) / MILE))
 				lines = [sim.cities[city].name, "EXIT  %d MI" % mile]
@@ -1353,7 +1991,9 @@ func _index_exits() -> void:
 		var mile := maxi(1, roundi(_s[p][mouth]/MILE))
 		var info := {"mouth":mouth,"side":-1 if lateral*way > 0.0 else 1,"number":str(mile),"route":"","cardinal":""}
 		if C.name.begins_with("S"):
-			info.route = C.name
+			info.route = SCENIC_ROUTES.get(C.name, C.name)
+			if SCENIC_NAMES.has(C.name):
+				info["scenic"] = true   # (a brown board: somewhere to go for its own sake)
 		elif C.name.begins_with("R"):
 			for ji in C.jx:
 				var merge: Array = sim.junctions[ji]
@@ -1628,10 +2268,20 @@ func _build_skylines() -> void:
 	var sh := preload("res://view/skyline.gdshader")
 	# Shared stepped architecture: podium, main floors and a recessed crown.
 	# Keep the old unit-box envelope so existing road clearances still apply.
-	var tower_mesh:=Kit.compound([
-		[Kit.box(Vector3(1.0,0.10,1.0)),Kit.at(Vector3(0,-0.45,0)),Color.WHITE],
-		[Kit.box(Vector3(0.84,0.78,0.84)),Kit.at(Vector3(0,-0.01,0)),Color.WHITE],
-		[Kit.box(Vector3(0.64,0.12,0.64)),Kit.at(Vector3(0,0.44,0)),Color.WHITE]])
+	# Realism spike: a podium, a shaft with corner piers, two setbacks, a plant room and a mast.
+	# Still one mesh and one draw per city; skyline.gdshader reshapes the upper tiers per tower
+	# (some step in hard, some rise as slabs, some carry a tall mast), so no two silhouettes match.
+	var tower_parts := [
+		[Kit.box(Vector3(1.0,0.06,1.0)),Kit.at(Vector3(0,-0.47,0)),Color.WHITE],
+		[Kit.box(Vector3(0.86,0.46,0.86)),Kit.at(Vector3(0,-0.21,0)),Color.WHITE],
+		[Kit.box(Vector3(0.74,0.30,0.74)),Kit.at(Vector3(0,0.17,0)),Color.WHITE],
+		[Kit.box(Vector3(0.58,0.12,0.58)),Kit.at(Vector3(0,0.38,0)),Color.WHITE],
+		[Kit.box(Vector3(0.34,0.04,0.34)),Kit.at(Vector3(0,0.46,0)),Color.WHITE],
+		[Kit.box(Vector3(0.035,0.02,0.035)),Kit.at(Vector3(0.08,0.49,-0.06)),Color.WHITE]]
+	for sx in [-1.0, 1.0]:
+		for sz in [-1.0, 1.0]:
+			tower_parts.append([Kit.box(Vector3(0.07,0.47,0.07)),Kit.at(Vector3(0.415*sx,-0.205,0.415*sz)),Color.WHITE])
+	var tower_mesh:=Kit.compound(tower_parts)
 	for ci in sim.cities.size():
 		var city: Dictionary = sim.cities[ci]
 		var pal: Array = PALETTE.get(city.biome, PALETTE.verdant)
@@ -1826,6 +2476,26 @@ func _road_row(J: Dictionary, R: CraftSim.TrackPath, sec: Dictionary, s: int, h:
 		J.traffic_colors.append_array(sec.traffic_rows[_traffic_paint[J.r][s]])
 	J.rows = int(J.rows) + 1
 	J.cols = o.size()
+
+
+## A scenic chunk's grid in two: [the triangles that are pavement, those of its open edges' ramps]
+## (or [] with no open edge in it). Row a is sample c0 + a; the first half of the columns is the
+## right-hand ramp, the last half the left-hand one, the flat middle between them.
+func _open_split(r: int, c0: int, rows: int, cols: int) -> Array:
+	var solid := PackedInt32Array()
+	var clear := PackedInt32Array()
+	var half := cols / 2
+	for a in rows - 1:
+		var right: bool = scenic.open(r, c0 + a, false)
+		var left: bool = scenic.open(r, c0 + a, true)
+		for k in cols - 1:
+			var p := a * cols + k
+			var quad := PackedInt32Array([p, p + 1, p + cols + 1, p, p + cols + 1, p + cols])
+			if (right and k < half - 1) or (left and k >= half):
+				clear.append_array(quad)
+			else:
+				solid.append_array(quad)
+	return [] if clear.is_empty() else [solid, clear]
 
 
 ## The road grid's triangles (rows of `cols` points), cached by size: the same for every chunk.

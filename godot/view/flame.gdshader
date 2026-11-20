@@ -53,7 +53,7 @@ void fragment() {
 	// dry thrust: a short, faint blue core only; the burner fills the whole plume
 	float dry_len = 0.35 + 0.25 * t;
 	float reach = mix(1.0 - smoothstep(dry_len * 0.4, dry_len, along), 1.0 - smoothstep(0.5, 1.0, along), burner);
-	float strength = mix(0.3 + 0.35 * t, 0.62, burner) * mix(1.0, 1.4, layer);
+	float strength = mix(0.3 + 0.35 * t, 0.95, burner) * mix(1.0, 1.4, layer);
 	// shock diamonds: evenly spaced bright knots with dimmer gaps between, shrinking and fading
 	// down the plume; they modulate brightness, so the plume stays translucent between them
 	float bands = pow(0.5 + 0.5 * cos(along * 6.2831 * 4.5 + 1.2), 8.0) * (1.0 - smoothstep(0.1, 0.75, along));

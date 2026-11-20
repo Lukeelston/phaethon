@@ -31,6 +31,17 @@ miles and 1500' up to the entrance of the next ramp"):
   drops you to the ground: the dash points you to the nearest);
 - heights are keys [sample, m, slope] with Hermite cubics between (zero slopes: the old smoothstep),
   real in both sims now (the deck lock: tools/sync_network.py).
+The scenic roads (Luke, 2026-11-19: "a track that drives along the side of a mountain, with the beach
+on one side. Then maybe another with a massive vertical drop into the valley below ... Pacific
+Northwest coastal highway but at speed. Maybe they could run on either edge of the map"):
+- SCoast, down the west edge: off E1's north side, out to the coast, north along it over headlands
+  and down round bays (the sea on its left, the mountain on its right), and in again onto E2;
+- SDrop, down the east edge: off E3's south side, south up a mountainside to a rim 2,300 m up, off
+  the rim down a 2 km dive on a viaduct, along the valley's floor, and in onto E2.
+Their plans and heights are ordinary roads' (the sims know nothing else about them); SCENIC also
+carries the land beside each ([sample, the height the land reaches on the left, over how far, the
+same on the right, how far the land's edge lies under the deck]: view/network_scenic.gd shapes the
+terrain from it), which the sims only pass along.
 Roads are sampled exactly as the sims sample them (NET_STEP: straights in equal steps, arcs in
 exact chords, a last point at the end). Junction zones are found by walking: a road's end samples
 whose corridor overlaps its parent's (plus a margin), against the parent's nearest samples.
@@ -146,6 +157,50 @@ SIDES = [   # highway, its middle along the highway (m), side (+1 its left, -1 i
     ("N2", 200 * KM, 1, "kinks"), ("N2", 200 * KM, -1, "crook"), ("N2", 400 * KM, 1, "hairpin"), ("N2", 400 * KM, -1, "esses"),
     ("E3", 200 * KM, 1, "crook"), ("E3", 200 * KM, -1, "chicane"), ("E3", 400 * KM, 1, "kinks"), ("E3", 400 * KM, -1, "tighten"),
 ]
+
+
+# The scenic roads. A plan is turns and straights from its start pose ("L"/"R" radius km, degrees;
+# "S" km); `stretch` names the straight whose length is found so the road ends on its highway's side
+# line. Heights are keys (segment, how far through it 0..1, m, slope) on that plan; land is stations
+# (segment, how far through it, left, its run m, right, its run m, gap m): a side's height is
+# absolute, or ("r", m) relative to the road there. A side lower than the road falls away from it
+# (and the road's edge on that side is open: view/network_world.gd); higher, it stands over it. The
+# coast's sea side takes "sea" and the shelf (m of low ground between the road and the cliff's edge).
+SC_W = 200.0
+SCENIC = [
+    dict(name="SCoast", start=(50.0, "E1", 1, 180.0), end=("E2", -1), sea=1, stretch=26,
+         plan=[("R", 16, 40), ("S", 5), ("L", 16, 30), ("S", 6), ("R", 14, 80),          # 0-4: out to the coast, north
+               ("S", 6), ("L", 12, 22), ("R", 10, 44), ("S", 5), ("L", 12, 40),          # 5-9
+               ("S", 7), ("R", 14, 36), ("L", 9, 38), ("S", 4), ("R", 12, 44),           # 10-14
+               ("S", 6), ("L", 16, 48), ("R", 11, 40), ("S", 5), ("L", 10, 36),          # 15-19
+               ("S", 3), ("R", 13, 44), ("L", 15, 50), ("S", 4), ("R", 10, 50),          # 20-24
+               ("L", 16, 24), ("S", 8), ("R", 14, 70), ("S", 18), ("R", 16, 20)],        # 25-29: north, and in onto E2
+         heights=[(4, .12, 0, 0), (4, .96, 26, 0), (6, .55, 150, 0), (7, .6, 18, 0), (9, .5, 215, 0),
+                  (10, .7, 70, 0), (11, .55, 22, 0), (12, .5, 245, 0), (14, .5, 20, 0), (16, .5, 180, 0),
+                  (17, .55, 24, 0), (19, .5, 200, 0), (21, .5, 16, 0), (22, .5, 230, 0), (24, .5, 22, 0),
+                  (25, .6, 120, 0), (26, .7, 30, 0), (27, .45, 0, 0)],
+         land=[(4, .12, -4, 400, -4, 400, 1), (4, .5, "sea", 2600, 260, 1500, 1), (4, .96, "sea", 0, 520, 2000, 1),
+               (9, .5, "sea", 0, 760, 2300, 1), (12, .5, "sea", 0, 900, 2400, 1), (16, .5, "sea", 0, 700, 2200, 1),
+               (19, .5, "sea", 0, 980, 2500, 1), (22, .5, "sea", 0, 1150, 2600, 1), (24, .5, "sea", 0, 900, 2400, 1),
+               (26, .7, "sea", 0, 520, 2000, 1), (27, .25, "sea", 2600, 200, 1400, 1), (27, .45, -4, 400, -4, 400, 1)]),
+    dict(name="SDrop", start=(548.0, "E3", -1, 0.0), end=("E2", 1), sea=0, stretch=24,
+         plan=[("R", 16, 35), ("S", 15), ("R", 14, 55),                                   # 0-2: out to the edge, south
+               ("S", 6), ("L", 12, 25), ("R", 12, 50), ("L", 12, 25), ("S", 8),           # 3-7: the climb
+               ("R", 10, 30), ("L", 10, 60), ("R", 10, 30), ("S", 5), ("L", 14, 18),      # 8-12: the rim
+               ("S", 19),                                                                 # 13: the dive
+               ("L", 16, 20), ("R", 16, 40), ("L", 16, 28), ("S", 6), ("R", 14, 30),      # 14-18: the valley
+               ("L", 14, 34), ("R", 14, 30), ("S", 4), ("R", 12, 26), ("L", 12, 26),      # 19-23
+               ("S", 6), ("R", 14, 70), ("S", 30), ("R", 16, 20)],                        # 24-27: south, and in onto E2
+         heights=[(2, .85, 0, 0), (5, .5, 1050, .062), (8, .1, 2250, 0), (10, .5, 2330, 0), (13, .1, 2390, 0),
+                  (13, .78, 330, 0), (16, .5, 190, 0), (20, .5, 90, 0), (24, .5, 0, 0)],
+         land=[(2, .85, -4, 400, -4, 400, 1), (3, .6, 30, 700, ("r", 500), 1800, 1), (5, .5, 60, 1300, ("r", 800), 2200, 1),
+               (8, .1, 110, 1600, ("r", 950), 2400, 1), (10, .5, 140, 1600, ("r", 1000), 2400, 1),
+               (12, .5, 150, 1600, ("r", 700), 2200, 1), (13, .02, 150, 1500, ("r", 0), 1400, 1), (13, .09, 150, 1400, 170, 1400, 1),
+               (13, .16, 150, 1400, 170, 1400, 1500), (13, .6, 150, 1400, 170, 1400, 500), (13, .78, ("r", -6), 1300, ("r", -6), 1300, 1),
+               (16, .5, ("r", -6), 1100, ("r", -6), 1100, 1), (20, .5, ("r", -6), 900, ("r", -6), 900, 1),
+               (24, .3, -4, 400, -4, 400, 1)]),
+]
+scenic_roads = []   # (road index, its SCENIC entry), filled by build()
 
 
 def walk(segs, x, y, h):
@@ -626,7 +681,61 @@ def build():
         joins.append((len(roads), 1, roads.index(H)))
         roads.append(O)
         onramps.append((k, len(roads) - 1))
+    # the scenic roads: last, so every road and junction before them keeps its index
+    scenic_roads.clear()
+    for spec in SCENIC:
+        x0, start_on, start_side, hdeg = spec["start"]
+        end_on, end_side = spec["end"]
+        P0 = next(R for R in roads if R.name == start_on)
+        P1 = next(R for R in roads if R.name == end_on)
+        assert P0.kind == "highway" and P1.kind == "highway" and abs(P0.hdeg) < 1e-9 and abs(P1.hdeg) < 1e-9
+        segs = [(q[0], q[1] * KM, 0, "sp") if q[0] == "S" else (q[0], q[1] * KM, float(q[2]), "sp") for q in spec["plan"]]
+        y0 = P0.y0 + start_side * OFF
+        k = spec["stretch"]
+        assert segs[k][0] == "S"
+        # the stretch runs north or south: its length moves the end's y one for one
+        _, end = walk(segs[:k], x0 * KM, y0, math.radians(hdeg))
+        way = math.sin(end[2])
+        assert abs(abs(way) - 1.0) < 1e-9, f"{spec['name']}: the stretch must run due north or south"
+        _, end = walk(segs, x0 * KM, y0, math.radians(hdeg))
+        length = segs[k][1] + (P1.y0 + end_side * OFF - end[1]) / way
+        assert length > 2 * KM, f"{spec['name']}: its stretch comes out {length:.0f} m"
+        segs[k] = ("S", length, 0, "sp")
+        R = Road(spec["name"], "scenic", x0 * KM, y0, hdeg, SC_W, segs)
+        assert abs(R.end[1] - (P1.y0 + end_side * OFF)) < 0.01 and abs(math.sin(R.end[2])) < 1e-9, f"{spec['name']} misses {end_on}"
+        # where each segment starts, in samples (the sims' own count)
+        R.seg0 = [0]
+        for q in segs:
+            R.seg0.append(R.seg0[-1] + max(1, math.ceil((q[1] if q[0] == "S" else q[1] * math.radians(q[2])) / STEP)))
+        joins += [(len(roads), 0, roads.index(P0)), (len(roads), 1, roads.index(P1))]
+        scenic_roads.append((len(roads), spec))
+        roads.append(R)
     return roads, joins, cities, ew, ns, jumps, onramps, shafts
+
+
+def scenic_at(R, seg, frac):
+    """Sample `frac` of the way through segment `seg` of a scenic road's plan."""
+    return int(round(R.seg0[seg] + (R.seg0[seg + 1] - R.seg0[seg]) * frac))
+
+
+def scenic_table(roads):
+    """[[road, sea side (1 left, -1 right, 0 none), [[sample, left m, its run m, right m, its run m, gap m], ...]], ...]:
+    the land beside each scenic road. On the sea side the height is -5 (below the open ground's -4: between a
+    flat end's -4 and it, the sea side begins halfway) and its run is the shelf."""
+    out = []
+    for r, spec in scenic_roads:
+        R = roads[r]
+        rows = []
+        for seg, frac, left, lrun, right, rrun, gap in spec["land"]:
+            i = scenic_at(R, seg, frac)
+            h = R.h(i)
+            side = []
+            for v in (left, right):
+                side.append(-5.0 if v == "sea" else (h + v[1] if isinstance(v, tuple) else float(v)))
+            rows.append([i, round(side[0], 1), float(lrun), round(side[1], 1), float(rrun), float(gap)])
+        assert all(a[0] < b[0] for a, b in zip(rows, rows[1:])), f"{R.name}: its land stations aren't in order"
+        out.append([r, spec["sea"], rows])
+    return out
 
 
 def junction(roads, c, end, p):
@@ -680,6 +789,10 @@ def heights(roads, ew, ns):
             for q, rise in enumerate([0.0, 360.0, 60.0, 430.0, 100.0, 0.0]):
                 R.keys.append([round(first+(last-first)*q/5), base+rise, 0.0])
             R.keys.append([R.N-1, base, 0.0])
+    for r, spec in scenic_roads:
+        R = roads[r]
+        R.keys = [[0, 0.0, 0.0]] + [[scenic_at(R, seg, frac), float(h), float(m)] for seg, frac, h, m in spec["heights"]] + [[R.N - 1, 0.0, 0.0]]
+        assert all(a[0] < b[0] for a, b in zip(R.keys, R.keys[1:])), f"{R.name}: its height keys aren't in order"
     return [[r, R.keys] for r, R in enumerate(roads) if R.keys]
 
 
@@ -850,6 +963,22 @@ def check(roads, joins, J, cities, ew, ns, jumps=(), onramps=(), overlaps=()):
     for k, r in onramps:
         O = roads[r]
         print(f"  on-ramp {O.name}: from {O.p[0, 0] / KM:.1f},{O.p[0, 1] / KM:.1f} km on the open ground")
+    for r, spec in scenic_roads:
+        R = roads[r]
+        hs = np.array([R.h(i) for i in range(R.N)])
+        grade = np.diff(hs) / R.len[:-1]
+        bend = np.diff(grade) / R.len[1:-1]
+        tight = min(q[1] for q in R.segs if q[0] != "S")
+        print(f"  scenic {R.name}: {R.len[:-1].sum() / KM:.0f} km, x {R.p[:, 0].min() / KM:.1f}-{R.p[:, 0].max() / KM:.1f} km, "
+              f"y {R.p[:, 1].min() / KM:.1f}-{R.p[:, 1].max() / KM:.1f} km, {hs.min():.0f}-{hs.max():.0f} m up, steepest {abs(grade).max() * 100:.1f}%, "
+              f"tightest crest or dip {1 / abs(bend).max() / KM:.1f} km, tightest bend {tight / KM:.0f} km, "
+              f"its stretch {R.segs[spec['stretch']][1] / KM:.1f} km, ends at x {R.end[0] / KM:.1f} km")
+        if hs.min() < -0.01:
+            bad(f"{R.name} dips to {hs.min():.1f} m")
+        if abs(grade).max() > 0.30:
+            bad(f"{R.name} is {abs(grade).max() * 100:.0f}% at its steepest (30 at most)")
+        if not 0 < R.p[:, 0].min() and R.p[:, 0].max() < 600 * KM:
+            bad(f"{R.name} leaves the map")
     return ok
 
 
@@ -885,7 +1014,7 @@ def plot(roads, cities, out):
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     fig, ax = plt.subplots(figsize=(10, 10))
-    col = {"highway": "#2a6fdb", "ramp": "#6a8", "city": "#d33", "turn": "#999", "jump": "#f80", "on": "#a0a", "side": "#0a7"}
+    col = {"highway": "#2a6fdb", "ramp": "#6a8", "city": "#d33", "turn": "#999", "jump": "#f80", "on": "#a0a", "side": "#0a7", "scenic": "#c0f"}
     for R in roads:
         ax.plot(R.p[:, 0] / KM, R.p[:, 1] / KM, color=col[R.kind], lw=1.6 if R.kind == "highway" else 0.9)
     for name, biome, cx, cy, r, i in cities:

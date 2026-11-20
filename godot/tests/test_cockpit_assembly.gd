@@ -56,8 +56,12 @@ func _sweep_levers() -> void:
 	for pivot in cockpit.lever_pivots:
 		var shaft: MeshInstance3D=pivot.get_child(0)
 		var rim:={}
-		for vertex in shaft.mesh.get_mesh_arrays()[Mesh.ARRAY_VERTEX]:
-			rim[Vector2(vertex.x,vertex.z)]=true
+		# The shaft is a plain cylinder, or (realism spike) a compound with a ferrule up under the grip;
+		# the ferrule never comes near the quadrant, so sweep the shaft's own radius.
+		var arrays: Array=shaft.mesh.get_mesh_arrays() if shaft.mesh is PrimitiveMesh else shaft.mesh.surface_get_arrays(0)
+		for vertex in arrays[Mesh.ARRAY_VERTEX]:
+			if Vector2(vertex.x,vertex.z).length()<0.0165: rim[Vector2(vertex.x,vertex.z)]=true
+		check("lever shaft outline found (%d points)"%rim.size(),rim.size()>=12)
 		for step in 29:
 			# Same idle-through-afterburner visual travel as the live cockpit.
 			pivot.rotation.x=deg_to_rad(lerpf(30.0,-30.0,step*0.05))

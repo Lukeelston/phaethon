@@ -7,8 +7,13 @@ engine's own run (--profile=second) with the second engine solo, the bass rotor 
 everything mixed.
 Each run records the game's master bus.
 Then it measures the recordings against the RPM each run logged:
-  pitch     V8/V12 firing pitch (subharmonic summation) and turbine blade-pass line, within 3%
-            of the logged RPM, wherever the RPM holds steady across the window
+  pitch     V8/V12 firing pitch (subharmonic summation; for the V8, that or the octave under it,
+            which its uneven cylinders sound on purpose) and turbine blade-pass line, within 3%
+            of the logged RPM, wherever the RPM holds steady across the window (the turbines:
+            wherever they are in)
+  turbines  the second stage: nothing from them until the craft reaches turbine_mph[0] (under
+            -60 dBFS, at least 30 dB under their full level), they light within 200 mph of it,
+            and the whine winds up from 0.4 of its pitch
   split     left lever 0.87, right 0.15: each channel carries its own engine on pitch, and each
             engine is at least 9 dB louder on its own side
   flameout  a dead left engine drops the pistons out of the left channel (at least 9 dB)
@@ -22,15 +27,16 @@ Then it measures the recordings against the RPM each run logged:
             <= 160 Hz), winds up
             with speed (its brightness follows its pitch: correlation >= 0.95, 0.75-1.35 octaves
             per octave), and steps back >= 6 dB once the second engine runs
-  twin      on equal levers the right engine runs 0.1-0.6% fast and the two beat: the mono level
-            breathes (150 ms level sd >= 0.8 dB) where the flat run, with no detune, holds still
+  twin      on equal levers the right engine runs 0.1-0.6% fast and the two beat: the V12's mono
+            level breathes (150 ms level sd >= 0.8 dB) where the flat run, with no detune, holds
+            still
   bark      a lever stab revs up in <= 0.2 s (median) and flares 4-20% past the lever
   pops      lifting off at high revs pops (both after the burner drop and through the blips),
             and nothing pops at idle, on the rev, on a hold, in the burner or through the
             flameout; popping stretches stand >= 40 dB over the quiet ones
   one tone  flat runs, slow rev: brightness doesn't pulse grossly with band position (no more
-            than 100 cents or 1.5x its wander at unrelated spacings); the bake's level-correlation
-            gate is the precise guard
+            than 100 cents, or 1.5x its typical wander at unrelated spacings, or the most it
+            wanders at any of them); the bake's level-correlation gate is the precise guard
   steady    flat runs: each channel's 150 ms level stays within 2.5 dB of a smooth curve in RPM
             while both engines share an RPM, lever blips included. Crossfade artifacts are local
             holds of several dB
@@ -38,6 +44,7 @@ Exit 0 = every check passes on at least 90% of its windows.
 
   python tools/engine_audio_check.py [--out DIR] [--plot]     (--plot draws a spectrogram PNG)
   python tools/engine_audio_check.py --listen                  the listening copy only: engine_listen.wav
+  python tools/engine_audio_check.py --reuse [--out DIR]       measure the captures already there
 
 Headless captures mix through Godot's Dummy driver in 93 ms bursts, so pitch can only change
 ~11 times a second: fine for these checks, but it records as stepping through tones. The
@@ -61,7 +68,7 @@ BLADE_HZ = 2400.0
 PAN_LOUD = 1.6   # Godot's panner at +-0.6 on a mono source: 1.6x near side, 0.4x far side
 WIN = 0.25
 # Gross stepping only: brightness may not pulse with band position by more than this many
-# cents AND more than 1.5x chance. The stepping band design read 109-198; the fixed design
+# cents AND more than 1.5x chance AND more than chance ever reaches. The stepping band design read 109-198; the fixed design
 # 13-83 (its noise). The bake's level-correlation gate is the precise guard.
 MAX_SWING = 100.0
 
@@ -128,9 +135,17 @@ def at(log, key, t):
     return float(np.interp(t, log["t"], log[key]))
 
 
-def seg(x, sr, t):
-    i = int((t - WIN / 2) * sr)
-    return x[max(0, i):i + int(WIN * sr)]
+def seg(x, sr, t, win=WIN):
+    i = int((t - win / 2) * sr)
+    return x[max(0, i):i + int(win * sr)]
+
+
+def span(layer, f):
+    """How long to listen for a pitch. A piston engine that fires unevenly (the V8 lopes and
+    misses, on purpose) puts a line on every order of its 720-degree cycle, f / cyl apart: 6 Hz
+    at a 700 rpm idle. A quarter second cannot tell the firing line from its neighbours there
+    (its window is 8 Hz wide), so pistons get at least four engine cycles."""
+    return max(WIN, 4.0 * CYL[layer] / f) if layer in CYL else WIN
 
 
 def spectrum(s, sr):
@@ -138,10 +153,10 @@ def spectrum(s, sr):
     return np.abs(np.fft.rfft(s * np.hanning(len(s)), nfft)), sr / nfft
 
 
-def pitch(s, sr, f_exp):
-    """Subharmonic summation (Hermes 1988) over candidates within -30%/+43% of f_exp."""
+def pitch(s, sr, f_exp, lowest=0.7):
+    """Subharmonic summation (Hermes 1988) over candidates from `lowest` to 1.43 times f_exp."""
     X, df = spectrum(s, sr)
-    c = f_exp * np.exp(np.linspace(np.log(0.7), np.log(1.43), 800))
+    c = f_exp * np.exp(np.linspace(np.log(lowest), np.log(1.43), int(800 * np.log(1.43 / lowest) / np.log(1.43 / 0.7))))
     score = np.zeros_like(c)
     for k in range(1, 9):
         idx = np.clip((k * c / df).astype(int), 0, len(X) - 1)
@@ -168,12 +183,27 @@ def expect(layer, log, side, t):
     return at(log, layer + side, t) * CYL[layer] / 120.0
 
 
+# The V8's alternate cylinders pull hard and soft, on purpose (tools/engine_bake.py cyl_trim):
+# that is a second note an octave under the firing pitch, with lines at 1/2, 3/2, 5/2 of it.
+# Searched only around the firing pitch, the summation locks onto 3/4 of it at high revs (the
+# pitch whose harmonics collect the 3/2 and 9/2 lines; measured, every one of 14 misses in 87
+# windows read x0.750-0.753). So the V8 is searched down past the octave, and its note may be
+# either: both follow the levers.
+OCTAVE_UNDER = {"v8"}
+
+
 def measure(layer, s, sr, f):
-    return line(s, sr, f) if layer == "turbine" else pitch(s, sr, f)
+    if layer == "turbine":
+        return line(s, sr, f)
+    if layer in OCTAVE_UNDER:
+        got = pitch(s, sr, f, 0.35)
+        return got * 2.0 if abs(got / (f / 2.0) - 1) < 0.03 else got
+    return pitch(s, sr, f)
 
 
 def steady(layer, log, side, t):
-    a, b = expect(layer, log, side, t - WIN / 2), expect(layer, log, side, t + WIN / 2)
+    half = span(layer, max(expect(layer, log, side, t), 1.0)) / 2   # across all that the pitch is measured over
+    a, b = expect(layer, log, side, t - half), expect(layer, log, side, t + half)
     return abs(a / b - 1) < 0.03
 
 
@@ -183,9 +213,12 @@ def level_dips(x, sr, log, layer):
     against log RPM. With the gains held flat, level may still drift with RPM (the fixed muffler
     trims more as the pulses brighten), but only smoothly. A crossfade artifact is local: two
     interfering bands held 5-8 dB off for 0.3-1.2 s (measured 2026-10-17), which no cubic follows.
-    Per channel, because that is what each ear gets."""
+    Per channel, because that is what each ear gets.
+    The V8's level is taken over at least two engine cycles: it lopes on purpose, and 150 ms of
+    a 700 rpm idle is seven pulses of an eight-pulse pattern, so a shorter window reads the lope
+    itself as a dip. Every level crossfade sits above 1,600 rpm, where two cycles are back
+    under 150 ms."""
     ts = np.arange(0.4, log["t"][-1] - 0.4, 0.01)
-    w = int(0.15 * sr)
     keys = ("turbL", "turbR") if layer == "turbine" else (layer + "L", layer + "R")
     a, b = np.interp(ts, log["t"], log[keys[0]]), np.interp(ts, log["t"], log[keys[1]])
     # "Same RPM" means the same to 0.05%: two engines even 0.2% apart drift through each other's
@@ -194,8 +227,10 @@ def level_dips(x, sr, log, layer):
     sym = (np.abs(a / b - 1) < 0.0005) & (ts > 1.0)
     lr = np.log2(np.maximum(a[sym], 1e-3))
     out = []
+    ws = np.maximum(0.15, 240.0 / np.maximum(a[sym], 100.0)) if layer == "v8" else np.full(int(sym.sum()), 0.15)
     for ch in (x[:, 0], x[:, 1]):
-        db = np.array([10 * np.log10(np.mean(ch[int(t * sr) - w // 2:int(t * sr) + w // 2] ** 2) + 1e-12) for t in ts[sym]])
+        db = np.array([10 * np.log10(np.mean(ch[max(0, int((t - w / 2) * sr)):int((t + w / 2) * sr)] ** 2) + 1e-12)
+                       for t, w in zip(ts[sym], ws)])
         out.append(db - np.polyval(np.polyfit(lr, db, 3), lr))
     resid = np.concatenate(out)
     return resid, len(resid)
@@ -212,7 +247,12 @@ def timbre_swing(x, sr, log, layer):
     correlate >= 0.9 (copies of one master; independent bands measured 0.14-0.73).
     (Widening it to the whole run made it worse: a cubic can't follow the V12's brightness
     from 1,100 to 13,400 rpm under its fixed muffler, and the misfit aliases into the bins.)
-    Returns (swing at the bands' own spacing, noise floor), or None for a single-loop layer."""
+    The noise floor is its typical size and its largest: an engine that misses on purpose (the
+    V8, since 2026-11-19) makes brightness jump from window to window, 226 cents sd against 57
+    for the smooth one, and its swing at unrelated spacings then ranges from 68 to 217 cents.
+    1.5x the median called a 105-cent swing at the bands stepping, 3 cents over; it was chance.
+    Returns (swing at the bands' own spacing, typical noise, largest noise), or None for a
+    single-loop layer."""
     import json
     man = json.load(open(os.path.join(ROOT, "godot", "audio", "engines", "manifest.json")))
     bands = np.array([b["at"] for b in man["layers"][layer]["bands"]])
@@ -237,8 +277,8 @@ def timbre_swing(x, sr, log, layer):
         m = [r[(frac >= e[i]) & (frac < e[i + 1])].mean() for i in range(5)]
         return max(m) - min(m)
     u = np.interp(np.log(at), np.log(bands), np.arange(len(bands)))
-    noise = [swing((np.log2(at) / np.log2(p) + o) % 1.0) for p in (1.6, 2.5, 3.1) for o in (0.0, 0.33)]
-    return swing(u - np.floor(u)), float(np.median(noise))
+    noise = [swing((np.log2(at) / np.log2(p) + o) % 1.0) for p in (1.45, 1.6, 1.75, 2.5, 2.75, 3.1, 3.3) for o in (0.0, 0.33)]
+    return swing(u - np.floor(u)), float(np.median(noise)), float(np.max(noise))
 
 
 class Tally:
@@ -263,8 +303,10 @@ def check_layer(layer, wav, flat_wav, tally):
         fl, fr = expect(layer, log, "L", t), expect(layer, log, "R", t)
         if abs(fl / fr - 1) > 0.01 or not steady(layer, log, "L", t):
             continue
+        if layer == "turbine" and at(log, "stage", t) < 0.35:   # not lit yet, or barely
+            continue
         n += 1
-        hits += abs(measure(layer, seg(mono, sr, t), sr, fl) / fl - 1) < 0.03
+        hits += abs(measure(layer, seg(mono, sr, t, span(layer, fl)), sr, fl) / fl - 1) < 0.03
     tally.add("%s pitch follows the levers" % layer, hits, n)
     fx, fsr, flog = load(flat_wav)
     dips, n = level_dips(fx, fsr, flog, layer)
@@ -274,8 +316,8 @@ def check_layer(layer, wav, flat_wav, tally):
     if tone is None:
         tally.add("%s one tone through the rev (single loop)" % layer, 1, 1, 1.0)
     else:
-        tally.add("%s one tone through the rev (swing %.0f cents, chance %.0f)" % (layer, tone[0], tone[1]),
-                  int(tone[0] <= max(MAX_SWING, 1.5 * tone[1])), 1, 1.0)
+        tally.add("%s one tone through the rev (swing %.0f cents, chance %.0f, up to %.0f)" % (layer, tone[0], tone[1], tone[2]),
+                  int(tone[0] <= max(MAX_SWING, 1.5 * tone[1], tone[2])), 1, 1.0)
     # Split. Pitch-tracking a whole channel fails here by design: the screaming left engine's
     # bleed can out-shout the idling right engine's quiet layer (measured 6-8 dB for the V12),
     # which is how two engines really sound. So test what the split promises, separately:
@@ -287,11 +329,11 @@ def check_layer(layer, wav, flat_wav, tally):
     for t in ts[(ts > 16.0) & (ts < 18.9)]:
         for side, near, far in (("L", left, right), ("R", right, left)):
             f = expect(layer, log, side, t)
-            got, peak, prom = line_strength(seg(near, sr, t), sr, f)
+            got, peak, prom = line_strength(seg(near, sr, t, span(layer, f)), sr, f)
             n += 1
             hits += abs(got / f - 1) < 0.03 and prom >= 12.0
             if side == "L":
-                _, far_peak, _ = line_strength(seg(far, sr, t), sr, got, span=0.01)
+                _, far_peak, _ = line_strength(seg(far, sr, t, span(layer, f)), sr, got, span=0.01)
                 pan_n += 1
                 pan_hits += 20 * np.log10(peak / far_peak) >= 9.0
     tally.add("%s split: each channel carries its engine" % layer, hits, n)
@@ -317,6 +359,36 @@ def check_layer(layer, wav, flat_wav, tally):
 
 
 SECOND_ON_MPH, SECOND_OFF_MPH = 1500.0, 1300.0   # EngineAudio.TUNE second_on_mph / second_off_mph
+TURBINE_ON_MPH, TURBINE_START = 2000.0, 0.4      # EngineAudio.TUNE turbine_mph[0], turbine_start
+
+
+def check_turbines(wav, tally):
+    """The turbines are the second stage, on the turbine-only capture of the main run: silent on
+    pistons alone, lit as the craft passes turbine_mph[0], winding up from low."""
+    print("[turbines]")
+    x, sr, log = load(wav)
+    mono = x.mean(axis=1)
+    ts = np.arange(0.5, 14.0, 0.05)
+    w = int(0.1 * sr)
+    db = np.array([10 * np.log10(np.mean(mono[int(t * sr) - w // 2:int(t * sr) + w // 2] ** 2) + 1e-12) for t in ts])
+    mph = np.interp(ts, log["t"], log["mph"])
+    stage = np.interp(ts, log["t"], log["stage"])
+    full = float(np.median(db[stage > 0.9])) if (stage > 0.9).any() else 0.0
+    before = db[mph < TURBINE_ON_MPH - 150]
+    # (a layer at rest still plays at -80 dB, so its floor is about -75 dBFS, not digital silence)
+    tally.add("turbines silent on pistons alone (%.0f dBFS, %.0f dB under their full level)" % (before.max(), full - before.max()),
+              int((stage > 0.9).any() and before.max() <= -60.0 and before.max() <= full - 30.0), 1, 1.0)
+    lit = db > full - 30.0
+    mph_on = float(mph[np.argmax(lit)]) if lit.any() else 0.0
+    tally.add("turbines light at %.0f mph (threshold %.0f)" % (mph_on, TURBINE_ON_MPH),
+              int(TURBINE_ON_MPH - 50 <= mph_on <= TURBINE_ON_MPH + 200), 1, 1.0)
+    # the whine's pitch over what the lever alone would give it (turbine_n: 0.25 at idle, 1 at full)
+    wound = np.interp(ts, log["t"], log["turbL"] / np.maximum(0.25 + 0.75 * log["sL"], 0.02))
+    t_on = ts[np.argmax(lit)] if lit.any() else 0.0
+    start = float(wound[(ts > t_on - 0.2) & (ts < t_on + 0.2)].min())
+    after = float(wound[(ts > t_on + 3.0) & (ts < t_on + 3.5)].mean())
+    tally.add("the whine winds up: x%.2f of its pitch as it lights, x%.2f three seconds on" % (start, after),
+              int(start <= TURBINE_START + 0.2 and after >= 0.97), 1, 1.0)
 
 
 def check_second(wav, tally):
@@ -448,21 +520,28 @@ def check_rotor(wav, tally):
     tally.add("rotor steps back for the second engine: %.1f dB" % drop, int(drop >= 6.0), 1, 1.0)
 
 
-def check_polish(v8_wav, v8_flat_wav, pops_wav, tally):
+def check_polish(v8_wav, v8_flat_wav, pops_wav, tally, twin_wav, twin_flat_wav):
     """Twin beat, rev flare and overrun pops, on the main lever run."""
     print("[polish]")
     x, sr, log = load(v8_wav)
     fx, fsr, flog = load(v8_flat_wav)
     t = log["t"]
-    hold = (t > 8.3) & (t < 9.9)   # both levers at 0.87, spool settled
+    # The twin beat is read on the V12. Two engines beat where their sound repeats exactly, and
+    # the V8 is now built not to (it misses, and its upper harmonics jitter): its level still
+    # breathes, 0.6 dB against 0.2 flat, but the V12 is the layer that carries the beat.
+    bx, bsr, blog = load(twin_wav)
+    bfx, bfsr, _ = load(twin_flat_wav)
+    hold = (blog["t"] > 8.3) & (blog["t"] < 9.9)   # both levers at 0.87, spool settled
 
     def breath(x, sr):
         mono = x.mean(axis=1)
         w = int(0.15 * sr)
-        lv = [10 * np.log10(np.mean(mono[int(q * sr) - w // 2:int(q * sr) + w // 2] ** 2)) for q in np.arange(8.3, 9.9, 0.02)]
-        return float(np.std(lv))
-    ratio = log["v8R"][hold] / log["v8L"][hold]
-    sd, sd_flat = breath(x, sr), breath(fx, fsr)
+        lv = np.array([10 * np.log10(np.mean(mono[int(q * sr) - w // 2:int(q * sr) + w // 2] ** 2)) for q in np.arange(8.3, 9.9, 0.02)])
+        # the turbines light inside this hold and the V12 comes up with them: take that slope out
+        q = np.arange(len(lv))
+        return float(np.std(lv - np.polyval(np.polyfit(q, lv, 2), q)))
+    ratio = blog["v12R"][hold] / blog["v12L"][hold]
+    sd, sd_flat = breath(bx, bsr), breath(bfx, bfsr)
     tally.add("twin: right engine %.2f-%.2f%% fast, level breathes %.1f dB (flat, no detune: %.1f dB)" % (
         100 * (ratio.min() - 1), 100 * (ratio.max() - 1), sd, sd_flat),
         int(1.001 <= ratio.min() and ratio.max() <= 1.006 and sd >= 0.8 and sd_flat <= 0.6), 1, 1.0)
@@ -538,18 +617,23 @@ def main():
     ap.add_argument("--out", default=os.path.join(ROOT, "godot", "shots"))
     ap.add_argument("--plot", action="store_true")
     ap.add_argument("--listen", action="store_true", help="only record the Movie Maker listening copy")
+    ap.add_argument("--reuse", action="store_true", help="measure the captures already in --out, without recording again")
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
     if args.listen:
         listen(args.out)
         return
-    wavs, fails = capture(args.out)
+    if args.reuse:
+        wavs, fails = {os.path.basename(w)[7:-4]: w for w in glob.glob(os.path.join(args.out, "engine_*.wav"))}, 0
+    else:
+        wavs, fails = capture(args.out)
     tally = Tally()
     for layer in ("v8", "v12", "turbine"):
         check_layer(layer, wavs[layer], wavs[layer + "_flat"], tally)
+    check_turbines(wavs["turbine"], tally)
     check_second(wavs["second"], tally)
     check_rotor(wavs["rotor"], tally)
-    check_polish(wavs["v8"], wavs["v8_flat"], wavs["pops"], tally)
+    check_polish(wavs["v8"], wavs["v8_flat"], wavs["pops"], tally, wavs["v12"], wavs["v12_flat"])
     if args.plot:
         plot(wavs["all"], os.path.join(args.out, "engine_all.png"))
     fails += sum(not ok for ok in tally.rows)

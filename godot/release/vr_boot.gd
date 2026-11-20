@@ -31,7 +31,9 @@ func _start() -> void:
 	if route == "setup":
 		_show_setup("--verify-vr-release" in args)
 		return
-	View.track_override = selected_track(args)
+	var boot_course := selected_track(args)
+	View.track_override = "network" if UI.SPOTS.has(boot_course) else boot_course
+	View.spot_override = UI.SPOTS.get(boot_course, "")
 	View.job_override = "none"
 	if route == "diagnostic":
 		print("PCVR DIAGNOSTIC: OpenXR is explicitly off. Checking scene construction only; physical VR remains unverified.")

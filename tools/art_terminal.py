@@ -11,8 +11,16 @@ from PIL import Image, ImageDraw
 
 
 DEST = Path(__file__).resolve().parents[1] / "godot" / "art" / "terminal"
-CELL = 128
-ATLAS = 4 * CELL
+# Realism spike: 256-pixel cells, four weathered variants of every finish, and faces laid as
+# separate panels about PANEL metres across instead of one swatch stretched over a whole wall.
+CELL = 256
+GRID = 8
+ATLAS = GRID * CELL
+VARIANTS = 4
+PANEL = 10.0
+K = CELL // 128
+TILED = {"plate", "recess", "enamel", "ivory", "intake", "hazard", "steel", "cladding", "lampwell",
+         "shutter", "tile", "window", "gasket"}
 # Name, base colour (sRGB), roughness, metallic, emission (sRGB).
 SWATCHES = [
     ("plate", (95, 110, 116), 167, 65, (0, 0, 0)),
@@ -39,48 +47,77 @@ def make_atlas():
     albedo = Image.new("RGB", (ATLAS, ATLAS))
     orm = Image.new("RGB", (ATLAS, ATLAS))
     emission = Image.new("RGB", (ATLAS, ATLAS))
+    normal = Image.new("RGB", (ATLAS, ATLAS), (128, 128, 255))
     rng = np.random.default_rng(731)
     yy, xx = np.mgrid[:CELL, :CELL]
     for i, (name, base, rough, metallic, glow) in enumerate(SWATCHES):
-        # A cool wash in the centre of the panels falls off toward their mounting channels.
-        wash = 0.54 + 0.53 * np.exp(-((xx - 64) / 68) ** 2 - ((yy - 58) / 73) ** 2)
-        wear = rng.normal(0, 0.013, (CELL, CELL)) + rng.normal(0, 0.013, (1, CELL))
-        value = 0.96 + wear
-        if name in ("plate", "cladding", "lampwell", "tile"):
-            value = wash + wear
-        tile = Image.fromarray(np.uint8(np.clip(value[:, :, None] * base, 0, 255)))
-        light = Image.fromarray(np.uint8(np.clip(wash[:, :, None] * glow, 0, 255)))
-        d, e = ImageDraw.Draw(tile), ImageDraw.Draw(light)
-        if name in ("cladding", "plate", "lampwell", "tile", "shutter"):
-            seam = tuple(int(0.48 * c) for c in base)
-            d.rounded_rectangle((9, 7, 118, 120), radius=5, outline=seam, width=2)
-            for x in (14, 113):
-                for y in (12, 115):
-                    d.ellipse((x-2, y-2, x+2, y+2), fill=seam)
-                    d.point((x-1,y-1), fill=(131, 140, 139))
-        if name in ("intake", "shutter"):
-            for y in range(13, 119, 11):
-                d.rectangle((7, y, 120, y+3), fill=(43, 49, 52))
-                d.line((8, y+4, 119, y+4), fill=(117, 124, 123))
-        if name == "hazard":
-            for x in range(-128, 165, 36):
-                d.polygon([(x, 0), (x+15, 0), (x+143, 128), (x+128, 128)], fill=(52, 58, 55))
-        if name == "window":
-            for x in (4, 43, 84, 122):
-                d.rectangle((x, 0, x+2, 128), fill=(44, 56, 60))
-                e.rectangle((x, 0, x+2, 128), fill=(5, 8, 9))
-        if name == "service":
-            # Transit maintenance mark, registered to the gallery face's UVs.
-            for image, ink in ((d, (215, 216, 191)), (e, (64, 79, 75))):
-                image.line([(17, 93),(33, 37),(49, 93)], fill=ink, width=5)
-                image.line([(27, 72),(39, 72)], fill=ink, width=4)
-                for y in (39, 63, 87):
-                    image.rectangle((63, y, 108, y+4), fill=ink)
-        xy = (i % 4 * CELL, i // 4 * CELL)
-        albedo.paste(tile, xy)
-        orm.paste(Image.new("RGB", (CELL, CELL), (255, rough, metallic)), xy)
-        emission.paste(light, xy)
-    for name, image in (("base", albedo), ("orm", orm), ("emission", emission)):
+        for variant in range(VARIANTS):
+            # A cool wash in the centre of the panels falls off toward their mounting channels.
+            wash = 0.54 + 0.53 * np.exp(-((xx - 64 * K) / (68 * K)) ** 2 - ((yy - 58 * K) / (73 * K)) ** 2)
+            wear = rng.normal(0, 0.013, (CELL, CELL)) + rng.normal(0, 0.013, (1, CELL))
+            # Rain and dust: streaks that start part-way down a panel and fade toward its foot.
+            top = rng.random((1, CELL))
+            run = np.clip(yy / CELL - top, 0, 1)
+            streak = rng.random((1, CELL)) ** 3 * np.clip(run * 4, 0, 1) * np.exp(-run * 2.4)
+            streak = (np.roll(streak, 1, 1) + streak + np.roll(streak, -1, 1)) / 3
+            lit = sum(glow) > 0
+            batch = 1 + (0 if lit else rng.normal(0, 0.035))       # no two panels came off the line alike
+            value = (0.96 + wear) * batch
+            if name in ("plate", "cladding", "lampwell", "tile"):
+                value = (wash + wear) * batch
+            if not lit:
+                value = value * (1 - 0.24 * streak)
+            tile = Image.fromarray(np.uint8(np.clip(value[:, :, None] * base, 0, 255)))
+            light = Image.fromarray(np.uint8(np.clip(wash[:, :, None] * glow, 0, 255)))
+            relief = Image.new("L", (CELL, CELL), 128)             # 128 is the panel's face
+            d, e, h = ImageDraw.Draw(tile), ImageDraw.Draw(light), ImageDraw.Draw(relief)
+            if name in ("cladding", "plate", "lampwell", "tile", "shutter"):
+                seam = tuple(int(0.48 * c) for c in base)
+                frame = (9 * K, 7 * K, 118 * K, 120 * K)
+                d.rounded_rectangle(frame, radius=5 * K, outline=seam, width=2 * K)
+                h.rounded_rectangle(frame, radius=5 * K, outline=48, width=2 * K)
+                for x in (14 * K, 113 * K):
+                    for y in (12 * K, 115 * K):
+                        d.ellipse((x - 2 * K, y - 2 * K, x + 2 * K, y + 2 * K), fill=seam)
+                        h.ellipse((x - 2 * K, y - 2 * K, x + 2 * K, y + 2 * K), fill=215)
+                        d.point((x - K, y - K), fill=(131, 140, 139))
+            if name in ("intake", "shutter"):
+                for y in range(13 * K, 119 * K, 11 * K):
+                    d.rectangle((7 * K, y, 120 * K, y + 3 * K), fill=(43, 49, 52))
+                    h.rectangle((7 * K, y, 120 * K, y + 3 * K), fill=30)
+                    d.line((8 * K, y + 4 * K, 119 * K, y + 4 * K), fill=(117, 124, 123), width=K)
+                    h.line((8 * K, y + 4 * K, 119 * K, y + 4 * K), fill=200, width=K)
+            if name == "hazard":
+                for x in range(-128 * K, 165 * K, 36 * K):
+                    d.polygon([(x, 0), (x + 15 * K, 0), (x + 143 * K, CELL), (x + 128 * K, CELL)], fill=(52, 58, 55))
+            if name == "window":
+                for x in (4 * K, 43 * K, 84 * K, 122 * K):
+                    d.rectangle((x, 0, x + 2 * K, CELL), fill=(44, 56, 60))
+                    e.rectangle((x, 0, x + 2 * K, CELL), fill=(5, 8, 9))
+                    h.rectangle((x, 0, x + 2 * K, CELL), fill=205)
+            if name == "service":
+                # Transit maintenance mark, registered to the gallery face's UVs.
+                for image, ink in ((d, (215, 216, 191)), (e, (64, 79, 75))):
+                    image.line([(17 * K, 93 * K), (33 * K, 37 * K), (49 * K, 93 * K)], fill=ink, width=5 * K)
+                    image.line([(27 * K, 72 * K), (39 * K, 72 * K)], fill=ink, width=4 * K)
+                    for y in (39 * K, 63 * K, 87 * K):
+                        image.rectangle((63 * K, y, 108 * K, y + 4 * K), fill=ink)
+            # Relief to a tangent-space normal (green up), softened so edges read as pressed, not cut.
+            height = np.asarray(relief, dtype=float) / 255
+            for axis in (0, 1):
+                height = (np.roll(height, 1, axis) + 2 * height + np.roll(height, -1, axis)) / 4
+            gy, gx = np.gradient(height)
+            n = np.dstack([-gx * 9.0, gy * 9.0, np.ones_like(height)])
+            n /= np.linalg.norm(n, axis=2, keepdims=True)
+            shade = np.clip(1 - 1.7 * np.clip(0.5 - height, 0, 1), 0.4, 1)     # grooves and louvres sit in shadow
+            rough_map = np.clip(rough / 255 + (0 if lit else 0.12) * streak - 0.05 * (wash - 0.8), 0.05, 1)
+            cell = i * VARIANTS + variant
+            xy = (cell % GRID * CELL, cell // GRID * CELL)
+            albedo.paste(tile, xy)
+            orm.paste(Image.fromarray(np.uint8(np.dstack([shade * 255, rough_map * 255, np.full_like(shade, metallic)]))), xy)
+            emission.paste(light, xy)
+            normal.paste(Image.fromarray(np.uint8(np.rint((n * 0.5 + 0.5) * 255))), xy)
+    for name, image in (("base", albedo), ("orm", orm), ("emission", emission), ("normal", normal)):
         image.save(DEST / f"shelter_{name}.png", optimize=True)
 
 
@@ -90,21 +127,31 @@ class Module:
         self.pos, self.norm, self.uv, self.tan, self.idx = [], [], [], [], []
 
     def face(self, corners, swatch):
-        """Add one outward-facing flat quad with an inset atlas island and Mikk-compatible basis."""
+        """Add one outward-facing flat face as separate panels, each on its own atlas cell."""
         p = np.asarray(corners, dtype=float)
-        e = p[1] - p[0]
+        e, f = p[1] - p[0], p[3] - p[0]
         tangent = e / np.linalg.norm(e)
-        n = np.cross(e, p[3] - p[0])
+        n = np.cross(e, f)
         n /= np.linalg.norm(n)
-        idx = CELL_INDEX[swatch]
-        u, v = idx % 4 / 4, idx // 4 / 4
-        low, high = 3 / ATLAS, 0.25 - 3 / ATLAS
-        start = len(self.pos)
-        self.pos.extend(p)
-        self.norm.extend([n] * 4)
-        self.tan.extend([[*tangent, -1]] * 4)
-        self.uv.extend([(u+low, v+high), (u+high, v+high), (u+high, v+low), (u+low, v+low)])
-        self.idx.extend([start, start+1, start+2, start, start+2, start+3])
+        across = up = 1
+        if swatch in TILED:
+            across = max(1, round(float(np.linalg.norm(e)) / PANEL))
+            up = max(1, round(float(np.linalg.norm(f)) / PANEL))
+        low, high = 3 / ATLAS, 1 / GRID - 3 / ATLAS
+
+        def at(s, t):
+            return (p[0] * (1 - s) + p[1] * s) * (1 - t) + (p[3] * (1 - s) + p[2] * s) * t
+        for a in range(across):
+            for b in range(up):
+                cell = CELL_INDEX[swatch] * VARIANTS + (len(self.pos) // 4 * 7 + a * 3 + b * 5) % VARIANTS
+                u, v = cell % GRID / GRID, cell // GRID / GRID
+                start = len(self.pos)
+                self.pos.extend([at(a / across, b / up), at((a + 1) / across, b / up),
+                                 at((a + 1) / across, (b + 1) / up), at(a / across, (b + 1) / up)])
+                self.norm.extend([n] * 4)
+                self.tan.extend([[*tangent, 1]] * 4)                # bitangent up the face, with the map's green
+                self.uv.extend([(u+low, v+high), (u+high, v+high), (u+high, v+low), (u+low, v+low)])
+                self.idx.extend([start, start+1, start+2, start, start+2, start+3])
 
     def prism(self, section, z, depth, face, edge=None):
         """Extrude a counterclockwise convex XY quad. Both travel directions get a finished face."""
@@ -215,19 +262,21 @@ def write_gltf(modules):
         return len(accessors)-1
     meshes = []
     for m in modules:
+        assert len(m.pos) < 65536, m.name               # indices are 16-bit
         attributes = {k: array(v, "<f4", t, 34962) for k, v, t in
                       (("POSITION", m.pos, "VEC3"), ("NORMAL", m.norm, "VEC3"),
                        ("TEXCOORD_0", m.uv, "VEC2"), ("TANGENT", m.tan, "VEC4"))}
         meshes.append({"name": m.name, "primitives": [{"attributes": attributes, "material": 0,
                        "indices": array(m.idx, "<u2", "SCALAR", 34963)}]})
-    names = ["base", "orm", "emission"]
+    names = ["base", "orm", "emission", "normal"]
     material = {"name": "Shelter enamel and service lighting", "pbrMetallicRoughness": {
         "baseColorTexture": {"index": 0}, "metallicRoughnessTexture": {"index": 1}},
-        "emissiveTexture": {"index": 2}, "emissiveFactor": [1.0, 1.0, 1.0]}
+        "emissiveTexture": {"index": 2}, "emissiveFactor": [1.0, 1.0, 1.0],
+        "normalTexture": {"index": 3}, "occlusionTexture": {"index": 1}}
     asset = {"asset": {"version": "2.0", "generator": "Phaethon shelter workshop"}, "scene": 0,
              "scenes": [{"nodes": list(range(len(modules)))}],
              "nodes": [{"name": m.name, "mesh": i} for i, m in enumerate(modules)], "meshes": meshes,
-             "materials": [material], "textures": [{"source": i, "sampler": 0} for i in range(3)],
+             "materials": [material], "textures": [{"source": i, "sampler": 0} for i in range(4)],
              "samplers": [{"magFilter": 9729, "minFilter": 9987}],
              "images": [{"uri": f"shelter_{name}.png"} for name in names],
              "buffers": [{"uri": "shelter.bin", "byteLength": len(blob)}],

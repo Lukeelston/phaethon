@@ -93,6 +93,7 @@ var binder_mats: Array[StandardMaterial3D] = []   # the binder emitters' glowing
 const FlameShader := preload("res://view/flame.gdshader")
 const FLAME_H := 0.62                # the plume's height at the nozzle (2 x 0.62 x scale 0.5)
 var flame_mats := [[], []]           # per engine: [outer plume, inner core] ShaderMaterials (view/flame.gdshader)
+var nozzle_mats: Array[ShaderMaterial] = []   # per engine: the fire in the nozzle (view/nozzle_glow.gdshader)
 var nozzle_lights: Array[OmniLight3D] = []   # light the track behind a burning engine
 var _burn := [0.0, 0.0]              # eased burner and ramjet shares, per engine
 var _ram := [0.0, 0.0]
@@ -115,7 +116,7 @@ var _wob := [Vector3.ZERO, Vector3.ZERO]     # each cable's flex: offset of its 
 var _wob_v := [Vector3.ZERO, Vector3.ZERO]   # ... and how fast it's moving
 var _prev_f := [0.0, 0.0]
 const BinderArc := preload("res://view/binder_arc.gd")
-var arc: ImmediateMesh
+var arc: Mesh   # (the binder arc's mesh: an ArrayMesh rebuilt each frame)
 var binder_arc: MeshInstance3D
 var pod_frame: Node3D = null          # VR: the cockpit rig stands in for the hidden pod
 const POD_FRAME_UP := 0.6             # pod mesh centre above the rig floor
@@ -308,6 +309,21 @@ func build(v) -> void:
 			cone.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 			cone_root.add_child(cone)
 			flame_mats[k].append(fmat)
+		# Realism spike: the fire in the nozzle itself (view/nozzle_glow.gdshader). From the seat the
+		# plume is seen end-on and nearly vanishes; the nozzle is what the pilot actually looks at.
+		var fire := MeshInstance3D.new()
+		fire.name = "nozzle_glow"
+		var slot := QuadMesh.new()
+		slot.size = Vector2(1.2, 1.2)   # the flame node's scale flattens it to the slot
+		fire.mesh = slot
+		fire.position.z = 0.07   # just behind the nozzle's flat glow slab
+		var gmat := ShaderMaterial.new()
+		gmat.shader = preload("res://view/nozzle_glow.gdshader")
+		gmat.set_shader_parameter("seed", float(k) * 3.7 + 1.9)
+		fire.material_override = gmat
+		fire.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		flame.add_child(fire)
+		nozzle_mats.append(gmat)
 		var lamp := OmniLight3D.new()
 		lamp.position = Vector3(0, -0.2, sim.P.engineLen / 2.0 + 1.2)
 		lamp.light_color = Color(1.0, 0.58, 0.25)
@@ -339,7 +355,7 @@ func build(v) -> void:
 
 	for k in 2:
 		var c := MeshInstance3D.new()
-		c.mesh = ImmediateMesh.new()   # rebuilt each frame along its flexing curve (sync_cables)
+		c.mesh = ArrayMesh.new()   # rebuilt each frame along its flexing curve (sync_cables)
 		var cm: StandardMaterial3D = view._mat(Color(0.15, 0.16, 0.18))
 		cm.emission_enabled = true   # energized: glows with its engine's thrust (cable_glow)
 		cm.emission = CABLE_COOL
@@ -679,7 +695,7 @@ static func pod_hull() -> ArrayMesh:
 		if run.size() > 1:
 			_tube(cage, run, CAGE_R * 0.8, SILVER)
 	cage.commit(mesh)
-	mesh.surface_set_material(4, Kit.polished(1.0, 0.18))
+	mesh.surface_set_material(4, Finishes.satin() if Finishes.hd else Kit.polished(1.0, 0.18))
 	paint.index()
 	paint.commit(mesh)
 	var coat := StandardMaterial3D.new()   # candy over metal flake, under a clear coat
@@ -959,6 +975,9 @@ func sync(sim, inp: Dictionary, delta: float) -> void:
 				(fmat as ShaderMaterial).set_shader_parameter("burner", _burn[k])
 				(fmat as ShaderMaterial).set_shader_parameter("ramjet", _ram[k])
 				(fmat as ShaderMaterial).set_shader_parameter("aspect", flame_len / FLAME_H)
+			nozzle_mats[k].set_shader_parameter("thrust", e.thrust)
+			nozzle_mats[k].set_shader_parameter("burner", _burn[k])
+			nozzle_mats[k].set_shader_parameter("ramjet", _ram[k])
 
 	CanopyScript.update(canopy, sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy), sim.hblend, sim.mode, delta)
 	pod.position = view.wz(sim.pod.x, sim.pod.y, sim.pod.z - 0.2 + POD_LIFT)
@@ -1019,40 +1038,47 @@ const FLEX_HZ := 2.2                          # the cables' sway: a lightly damp
 const FLEX_ZETA := 0.18
 
 
-## A round tube from a to b along the quadratic curve through control point m, into `im`.
-static func _tube_curve(im: ImmediateMesh, a: Vector3, b: Vector3, m: Vector3) -> void:
-	im.clear_surfaces()
-	im.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
+static var _tube_index := PackedInt32Array()   # the cable tube's triangles: the same every frame
+
+
+## A cable: a six-sided tube along the curve from a to b bowed through m, as one indexed surface
+## (rings of shared vertices; it was 504 loose vertices, two calls into an ImmediateMesh each).
+static func _tube_curve(into: ArrayMesh, a: Vector3, b: Vector3, m: Vector3) -> void:
 	var segs := 14
 	var sides := 6
-	var pts := []
+	if _tube_index.is_empty():
+		for i in segs:
+			for k in sides:
+				var k2 := (k + 1) % sides
+				_tube_index.append_array(PackedInt32Array([i * sides + k, (i + 1) * sides + k, (i + 1) * sides + k2,
+					i * sides + k, (i + 1) * sides + k2, i * sides + k2]))
+	var pts := PackedVector3Array()
 	for i in segs + 1:
 		var t := float(i) / segs
 		pts.append(a * (1.0 - t) * (1.0 - t) + m * 2.0 * (1.0 - t) * t + b * t * t)
-	var rings := []
+	var verts := PackedVector3Array()
+	var normals := PackedVector3Array()
 	var nrm := Vector3.ZERO
 	for i in segs + 1:
-		var tg: Vector3 = ((pts[mini(i + 1, segs)] as Vector3) - (pts[maxi(i - 1, 0)] as Vector3)).normalized()
+		var tg: Vector3 = (pts[mini(i + 1, segs)] - pts[maxi(i - 1, 0)]).normalized()
 		if i == 0:
 			nrm = tg.cross(Vector3.UP)
 			if nrm.length() < 0.1:
 				nrm = tg.cross(Vector3.RIGHT)
 		nrm = (nrm - tg * nrm.dot(tg)).normalized()
 		var bn := tg.cross(nrm)
-		var ring := []
 		for k in sides:
 			var ang := TAU * k / sides
-			ring.append(nrm * cos(ang) + bn * sin(ang))
-		rings.append(ring)
-	for i in segs:
-		for k in sides:
-			var k2 := (k + 1) % sides
-			for q in [[i, k], [i + 1, k], [i + 1, k2], [i, k], [i + 1, k2], [i, k2]]:
-				var r: Vector3 = rings[q[0]][q[1]]
-				im.surface_set_normal(r)
-				im.surface_add_vertex((pts[q[0]] as Vector3) + r * CABLE_R)
-	im.surface_end()
-
+			var r := nrm * cos(ang) + bn * sin(ang)
+			normals.append(r)
+			verts.append(pts[i] + r * CABLE_R)
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = verts
+	arrays[Mesh.ARRAY_NORMAL] = normals
+	arrays[Mesh.ARRAY_INDEX] = _tube_index
+	into.clear_surfaces()
+	into.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 
 ## Rope sag (m) at the middle of a cable of rest length `rest` hung across `span` (parabola).
 static func cable_sag_for(span: float, rest: float) -> float:
@@ -1228,7 +1254,7 @@ func sync_cables(sim, delta := 1.0 / 72.0) -> void:
 		if _wob[k].length() > span * 0.25:
 			_wob[k] = _wob[k].normalized() * span * 0.25
 		cable_sag[k] = _wob[k].length()
-		_tube_curve(cables[k].mesh as ImmediateMesh, a, b, (a + b) / 2.0 + _wob[k] * 2.0)
+		_tube_curve(cables[k].mesh as ArrayMesh, a, b, (a + b) / 2.0 + _wob[k] * 2.0)
 		cable_mats[k].albedo_color = Color(0.4, 0.4, 0.42) if c.slack else Color(0.15, 0.16, 0.18)
 		# colour: its engine's thrust glow, turning amber then red as the tension nears its limit
 		var eng = sim.eL if k == 0 else sim.eR

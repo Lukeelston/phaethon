@@ -7,6 +7,9 @@
 ##   whistle a resonant shriek that comes in above ~1,000 mph and rises in pitch.
 ##   flaps   the air brakes: a deep rumbling roar heaved by a slow buffet, one per side, panned
 ##           to that ear, louder with speed and with how far that side's flaps are open.
+##   drag    both air brakes hard out at speed: a bass rush under everything, the whole craft
+##           leaning on the air. It needs both (one brake alone is a turn, not a stop), and the
+##           seal does not shut it out: it comes through the hull.
 ## Plus a one-shot sonic boom on the way through Mach 1 (re-arms below Mach 0.9), on its own
 ## "Boom" bus: a heavy double-crack N-wave, its reflection off the desert floor, a sub thump and
 ## four seconds of rolling thunder, soft-clipped dense. The engines and the wind duck under it,
@@ -27,8 +30,8 @@ const LOOP_S := 2.0     # seamless loops; filtering and gusts hide the repeat
 const XF_S := 0.25      # loop crossfade
 const SOUND := 343.0    # m/s
 const BOOM_S := 4.2
-const BOOM_DB := 2.0       # boom player level (the Boom bus limiter holds the ceiling)
-const DUCK_DB := -14.0     # engines and wind under the boom ...
+const BOOM_DB := -7.0      # boom player level. It was +2 into the Boom bus limiter (Luke, after flying it: "turn down the sonic boom at mach 1")
+const DUCK_DB := -8.0      # engines and wind under the boom (was -14: a quieter boom needs less room made for it) ...
 const DUCK_HOLD := 0.35    # ... held this long ...
 const DUCK_REL := 1.6      # ... then back over this long
 
@@ -46,6 +49,10 @@ const TUNE := {
 	"flap_db": [-41.0, -4.0],           # one side's flaps fully open, g 0 -> 1 (Luke: "could still be louder")
 	"flap_shudder": 0.5,                # how hard the open flaps buffet the roar (volume swing, linear)
 	"flap_pan": 0.75, "flap_tau": 0.11,  # pan per side; follows the brake like the flaps move
+	# The bass rush (Luke: "a super bassy wind rush when both air brakes are fully depressed at
+	# speed"): its level with both sides' flaps past drag_full[1], fading in from drag_full[0], and
+	# over speed g drag_g[0] -> drag_g[1] (about 180 -> 950 mph).
+	"drag_db": -5.0, "drag_full": [0.8, 0.98], "drag_g": [0.45, 0.8],
 	"smooth": 0.08,                     # parameter smoothing, s
 	# The seal (Luke: "an electronic hum then a wind sound dampening at second engine engagement.
 	# Something that seals that you're in a totally different environment"): when the second
@@ -66,7 +73,7 @@ const TUNE := {
 var sim
 var streams := {}   # layer -> AudioStreamWAV (tests read these)
 var players := {}   # layer -> AudioStreamPlayer
-var levels := {"rush": 0.0, "buffet": 0.0, "whistle": 0.0, "flapL": 0.0, "flapR": 0.0}   # smoothed linear gains (tests read these)
+var levels := {"rush": 0.0, "buffet": 0.0, "whistle": 0.0, "flapL": 0.0, "flapR": 0.0, "drag": 0.0}   # smoothed linear gains (tests read these)
 var _open := [0.0, 0.0]   # each side's flaps, following its brake
 var shudder := [0.0, 0.0] # each side's air-brake shudder right now, 0..1 (the cockpit's haptics read it)
 var shake := [0.0, 0.0]   # ... and its signed waveform, -1..1 (the cockpit's shake reads it)
@@ -128,11 +135,12 @@ func setup(craft_sim) -> void:
 			var pan := AudioEffectPanner.new()
 			pan.pan = TUNE.flap_pan * (-1.0 if side == "L" else 1.0)
 			AudioServer.add_bus_effect(fb, pan)
-	var busmap := {"rush": "WindRush", "buffet": "WindBuffet", "whistle": "Wind", "flapL": "WindFlapL", "flapR": "WindFlapR"}
+	var busmap := {"rush": "WindRush", "buffet": "WindBuffet", "whistle": "Wind", "flapL": "WindFlapL", "flapR": "WindFlapR", "drag": "Wind"}
 	var t0 := Time.get_ticks_msec()
 	streams.flap = make_loop("flap", 1777)
-	for layer in ["rush", "buffet", "whistle", "flapL", "flapR"]:
-		if not layer.begins_with("flap"):
+	streams.drag = make_loop("drag", 2024)
+	for layer in ["rush", "buffet", "whistle", "flapL", "flapR", "drag"]:
+		if not layer.begins_with("flap") and not streams.has(layer):
 			streams[layer] = make_loop(layer, 1000 + layer.length())
 		var p := AudioStreamPlayer.new()
 		p.stream = streams.flap if layer.begins_with("flap") else streams[layer]
@@ -183,7 +191,7 @@ func setup(craft_sim) -> void:
 	boom_player.bus = "Boom"
 	boom_player.volume_db = BOOM_DB
 	add_child(boom_player)
-	print("AUDIO: WindAudio up, 4 stereo loops + a boom synthesized in %d ms (%d more booms on a worker)" % [Time.get_ticks_msec() - t0, BOOM_VARIANTS.size() - 1])
+	print("AUDIO: WindAudio up, 5 stereo loops + a boom synthesized in %d ms (%d more booms on a worker)" % [Time.get_ticks_msec() - t0, BOOM_VARIANTS.size() - 1])
 
 
 ## Get or create a bus routed into `send` (same helper as EngineAudio).
@@ -283,6 +291,68 @@ static func make_loop(kind: String, seed: int) -> AudioStreamWAV:
 			var drive := 1.5 / sqrt(maxf(sum_sq / m, 1e-20))   # driven harder: a growl the small speakers carry
 			for i in m:
 				buf[i] = tanh(drive * buf[i]) / 1.5
+		elif kind == "drag":
+			# Both air brakes hard out at speed: the whole craft leaning on the air. Deeper than the
+			# flaps' roar: brown noise held to about 28-150 Hz with the hull booming at 52, 78 and
+			# 116 Hz (at 41, 62 and 93 it measured 81% under 80 Hz: felt on a subwoofer, absent in a
+			# headset), heaved slowly, then saturated hard so its harmonics carry the weight up to where
+			# a headset's small speakers can play it (they give back little under 80 Hz), and
+			# low-passed again so none of it turns to hiss.
+			var m := n + xf
+			var parts: Array[PackedFloat32Array] = []
+			for p in 4:
+				var a := PackedFloat32Array()
+				a.resize(m)
+				parts.append(a)
+			var lp_a := 1.0 - exp(-TAU * 150.0 / RATE)
+			var hp_a := exp(-TAU * 28.0 / RATE)
+			var res_r := [0.9985, 0.998, 0.9975]
+			var res_a1 := []
+			for r in 3:
+				res_a1.append(2.0 * res_r[r] * cos(TAU * [52.0, 78.0, 116.0][r] / RATE))
+			var y1 := [0.0, 0.0, 0.0]
+			var y2 := [0.0, 0.0, 0.0]
+			var br := 0.0
+			var l1 := 0.0
+			var l2 := 0.0
+			var h1 := 0.0
+			var h1_in := 0.0
+			var sq := [0.0, 0.0, 0.0, 0.0]
+			for i in m:
+				var w := rng.randf_range(-1.0, 1.0)
+				br = (br + 0.02 * w) / 1.02   # brown
+				l1 += lp_a * (br - l1)
+				l2 += lp_a * (l1 - l2)
+				h1 = hp_a * (h1 + l2 - h1_in)
+				h1_in = l2
+				parts[0][i] = h1
+				sq[0] += h1 * h1
+				for r in 3:   # the hull booming
+					var rr: float = res_r[r]
+					var y: float = (1.0 - rr) * w + res_a1[r] * y1[r] - rr * rr * y2[r]
+					y2[r] = y1[r]
+					y1[r] = y
+					parts[r + 1][i] = y
+					sq[r + 1] += y * y
+			var gains := [0.6, 0.8, 1.1, 1.6]
+			for p in 4:
+				gains[p] = gains[p] / sqrt(maxf(sq[p] / m, 1e-20))
+			var ph := [rng.randf() * TAU, rng.randf() * TAU]
+			var sum_sq := 0.0
+			for i in m:
+				# the heave: 0.5 and 1.5 Hz, whole cycles in the 2 s loop so it stays seamless
+				var t := float(i % n) / RATE
+				var heave: float = 0.72 + 0.18 * sin(TAU * 0.5 * t + ph[0]) + 0.1 * sin(TAU * 1.5 * t + ph[1])
+				buf[i] = (gains[0] * parts[0][i] + gains[1] * parts[1][i] + gains[2] * parts[2][i] + gains[3] * parts[3][i]) * heave
+				sum_sq += buf[i] * buf[i]
+			var drive := 4.5 / sqrt(maxf(sum_sq / m, 1e-20))   # hard: the third and fifth harmonics (156-580 Hz) are what a headset plays best
+			var lp_b := 1.0 - exp(-TAU * 400.0 / RATE)
+			var s1 := 0.0
+			var s2 := 0.0
+			for i in m:
+				s1 += lp_b * (tanh(drive * buf[i]) - s1)
+				s2 += lp_b * (s1 - s2)
+				buf[i] = s2
 		elif kind == "buffet":   # brown
 			var b := 0.0
 			for i in n + xf:
@@ -594,6 +664,9 @@ func update(_inp: Dictionary, delta: float) -> void:
 	for k in 2:
 		_open[k] = _follow(_open[k], clampf(brk[k], 0.0, 1.0), TUNE.flap_tau, dt)
 		targets["flap" + ("L" if k == 0 else "R")] = db_to_linear(lerpf(TUNE.flap_db[0], TUNE.flap_db[1], pow(g, 0.9))) * pow(_open[k], 0.7)
+	# both hard out at speed: the bass rush
+	targets["drag"] = db_to_linear(TUNE.drag_db) * smoothstep(TUNE.drag_g[0], TUNE.drag_g[1], g) \
+		* smoothstep(TUNE.drag_full[0], TUNE.drag_full[1], minf(_open[0], _open[1]))
 	# the shudder: open flaps at speed buffet in irregular 4-9 Hz bursts (Luke: "should have a
 	# shudder to them too"), heard in the roar and felt through the cockpit
 	var buffet_g := smoothstep(0.15, 0.7, g) * moving * duck
@@ -606,12 +679,14 @@ func update(_inp: Dictionary, delta: float) -> void:
 		if layer.begins_with("flap"):
 			var k := 0 if layer == "flapL" else 1
 			lin *= 1.0 + TUNE.flap_shudder * pow(_open[k], 0.8) * buffet_g * shake[k]
-		lin *= db_to_linear(TUNE.seal_db * seal)   # sealed in: the wind shut out
+		if layer != "drag":   # (the bass rush comes through the hull)
+			lin *= db_to_linear(TUNE.seal_db * seal)   # sealed in: the wind shut out
 		players[layer].volume_db = linear_to_db(lin) if lin > 1e-4 else -80.0
 	players.rush.pitch_scale = 0.85 + 0.35 * g
 	players.whistle.pitch_scale = 0.8 + 0.7 * g
 	players.flapL.pitch_scale = 0.75 + 0.3 * g    # the rumble deepens as you slow (and stays a rumble flat out)
 	players.flapR.pitch_scale = 0.77 + 0.3 * g    # a touch apart, so the two sides don't phase
+	players.drag.pitch_scale = 0.85 + 0.3 * g
 	var cut: float = TUNE.rush_hz[0] * pow(TUNE.rush_hz[1] / TUNE.rush_hz[0], g) * (1.0 - 0.35 * air)
 	_cut = _follow(_cut, cut, TUNE.smooth, dt)
 	(AudioServer.get_bus_effect(_rush_bus, 0) as AudioEffectLowPassFilter).cutoff_hz = _cut

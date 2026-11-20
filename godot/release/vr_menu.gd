@@ -96,9 +96,12 @@ func _build_screen() -> void:
 	choices.custom_minimum_size.x = 580
 	columns.add_child(choices)
 	choices.add_child(UI.label("Choose a map", 32, UI.AMBER))
+	var crowded: bool = UI.COURSES.size() > 6   # eight rows fit the board at this height and spacing
+	if crowded:
+		choices.add_theme_constant_override("separation", 6)
 	for course in UI.COURSES:
-		var button := UI.button(course.name, choose_course.bind(course.id), 64)
-		button.add_theme_font_size_override("font_size", 28)
+		var button := UI.button(course.name, choose_course.bind(course.id), 46 if crowded else 64)
+		button.add_theme_font_size_override("font_size", 24 if crowded else 28)
 		choices.add_child(button)
 		buttons.append(button)
 	var details := VBoxContainer.new()
@@ -168,6 +171,7 @@ func start_selected() -> void:
 	var overrides := UI.course_overrides(selected_course)
 	View.track_override = overrides[0]
 	View.job_override = overrides[1]
+	View.spot_override = overrides[2]
 	var cockpit = load("res://vr/vr_cockpit.gd")
 	cockpit.require_neutral_on_entry = true
 	start_button.text = "Loading " + title.text + "…"

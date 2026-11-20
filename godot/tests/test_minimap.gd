@@ -10,9 +10,10 @@
 ##   dawn         on the emergency run the dawn front's line crosses the map (here 2 mi ahead), and
 ##                the readout counts down to it lighting the job's next stop: DAWN m:ss; no line,
 ##                no countdown, without a job
-##   headset      the panel is built into the cockpit on a course, 1 m from the eye, up and left of
-##                the instrument panel and clear of it, facing the eye; it draws the path and the
-##                readout; the flat view's map is hidden on the range
+##   headset      the screen is built into the cockpit on a course, left of the instruments and
+##                clear of them, facing the eye; it draws the path and the readout; its pod and
+##                arm clear the hull, the cockpit's lip and the port console; the flat view's
+##                map is hidden on the range
 ## Prints MINIMAP PASS.
 ## Run: Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_minimap.gd -- --mute
 extends SceneTree
@@ -22,7 +23,8 @@ const MiniMap := preload("res://view/minimap.gd")
 const MapPanel := preload("res://vr/minimap_panel.gd")
 const ViewScript := preload("res://view/craft_view.gd")
 const VRScript := preload("res://vr/vr_cockpit.gd")
-const CHECKS := 14
+const CHECKS := 15
+const CraftModel := preload("res://view/craft_model.gd")
 const MI := 1609.344
 var fails := 0
 var passed := 0
@@ -227,6 +229,27 @@ func _headset() -> void:
 		verts += (lines.surface_get_arrays(k)[Mesh.ARRAY_VERTEX] as PackedVector3Array).size()
 	_check("it draws the path (%d vertices) and the readout ('%s')" % [verts, p.label.text],
 		verts > 200 and p.label.text.begins_with("SPEEDCRAFT"))
+	# the enclosure: every vertex of the pod and its arm, in the pod's frame, against the hull;
+	# and the pod itself against the port console's housing (the arm stands on that)
+	var to_shell := shell.global_transform.affine_inverse()
+	var parts := 0
+	var points := 0
+	var clipped := ""
+	for n in p.find_children("*", "MeshInstance3D", true, false):
+		var mi := n as MeshInstance3D
+		if not ["pod", "tube", "ends"].has(str(mi.name)):
+			continue
+		parts += 1
+		for vertex in mi.mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]:
+			var q: Vector3 = to_shell * (mi.global_transform * vertex)
+			var why: String = CraftModel.hull_clearance(q - Vector3(0, CraftModel.POD_FRAME_UP, 0))
+			if why == "" and mi.name == "pod" and q.x < -0.55 and q.x > -0.68 and q.y < 0.37 and q.z > -0.055:
+				why = "in the port console"
+			points += 1
+			if why != "":
+				clipped = "%s %s at (%.2f, %.2f, %.2f)" % [mi.name, why, q.x, q.y, q.z]
+	_check("the map's pod and arm (%d parts, %d points) clear the hull, the lip and the port console%s" % [parts, points, "" if clipped == "" else ": " + clipped],
+		parts == 3 and points > 2000 and clipped == "")
 
 
 func _check(label: String, ok: bool) -> void:

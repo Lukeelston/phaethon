@@ -10,7 +10,7 @@
 ##              top with its up pointing down, the right way up again, the frame never jumps (no step
 ##              between frames over ~1.5x the speed), and it comes out on the same highway the other way
 ##   stall      no throttle at 300 mph: gravity stops it on the climb and it slides back
-##   sides      twelve side roads, every one with corners a board names (a speed and a gear), at least
+##   sides      fourteen side roads (twelve off the straight highways, the coast road and the drop), every one with corners a board names (a speed and a gear), at least
 ##              two gears' worth on each, none slower than second
 ##   partner    on E2 at 4,000 mph: it passes within 400 m while staying on the road;
 ##              braking matches speed without cancelling a safe pass; shafts retain close formation
@@ -240,7 +240,7 @@ func _sides(sim) -> void:
 		if gears[nm].size() >= 2:
 			two += 1
 	_check("sides: %d side roads, all with corner boards (%d); %d with two gears' worth of corners; none in first (%s); e.g. %s" % [n_side, roads.size(), two, shifts, gears.get("S0", {}).keys()],
-		n_side == 12 and roads.size() == 12 and two == 12 and shifts and W.gear_for(2100.0) == 2 and W.gear_for(3000.0) == 3)
+		n_side == 14 and roads.size() == 14 and two == 14 and shifts and W.gear_for(2100.0) == 2 and W.gear_for(3000.0) == 3)
 
 
 func _partner(sim) -> void:

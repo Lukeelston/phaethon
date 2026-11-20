@@ -3,6 +3,7 @@
 extends MeshInstance3D
 const SEGMENTS := 32
 const RESTRIKE := 1.0 / 22.0
+const HALO_UV := [Vector2(0, 0), Vector2(1, 0), Vector2(1, 1), Vector2(0, 0), Vector2(1, 1), Vector2(0, 1)]
 const RING := [Vector2(1,0), Vector2(0.5,0.8660254), Vector2(-0.5,0.8660254),
 	Vector2(-1,0), Vector2(-0.5,-0.8660254), Vector2(0.5,-0.8660254)]
 var channel := PackedVector3Array()
@@ -17,7 +18,7 @@ var _core_material: StandardMaterial3D
 var _glow_material: ShaderMaterial
 
 func _init() -> void:
-	mesh = ImmediateMesh.new()
+	mesh = ArrayMesh.new()   # rebuilt each frame from packed arrays (update_arc): a surface for the core, one for the glow
 	cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_rng.seed = 829371
 	var material := StandardMaterial3D.new()
@@ -67,8 +68,8 @@ func _restrike() -> void:
 		_branch_shapes.append(branch)
 
 func update_arc(a: Vector3, b: Vector3, strain: float, broken: bool, delta: float) -> void:
-	var immediate := mesh as ImmediateMesh
-	immediate.clear_surfaces()
+	var built := mesh as ArrayMesh
+	built.clear_surfaces()
 	if broken or a.distance_squared_to(b) < 0.0001:
 		channel.clear()
 		branches.clear()
@@ -100,26 +101,37 @@ func update_arc(a: Vector3, b: Vector3, strain: float, broken: bool, delta: floa
 		branches.append(path)
 	var hue := Color(0.18, 0.51, 1.0).lerp(Color(0.62, 0.24, 1.0), clampf(strain, 0.0, 1.0))
 	var pulse := 0.88 + 0.12 * sin(_time * 37.0)
-	immediate.surface_begin(Mesh.PRIMITIVE_TRIANGLES, _core_material)
-	_tube(immediate, channel, 0.007, Color(1.3, 1.5, 1.7, pulse), false)
+	var core := [PackedVector3Array(), PackedColorArray()]
+	_tube(core, channel, 0.007, Color(1.3, 1.5, 1.7, pulse), false)
 	for k in branches.size():
 		var branch_color := Color(0.8, 0.9, 1.0, pulse * (0.48 + 0.3 * sin(_age / RESTRIKE * PI + k)))
-		_tube(immediate, branches[k], 0.004, branch_color, true)
-	immediate.surface_end()
+		_tube(core, branches[k], 0.004, branch_color, true)
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = core[0]
+	arrays[Mesh.ARRAY_COLOR] = core[1]
+	built.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	built.surface_set_material(0, _core_material)
 	var eye := (a + b) * 0.5 + Vector3(0, 0, 10)
 	var viewport := get_viewport()
 	var camera: Camera3D = viewport.get_camera_3d() if viewport else null
 	if camera:
 		eye = to_local(camera.global_position)
-	immediate.surface_begin(Mesh.PRIMITIVE_TRIANGLES, _glow_material)
+	var glow := [PackedVector3Array(), PackedColorArray(), PackedVector2Array()]
 	hue.a = 0.45 * pulse
-	_halo(immediate, channel, 0.10, hue, eye, false)
+	_halo(glow, channel, 0.10, hue, eye, false)
 	for branch in branches:
-		_halo(immediate, branch, 0.06, Color(hue.r, hue.g, hue.b, hue.a * 0.55), eye, true)
-	immediate.surface_end()
+		_halo(glow, branch, 0.06, Color(hue.r, hue.g, hue.b, hue.a * 0.55), eye, true)
+	arrays = []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = glow[0]
+	arrays[Mesh.ARRAY_COLOR] = glow[1]
+	arrays[Mesh.ARRAY_TEX_UV] = glow[2]
+	built.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	built.surface_set_material(1, _glow_material)
 
-static func _halo(into: ImmediateMesh, path: PackedVector3Array, radius: float, col: Color, eye: Vector3, taper: bool) -> void:
-	into.surface_set_color(col)
+## A camera-facing ribbon along `path` into [vertices, colours, uvs].
+static func _halo(into: Array, path: PackedVector3Array, radius: float, col: Color, eye: Vector3, taper: bool) -> void:
 	var offsets := PackedVector3Array()
 	for i in path.size():
 		var tangent := (path[mini(i+1,path.size()-1)] - path[maxi(i-1,0)]).normalized()
@@ -127,22 +139,25 @@ static func _halo(into: ImmediateMesh, path: PackedVector3Array, radius: float, 
 		if side.length_squared() < 0.01:
 			side = tangent.cross(Vector3.UP).normalized()
 		offsets.append(side * radius * (1.0-float(i)/(path.size()-1) if taper else 1.0))
+	var verts: PackedVector3Array = into[0]
+	var uvs: PackedVector2Array = into[2]
+	var unit := PackedVector2Array(HALO_UV)
 	for i in path.size()-1:
-		into.surface_set_uv(Vector2(0,0))
-		into.surface_add_vertex(path[i]-offsets[i])
-		into.surface_set_uv(Vector2(1,0))
-		into.surface_add_vertex(path[i+1]-offsets[i+1])
-		into.surface_set_uv(Vector2(1,1))
-		into.surface_add_vertex(path[i+1]+offsets[i+1])
-		into.surface_set_uv(Vector2(0,0))
-		into.surface_add_vertex(path[i]-offsets[i])
-		into.surface_set_uv(Vector2(1,1))
-		into.surface_add_vertex(path[i+1]+offsets[i+1])
-		into.surface_set_uv(Vector2(0,1))
-		into.surface_add_vertex(path[i]+offsets[i])
+		verts.append_array(PackedVector3Array([path[i]-offsets[i], path[i+1]-offsets[i+1], path[i+1]+offsets[i+1],
+			path[i]-offsets[i], path[i+1]+offsets[i+1], path[i]+offsets[i]]))
+		uvs.append_array(unit)
+	var tones: PackedColorArray = into[1]   # (one colour a tube: filled in for the vertices just added)
+	var tone := PackedColorArray()
+	tone.resize(verts.size() - tones.size())
+	tone.fill(col)
+	tones.append_array(tone)
+	into[1] = tones
+	into[0] = verts
+	into[2] = uvs
 
-static func _tube(into: ImmediateMesh, path: PackedVector3Array, radius: float, col: Color, taper: bool) -> void:
-	into.surface_set_color(col)
+## A six-sided tube along `path` into [vertices, colours].
+static func _tube(into: Array, path: PackedVector3Array, radius: float, col: Color, taper: bool) -> void:
+	var verts: PackedVector3Array = into[0]
 	for i in path.size() - 1:
 		var axis := (path[i + 1] - path[i]).normalized()
 		var u := axis.cross(Vector3.UP).normalized()
@@ -155,12 +170,13 @@ static func _tube(into: ImmediateMesh, path: PackedVector3Array, radius: float, 
 			var n0: Vector3 = u * RING[side].x + v * RING[side].y
 			var n1: Vector3 = u * RING[(side + 1) % 6].x + v * RING[(side + 1) % 6].y
 			var p0 := path[i] + n0 * r0
-			var p1 := path[i + 1] + n0 * r1
 			var p2 := path[i + 1] + n1 * r1
-			var p3 := path[i] + n1 * r0
-			into.surface_add_vertex(p0)
-			into.surface_add_vertex(p1)
-			into.surface_add_vertex(p2)
-			into.surface_add_vertex(p0)
-			into.surface_add_vertex(p2)
-			into.surface_add_vertex(p3)
+			verts.append_array(PackedVector3Array([p0, path[i + 1] + n0 * r1, p2, p0, p2, path[i] + n1 * r0]))
+	var tones: PackedColorArray = into[1]   # (one colour a tube: filled in for the vertices just added)
+	var tone := PackedColorArray()
+	tone.resize(verts.size() - tones.size())
+	tone.fill(col)
+	tones.append_array(tone)
+	into[1] = tones
+	into[0] = verts
+

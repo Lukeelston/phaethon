@@ -1,31 +1,43 @@
-## The minimap in the headset (Luke: "a minimap overlay of upcoming path"): a translucent heads-up
-## panel fixed in the cockpit, up and left of the instrument panel and turned to face the eye, so
-## a glance down-left shows the track ahead. Heading-up, the craft near the bottom, the next
+## The minimap in the headset (Luke: "a minimap overlay of upcoming path", then "put the map in
+## its own enclosure on the left side, pointed at the driver"): a screen in a hooded pod on an arm
+## off the nose of the port console, left of the instruments and turned to face the eye, so a
+## glance down-left shows the track ahead. (With `enclosure` off it is the translucent heads-up
+## panel it was: no pod, drawn over everything.) Heading-up, the craft near the bottom, the next
 ## LOOK_S seconds of track above it (view/minimap.gd: it zooms out with speed, ~21 km at
 ## 4,000 mph), the loop in SPEEDCRAFT blue and the towns in STARFIGHTER magenta, a bar where the
-## next mode change is and a readout of how far ("STARFIGHTER  12.4 km"). Drawn over everything
-## (no depth test), like the HUD it is. Circuits only; the range is one straight line.
+## next mode change is and a readout of how far ("STARFIGHTER  12.4 km"). Circuits and the Network
+## only; on the range the screen is dark (set_live).
 ## Panel-local: x across, y up, the face looks down +z at the pilot.
 ##   var mp := MinimapPanel.new(); shell.add_child(mp); mp.transform = MinimapPanel.mount(eye); mp.build()
 ##   mp.show_frame(minimap.update(heading, delta))      every frame
 extends Node3D
 
 const MiniMap := preload("res://view/minimap.gd")
+const Interior := preload("res://vr/cockpit_interior.gd")
+const Finish := preload("res://view/craft_materials.gd")
+const Kit := preload("res://view/mesh_kit.gd")
+const POD := "res://art/cockpit/gauges_hd.glb"   # tools/art_gauges_hd.py: the MapPod mesh, in the screen's frame
 const W := 0.22
 const H := 0.22
 const MARGIN := 0.007
 const TOP := 0.026                  # the readout's band along the top
 const LINE := 0.0024                # path half-width (m on the panel)
-const DIST := 1.0                   # from the eye
-const YAW := deg_to_rad(30.0)       # left of straight ahead, clear of the instrument panel (its end: 21 deg) ...
-const PITCH := deg_to_rad(-10.0)    # ... and a little below the horizon, beside the instrument panel
+const DIST := 0.85                  # from the eye
+const YAW := deg_to_rad(33.0)       # left of straight ahead, clear of the instruments (their end: 21.5 deg) ...
+const PITCH := deg_to_rad(-14.0)    # ... and below the horizon, just over the port console's nose
+const SCALE := 0.88                 # the screen and its pod, so it fills the eye as it did a metre away
+const HUD := [1.0, deg_to_rad(30.0), deg_to_rad(-10.0), 1.0]   # the same four for the heads-up panel
+const ARM_FOOT := Vector3(-0.6, 0.37, -0.028)   # where the arm stands on the port console (rig frame)
 const SP_COL := Color(0.25, 0.65, 1.0)
 const SF_COL := Color(1.0, 0.3, 0.75)
 const PRIORITY := 40                # over the windscreen and the forcefield
 
+static var enclosure := true   # false before the cockpit is built: the heads-up panel instead
+var live := true         # is the screen showing a map? (set_live)
 var lines: ArrayMesh     # rebuilt every frame from _v, _c (on the Network: ~5,000 vertices at a crossing;
 var label: Label3D       # an ImmediateMesh's two calls a vertex cost ~0.7 ms of the headset's 8.3)
 var _mat: StandardMaterial3D
+var _housed := false
 var _v := PackedVector3Array()
 var _roads: MeshInstance3D   # the whole country's roads, drawn once (the Network's whole map)
 var _c := PackedColorArray()
@@ -33,20 +45,51 @@ var _c := PackedColorArray()
 
 ## Where the panel sits in the cockpit rig (floor origin, forward -Z), facing `eye`.
 static func mount(eye: Vector3) -> Transform3D:
-	var dir := Vector3(-sin(YAW) * cos(PITCH), sin(PITCH), -cos(YAW) * cos(PITCH))
-	return Transform3D(Basis.looking_at(dir, Vector3.UP), eye + dir * DIST)
+	var pose: Array = [DIST, YAW, PITCH, SCALE] if housed() else HUD
+	var dir := Vector3(-sin(pose[1]) * cos(pose[2]), sin(pose[2]), -cos(pose[1]) * cos(pose[2]))
+	return Transform3D(Basis.looking_at(dir, Vector3.UP).scaled(Vector3.ONE * float(pose[3])), eye + dir * float(pose[0]))
+
+
+static func housed() -> bool:
+	return enclosure and Finish.hd and ResourceLoader.exists(POD)
+
+
+## The screen shows a map, or (in its pod) sits dark; the heads-up panel just goes away.
+func set_live(on: bool) -> void:
+	live = on
+	if _housed:
+		for name in ["path", "readout", "roads"]:
+			var n := get_node_or_null(name) as Node3D
+			if n:
+				n.visible = on
+	else:
+		visible = on
 
 
 func build() -> void:
+	_housed = housed()
 	var back := MeshInstance3D.new()
 	back.name = "backing"
 	var q := QuadMesh.new()
 	q.size = Vector2(W, H)
 	back.mesh = q
-	var bm := _hud_mat(PRIORITY)
-	bm.vertex_color_use_as_albedo = false
-	bm.albedo_color = Color(0.02, 0.03, 0.05, 0.5)
-	back.material_override = bm
+	if _housed:
+		var glass := StandardMaterial3D.new()   # the screen itself: dark glass with a little backlight
+		glass.albedo_color = Color(0.012, 0.016, 0.022)
+		glass.roughness = 0.16
+		glass.emission_enabled = true
+		glass.emission = Color(0.012, 0.018, 0.028)
+		back.material_override = glass
+		var pod := MeshInstance3D.new()
+		pod.name = "pod"
+		pod.mesh = Interior._hd_mesh(POD, "MapPod")
+		add_child(pod)
+		_arm()
+	else:
+		var bm := _hud_mat(PRIORITY)
+		bm.vertex_color_use_as_albedo = false
+		bm.albedo_color = Color(0.02, 0.03, 0.05, 0.5)
+		back.material_override = bm
 	add_child(back)
 	_mat = _hud_mat(PRIORITY + 1)
 	lines = ArrayMesh.new()
@@ -62,12 +105,65 @@ func build() -> void:
 	label.font_size = 26
 	label.outline_size = 6
 	label.outline_modulate = Color(0, 0, 0, 0.7)
-	label.no_depth_test = true
+	label.no_depth_test = not _housed
 	label.render_priority = PRIORITY + 2
 	label.outline_render_priority = PRIORITY + 1
 	label.position = Vector3(0, H / 2.0 - MARGIN - TOP / 2.0, 0.002)
 	add_child(label)
 	show_frame({"pts": PackedVector2Array(), "modes": PackedByteArray(), "ahead": MiniMap.MIN_AHEAD, "next": {}})
+
+
+## The arm: a satin tube from a flange on the port console's nose up to a boss on the pod's back.
+## Built in the rig's frame (the node under it undoes this panel's own placement).
+func _arm() -> void:
+	var to_rig := transform
+	var boss: Vector3 = to_rig * Vector3(-0.045, -0.085, -0.058)
+	var away: Vector3 = -to_rig.basis.z.normalized()
+	var p := [ARM_FOOT, ARM_FOOT + Vector3(0, 0.07, 0), boss + away * 0.06, boss]
+	const STEPS := 14
+	const SIDES := 10
+	const RADIUS := 0.011
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var rings := []
+	var side := Vector3.RIGHT
+	for k in STEPS + 1:
+		var t := float(k) / STEPS
+		var u := 1.0 - t
+		var at: Vector3 = u * u * u * p[0] + 3.0 * u * u * t * p[1] + 3.0 * u * t * t * p[2] + t * t * t * p[3]
+		var along: Vector3 = (3.0 * u * u * (p[1] - p[0]) + 6.0 * u * t * (p[2] - p[1]) + 3.0 * t * t * (p[3] - p[2])).normalized()
+		side = (side - along * side.dot(along)).normalized()   # carried along the tube, so it does not twist
+		var other := along.cross(side)
+		var ring := []
+		for s in SIDES:
+			var a := TAU * s / SIDES
+			ring.append([at, side * cos(a) + other * sin(a)])
+		rings.append(ring)
+	for k in STEPS:
+		for s in SIDES:
+			var s1 := (s + 1) % SIDES
+			for corner in [[k, s], [k + 1, s1], [k + 1, s], [k, s], [k, s1], [k + 1, s1]]:
+				var v: Array = rings[corner[0]][corner[1]]
+				st.set_normal(v[1])
+				st.add_vertex((v[0] as Vector3) + (v[1] as Vector3) * RADIUS)
+	var holder := Node3D.new()
+	holder.name = "arm"
+	holder.transform = to_rig.affine_inverse()
+	add_child(holder)
+	var tube := MeshInstance3D.new()
+	tube.name = "tube"
+	tube.mesh = st.commit()
+	tube.material_override = Finish.satin()
+	holder.add_child(tube)
+	var ends := MeshInstance3D.new()   # the flange on the console, the collar at the pod
+	ends.name = "ends"
+	var dark := Color(0.09, 0.09, 0.1)
+	ends.mesh = Kit.compound([
+		[Kit.cyl(0.026, 0.03, 0.009, 20), Kit.at(ARM_FOOT + Vector3(0, 0.0045, 0)), dark],
+		[Kit.cyl(0.016, 0.018, 0.016, 16), Kit.at(ARM_FOOT + Vector3(0, 0.017, 0)), dark],
+		[Kit.cyl(0.017, 0.017, 0.02, 16), Transform3D(Basis(Quaternion(Vector3.UP, away)), boss + away * 0.008), dark]])
+	ends.material_override = Finish.powder_coat()
+	holder.add_child(ends)
 
 
 func _hud_mat(priority: int) -> StandardMaterial3D:
@@ -76,7 +172,7 @@ func _hud_mat(priority: int) -> StandardMaterial3D:
 	m.vertex_color_use_as_albedo = true
 	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	m.cull_mode = BaseMaterial3D.CULL_DISABLED
-	m.no_depth_test = true
+	m.no_depth_test = not _housed   # in its pod it is a screen, and things in front of it hide it
 	m.disable_fog = true
 	m.render_priority = priority
 	return m

@@ -40,9 +40,17 @@ func _ready() -> void:
 	left.add_child(breathing_room)
 	left.add_child(UI.label("CHOOSE YOUR BAD IDEA", 14, UI.MUTED))
 	var sprint: Button
+	var course_list: Container = left
+	if UI.COURSES.size() > 6:   # eight and more: two abreast, or the list runs off the window
+		course_list = GridContainer.new()
+		(course_list as GridContainer).columns = 2
+		course_list.add_theme_constant_override("h_separation", 8)
+		course_list.add_theme_constant_override("v_separation", 6)
+		left.add_child(course_list)
 	for course in UI.COURSES:
 		var button := UI.button(course.name, start_course.bind(course.id), 42)
-		left.add_child(button)
+		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		course_list.add_child(button)
 		if course.id == "range":
 			sprint = button
 	collision_checkbox = UI.collision_checkbox()
@@ -70,4 +78,5 @@ func start_course(course: String) -> void:
 	var overrides := UI.course_overrides(course)
 	View.track_override = overrides[0]
 	View.job_override = overrides[1]
+	View.spot_override = overrides[2]
 	get_tree().change_scene_to_file(UI.GAME_SCENE)

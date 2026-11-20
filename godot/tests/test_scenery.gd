@@ -2,7 +2,7 @@
 ##   mountains   three ranges each side plus the backdrop ring; each strip tiles seamlessly; mesas
 ##               stay mesa-sized, the high range is high and snow-capped; the feet are exactly the
 ##               fog's colour (they melt into the fogged desert)
-##   light       filmic (ACES) tonemap, bloom, sky ambient; a shadow-casting sun with no disc and
+##   light       filmic (AgX, since the realism spike: it holds the suns' colour where ACES bleached it) tonemap, bloom, sky ambient; a shadow-casting sun with no disc and
 ##               two sky-only disc suns; the camera sees out to the backdrop
 ##   ground      the dry lake's shore keeps clear of the runway and repeats on the ground's period
 ##   faces       the range's flat quads face up (Godot fronts are clockwise), so the sun lights
@@ -100,9 +100,9 @@ func _light() -> void:
 				discs += 1
 			elif l.sky_mode == DirectionalLight3D.SKY_MODE_LIGHT_ONLY and l.shadow_enabled:
 				casters += 1
-	var ok := env != null and env.tonemap_mode == Environment.TONE_MAPPER_ACES and env.glow_enabled \
+	var ok := env != null and env.tonemap_mode == Environment.TONE_MAPPER_AGX and env.glow_enabled \
 		and env.ambient_light_source == Environment.AMBIENT_SOURCE_SKY
-	_check("light: ACES, bloom, sky ambient; %d shadow-casting sun, %d disc suns in the sky; camera sees %.0f km" % [casters, discs, v.cam.far / 1000.0],
+	_check("light: AgX, bloom, sky ambient; %d shadow-casting sun, %d disc suns in the sky; camera sees %.0f km" % [casters, discs, v.cam.far / 1000.0],
 		ok and casters == 1 and discs == 2 and v.cam.far >= 60000.0)
 
 

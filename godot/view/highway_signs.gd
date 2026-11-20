@@ -13,6 +13,7 @@ const SERVICE := Color("#18507a")
 const YELLOW := Color("#edb637")
 const ID_SILVER := Color("#c6cac3")
 const EXPRESSWAY_BLUE := Color("#123b74")
+const SCENIC_BROWN := Color("#5c3a1f")   # the coast road's and the drop's boards (a scenic route's brown)
 const SHEETING_LAYER := 1 << 9
 const GLYPH_SIZE := 128
 var hardware := Gantry.new()
@@ -107,7 +108,7 @@ func face(parent: Node3D, pose: Transform3D, size: Vector2, kind: String, lines:
 	var direction := 0 if rear else int(info.get("side",1))
 	var arrow := direction if jump or (not rear and info.get("decision",false)) else 0
 	var warning := kind in ["corner","brake","end"]
-	var field := YELLOW if warning else (SERVICE if kind == "terminal" else GREEN)
+	var field := YELLOW if warning else (SERVICE if kind == "terminal" else (SCENIC_BROWN if info.get("scenic", false) else GREEN))
 	var angle := PI/2.0 if kind == "fork" else PI/4.0
 	var board := panel(root,"LegendPanel",size,Vector3.ZERO,sheet(size,field,arrow,angle,jump and not rear,0.245 if jump else 0.0))
 	var w := size.x

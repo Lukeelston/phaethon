@@ -148,9 +148,11 @@ def pipe(x, delay_s, g):
     return circular(lambda v: signal.lfilter([1.0], a, v), x)
 
 
-def soft_clip(x, drive):
+def soft_clip(x, drive, bias=0.0):
+    """With a bias the clip is lopsided: it flattens one side of the wave sooner than the other,
+    which adds the even harmonics a symmetric clip never makes. That is the rasp of an open pipe."""
     x = x / (np.sqrt(np.mean(x * x)) + 1e-12) * 0.25   # drive is relative to a fixed level
-    return np.tanh(drive * x)
+    return np.tanh(drive * x + bias) - np.tanh(bias)
 
 
 def hann(n):
@@ -201,12 +203,57 @@ V8 = {
     # pulse a different tone and the train stops being heard as a pitch (measured: corr < 0.3).
     # Life comes from per-event gain and crank-angle jitter instead. The burble is set by
     # bank_gain: a louder bank A leaves the per-bank 270/180/90/180 rhythm audible.
-    "bank_notes": [21, 21], "bank_vels": [16, 16], "bank_gain": [1.0, 0.6], "grain_s": 0.09, "tau": 0.016, "grain_lp": 1400,
-    "click": 0.18, "pipes": [(0.0051, 0.35), (0.0055, 0.35)], "drive": 2.4,
-    "jitter_deg": 1.4, "gain_sd": 0.10, "cyl_sd": 0.07,
+    # Grumble (Luke: "a more grumbly v8 mixed in with the turbine whine"). Measured before: above
+    # idle this engine had nothing under its firing pitch and 4% of its energy under 200 Hz at
+    # 3,000 rpm, none at 5,400: a mid-range buzz. Now each pulse carries a one-sided thump
+    # (thump()), the banks are unequal in level and in pipe length so their 270/180/90/180
+    # patterns no longer cancel, the cylinders pull unevenly (cyl_trim), and the pulse is longer,
+    # darker and driven harder. The result puts 30-50% of its energy under the firing pitch at
+    # speed, which costs firing-harmonic share (56% -> about 40%, hence min_fire); the game's own
+    # gate still has to find the firing pitch in the recording.
+    # Anger (Luke: "lower and more angry ... misfires, late ignitions ... instead of a sterile sine
+    # wave ... focus on it sounding *pissed*"). The sine was the thump: a smooth, symmetric 60 Hz
+    # bump on every pulse, every pulse nearly alike, so at speed the low end was one clean tone at
+    # the firing pitch. Now:
+    #   faults    3.5% of pulses barely light and 6% light late (8-22 degrees) and bang harder,
+    #             from their own random stream, over 96 cycles so the pattern takes twice as long
+    #             to come round
+    #   post_dyn  every pulse's strength goes on after the clip. Before, the clip levelled them: a
+    #             miss came out 3 dB down and a hard one no louder, which is why it sounded so even.
+    #             The random part goes on mostly above the firing pitch (dyn_low): a miss is a
+    #             hole in the rasp. On the whole pulse it made a bed of low noise that no rev moved
+    #   lower     cyl_trim: alternate cylinders in the firing order pull hard and soft (+-40%), with
+    #             a little of the three-per-cycle pattern the unequal banks already make. That is
+    #             a note at half the firing pitch and a burble at 3/8 and 5/8 of it, and it follows
+    #             the revs. (A general unevenness also lights the orders next to the firing pitch,
+    #             which blur it; more thump than this and the firing pitch is lost outright:
+    #             measured, the gate's pitch finder drops from 96% to 77%.)
+    #   thump     kicks up fast and falls away (thump_edge)
+    #   rasp      driven more than twice as hard into a lopsided clip (bias), from a brighter
+    #             pulse with more of the mechanical click in it
+    # Flown in the headset, that version failed (Luke: "It sounds like crackling instead of a
+    # bassy, hearty monster"). The crackle was everything in the last two entries plus the faults:
+    # misses and late bangs every few pulses, written into the band above the firing pitch, are
+    # crackle by construction, and 10-24% of the energy sat over 1.5 kHz with a 16-18 dB crest.
+    # What stays is what made it lower (the rev range in the game, the alternate cylinders, the
+    # fast thump, post_dyn). What changed for the monster:
+    #   body      a darker pulse, a gentler clip, almost no click, longer pipes; the game adds a
+    #             fixed chest EQ and a 1.8 kHz muffler (EngineAudio v8_eq_db, muffler_hz)
+    #   faults    rare: under 1% miss, 1.5% light late and only a little harder
+    #   pattern   alternate cylinders +-28%, the rest of the unevenness three-per-cycle only, so
+    #             it does not add orders at 33 and 67 Hz that a headset cannot play back
+    # Measured as the game plays it at 700-5,600 rpm: 57-83% of the energy between 80 and 350 Hz
+    # (the crackly one: 30-52%), under 0.5% over 1.5 kHz (was up to 24%), crest 11-13.5 dB (was 16-19).
+    "bank_notes": [21, 21], "bank_vels": [16, 16], "bank_gain": [1.0, 0.5], "grain_s": 0.09, "tau": 0.024, "grain_lp": 1300,
+    "click": 0.12, "pipes": [(0.0090, 0.5), (0.0066, 0.42)], "drive": 3.0, "bias": -0.2,
+    "jitter_deg": 2.2, "gain_sd": 0.07, "cyl_sd": 0.07,
+    "cyl_trim": [1.36, 0.66, 1.28, 0.78, 1.2, 0.78, 1.28, 0.66], "thump": 1.0, "thump_hz": 90.0, "thump_edge": True,
+    "n_cyc": 96, "fault_seed": 4242, "misfire": 0.008, "late": 0.015, "late_deg": (8.0, 22.0), "late_gain": (1.1, 1.3),
+    "post_dyn": True, "dyn_low": 0.3,
+    "hp": 5.0, "min_fire": 0.15,
     # The master runs at rate_at rpm, its hammer grains slowed to grain_speed (a fat idle thud
     # that shortens with RPM like a real crank-angle pulse). EngineAudio plays it up to p_max.
-    "rate_at": 800, "grain_speed": 0.6, "p_max": 12.0,
+    "rate_at": 800, "grain_speed": 0.48, "p_max": 12.0,
 }
 V12 = {
     "name": "v12", "cyl": 12,
@@ -231,8 +278,35 @@ MIN_MIP_RHO = 0.9
 # crossfade holds the level within this many dB at 25, 50 and 75% of the way across.
 MAX_XFADE_DB = 1.0
 # Gate: at least half of every piston master's energy sits on firing harmonics (cyl per 720-degree
-# cycle), so the ear hears the firing pitch and not a pipe drone or the lope.
+# cycle), so the ear hears the firing pitch and not a pipe drone or the lope. (A spec may set its
+# own floor with min_fire: the V8 gives some of this up for its grumble, on purpose.)
 MIN_FIRE = 0.5
+
+
+def thump(g, spec):
+    """A hammer strike swings both ways about zero, so a train of them has nothing below the
+    strike's own lowest partial: pitched up with the revs, the engine has no bottom at all. An
+    exhaust pulse is a one-sided push of pressure. With spec['thump'], add the strike's own
+    outline (its rectified, smoothed level) to it: a push the length of the strike, which gives
+    the train its firing fundamental and, fired unevenly, the orders under it."""
+    k = spec.get("thump", 0.0)
+    if k <= 0.0:
+        return g
+    sos = signal.butter(2, spec.get("thump_hz", 60.0), "lowpass", fs=SR, output="sos")
+    # Smoothed both ways the push is a rounded, symmetric bump: close to a sine, and it sounds
+    # like one. thump_edge smooths it forward only, so it kicks up fast and falls away slower.
+    push = signal.sosfilt(sos, np.abs(g)) if spec.get("thump_edge", False) else signal.sosfiltfilt(sos, np.abs(g))
+    push *= np.max(np.abs(g)) / (np.max(push) + 1e-12)
+    out = g + k * push
+    return out / np.max(np.abs(out))
+
+
+def held(marks, n, smooth_hz=220.0):
+    """Per-pulse gains as a curve over the loop: each pulse's gain holds from its own start to
+    the next pulse's, with the steps rounded off (about 1.5 ms) so they don't click."""
+    pos, gain = (np.array(v) for v in zip(*sorted(marks)))
+    idx = np.searchsorted(pos, np.arange(n), side="right") - 1   # before the first pulse: -1, the last one
+    return circular(lambda v: butter(v, smooth_hz, "lowpass"), gain[idx])
 
 
 def bake_piston(piano, spec, n_cyc, rng):
@@ -242,27 +316,69 @@ def bake_piston(piano, spec, n_cyc, rng):
     cyc = n / n_cyc                           # samples per cycle (fractional is fine)
     rpm_true = 120.0 * SR / cyc
     speed = spec["grain_speed"]
-    pools = [[resample(strike(piano, m, v, spec["grain_s"], spec["tau"], spec["grain_lp"]), speed)]
+    pools = [[thump(resample(strike(piano, m, v, spec["grain_s"], spec["tau"], spec["grain_lp"]), speed), spec)]
              for m, v in zip(spec["bank_notes"], spec["bank_vels"])]
     clicks = [resample(damper(piano, m, 0.012), speed) for m in spec["bank_notes"]]
     cyl_gain = 1.0 + spec["cyl_sd"] * rng.standard_normal(len(spec["events"]))
+    # A fixed strength per cylinder, the same every cycle: an engine that pulls unevenly. It puts
+    # energy on the orders below the firing pitch, which is the lump at idle and the growl at speed.
+    cyl_gain = cyl_gain * np.array(spec.get("cyl_trim", [1.0] * len(spec["events"])))
     gain_sd = spec["gain_sd"]
     banks = [np.zeros(n), np.zeros(n)]
     jitter = spec["jitter_deg"] / 720.0 * cyc
+    # Combustion faults (a spec with fault_seed): now and then a cylinder barely lights (a miss),
+    # or lights late, on the way down, and bangs harder into the pipe. They draw from their own
+    # stream, and so do any cycles past the first N_CYC, so the loops baked before and after
+    # this one in the shared stream come out the same as they always did.
+    faults = np.random.default_rng(spec["fault_seed"]) if "fault_seed" in spec else None
+    # The clip levels whatever goes into it: measured, a pulse at a third of the strength came
+    # out 3 dB down, and a late bang 40% over came out no louder at all. With post_dyn every
+    # pulse goes in at full strength (so each one rasps the same) and its gain goes on after,
+    # in two parts. The fixed part (which cylinder it is) goes on everything: that is the lope,
+    # on the orders under the firing pitch, and it follows the revs. The part that differs
+    # from one cycle to the next (gain_sd, the faults) goes on in full only above dyn_split
+    # times the firing pitch, and dyn_low of it below. On the whole pulse it turned the one-
+    # sided thumps into a bed of low noise that no rev moved (measured: it hid an idling
+    # engine's note behind a screaming one's): a miss is a hole in the rasp, not a rumble.
+    post = spec.get("post_dyn", False)
+    marks = [[], []]
+    fixed = [[], []]
     for c in range(n_cyc):
+        src = rng if c < N_CYC or faults is None else faults
         for k, (deg, bank) in enumerate(spec["events"]):
-            pos = (c + deg / 720.0) * cyc + jitter * rng.standard_normal()
+            pos = (c + deg / 720.0) * cyc + jitter * src.standard_normal()
             pool = pools[bank]
-            g = pool[rng.integers(len(pool))]
-            g = resample(g, 1.0 + 0.008 * rng.standard_normal())
-            gain = cyl_gain[k] * float(np.exp(gain_sd * rng.standard_normal()))
+            g = pool[src.integers(len(pool))]
+            g = resample(g, 1.0 + 0.008 * src.standard_normal())
+            gain = cyl_gain[k] * float(np.exp(gain_sd * src.standard_normal()))
+            if faults is not None:
+                roll = faults.random()
+                if roll < spec.get("misfire", 0.0):
+                    gain *= faults.uniform(0.04, 0.3)
+                elif roll < spec.get("misfire", 0.0) + spec.get("late", 0.0):
+                    pos += faults.uniform(*spec.get("late_deg", (8.0, 22.0))) / 720.0 * cyc
+                    gain *= faults.uniform(*spec.get("late_gain", (1.15, 1.45)))
+            if post:
+                marks[bank].append((pos % n, gain / cyl_gain[k]))
+                fixed[bank].append((pos % n, cyl_gain[k]))
+                gain = 1.0
             place(banks[bank], g, pos, gain)
             place(banks[bank], clicks[bank], pos, gain * spec["click"])
     out = np.zeros(n)
     # bank levels apply after the clip (which normalizes)
-    for b, (delay, fb), level in zip(banks, spec["pipes"], spec["bank_gain"]):
-        out += level * soft_clip(pipe(b, delay, fb), spec["drive"])
-    out = circular(lambda v: butter(v, 30, "highpass"), out)
+    split = spec.get("dyn_split", 2.5) * spec["cyl"] * rpm_true / 120.0
+    for b, (delay, fb), level, mark, fix in zip(banks, spec["pipes"], spec["bank_gain"], marks, fixed):
+        shaped = soft_clip(pipe(b, delay, fb), spec["drive"], spec.get("bias", 0.0))
+        if post:
+            wild = held(mark, n)
+            low = bandlimit(shaped, split)
+            shaped = held(fix, n) * (low * (1.0 + spec.get("dyn_low", 1.0) * (wild - 1.0)) + (shaped - low) * wild)
+        out += level * shaped
+    # The high-pass rides the pitch with everything else in the master: 30 Hz here is 280 Hz at
+    # nine times the speed, which takes every order under the firing pitch with it. A spec that
+    # wants those orders heard at speed asks for a lower corner (and EngineAudio then holds a
+    # fixed high-pass on that layer, so the idle stays clean).
+    out = circular(lambda v: butter(v, spec.get("hp", 30.0), "highpass"), out)
     if "seam_deg" in spec:   # start the loop in a firing gap, so its seam isn't on a pulse
         out = np.roll(out, -int(round(spec["seam_deg"] / 720.0 * cyc)))
     return normalize(out), rpm_true
@@ -561,10 +677,11 @@ def main():
     # The second engine draws from its own stream, so adding it changed none of the other loops.
     rng_second = np.random.default_rng(args.seed + 2)
     for spec in (V8, V12, SECOND):
-        master, rpm_true = bake_piston(piano, spec, N_CYC, rng_second if spec is SECOND else rng)
-        cyc = harmonic_share(master, N_CYC, 1)
-        fire = harmonic_share(master, N_CYC, spec.get("pulse_per_cycle", spec["cyl"]))
-        ok = fire >= MIN_FIRE and seam_ratio(master) < 1
+        n_cyc = spec.get("n_cyc", N_CYC)
+        master, rpm_true = bake_piston(piano, spec, n_cyc, rng_second if spec is SECOND else rng)
+        cyc = harmonic_share(master, n_cyc, 1)
+        fire = harmonic_share(master, n_cyc, spec.get("pulse_per_cycle", spec["cyl"]))
+        ok = fire >= spec.get("min_fire", MIN_FIRE) and seam_ratio(master) < 1
         fails += 0 if ok else 1
         print("  %s %s master  %.1f rpm, %.2f s  on cycle harmonics %3.0f%%, on firing harmonics %3.0f%%" % (
             "ok  " if ok else "FAIL", spec["name"], rpm_true, len(master) / SR, 100 * cyc, 100 * fire))

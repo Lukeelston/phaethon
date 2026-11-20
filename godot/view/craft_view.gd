@@ -97,6 +97,7 @@ var handling_ask := ""             # the live handling switch: "speed" / "starfi
 static var track_override := ""    # an in-game track switch (VR: hold the menu button) wins over --track;
                                    # static, so it survives the scene reload that does the switch
 static var job_override := ""      # the job to fly ("emergency": the emergency run; "none": no job), wins over --job; static too
+static var spot_override := ""     # the Network road to start on (a scenic road's menu entry: "SCoast", "SDrop"); static too
 var eye := Vector3.INF            # --eye / --look: a fixed debug camera at sim (x, y, h), aimed at another point
 var look := Vector3.ZERO
 var best_saved := -1.0     # sprint best, persisted across launches
@@ -135,6 +136,7 @@ var traffic_net: Node3D      # the Network: its traffic and racers (view/network
 var dawn: Node3D             # the emergency run: the dawn's front (view/dawn.gd)
 var stars: MeshInstance3D    # the emergency run: the night still over the twilight (view/stars.gdshader)
 var light_preset := "afternoon"   # "afternoon", or "twilight" on a job (the emergency run: before dawn)
+var sky_zenith := Color(0.19, 0.39, 0.78)   # the afternoon sky overhead (view/sky.gdshader), for whatever fades into it
 var burn_rect: ColorRect     # the flat view's burn to white when the dawn catches you
 var verdant_world: Node3D    # ... and the green valley round it (view/verdant_world.gd)
 var dust: Node3D
@@ -202,6 +204,10 @@ func _ready() -> void:
 			net_beaten = saved.get("beaten", {})
 			if int(saved.get("last", -1)) >= 0 and int(saved.get("last", -1)) < CraftSimScript.NET_CITIES.size():
 				opts["startCity"] = int(saved.last)
+		var spot := scenic_spot(spot_override)
+		if spot.x >= 0:   # a scenic road's own menu entry: at the foot of it
+			opts["startRoad"] = spot.x
+			opts["startSample"] = spot.y
 	partner_on = GameSettings.resolve_driving_partner(OS.get_cmdline_user_args())
 	if "--pod=heavy" in OS.get_cmdline_user_args():   # the heavy pod (Luke: "giving the pod some weight"): 1,500 kg, not
 		opts["podMass"] = 1500.0                       # 500, with thrust and drag scaled to the total mass so the
@@ -494,6 +500,7 @@ func enter_city_gp() -> void:
 	print("TRACK: switching network -> %s" % gp)
 	track_override = gp
 	job_override = "none"
+	spot_override = ""   # (back from the GP you are at this city, not out on a scenic road)
 	get_tree().call_deferred("reload_current_scene")
 
 
@@ -542,6 +549,8 @@ func _gp_skyline(biome: String) -> void:
 	m.shader = preload("res://view/skyline.gdshader")
 	m.set_shader_parameter("crown", Vector3(pal[2].r, pal[2].g, pal[2].b))
 	m.set_shader_parameter("haze_col", Vector3(BIOME_HAZE[biome].r, BIOME_HAZE[biome].g, BIOME_HAZE[biome].b))
+	m.set_shader_parameter("night", 1.0 if light_preset == "twilight" else 0.0)
+	m.set_shader_parameter("suns", 0.0 if light_preset == "twilight" else 1.0)
 	mmi.material_override = m
 	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	mmi.custom_aabb = AABB(Vector3(lo.x - 8000.0, 0.0, -hi.y - 8000.0), Vector3(hi.x - lo.x + 16000.0, 1200.0, hi.y - lo.y + 16000.0))
@@ -856,6 +865,17 @@ func _track_braking() -> void:
 	was_active = sim.run_active
 
 
+## Where a scenic road's flight starts: Vector2i(road, sample), a little way into its scenic
+## stretch (still on the open ground: the coast, or the climb, comes to you); (-1, -1) for no such road.
+static func scenic_spot(road_name: String) -> Vector2i:
+	if road_name == "":
+		return Vector2i(-1, -1)
+	for entry in CraftSimScript.NET_SCENIC:
+		if CraftSimScript.NET_ROADS[int(entry[0])][0] == road_name:
+			return Vector2i(int(entry[0]), int(entry[2][0][0]) + 40)
+	return Vector2i(-1, -1)
+
+
 ## The job to fly: the override ("none": no job, whatever the command line says), else --job=.
 static func resolve_job(args: PackedStringArray, override: String) -> String:
 	if override == "none":
@@ -1029,6 +1049,17 @@ func _build_world() -> void:
 		sky_mat.sun_curve = 0.12
 	var sky := Sky.new()
 	sky.sky_material = sky_mat
+	if not tw:
+		# Realism spike: the afternoon's air is a shader (view/sky.gdshader): the blue deepens overhead
+		# and away from the suns, the haze thickens toward the horizon, and each sun has its glare.
+		# The same colours as before feed it, so every track keeps its own sky.
+		var air := ShaderMaterial.new()
+		air.shader = preload("res://view/sky.gdshader")
+		sky_zenith = Color(sky_mat.sky_top_color.r * 0.64, sky_mat.sky_top_color.g * 0.78, sky_mat.sky_top_color.b * 0.98)
+		air.set_shader_parameter("zenith", sky_zenith)
+		air.set_shader_parameter("horizon", hz)
+		air.set_shader_parameter("ground", sky_mat.ground_bottom_color)
+		sky.sky_material = air
 	var env := WorldEnvironment.new()
 	var en := Environment.new()
 	env.environment = en
@@ -1041,8 +1072,10 @@ func _build_world() -> void:
 	en.ambient_light_sky_contribution = 0.75
 	en.ambient_light_color = Color(0.85, 0.78, 0.7)
 	en.ambient_light_energy = 0.75
-	en.tonemap_mode = Environment.TONE_MAPPER_ACES
-	en.tonemap_exposure = 1.05
+	# Realism spike: AgX rolls bright sky, paint and chrome off the way a camera does, where
+	# ACES pushed them toward saturated primaries.
+	en.tonemap_mode = Environment.TONE_MAPPER_AGX
+	en.tonemap_exposure = 1.22
 	en.tonemap_white = 6.0
 	en.glow_enabled = true
 	en.glow_intensity = 0.55
@@ -1053,8 +1086,8 @@ func _build_world() -> void:
 	for lv in 7:
 		en.set_glow_level(lv, 1.0 if lv in [1, 2, 3, 4] else 0.0)
 	en.adjustment_enabled = true
-	en.adjustment_saturation = 1.08
-	en.adjustment_contrast = 1.04
+	en.adjustment_saturation = 1.04
+	en.adjustment_contrast = 1.06
 	en.fog_enabled = true
 	en.fog_light_color = hz
 	# (the valley's air is clearer than the desert's dust: Eridanus' 12 km boards come up readable)
@@ -1062,6 +1095,7 @@ func _build_world() -> void:
 	if sim.kind == "network" or sim.track_name == "carving":
 		en.fog_density = 0.00016   # the roads stream in 20 km out: the haze takes them there (the skylines carry their own)
 	en.fog_sky_affect = 0.0
+	en.fog_aerial_perspective = 0.0 if tw else 0.55   # distance takes the colour of the sky behind it, sunward or not
 	en.fog_sun_scatter = 0.05 if sim.kind == "network" or sim.track_name == "carving" else 0.18   # preserve contrast on fast roads
 	if tw:
 		en.ambient_light_sky_contribution = 1.0

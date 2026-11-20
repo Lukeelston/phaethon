@@ -44,7 +44,13 @@ func _run() -> void:
 			road_index[rc].append([p,road.w[i]*0.5])
 			for side in [-1.0, 0.0, 1.0]:
 				var q: Vector2 = p + Vector2(road.nx[i], road.ny[i]) * (road.w[i] * 0.5 + 80.0) * side
-				bad += int(land.surface_at(q) > -0.49)
+				# (a scenic road lies on its own land, high over the open ground: under its deck there, not under -0.49)
+				var scenic_here: bool = v.network_world.scenic.on(r, i)
+				var limit: float = v.sim.net_height(r, float(i)) - 2.0 if scenic_here else -0.49
+				if land.surface_at(q) > limit:
+					bad += 1
+					if bad <= 6:
+						print("  over a deck: %s sample %d side %.0f: land %.1f m, limit %.1f" % [road.name, i, side, land.surface_at(q), limit])
 				samples += 1
 	check("terrain triangles remain below real road decks and shoulders (%d samples)" % samples, bad == 0)
 	var jump_clearance := INF
@@ -112,9 +118,10 @@ func _run() -> void:
 	water_b.free()
 	var key: Vector2i = land.tiles.keys()[0]
 	var tile = land.tiles[key]
-	var original: Vector3 = tile.node.position + Vector3(pos.x, 0, -pos.y)
+	# (a tile's place is its own under the tiles' node, plus that node's: the node is what follows the craft)
+	var original: Vector3 = land._tile_root.position + tile.node.position + Vector3(pos.x, 0, -pos.y)
 	land.sync(pos.x + 1200, pos.y + 900)
-	check("terrain has real parallax instead of following player", (tile.node.position + Vector3(pos.x + 1200, 0, -pos.y - 900)).distance_to(original) < 0.01)
+	check("terrain has real parallax instead of following player", (land._tile_root.position + tile.node.position + Vector3(pos.x + 1200, 0, -pos.y - 900)).distance_to(original) < 0.01)
 	var first: ArrayMesh = tile.node.get_child(0).mesh
 	var rebuilt: ArrayMesh = land.make_mesh(key)
 	check("recreated tiles reproduce exact vertices and colors", first.surface_get_arrays(0)[Mesh.ARRAY_VERTEX] == rebuilt.surface_get_arrays(0)[Mesh.ARRAY_VERTEX] and first.surface_get_arrays(0)[Mesh.ARRAY_COLOR] == rebuilt.surface_get_arrays(0)[Mesh.ARRAY_COLOR])

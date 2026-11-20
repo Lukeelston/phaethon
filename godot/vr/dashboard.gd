@@ -13,6 +13,7 @@
 extends Node3D
 
 const Kit := preload("res://view/mesh_kit.gd")
+const Finish := preload("res://view/craft_materials.gd")
 
 const R := 1.32                     # arc radius: about the eye's distance
 const W := 0.84                     # face width, measured along the arc
@@ -44,12 +45,12 @@ static func mount() -> Transform3D:
 
 
 func build() -> void:
-	_curved(Kit.rounded_box(Vector3(W + 0.06, H + 0.05, D + 0.01), 7.0, 48), Vector3(0, 0, -0.005), Color(0.10, 0.10, 0.11)).name = "housing"
-	_curved(Kit.rounded_box(Vector3(W - 0.14, 0.03, 0.12), 5.0, 48), Vector3(0, H / 2.0 + 0.025, 0.04), Color(0.08, 0.08, 0.09)).name = "hood"   # shorter than the panel: its ends would reach the lip
+	_curved(Kit.rounded_box(Vector3(W + 0.06, H + 0.05, D + 0.01), 7.0, 48), Vector3(0, 0, -0.005), Color(0.10, 0.10, 0.11), "powder").name = "housing"
+	_curved(Kit.rounded_box(Vector3(W - 0.14, 0.03, 0.12), 5.0, 48), Vector3(0, H / 2.0 + 0.025, 0.04), Color(0.08, 0.08, 0.09), "rubber").name = "hood"   # shorter than the panel: its ends would reach the lip
 	var face := BoxMesh.new()
 	face.size = Vector3(W, H, 0.004)
 	face.subdivide_width = 32
-	_curved(face, Vector3(0, 0, D / 2.0 + 0.002), Color(0.04, 0.045, 0.05)).name = "face"
+	_curved(face, Vector3(0, 0, D / 2.0 + 0.002), Color(0.04, 0.045, 0.05), "glass").name = "face"
 	# centre stack: wide labels stand a little proud so their flat ends clear the curve
 	var proud := FACE + 0.03
 	_label("progress", Vector2(0, 0.128), 20, AMBER, VERTICAL_ALIGNMENT_TOP, proud)
@@ -81,12 +82,21 @@ func build() -> void:
 
 
 ## A mesh wrapped onto the panel's arc (offset = its place on the flat layout).
-func _curved(mesh: Mesh, offset: Vector3, c: Color) -> MeshInstance3D:
+func _curved(mesh: Mesh, offset: Vector3, c: Color, finish := "") -> MeshInstance3D:
 	var m := MeshInstance3D.new()
 	m.mesh = Kit.bend(mesh, offset, R)
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = c
 	mat.roughness = 0.5
+	if Finish.hd and finish == "glass":
+		# Realism spike: the instrument face is a sheet of dark glass over the readouts.
+		mat.roughness = 0.2
+		mat.metallic_specular = 0.6
+		mat.clearcoat_enabled = true
+		mat.clearcoat = 0.5
+		mat.clearcoat_roughness = 0.14
+	elif Finish.hd and finish != "":
+		mat = Finish.tinted(finish, c)   # powder-coated housing, soft-touch hood
 	m.material_override = mat
 	m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(m)

@@ -1,7 +1,16 @@
 ## EngineAudio: one voice per pod engine, built from the piano-baked loops in res://audio/engines
-## (tools/engine_bake.py). Each voice blends three machines: a V8 for the low-end burble, a V12
-## that takes over through the mid range, and a turbine whine that rides the spool, over a roar
-## that opens up with it. The afterburner and ramjet add a burner rumble on top.
+## (tools/engine_bake.py). Each voice is two stages. The first is the piston pair: a big, bassy
+## cross-plane V8 that carries the low end with a V12 held well back behind it, over a roar that
+## opens up with the spool. The second is the turbines: a whine that rides the spool. The
+## afterburner and ramjet add a burner rumble on top.
+## The turbines are off from a standstill. They light when the craft reaches turbine_mph[0]
+## (the cluster's TURBINES lamp comes on with them: turbines_at()), wind up to pitch, come all
+## the way in by turbine_mph[1], and shut down under turbine_off_mph.
+## The V8's temper is whatever of that stage is not in yet. On pistons alone it leads, behind
+## a fixed chest EQ and a low muffler (its weight sits at 80-350 Hz, which a headset's speakers
+## can play back), and snarls on a lever stab. As the turbines come in it steps down and darkens
+## and the V12 comes up to full, so at speed the craft sounds precise. (Its first angry version
+## missed, banged and dropped beats live; in the headset that was crackle: Luke, 2026-11-19.)
 ## Every layer is one master performance played at the engine's speed (pitch = rpm / rate_at),
 ## so a ramp is one continuous signal. (Per-RPM bands crossfaded into each other "stepped
 ## through selected tones": every band had its own timbre.) Pitching up to 15x would alias, so
@@ -52,12 +61,37 @@ const TUNE := {
 	"bark_db": 3.0, "bark_s": 0.15,  # a quick stab barks: up to +3 dB, gone in 0.15 s
 	"crank": 0.3,                    # pistons bottom out at this fraction of idle RPM
 	"burner_spool": 0.15, "ramjet_spool": 0.3,
-	"v8_rpm": [850.0, 7600.0], "v12_rpm": [1100.0, 11800.0], "turbine_n": [0.25, 1.0],
-	"mix_v8": [[0.0, 1.0], [0.35, 0.85], [0.8, 0.45], [1.3, 0.35]],
+	# The V8 turns slower than it did (850-7,600): the same lever is a lower note, firing at 47 Hz
+	# at idle and 373 Hz flat out.
+	"v8_rpm": [700.0, 5600.0], "v12_rpm": [1100.0, 11800.0], "turbine_n": [0.25, 1.0],
+	# The V8 holds its level through the rev. Over 1 at idle: the fixed high-pass takes the
+	# infrasound the loop was levelled with, and the idle came out 3 dB down. The V12's curve is
+	# its full, precise self; while the V8 is angry it plays at angry_v12 of this.
+	"mix_v8": [[0.0, 1.2], [0.35, 1.3], [0.8, 1.3], [1.3, 1.25]],
 	"mix_v12": [[0.0, 0.12], [0.3, 0.45], [0.7, 0.95], [1.3, 1.0]],
+	# The second stage (Luke: "maybe the turbine turns on at 2-3k also"): the turbines light at
+	# turbine_mph[0], are all the way in by turbine_mph[1] and shut down under turbine_off_mph.
+	"turbine_mph": [2000.0, 3000.0], "turbine_off_mph": 1700.0,
+	"turbine_light": 0.4,            # this much of the stage is in as soon as they light; the rest comes with speed
+	"turbine_tau": [0.9, 1.6],       # the stage coming in, going out: time constants, s
+	"turbine_start": 0.4,            # the whine starts this far down its pitch
+	"turbine_wind": [0.6, 1.0],      # and winds up, down: time constants, s
+	"turbine_full": 1.2,             # the whine's level with the stage all in (x mix_turbine)
+	"roar_piston": 0.45,             # the roar on pistons alone (x its level with the turbines in)
+	# The V8's temper is whatever of the stage is not in yet.
+	"calm_v8": 0.16,                 # the V8's level once it has calmed down (x mix_v8; 0.28 before its chest EQ, which lifted it level with the V12)
+	"calm_v8_hz": 1500.0,            # and its muffler then (muffler_hz.v8 is the angry one)
+	"angry_v12": 0.4,                # the V12's level while the V8 is angry (x mix_v12)
+	"snarl_db": 2.5,                 # a lever stab barks this much harder on the angry V8
 	"mix_turbine": [[-0.33, 0.0], [0.0, 0.3], [0.6, 0.5], [1.0, 0.7], [1.3, 0.9]],
 	"burner_gain": 0.8, "burner_fade": 0.25,
-	"muffler_hz": {"v8": 2400.0, "v12": 7000.0, "second": 1200.0},   # fixed: the exhaust colour doesn't ride the pitch
+	"muffler_hz": {"v8": 1800.0, "v12": 7000.0, "second": 1200.0},   # fixed: the exhaust colour doesn't ride the pitch
+	# The V8's master keeps its low orders (its own high-pass is at 5 Hz, so they survive being
+	# pitched up): this fixed one takes the idle's infrasound back out.
+	"v8_hp_hz": 28.0,
+	# The V8's chest: a fixed EQ6 at 32/100/320/1k/3.2k/10k Hz. It does not ride the pitch, so the
+	# body stays put through the rev the way an exhaust's own resonances do.
+	"v8_eq_db": [-2.0, 7.0, 5.0, -3.0, -10.0, -18.0],
 	"roar_hz": [250.0, 3450.0],      # roar low-pass, turbine spool 0 -> 1
 	"roar_gain": [0.35, 1.0],        # roar level relative to the whine, spool 0 -> 1
 	"level_db": [-15.0, -8.0],       # whole voice, idle -> full lever
@@ -104,6 +138,10 @@ var _rate_at := {}   # layer -> rpm (or spool) the master sounds at on pitch 1, 
 var _bang: AudioStreamWAV
 var _pops: AudioStreamRandomizer
 var _t := 0.0   # seconds of update, for the twin wander
+var turbines_on := false   # craft fast enough for the turbines (with hysteresis)
+var stage := 0.0   # how far the turbines are in, 0..1
+var anger := 1.0   # the V8's temper: what is left of the stage
+var _wind := 0.0   # the whine's wind-up, 0..1
 var second_on := false   # craft fast enough for the second engine (with hysteresis)
 
 
@@ -140,6 +178,15 @@ func setup(craft_sim) -> void:
 				AudioServer.add_bus_effect(sub, AudioEffectLowPassFilter.new())
 			var lp := AudioServer.get_bus_effect(sub, 0) as AudioEffectLowPassFilter
 			lp.cutoff_hz = TUNE.muffler_hz.get(layer, TUNE.roar_hz[0])
+			if layer == "v8" and AudioServer.get_bus_effect_count(sub) == 1:
+				var hp := AudioEffectHighPassFilter.new()
+				hp.cutoff_hz = TUNE.v8_hp_hz
+				AudioServer.add_bus_effect(sub, hp)
+			if layer == "v8" and AudioServer.get_bus_effect_count(sub) == 2:
+				var chest := AudioEffectEQ6.new()
+				for band in 6:
+					chest.set_band_gain_db(band, TUNE.v8_eq_db[band])
+				AudioServer.add_bus_effect(sub, chest)
 			if layer == "second" and AudioServer.get_bus_effect_count(sub) == 1:
 				var eq := AudioEffectEQ6.new()
 				for band in 6:
@@ -228,6 +275,12 @@ func _load_streams() -> void:
 		_pops.add_stream(-1, w)
 
 
+## Whether the turbines run at this airspeed, given whether they were running already. The
+## cockpit lights its TURBINES lamp from the same rule.
+static func turbines_at(mph: float, running: bool) -> bool:
+	return mph >= (TUNE.turbine_off_mph if running else TUNE.turbine_mph[0])
+
+
 ## Get or create a bus routed into `send`.
 static func _bus(name: String, send: String) -> int:
 	var i := AudioServer.get_bus_index(name)
@@ -290,6 +343,15 @@ func update(inp: Dictionary, delta: float) -> void:
 		second_on = true
 	elif second_on and mph < TUNE.second_off_mph:
 		second_on = false
+	turbines_on = turbines_at(mph, turbines_on)
+	var want := 0.0
+	if turbines_on:
+		want = lerpf(TUNE.turbine_light, 1.0, smoothstep(TUNE.turbine_mph[0], TUNE.turbine_mph[1], mph))
+	stage = _follow(stage, want, TUNE.turbine_tau[0] if want > stage else TUNE.turbine_tau[1], dt)
+	_wind = _follow(_wind, 1.0 if turbines_on else 0.0, TUNE.turbine_wind[0] if turbines_on else TUNE.turbine_wind[1], dt)
+	# flat holds everything open (turbines in, temper full): only the crossfader may move anything there
+	var turbines := 1.0 if flat else stage
+	anger = 1.0 if flat else 1.0 - stage
 	for k in 2:
 		var v: Dictionary = voices[k]
 		var e = bodies[k]
@@ -347,11 +409,15 @@ func update(inp: Dictionary, delta: float) -> void:
 		v.burn = _follow(v.burn, 1.0 if boost > 0.0 and not e.flameout else 0.0, TUNE.burner_fade, dt)
 		var n_spool := clampf(layer_at("turbine", s), 0.0, 1.0)
 		var turb := _curve(TUNE.mix_turbine, s)
+		var snarl := 1.0 if flat else db_to_linear(TUNE.snarl_db * anger * v.bark)
+		(AudioServer.get_bus_effect(v.subs.v8, 0) as AudioEffectLowPassFilter).cutoff_hz = lerpf(
+			TUNE.calm_v8_hz, TUNE.muffler_hz.v8, anger)
 		var gains := {
-			"v8": _curve(TUNE.mix_v8, s) * burning * bark,
-			"v12": _curve(TUNE.mix_v12, s) * burning * bark,
-			"turbine": turb * (0.55 + 0.45 * burning),
-			"roar": turb * lerpf(TUNE.roar_gain[0], TUNE.roar_gain[1], n_spool) * (0.4 + 0.6 * burning),
+			"v8": _curve(TUNE.mix_v8, s) * lerpf(TUNE.calm_v8, 1.0, anger) * burning * bark * snarl,
+			"v12": _curve(TUNE.mix_v12, s) * lerpf(1.0, TUNE.angry_v12, anger) * burning * bark,
+			"turbine": turb * turbines * lerpf(1.0, TUNE.turbine_full, turbines) * (0.55 + 0.45 * burning),
+			"roar": turb * lerpf(TUNE.roar_piston, 1.0, turbines) * lerpf(TUNE.roar_gain[0], TUNE.roar_gain[1], n_spool)
+				* (0.4 + 0.6 * burning),
 			"burner": TUNE.burner_gain * v.burn * burning,
 		}
 		var sec_gain := _second(v, k, running_target, dt, duck, rise_rate)
@@ -381,6 +447,8 @@ func update(inp: Dictionary, delta: float) -> void:
 					at = 1.0 + 0.1 * maxf(0.0, s - 1.0)
 				"v8", "v12":
 					at = layer_at(layer, s) * twin
+				"turbine":
+					at = layer_at(layer, s) * (1.0 if flat else lerpf(TUNE.turbine_start, 1.0, _wind))
 				_:
 					at = layer_at(layer, s)
 			v.at[layer] = at

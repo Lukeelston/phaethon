@@ -57,7 +57,7 @@ class NetworkProfiles(unittest.TestCase):
         self.assertTrue(hasattr(dn, "surface_overlaps"), "shared pavement needs an explicit physical relation")
         overlaps = dn.surface_overlaps(self.roads, self.joins, self.jumps)
         self.assertEqual(len(overlaps), 20)
-        self.assertEqual(len(self.joins), 175, "physical overlap must not add route shortcuts")
+        self.assertEqual(len(self.joins), 179, "physical overlap must not add route shortcuts")   # (175, and the two scenic roads' two ends each)
         self.assertEqual({j[3] for j in overlaps}, {j[0] for j in self.jumps})
         for j in overlaps:
             self.assertEqual(self.roads[j[0]].kind, "highway")

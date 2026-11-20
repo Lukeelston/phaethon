@@ -28,6 +28,7 @@ var clock: AudioStreamPlayer
 var started := false
 var boom_signals := 0
 var shud_max := []     # per leg: [max shudder L, max shudder R, min flapL volume_db, max flapL volume_db]
+var drag_max := []     # per leg: the bass rush's highest level (linear)
 var seal_t := [-1.0, -1.0]   # into the sealed leg: when the hum, then the seal, passed half
 var sealed_end := [0.0, 0.0, -80.0]   # at the sealed leg's end: hum, seal, hum volume_db
 var open_end := 1.0          # the seal a leg later, back under the off speed
@@ -86,6 +87,8 @@ func _process(_delta: float) -> bool:
 		open_end = wind.seal
 	while shud_max.size() <= li:
 		shud_max.append([0.0, 0.0, INF, -INF])
+		drag_max.append(0.0)
+	drag_max[li] = maxf(drag_max[li], wind.levels.drag) if fmod(t, LEG) > SETTLE else drag_max[li]
 	if fmod(t, LEG) > SETTLE:
 		shud_max[li][0] = maxf(shud_max[li][0], wind.shudder[0])
 		shud_max[li][1] = maxf(shud_max[li][1], wind.shudder[1])
@@ -171,6 +174,10 @@ func _report(wav: AudioStreamWAV) -> void:
 		var seam := absf(d.decode_s16(0) - d.decode_s16((n - 1) * 4))
 		fails += _check("%s loop seamless (seam %.0f vs 99th-pct step %.0f)" % [layer, seam, typical], seam <= typical)
 	fails += _flap_is_deep(wind.streams.flap)
+	fails += _check("the bass rush needs both air brakes hard out at speed: both %.2f, left only %.3f, none %.3f, both at 100 mph %.3f" % [
+		drag_max[7], drag_max[8], drag_max[3], _drag_at(100.0)],
+		drag_max[7] > 0.4 and drag_max[8] < 0.01 and drag_max[3] < 0.01 and _drag_at(100.0) < 0.01)
+	fails += _drag_is_deep(wind.streams.drag)
 	var sb: Array = shud_max[7]
 	var sl: Array = shud_max[8]
 	var sp: Array = shud_max[3]
@@ -198,6 +205,7 @@ func _report(wav: AudioStreamWAV) -> void:
 	var b_rms := 20.0 * log(sqrt(bsq / 44100.0) / 32768.0) / log(10.0)
 	fails += _check("boom is loud: peak %.1f dBFS, first-second RMS %.1f dBFS (>= -14)" % [
 		20.0 * log(bpeak / 32768.0) / log(10.0), b_rms], bpeak > 30000 and b_rms >= -14.0)
+	fails += _check("the boom plays turned down (%.1f dB at its player; it was +2)" % wind.boom_player.volume_db, wind.boom_player.volume_db <= -6.0)
 	fails += _check("engines and wind back up after the duck (%.1f dB)" % wind.duck_db, wind.duck_db == 0.0)
 	fails += _boom_variety()
 	fails += _check("boomed signal fired (%d)" % boom_signals, boom_signals == 1)
@@ -260,6 +268,43 @@ func _rms_db(wav: AudioStreamWAV, t0: float, t1: float) -> float:
 		var x := d.decode_s16(i * 4)
 		sq += float(x) * x
 	return 20.0 * log(maxf(sqrt(sq / maxf(b - a, 1)), 1e-3) / 32768.0) / log(10.0)
+
+
+## The bass rush's target level with both brakes hard out at this speed (its own formula, as update() applies it).
+func _drag_at(mph: float) -> float:
+	var g: float = WindAudioScript.speed_g(mph)
+	return db_to_linear(WindAudioScript.TUNE.drag_db) * smoothstep(WindAudioScript.TUNE.drag_g[0], WindAudioScript.TUNE.drag_g[1], g)
+
+
+## The bass rush must be bass (Luke: "super bassy"): next to nothing above 400 Hz, yet enough
+## above 80 Hz that a headset's small speakers have something to play.
+func _drag_is_deep(s: AudioStreamWAV) -> int:
+	var d := s.data
+	var n: int = s.loop_end
+	var sq := 0.0
+	var over := [0.0, 0.0]
+	var zc := 0
+	var prev := 0
+	var state := [[0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0]]   # two one-pole high-passes each: h1, h1_in, h2, h2_in
+	var coef := [exp(-TAU * 400.0 / s.mix_rate), exp(-TAU * 80.0 / s.mix_rate)]
+	for i in n:
+		var x := d.decode_s16(i * 4)
+		sq += float(x) * x
+		for k in 2:
+			var st: Array = state[k]
+			st[0] = coef[k] * (st[0] + x - st[1])
+			st[1] = x
+			st[2] = coef[k] * (st[2] + st[0] - st[3])
+			st[3] = st[0]
+			over[k] += st[2] * st[2]
+		if (x >= 0) != (prev >= 0):
+			zc += 1
+		prev = x
+	var hi: float = 100.0 * over[0] / maxf(sq, 1.0)
+	var body: float = 100.0 * over[1] / maxf(sq, 1.0)
+	var zcr := float(zc) * s.mix_rate / n
+	return _check("bass rush is deep: %.1f%% of it above 400 Hz (< 4), %.0f zero crossings/s (< 320), and %.0f%% above 80 Hz for small speakers (> 25)" % [hi, zcr, body],
+		hi < 4.0 and zcr < 320.0 and body > 25.0)
 
 
 ## The air-brake roar must rumble, not hiss or rattle (Luke: the first one "sounds like grass and
