@@ -18,7 +18,8 @@
 ## Steel cables run from an eye under each engine's tail to two hardpoint eyes on the pod's
 ## nose, exactly where the sim anchors them (the nose ring, either side of centre); the binder
 ## arc crackles between the engines. In VR the pod is hidden (you sit in it), so the view hands
-## over its cockpit frame (pod_frame), which carries its own nose and eyes. Exhaust plumes are additive shader cones (view/flame.gdshader): faint on dry thrust, long with shock diamonds and a nozzle light on the burner.
+## over its cockpit frame (pod_frame), which carries its own nose and eyes. The slot jets follow
+## the steering vanes. Their turbulent outer layers mix around a chain of shrinking shock cells.
 ##   add_child(model); model.build(view)          once
 ##   model.sync(sim, inp, delta)                  every frame, after the floating origin moves
 extends Node3D
@@ -88,9 +89,15 @@ var fans: Array[Node3D] = []         # per engine: holds its twin intake rotors
 var rotors := [[], []]               # per engine: the two fan rotors (spin about their own Z)
 var vanes := [[], []]                # per engine: the thrust-vectoring vanes in the nozzle (swing with steering)
 var vane_angle := 0.0                # their current deflection, radians (+ = trailing edges right, a right turn)
+var _wake_yaw := 0.0                 # gas farther downstream was emitted before the vanes finished moving
 var strobes: Array[Node3D] = []      # the fin-tip strobes (double flash)
 var binder_mats: Array[StandardMaterial3D] = []   # the binder emitters' glowing cores
 const FlameShader := preload("res://view/flame.gdshader")
+const FlowTexture := preload("res://art/engine/jet_flow.png")
+const FlameHolder := preload("res://art/engine/flame_holder.png")
+const EffectExclusion := preload("res://view/effect_exclusion.gd")
+const NOZZLE_EXIT := 4.30
+var _flap_phase := [0.0, 2.56]
 const FLAME_H := 0.62                # the plume's height at the nozzle (2 x 0.62 x scale 0.5)
 var flame_mats := [[], []]           # per engine: [outer plume, inner core] ShaderMaterials (view/flame.gdshader)
 var nozzle_mats: Array[ShaderMaterial] = []   # per engine: the fire in the nozzle (view/nozzle_glow.gdshader)
@@ -137,8 +144,7 @@ func build(v) -> void:
 	var nacelle_scene := load("res://art/engine/nacelle.glb") as PackedScene
 	view = v
 	var sim = v.sim
-	var shaded := Kit.vertex_colors()
-	var finish := Kit.polished(0.55, 0.38)   # the slabs: satin metal, tinted by vertex colour
+	var finish := Finishes.machined()
 	var lit_mat := Kit.vertex_colors(true)
 	for k in 2:
 		var out := -1.0 if k == 0 else 1.0   # outboard side, engine-local X (eL rides on the left)
@@ -147,13 +153,15 @@ func build(v) -> void:
 		engines.append(eng)
 		var body := MeshInstance3D.new()
 		body.mesh = _engine_body(out)
-		body.material_override = finish
+		body.material_override = Finishes.painted_metal()
 		eng.add_child(body)
 		# One shared UV-mapped shell on each engine. The hot section, brakes and
 		# vectoring vanes still use their independent pivots and materials.
 		var shell := nacelle_scene.instantiate()
 		shell.name = "NacelleShell"
 		eng.add_child(shell)
+		var aft_leaf := _take_brake_mesh(shell, "AftBrakeLeaf")
+		var front_leaf := _take_brake_mesh(shell, "FrontBrakeLeaf")
 		var lights := MeshInstance3D.new()   # nav, tail, landing lights and the repulsor underglow
 		lights.mesh = _engine_lights(out)
 		lights.material_override = lit_mat
@@ -165,17 +173,22 @@ func build(v) -> void:
 		hot.position.z = 2.9
 		var hm := StandardMaterial3D.new()
 		hm.albedo_color = STEEL
+		hm.metallic = 0.68
+		hm.roughness = 0.49
 		hm.emission_enabled = true
 		hm.emission = Color.BLACK
 		hot.material_override = hm
 		eng.add_child(hot)
 		hot_mats.append(hm)
 		var glow := MeshInstance3D.new()   # the slot nozzle's glow
-		glow.mesh = Kit.box(Vector3(ENG_W - 0.5, 0.5, 0.04))
-		glow.position.z = 4.02
+		var throat := QuadMesh.new()
+		throat.size = Vector2(1.92, 0.54)
+		glow.mesh = throat
+		glow.position.z = 4.035
 		var gm := StandardMaterial3D.new()
 		gm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		gm.albedo_color = DARK
+		gm.albedo_texture = FlameHolder
 		glow.material_override = gm
 		eng.add_child(glow)
 		glow_mats.append(gm)
@@ -209,10 +222,6 @@ func build(v) -> void:
 		eng.add_child(legend)
 		# split air brakes, two on top and two underneath: hinged at the front edge, the trailing
 		# edge swings up (or down) into the airflow
-		var flap_mesh := Kit.compound([
-			[Kit.rounded_box(Vector3(1.0, 0.05, 1.3), 8.0), Kit.at(Vector3(0, 0.025, 0.65)), STEEL.darkened(0.1)],
-			[Kit.box(Vector3(0.92, 0.02, 1.22)), Kit.at(Vector3(0, -0.012, 0.65)), Color(0.85, 0.08, 0.05)],
-		])
 		for fa in FLAPS_AT:
 			var ring := Node3D.new()
 			ring.position = Vector3(fa[0], 0.0, FLAP_Z)
@@ -222,8 +231,7 @@ func build(v) -> void:
 			hinge.position.y = ENG_H / 2.0 + 0.01
 			ring.add_child(hinge)
 			var fl := MeshInstance3D.new()
-			fl.mesh = flap_mesh
-			fl.material_override = shaded
+			fl.mesh = aft_leaf
 			hinge.add_child(fl)
 			flaps[k].append(hinge)
 		# front speed brakes (Luke: "front speed brake flaps for braking done at high speed"): a
@@ -235,11 +243,9 @@ func build(v) -> void:
 			fh.set_meta("side", side)   # it swings out that way
 			eng.add_child(fh)
 			var fp := MeshInstance3D.new()
-			fp.mesh = Kit.compound([
-				[Kit.rounded_box(Vector3(0.05, 0.72, 1.15), 6.0), Kit.at(Vector3(side * 0.025, 0, 0.575)), STEEL.darkened(0.1)],
-				[Kit.box(Vector3(0.02, 0.64, 1.07)), Kit.at(Vector3(-side * 0.012, 0, 0.575)), Color(1.0, 0.6, 0.1)],   # amber, facing the engine
-			])
-			fp.material_override = shaded
+			fp.mesh = front_leaf
+			fp.rotation.z = -side * PI / 2.0
+			fp.scale = Vector3(0.73, 1.0, 0.88)
 			fh.add_child(fp)
 			front_flaps[k].append(fh)
 		# thrust-vectoring vanes across the nozzle: they swing with the steering
@@ -250,7 +256,7 @@ func build(v) -> void:
 			eng.add_child(vp)
 			var vm := MeshInstance3D.new()
 			vm.mesh = vane_mesh
-			vm.material_override = shaded
+			vm.material_override = finish
 			vp.add_child(vm)
 			vanes[k].append(vp)
 		# the fin-tip strobe
@@ -283,12 +289,10 @@ func build(v) -> void:
 		core_m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		em.add_child(core_m)
 		binder_mats.append(cmat)
-		# exhaust plume: two additive shader layers (a wide soft plume over a bright core),
-		# flattened to the slot nozzle; dry thrust nearly invisible, the burner long with shock
-		# diamonds (view/flame.gdshader); a flickering light for the burner
+		# Both gas layers originate at the moving vane exits. Cross-section belongs
+		# to the meshes so vectoring keeps its true angle on the wide slot nozzle.
 		var flame := Node3D.new()
-		flame.position.z = sim.P.engineLen / 2.0
-		flame.scale = Vector3(1.55, 0.5, 1.0)   # the outer cone's mouth fills the 1.9 x 0.6 m slot
+		flame.position.z = NOZZLE_EXIT
 		eng.add_child(flame)
 		flames.append(flame)
 		var cone_root := Node3D.new()   # cones hang along -Y; sync turns that to +Z (back) and stretches it
@@ -296,15 +300,21 @@ func build(v) -> void:
 		flame.add_child(cone_root)
 		for layer in 2:
 			var cone := MeshInstance3D.new()
-			var cm: CylinderMesh = Kit.cyl(0.62, 0.06, 1.0, 24) if layer == 0 else Kit.cyl(0.3, 0.0, 0.75, 16)
+			var cm := Kit.cyl(1.0, 1.0, 1.0, 32)
+			cm.rings = 47
 			cm.cap_top = false
 			cm.cap_bottom = false
 			cone.mesh = cm
-			cone.position.y = -0.5 if layer == 0 else -0.375
+			cone.scale = Vector3(0.96, 1.0, 0.289) if layer == 0 else Vector3(0.86, 0.81, 0.246)
+			cone.position.y = -0.5 * cone.scale.y
+			# Vertex displacement widens the mixing layer beyond the source cylinder.
+			cone.custom_aabb = AABB(Vector3(-3.6,-0.5,-1.8), Vector3(7.2,1.0,3.6))
 			var fmat := ShaderMaterial.new()
 			fmat.shader = FlameShader
+			fmat.render_priority = layer
 			fmat.set_shader_parameter("layer", float(layer))
 			fmat.set_shader_parameter("seed", float(k) * 3.7)
+			fmat.set_shader_parameter("flow_map", FlowTexture)
 			cone.material_override = fmat
 			cone.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 			cone_root.add_child(cone)
@@ -368,6 +378,14 @@ func build(v) -> void:
 	binder_arc = BinderArc.new()
 	arc = binder_arc.mesh
 	add_child(binder_arc)
+
+
+## The dress kit also carries the two UV-mapped movable mesh masters at their local hinge.
+static func _take_brake_mesh(shell: Node3D, part: String) -> Mesh:
+	var source := shell.find_child(part, true, false) as MeshInstance3D
+	var mesh := source.mesh
+	source.free()
+	return mesh
 
 
 ## Engine shell, forward -Z, 8 m, a flat rounded slab: intake lip and twin-intake face, nacelle,
@@ -905,6 +923,9 @@ func sync(sim, inp: Dictionary, delta: float) -> void:
 	_update_bank(sim, delta)
 	var bodies := [sim.eL, sim.eR]
 	var brakes := [inp.brkL, inp.brkR]   # each engine's flaps answer to its own brake
+	var steer: float = sim.eL.thrust - sim.eR.thrust + 0.72*(inp.brkR-inp.brkL)
+	vane_angle = lerpf(vane_angle, clampf(steer*1.2,-1.0,1.0)*VANE_MAX, 1.0-exp(-delta*8.0))
+	_wake_yaw = lerpf(_wake_yaw, vane_angle, 1.0-exp(-delta*6.0))
 	for k in 2:
 		var e = bodies[k]
 		var eng := engines[k]
@@ -934,18 +955,19 @@ func sync(sim, inp: Dictionary, delta: float) -> void:
 		for r in 2:   # the twin rotors counter-rotate
 			var rotor: Node3D = rotors[k][r]
 			rotor.rotation.z = fposmod(rotor.rotation.z + _fan_w[k] * delta * (1.0 if r == 0 else -1.0), TAU)
-		# air brakes
+		# Hinge travel follows the actuator. The pressure face only buffets when
+		# deployed in fast air; the two frequencies keep adjacent leaves off beat.
+		var pressure := smoothstep(180.0, 760.0, vh)
+		_flap_phase[k] = fposmod(_flap_phase[k] + TAU*(5.2+3.6*pressure)*delta, TAU*5.0)
 		flap_open[k] = move_toward(flap_open[k], clampf(brakes[k], 0.0, 1.0), FLAP_RATE * delta)
-		for hinge in flaps[k]:
-			(hinge as Node3D).rotation.x = -FLAP_OPEN * flap_open[k]
+		for i in flaps[k].size():
+			var hinge: Node3D = flaps[k][i]
+			hinge.rotation.x = -FLAP_OPEN*flap_open[k] - _flutter(_flap_phase[k], i, flap_open[k], pressure)
 		front_open[k] = move_toward(front_open[k], clampf(float(e.front), 0.0, 1.0), FLAP_RATE * delta)
-		for fh in front_flaps[k]:
-			(fh as Node3D).rotation.y = FRONT_OPEN * front_open[k] * float(fh.get_meta("side"))
-		# vectoring vanes: trailing edges swing to the side the craft is turning (a right turn
-		# is the left engine harder), like rudders; both engines' together
-		if k == 0:
-			var split: float = clampf(sim.eL.thrust - sim.eR.thrust, -1.0, 1.0)
-			vane_angle = lerpf(vane_angle, clampf(split * 1.2, -1.0, 1.0) * VANE_MAX, 1.0 - exp(-delta * 8.0))
+		for i in front_flaps[k].size():
+			var fh: Node3D = front_flaps[k][i]
+			var flex := 0.78 * _flutter(_flap_phase[k], i+4, front_open[k], pressure)
+			fh.rotation.y = (FRONT_OPEN*front_open[k] + flex) * float(fh.get_meta("side"))
 		for vp in vanes[k]:
 			(vp as Node3D).rotation.y = vane_angle
 		# the fin strobe: a double flash every 1.2 s, the two engines a beat apart
@@ -957,20 +979,25 @@ func sync(sim, inp: Dictionary, delta: float) -> void:
 		binder_mats[k].albedo_color = BINDER_COL.lerp(Color(0.8, 0.45, 1.0), strain) * (0.7 + 0.5 * pulse)
 		# flame
 		var flame := flames[k]
+		flame.rotation.y = vane_angle
+		flame.position.x = (NOZZLE_EXIT-4.02) * tan(vane_angle)
 		var burning: bool = not e.flameout and e.thrust > 0.02
 		flame.visible = burning
 		var fade := 1.0 - exp(-delta * 6.0)   # the burner lights and dies over ~0.2 s, not in a frame
 		_burn[k] = lerpf(_burn[k], 1.0 if burning and sim.mode != "normal" else 0.0, fade)
 		_ram[k] = lerpf(_ram[k], 1.0 if burning and sim.mode == "ramjet" else 0.0, fade)
 		var lamp: OmniLight3D = nozzle_lights[k]
+		lamp.position = flame.position + flame.basis.z*1.2 + Vector3.DOWN*0.2
+		lamp.light_color = Color(1.0,0.48,0.19).lerp(Color(0.34,0.61,1.0),_ram[k])
 		lamp.light_energy = _burn[k] * (2.2 + 0.8 * sin(Time.get_ticks_msec() * 0.031 + k * 2.0)) * minf(e.thrust, 1.2) if burning else 0.0
 		if burning:
 			# the plume's length: a short cone on dry thrust (the shader shows only its near part),
 			# a long one on the burner, longer still on the ramjet
-			var flame_len: float = lerpf(1.5 + 2.0 * e.thrust, 4.0 + 8.0 * e.thrust, _burn[k]) * (1.0 + 0.3 * _ram[k])
+			var flame_len: float = lerpf(0.65 + 3.6*e.thrust, 4.4 + 7.6*e.thrust, _burn[k]) * (1.0 + 0.22*_ram[k])
 			var cones: Node3D = flame.get_node("cones")
 			cones.transform = Transform3D(Basis(Vector3.RIGHT, -PI / 2.0) * Basis.from_scale(Vector3(1, flame_len, 1)), Vector3.ZERO)
 			for fmat in flame_mats[k]:
+				(fmat as ShaderMaterial).set_shader_parameter("wake_bend", clampf(sin(_wake_yaw-vane_angle)*flame_len,-1.55,1.55))
 				(fmat as ShaderMaterial).set_shader_parameter("thrust", e.thrust)
 				(fmat as ShaderMaterial).set_shader_parameter("burner", _burn[k])
 				(fmat as ShaderMaterial).set_shader_parameter("ramjet", _ram[k])
@@ -995,6 +1022,17 @@ func sync(sim, inp: Dictionary, delta: float) -> void:
 	for i in 2:
 		var s := -1.0 if i == 0 else 1.0
 		pod_flaps[i].rotation.y = s * FLAP_OPEN * 0.8 * pod_flap_open   # trailing edge swings out
+
+
+static func _flutter(phase: float, leaf: int, opening: float, pressure: float) -> float:
+	var vibration := 0.70*sin(phase + leaf*1.41) + 0.30*sin(phase*1.6 + leaf*2.25)
+	return deg_to_rad(1.85) * pressure * opening * opening * vibration
+
+
+func update_jet_clearance() -> void:
+	for k in 2:
+		if flames[k].visible:
+			EffectExclusion.apply(view, flame_mats[k])
 
 
 ## Where cable k hooks to the drawn pod: the sim's nose-ring anchor (podLen/2 ahead, podAnchorW

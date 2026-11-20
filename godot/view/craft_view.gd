@@ -34,6 +34,7 @@ const SkillScoreScript := preload("res://view/skill_score.gd")
 const SkillAudioScript := preload("res://audio/skill_audio.gd")
 const SkillDisplayScript := preload("res://view/skill_display.gd")
 const CanopyFlash := preload("res://view/canopy.gd")
+const ApproachProjector := preload("res://view/approach_projector.gd")
 const SpeedCuesScript := preload("res://view/speed_cues.gd")
 const TrafficScript := preload("res://view/traffic.gd")
 const DustScript := preload("res://view/dust.gd")
@@ -112,6 +113,7 @@ var org_y := 0.0
 var top_kmh := 0.0
 
 var craft: Node3D
+var approach_display: ApproachProjector
 var pod_mesh: MeshInstance3D
 var cam: Camera3D
 var hud: Label
@@ -829,6 +831,7 @@ func _process(delta: float) -> void:
 	if network_world:   # no road spray up a shaft
 		dust.visible = _shaft_f(sim.pod.x, sim.pod.y) < 0.0
 	_place_camera(1.0 - exp(-delta * 6.0))
+	craft.update_jet_clearance()
 	craft.sync_cables(sim, delta)   # after the camera: in VR the cables' pod end rides the cockpit
 	var t_world := Time.get_ticks_usec()
 	_sync_world()   # after the camera: distant anchors scale about its current position
@@ -1410,6 +1413,8 @@ func _build_craft() -> void:
 
 ## Overridable: the flat view's chase camera and 2D HUD.
 func _make_view() -> void:
+	if sim.kind == "network":
+		_mount_approach_projector(craft.canopy)
 	cam = Camera3D.new()
 	cam.fov = 70
 	cam.far = 120000   # the backdrop peaks sit at 45-57 km; Eridanus' far ranges up to ~100 km away
@@ -1753,12 +1758,27 @@ static func _mmss(secs: float, tenths := false) -> String:
 	return "%d:%02d" % [int(s) / 60, int(s) % 60]
 
 
+func _mount_approach_projector(windscreen: Node3D) -> void:
+	approach_display = ApproachProjector.new()
+	approach_display.build(windscreen)
+
+
+func _hud_progress(in_cockpit: bool) -> String:
+	if approach_display == null:
+		return _progress_text()
+	var message := _net_jump_approach_text()
+	approach_display.set_message(message)
+	if message.is_empty():
+		return _net_text()
+	return "" if in_cockpit else message
+
+
 func _update_hud() -> void:
 	if minimap_2d and minimap_2d.visible:
 		minimap_2d.show_frame(minimap.update(cam_th, get_process_delta_time()))
 	var mode_txt: String = {"ramjet": "RAMJET", "burner": "AFTERBURNER"}.get(sim.mode, "RAMJET ARMED" if sim.armed else "")
 	hud.text = "%4d mph   %s   %s\nTHR %.2f | %.2f   BRK %.2f | %.2f   HEAT %d%% | %d%%   HP %d%% | %d%%   BAT %d%%   %s\n%s" % [
-		_kmh() / 1.609344, cues.readout(), _progress_text(), inp.thrL, inp.thrR, inp.brkL, inp.brkR,
+		_kmh() / 1.609344, cues.readout(), _hud_progress(false), inp.thrL, inp.thrR, inp.brkL, inp.brkR,
 		sim.eL.heat * 100, sim.eR.heat * 100, sim.eL.health * 100, sim.eR.health * 100, sim.battery * 100, mode_txt,
 		("Replay: parity lap" if not replay.is_empty() else levers.source) + "   " + handling_text()]
 	if skill_score:

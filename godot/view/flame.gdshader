@@ -1,67 +1,74 @@
-// An engine's exhaust plume, drawn additively on an uncapped cone hanging back from the nozzle
-// (`along`: 0 at the nozzle, 1 at the tip; a CylinderMesh's side UV.y only runs 0..0.5). Dry thrust is nearly invisible: a short pale-blue core and haze.
-// The burner is a long plume, blue-white at the nozzle through yellow-orange to a fading red,
-// with shock diamonds (bright bands that shrink and fade down the plume). Soft edges (faces seen
-// edge-on fade out), flicker and a little turbulence. craft_model.gd sets the uniforms per engine.
+// Slot jet with a contracting luminous core inside a rolling shear layer.
+// Gas flows through fixed pressure cells; the nozzle fixes the upstream boundary.
 shader_type spatial;
-render_mode unshaded, blend_add, depth_draw_never, cull_disabled, shadows_disabled;
+render_mode unshaded, blend_mix, depth_draw_never, cull_disabled, shadows_disabled, fog_disabled;
+#include "res://view/effect_exclusion.gdshaderinc"
 
-uniform float thrust = 0.0;   // 0..1+ (the engine's real thrust)
-uniform float burner = 0.0;   // 0..1, eased: the afterburner's share
-uniform float ramjet = 0.0;   // 0..1, eased: hotter, bluer
-uniform float layer = 0.0;    // 0 the outer plume, 1 the inner core
-uniform float seed = 0.0;     // per engine, so the two don't flicker in step
-uniform float aspect = 4.0;   // the plume's length over the nozzle's height (the side-view chord)
-
+uniform sampler2D flow_map : repeat_enable, filter_linear_mipmap;
+uniform float thrust = 0.0;
+uniform float burner = 0.0;
+uniform float ramjet = 0.0;
+uniform float layer = 0.0;
+uniform float seed = 0.0;
+uniform float aspect = 4.0;
+uniform float wake_bend = 0.0;
 varying float along;
-varying vec3 axis;   // the plume's axis in view space
+varying vec3 jet_axis;
+varying float span;
 
-float hash(float n) {
-	return fract(sin(n) * 43758.5453);
-}
-
-float noise1(float x) {
-	float i = floor(x);
-	float f = fract(x);
-	return mix(hash(i), hash(i + 1.0), f * f * (3.0 - 2.0 * f));
+float cell_phase(float z) {
+	// Expansion cells shorten and lose definition as the jet mixes downstream.
+	return z * (3.9 + 1.95*z) + 0.04;
 }
 
 void vertex() {
-	along = UV.y * 2.0;
-	axis = (MODELVIEW_MATRIX * vec4(0.0, 1.0, 0.0, 0.0)).xyz;
+	along = clamp(0.5 - VERTEX.y, 0.0, 1.0);
+	float z = along;
+	vec2 circle = normalize(VERTEX.xz);
+	span = circle.x;
+	vec2 slot = sign(circle)*pow(abs(circle),vec2(mix(0.53,1.0,smoothstep(0.0,0.38,z))));
+	float cell = cos(TAU * cell_phase(z));
+	float pulse = 0.5 + 0.5*cell;
+	float gas = textureLod(flow_map,vec2(UV.x*2.0+seed,z*1.7-TIME*1.5),1.0).r-0.5;
+	float mix_out = smoothstep(0.04,0.65,z);
+	float outer = (1.0+0.16*sin(PI*z)+mix_out*gas*0.66)*(1.0-smoothstep(0.57,1.0,z)*0.76);
+	float core = mix(0.38,0.99,pulse)*(1.0-0.54*z);
+	core = mix(0.90*(1.0-0.77*z),core,smoothstep(0.0,0.10,z)*mix(0.18,0.88,burner));
+	VERTEX.xz = slot*mix(outer,core,layer);
+	VERTEX.xz += mix_out*vec2(0.095*sin(9.0*z-TIME*4.1+seed),0.13*cos(13.0*z-TIME*4.7+seed));
+	VERTEX.x += wake_bend*z*z*mix(1.04,0.94,layer);
+	jet_axis = (MODELVIEW_MATRIX*vec4(0.0,-1.0,0.0,0.0)).xyz;
+	effect_world_position = (MODEL_MATRIX*vec4(VERTEX,1.0)).xyz;
 }
 
 void fragment() {
-	float t = clamp(thrust, 0.0, 1.6);
-	// how much glowing gas the eye looks through here, relative to a side view: a ray at angle
-	// th to the axis crosses a slender cone over 2r*(N.V)/sin^2(th), so the rim (edge-on, N.V
-	// ~ 0) fades to nothing from any side, while looking down the plume from the cockpit sees
-	// through its length and it brightens (capped) instead of vanishing. A ray that leaves
-	// through the open nozzle end only crosses the gas back to the nozzle plane (along*L/cos th),
-	// so the nozzle's rim, seen from behind, doesn't light up as a ring.
-	float facing = abs(dot(normalize(NORMAL), normalize(VIEW)));
-	float ax = dot(normalize(axis), normalize(VIEW));
-	float to_nozzle = along * aspect * mix(1.0, 2.0, layer) / max(abs(ax), 0.05);
-	float thick = min(min(facing / max(1.0 - ax * ax, 0.03), to_nozzle), 2.5);
-	float edge = thick < 1.0 ? pow(max(thick, 0.0), mix(1.6, 0.9, layer)) : thick;   // max: MSAA edge pixels run `along` off the quad
-	// colour temperature down the plume
-	vec3 nozzle = mix(vec3(0.55, 0.75, 1.0), vec3(0.85, 0.9, 1.0), ramjet);    // blue-white at the exit
-	vec3 mid = mix(vec3(1.0, 0.62, 0.18), vec3(0.75, 0.55, 1.0), ramjet);      // yellow-orange (violet on the ramjet)
-	vec3 tail = vec3(0.6, 0.12, 0.05);                                          // fading red
-	vec3 col = mix(nozzle, mid, smoothstep(0.02, 0.35, along));
-	col = mix(col, tail, smoothstep(0.45, 1.0, along));
-	// dry thrust: a short, faint blue core only; the burner fills the whole plume
-	float dry_len = 0.35 + 0.25 * t;
-	float reach = mix(1.0 - smoothstep(dry_len * 0.4, dry_len, along), 1.0 - smoothstep(0.5, 1.0, along), burner);
-	float strength = mix(0.3 + 0.35 * t, 0.95, burner) * mix(1.0, 1.4, layer);
-	// shock diamonds: evenly spaced bright knots with dimmer gaps between, shrinking and fading
-	// down the plume; they modulate brightness, so the plume stays translucent between them
-	float bands = pow(0.5 + 0.5 * cos(along * 6.2831 * 4.5 + 1.2), 8.0) * (1.0 - smoothstep(0.1, 0.75, along));
-	float knots = mix(1.0, 0.45 + 1.6 * bands, burner * (1.0 - 0.6 * smoothstep(0.5, 0.9, along)));
-	col = mix(col, vec3(1.0, 0.92, 0.85), bands * burner * 0.7);
-	// flicker and turbulence: slow breathing plus fast ripples moving down the plume
-	float flick = 0.82 + 0.18 * noise1(TIME * 9.0 + seed * 13.0);
-	float ripple = 0.75 + 0.25 * noise1(along * 14.0 - TIME * 38.0 + seed * 7.0);
-	float a = clamp(edge * reach * strength * knots * flick * ripple, 0.0, 2.0);
-	ALBEDO = col * a;
+	float z = clamp(along,0.0,1.0);
+	vec2 stream = vec2(2.0*UV.x+seed,2.0*z-TIME*(1.2+0.52*burner));
+	vec2 flow = texture(flow_map,stream).rg;
+	float wisps = texture(flow_map,vec2(5.0*UV.x+flow.r*0.33+seed,3.0*z-TIME*2.1)).b;
+	float axial = abs(dot(normalize(jet_axis),normalize(VIEW)));
+	float chord = min(abs(dot(normalize(NORMAL),normalize(VIEW)))/max(0.10,1.0-axial*axial),1.45);
+	float edge = min(chord,0.12 + z*aspect/max(axial,0.08));
+	float shear = smoothstep(0.17+0.24*z,0.80,flow.r*0.60+wisps*0.40);
+	float cells = pow(0.5-0.5*cos(TAU*cell_phase(z)),2.6)*(1.0-smoothstep(0.27,0.87,z));
+	float crossing = abs(2.0*fract(cell_phase(z)+0.5)-1.0);
+	float shock = (1.0-smoothstep(0.03,0.28,abs(crossing-abs(span)*0.82))) * (1.0-smoothstep(0.35,0.86,z));
+	float reach = 1.0-smoothstep(mix(0.24,0.46,burner),0.97,z);
+	float dry = smoothstep(0.0,0.9,thrust);
+	vec3 blue = vec3(0.035,0.23,1.05);
+	vec3 violet = vec3(0.23,0.12,0.81);
+	vec3 amber = vec3(1.32,0.26,0.047);
+	vec3 outer = mix(blue,violet,smoothstep(0.04,0.32,z));
+	outer = mix(outer,mix(amber,vec3(0.17,0.57,1.04),ramjet),smoothstep(0.13,0.45,z)*burner);
+	vec3 core = mix(vec3(0.15,0.49,1.12),mix(vec3(1.32,0.52,0.13),vec3(0.30,0.65,1.25),ramjet),
+		smoothstep(0.10,0.36,z)*burner);
+	float compression = clamp(0.65*cells+0.65*shock,0.0,1.0);
+	core = mix(core,vec3(1.54,1.41,1.19),compression*mix(0.30,0.90,burner));
+	float skin = (0.045+0.80*shear)*mix(0.32,0.70,burner);
+	float mixing = smoothstep(0.12+0.26*z,0.71,flow.g*0.72+wisps*0.28);
+	float bright = (0.12+0.24*(1.0-smoothstep(0.0,0.18,z))+1.19*compression)*(0.27+0.80*mixing);
+	float energy = mix(0.12+0.60*dry,1.06,burner);
+	float cabin = exterior_effect_visibility(effect_world_position,CAMERA_POSITION_WORLD);
+	ALBEDO = mix(outer,core,layer);
+	ALPHA = clamp(mix(skin,bright,layer)*energy*reach*edge*cabin,0.0,1.0);
 }

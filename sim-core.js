@@ -775,7 +775,7 @@
     const S = {
       P, T, eL: body(P.engineMass, eI), eR: body(P.engineMass, eI), pod: body(P.podMass, pI),
       hwant: hname, hblend: hname === 'starfighter' ? 1 : 0,
-      battery: 1, armed: false, mode: 'normal', binderBroken: false, crashT: 0, time: 0, towU: -1,
+      battery: 1, armed: false, mode: 'normal', binderBroken: false, crashT: 0, time: 0, towU: -1, towSwing: 0,
       lap: 0, lapStart: null, lastLap: null, bestLap: null, visited: new Set(), checkpoint: 0,
       progressI: 0, cables: [{ f: 0 }, { f: 0 }], events: [], rand: xorshift32(P.seed),
       runStart: null, lastRun: null, bestRun: null, finished: false, runActive: false, result: null,
@@ -893,7 +893,7 @@
       }
       for (const e of [S.eL, S.eR]) { e.heat = P.limits ? Math.min(e.heat ?? 0.3, 0.5) : 0; e.flameout = false; e.health = e.health ?? 1; e.sputter = 1; e.sputterT = 0; }
       S.pod.health = S.pod.health > 0 ? S.pod.health : 1;
-      S.binderBroken = false; S.towU = -1; S.crashT = 0; S.progressI = idx;
+      S.binderBroken = false; S.towU = -1; S.towSwing = 0; S.crashT = 0; S.progressI = idx;
       S.gate = T.branches.map(() => null); S.podPath = 0; S.onGround = false;
     }
 
@@ -1340,9 +1340,16 @@
         const pf = Math.cos(S.pairTh), ps2 = Math.sin(S.pairTh), lx = -ps2, ly = pf;
         const back = P.engineLen / 2 + P.cableLen + P.podLen / 2;
         const mxp = (L.x + R.x) / 2, myp = (L.y + R.y) / 2, wpair = (L.w + R.w) / 2;
+        const turnG = wpair * Math.max(0, Pd.vx * pf + Pd.vy * ps2) / G;
+        const steer = inp.thrR - inp.thrL + inp.brkL - inp.brkR;
+        const load = smoothstep(2.5, 11, Math.abs(turnG)) * smoothstep(0.15, 0.65, steer * Math.sign(turnG));
+        const prevSwing = S.towSwing;
+        S.towSwing += (Math.sign(turnG) * Math.PI / 60 * load - prevSwing) * (1 - Math.exp(-dt / 0.28));
+        const swingRate = (S.towSwing - prevSwing) / dt;
         const tx = mxp - pf * back, ty = myp - ps2 * back;
         const tvx = (L.vx + R.vx) / 2 + wpair * ps2 * back, tvy = (L.vy + R.vy) / 2 - wpair * pf * back;
-        const e = (Pd.x - tx) * lx + (Pd.y - ty) * ly, ev = (Pd.vx - tvx) * lx + (Pd.vy - tvy) * ly;
+        const e = (Pd.x - tx) * lx + (Pd.y - ty) * ly + back * Math.sin(S.towSwing);
+        const ev = (Pd.vx - tvx) * lx + (Pd.vy - tvy) * ly + back * Math.cos(S.towSwing) * swingRate;
         const ft = -P.towK * e - P.towC * ev;
         Pd.fx += ft * lx; Pd.fy += ft * ly;
         L.fx -= ft * lx / 2; L.fy -= ft * ly / 2; R.fx -= ft * lx / 2; R.fy -= ft * ly / 2;
@@ -1361,7 +1368,8 @@
           Pd.fx += fl * pf; Pd.fy += fl * ps2;
           L.fx -= fl * pf / 2; L.fy -= fl * ps2 / 2; R.fx -= fl * pf / 2; R.fy -= fl * ps2 / 2;
         }
-        const podTw = P.podAlignK * wrap(Pd.th - S.pairTh) + P.podYawDamp * (Pd.w - wpair);
+        const dth = wrap(Pd.th - S.pairTh - S.towSwing);
+        const podTw = P.podAlignK * dth + P.podYawDamp * (Pd.w - wpair - swingRate);
         Pd.t -= podTw;
         // Energy audit (see godot/sim/craft_sim.gd). The tow bar is one-way on purpose, so its
         // pull and the pod's twist have no equal and opposite, and that let it create energy:
@@ -1373,7 +1381,6 @@
         if (P.towAudit) {
           const mvx = (L.vx + R.vx) / 2, mvy = (L.vy + R.vy) / 2;
           const pIn = ft * ((Pd.vx - mvx) * lx + (Pd.vy - mvy) * ly) - podTw * Pd.w;
-          const dth = wrap(Pd.th - S.pairTh);
           const u = 0.5 * P.towK * e * e + 0.5 * P.podAlignK * dth * dth;
           if (S.towU >= 0) {
             const created = pIn + (u - S.towU) / dt;

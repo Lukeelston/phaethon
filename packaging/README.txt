@@ -1,6 +1,13 @@
 PHAETHON
-Experimental Desktop Racer - Windows x64 - v0.3.4
+Experimental Desktop Racer - Windows x64 - v0.3.6
 ElstonWorks
+
+The twin engines now have rolled intakes, ribbed air brakes and heat-stained
+nozzle petals. Open brakes shiver in fast air. The jet follows the steering
+vanes, and hard turns let the trailing pod swing a few degrees outward.
+
+On the Network, a projector in the upper windscreen frame unfurls a holographic
+guide for exits and ascent ramps. Chase view also shows the route in the HUD.
 
 On the Network, green guide signs name the destinations, receiving routes and numbered exits. A yellow LEFT tab identifies a left exit. Launch signs carry the minimum lip speed in an amber strip.
 Expressway shields have a red crest and blue field. Silver plates on the backs identify the opposing approach.
@@ -116,7 +123,7 @@ copyright. Third-party components and the CC BY engine audio retain their
 own licenses and permissions. See THIRD_PARTY_NOTICES.txt and licenses/.
 Adapted engine audio is also supplied separately in audio/engines/.
 
-Build: 0.3.4-experimental | 2026-11-19
+Build: 0.3.6-experimental | 2026-11-20
 
 IN THIS LOCAL BUILD
 Central highway transfers and long side-road sweeps now alternate bends with
