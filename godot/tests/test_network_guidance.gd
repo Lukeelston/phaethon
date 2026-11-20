@@ -103,9 +103,23 @@ func _run() -> void:
 	_check("leaving the approach starts retraction", display.message.is_empty() and display.panel.visible)
 	display._process(display.CLOSE_TIME)
 	_check("guidance stows after leaving the approach", not display.panel.visible and not display.is_processing())
+	# The projector's beam (with the roof): from the lens under the header to the image's top edge,
+	# lit with the image and gone with it.
+	if display.beam:
+		var fan: PackedVector3Array = display.beam.mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
+		var top_edge: Vector3 = display.panel.get_parent().position      # the image hangs from its top edge
+		var nearest := INF
+		var furthest := 0.0
+		for point in fan:
+			nearest = minf(nearest, point.length())
+			furthest = maxf(furthest, point.length())
+		_check("the beam runs from the housing (%.2f m) to the image's top edge (%.2f m of %.2f) and is dark while stowed" % [nearest, furthest, top_edge.length()],
+			nearest < 0.03 and furthest > top_edge.length() - 0.01 and furthest < top_edge.length() + 0.75 and not display.beam.visible)
 	display.set_message("WRONG WAY\nASCENT J0 | TURN BACK\nJUMP LIP IS BEHIND")
 	display._process(display.OPEN_TIME*0.5)
 	_check("projection sweeps down from the header", is_equal_approx(display.deployment,0.5) and display.action.modulate.a > 0.95 and display.advice.modulate.a < 0.05)
+	if display.beam:
+		_check("the beam comes up with the image", display.beam.visible and float(display.beam_mat.get_shader_parameter("lit")) > 0.3)
 	display.set_message("RIGHT EXIT  2 MI / 4.7 S\nTO N1 UPPER\nOPTIONAL / KEEP RIGHT")
 	_check("live updates preserve animation position", is_equal_approx(display.deployment,0.5) and display.countdown.text.ends_with("4.7 S"))
 	display.set_message("")

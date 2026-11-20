@@ -39,7 +39,7 @@ const EVERY := 3.0                           # seconds between pictures
 static var every := EVERY                    # (timings: 0 takes a picture every frame, to weigh one)
 static var enabled := true                   # (timings: false before the cockpit is built leaves it out)
 static var whole := false                    # (timings: true keeps the whole pane's sheet)
-static var strength := 3.0                   # times a bare pane's own share: by day that is lost against the sky
+static var strength := 2.2                   # times a bare pane's own share: by day that is lost against the sky (3.0 as first flown; Luke: "dim the reflection just a bit")
 
 var sheet := MeshInstance3D.new()
 var surface := ShaderMaterial.new()

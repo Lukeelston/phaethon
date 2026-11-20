@@ -13,8 +13,8 @@ header over the pilot's brow, its pillars with it, and the roof falls away behin
   pillars    an A-pillar each side, its foot well forward on the rim and its top back at the header's
              corner (65 degrees from vertical); a raked B-pillar behind the shoulders
   rails      a short cant rail each side from the header back over the head to the B-pillars
-  roof       a crowned shell between them: stitched Alcantara inside (0.36 m over the eye), carbon
-             weave under lacquer outside
+  roof       a crowned shell between them: Alcantara inside (0.36 m over the eye), quilted in padded
+             diamonds and stitched in the cockpit's orange thread; carbon weave under lacquer outside
   cowl       the same shell carried down behind the head to the rear of the rim
   glass      the shade band along the top of the windscreen and of each side window: a separate mesh
              ("RoofGlass", u across and v down the pane in its UVs) that the game gives its own material.
@@ -140,6 +140,50 @@ def paint_suede(area, length, width, seams):
     kit.commit(area, length, width, where, col, h, rough, np.zeros_like(nap), ao)
 
 
+def paint_quilt(area, length, width, pitch=.082, border=.04):
+    """The headliner (Luke, after flying under the plain one: "add a bit of texture to the ceiling to
+    match the rest of the stitching quality"): Alcantara quilted in diamonds, each one padded and
+    drawn down into its seams, every seam a row of the cockpit's orange thread; a plain border round
+    the field, closed by a double row of the same stitching. The padding's shade is painted into the
+    colour as well as the relief: the headliner faces down and is lit mostly by its own glow, which
+    shows colour and hides relief."""
+    a, b, where = kit.window(area, length, width)
+    a, b = np.broadcast_arrays(a, b)
+    nap = fbm(b * 2600, a * 2600, 2)
+    brushed = smooth((fbm(b * 9 + 3, a * 6, 3) - .5) * 3 + .5)              # where a hand has stroked it
+    col = SUEDE * (.86 + .22 * nap[..., None]) * (.95 + .1 * brushed[..., None])
+    h, rough = (nap - .5) * 3.5e-5, .93 + (nap - .5) * .06
+    ao = np.ones_like(nap)
+    edge = np.minimum(np.minimum(a, length - a), np.minimum(b, width - b))    # to the nearest edge of the panel
+    field = smooth((edge - border) / .003)                                   # 1 inside the border
+    d1, d2 = (a + b) / math.sqrt(2), (a - b) / math.sqrt(2)
+    puff = np.sqrt(np.abs(np.sin(math.pi * d1 / pitch)) * np.abs(np.sin(math.pi * d2 / pitch)))
+    h = h + field * .0034 * puff
+    col = col * (1 - .3 * field[..., None] * (1 - puff[..., None])**1.5)
+    ao = ao * (1 - .4 * field * (1 - puff)**2)
+    for along, across in ((d2, d1), (d1, d2)):
+        row = (across + pitch / 2) % pitch - pitch / 2
+        h = h - .0008 * field * np.exp(-(row / .0015)**2)
+        thread, lift = stitches(along, row)
+        thread = thread & (field > .5)
+        h = h + np.where(field > .5, lift, 0)
+        col = np.where(thread[..., None], THREAD * (.85 + .15 * np.cos(2 * math.pi * along / .00045))[..., None], col)
+        rough = np.where(thread, .7, rough)
+    # the border's seam, and its two rows of stitching, running round the field
+    along = np.where(np.minimum(b, width - b) < np.minimum(a, length - a), a, b)
+    d = edge - border
+    groove = np.exp(-(d / .0016)**2)
+    h = h - .0009 * groove
+    ao = ao * (1 - .45 * groove)
+    col = col * (1 - .25 * groove[..., None])
+    for off in (-.0045, .0045):
+        thread, lift = stitches(along, d - off)
+        h = h + lift
+        col = np.where(thread[..., None], THREAD * (.85 + .15 * np.cos(2 * math.pi * along / .00045))[..., None], col)
+        rough = np.where(thread, .7, rough)
+    kit.commit(area, length, width, where, col, h, rough, np.zeros_like(nap), ao)
+
+
 def paint_carbon(area, length, width):
     """Two-by-two twill under lacquer."""
     a, b, where = kit.window(area, length, width)
@@ -215,9 +259,9 @@ def canopy():
     part, glass = Part("Roof"), Part("RoofGlass")
     # the roof and the cowl behind the head
     span = shell(part, kit.rect(16, 16, 1100, 860), kit.rect(16, 900, 1100, 500), roof, 33, 25,
-                 lambda area, length, width: paint_suede(area, length, width, [width * k / 5 for k in (1, 2, 3, 4)]))
+                 paint_quilt)
     back = shell(part, kit.rect(1140, 16, 880, 300), kit.rect(1140, 330, 880, 200), lambda v, q: cowl(q, v), 9, 33,
-                 lambda area, length, width: paint_suede(area, length, width, [width * k / 4 for k in (1, 2, 3)]))
+                 lambda area, length, width: paint_quilt(area, length, width, border=.03))
     # the rails
     n = 41
     lengths = {}

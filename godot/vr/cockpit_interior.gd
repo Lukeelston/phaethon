@@ -8,6 +8,8 @@
 ##   consoles  a console down each side: toggle switches, backlit buttons, stencilled placards
 ##   quadrant  a gate plate round each throttle lever, the burner gate marked in orange
 ##   harness   shoulder straps and a lap belt on the seat, a buckle
+##   tub       a moulded carbon panel each side of the seat, from its flank up to the console and,
+##             behind the console, up to the rim: the cabin is closed round the pilot's hips
 ##   rim light a strip just under the cockpit rim, coloured by mode (set_mode): cool blue in
 ##             SPEEDCRAFT, magenta in STARFIGHTER (following the live blend), amber on the
 ##             burner, violet on the ramjet
@@ -64,6 +66,7 @@ const HD_PARTS := {
 static var hd_parts := true
 static var instrument_rails := true   # the flat instrument panel's frame; false when the gauge cluster stands there
 const HD_CONSOLE := "res://art/cockpit/console_hd.glb"
+const HD_TUB := "res://art/cockpit/tub_hd.glb"     # the seat's tub (tools/art_tub_hd.py): the hip panels, the quarters behind the consoles, the side liners
 
 static func _hd_mesh(path: String, node := "*") -> Mesh:
 	var source := (load(path) as PackedScene).instantiate()
@@ -96,6 +99,14 @@ func build() -> void:
 		rails.name = "InstrumentRails"
 		rails.mesh = _hd_mesh(HD_PARTS.Bezel, "InstrumentRails")
 		add_child(rails)
+	# Realism spike: the seat's tub (Luke: "close up the sides by the pilot's butt so that its more of
+	# a monocoque design"). Either side of the seat the cabin was open down to the hull's floor, and
+	# behind each console out to its wall.
+	if hd_parts and ResourceLoader.exists(HD_TUB):
+		var tub := MeshInstance3D.new()
+		tub.name = "SeatTub"
+		tub.mesh = _hd_mesh(HD_TUB, "Tub")
+		add_child(tub)
 	var dark := Color(0.09, 0.09, 0.1)
 	var gunmetal := Color(0.28, 0.29, 0.31)
 	var steel := Color(0.62, 0.64, 0.68)

@@ -12,6 +12,7 @@ extends Node3D
 const Kit := preload("res://view/mesh_kit.gd")
 const Finish := preload("res://view/craft_materials.gd")
 const Glass := preload("res://view/guidance_glass.gdshader")
+const Beam := preload("res://view/projector_beam.gdshader")
 const SIZE := Vector2(0.94, 0.228)
 const OPEN_TIME := 0.36
 const CLOSE_TIME := 0.24
@@ -35,6 +36,9 @@ var advice: Label3D
 var status: Label3D
 var message := ""
 var deployment := 0.0
+static var beams := true                             # (timings: false before build() leaves the beam out)
+var beam: MeshInstance3D                             # (the roof's mount) the fan of light from the lens to the image's top edge
+var beam_mat: ShaderMaterial
 var lens_mat: StandardMaterial3D                     # (the roof's mount) the emitter's lens: dark glass until it projects
 const LENS_IDLE := Color("#16343a")
 const LENS_LIT := Color("#8fe9f0")
@@ -100,6 +104,30 @@ func _mount_under_header(pivot: Node3D) -> void:
 	pivot.position = middle + up * (SIZE.y * 0.5 * size) - position
 	pivot.rotation.x = IMAGE_ELEVATION
 	pivot.scale = Vector3.ONE * size
+	# The beam (Luke: "add a light projector beam from the roof mounted hud projector to the actual
+	# hud"): a fan from the lens out through the screen to the image's top edge. From the seat it
+	# lies between the housing and the readout, in the shade band, and never over the words.
+	var slit: Vector3 = housing.transform * lens.position
+	var reach := SIZE.x * 0.5 * size
+	var fan := SurfaceTool.new()
+	fan.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var cols := 16
+	var rows := 10
+	for j in rows:
+		for i in cols:
+			for corner: Vector2i in [Vector2i(i, j), Vector2i(i + 1, j), Vector2i(i + 1, j + 1), Vector2i(i, j), Vector2i(i + 1, j + 1), Vector2i(i, j + 1)]:
+				var u := float(corner.x) / cols
+				var v := float(corner.y) / rows
+				var near := slit + Vector3((u - 0.5) * 0.15, 0.0, 0.0)
+				var far := pivot.position + Vector3((u - 0.5) * 2.0 * reach, 0.0, 0.0)
+				fan.set_uv(Vector2(u, v))
+				fan.add_vertex(near.lerp(far, v))
+	beam_mat = ShaderMaterial.new()
+	beam_mat.shader = Beam
+	beam_mat.render_priority = 2      # over the roof's glass, under the image
+	if beams:
+		beam = _part("Beam", fan.commit(), beam_mat)
+		beam.visible = false
 
 
 ## The open cockpit's mount: a short brow of glazing joins the oblong screen's top edge to a fixed
@@ -213,6 +241,8 @@ func set_message(value: String) -> void:
 	status.modulate = Color(tint, status.modulate.a)
 	action.modulate = Color(tint if metrics[0]=="WRONG WAY" else ICE, action.modulate.a)
 	surface.set_shader_parameter("signal", tint)
+	if beam_mat:
+		beam_mat.set_shader_parameter("signal", tint)
 	var direction := -1 if metrics[0]=="LEFT EXIT" else (1 if metrics[0]=="RIGHT EXIT" else 0)
 	surface.set_shader_parameter("direction", float(direction))
 	surface.set_shader_parameter("wrong_way", metrics[0]=="WRONG WAY")
@@ -234,6 +264,9 @@ func _reveal() -> void:
 	surface.set_shader_parameter("scan", scan)
 	if lens_mat:
 		lens_mat.albedo_color = LENS_IDLE.lerp(LENS_LIT, scan)
+	if beam:
+		beam.visible = deployment > 0.0
+		beam_mat.set_shader_parameter("lit", scan)
 	for label: Label3D in [action, countdown, route, advice, status]:
 		var row := 0.5-label.position.y/SIZE.y
 		var opacity := smoothstep(row, row+0.16, scan)

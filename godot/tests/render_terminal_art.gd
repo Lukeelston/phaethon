@@ -43,6 +43,8 @@ func _run() -> void:
 			preload("res://view/network_world.gd").open_edge_probe = arg.trim_prefix("--edge-probe=")
 		if arg.begins_with("--roof-probe="):   # timings: the roof without its glass, or without its dome light
 			preload("res://view/canopy.gd").probe = arg.trim_prefix("--roof-probe=")
+	if "--no-beam" in OS.get_cmdline_user_args():   # timings: the approach guidance without its projector beam
+		preload("res://view/approach_projector.gd").beams = false
 	if "--no-plume" in OS.get_cmdline_user_args():   # timings: the jets' gas undrawn
 		preload("res://view/craft_model.gd").plumes = false
 	for arg in OS.get_cmdline_user_args():
@@ -131,6 +133,7 @@ func _benchmark() -> void:
 	var road = seat.sim.roads[int(city.road)]
 	var vp := root.get_viewport_rid()
 	var burner := "--burner" in OS.get_cmdline_user_args()
+	var guidance := "--guidance" in OS.get_cmdline_user_args()
 	# Two warm passes give the runtime a chance to compile newly visible materials.
 	# Every pass follows identical transforms even if the host display rate changes.
 	for lap in 3:
@@ -151,6 +154,9 @@ func _benchmark() -> void:
 			var begin := Time.get_ticks_usec()
 			seat._process(STEP)
 			var update_ms := (Time.get_ticks_usec() - begin) / 1000.0
+			if guidance and seat.approach_display:      # the approach readout held up (the frame's own update has just stowed it)
+				seat.approach_display.set_message("JUMP LIP  2 MI / 4.0 S\nASCENT J0 > N2 UPPER\nMIN 3,000 MPH AT LIP | READY")
+				seat.approach_display._process(1.0)
 			await process_frame
 			var now := Time.get_ticks_usec()
 			if lap == 2:

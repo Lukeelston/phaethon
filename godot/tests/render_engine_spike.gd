@@ -37,6 +37,16 @@ const VIEWS := [
 	["r2-seat-looking-up", 2.0, false, 0.0, "seat", 0.0, 18.0],
 	["r3-seat-head-right", 2.0, false, 0.0, ["pod", Vector3(0.14, 0.12, 0.6), Vector3(0.14, 0.44, -0.4)]],
 	["r4-seat-head-left", 2.0, false, 0.0, ["pod", Vector3(-0.14, 0.12, 0.6), Vector3(-0.14, 0.44, -0.4)]],
+	# the cabin round the seat and over it, from the seated eye: the sides by the hips, the lap, over
+	# each shoulder, the ceiling; and down into it from above (best with --open)
+	["k1-seat-down-left", 1.0, false, 0.0, ["pod", Vector3(0.0, 0.12, 0.6), Vector3(-0.55, -0.42, 0.62)]],
+	["k2-seat-down-right", 1.0, false, 0.0, ["pod", Vector3(0.0, 0.12, 0.6), Vector3(0.55, -0.42, 0.62)]],
+	["k3-seat-lap", 1.0, false, 0.0, ["pod", Vector3(0.0, 0.12, 0.6), Vector3(0.0, -0.6, 0.3)]],
+	["k4-seat-over-left-shoulder", 1.0, false, 0.0, ["pod", Vector3(0.0, 0.12, 0.6), Vector3(-0.6, -0.25, 1.25)]],
+	["k5-seat-ceiling", 1.0, false, 0.0, ["pod", Vector3(0.0, 0.12, 0.6), Vector3(0.0, 0.62, 0.45)]],
+	["k6-seat-ceiling-aft", 1.0, false, 0.0, ["pod", Vector3(0.0, 0.12, 0.6), Vector3(0.25, 0.6, 1.0)]],
+	["k7-cabin-from-above", 1.0, false, 0.0, ["pod", Vector3(0.0, 2.3, 0.75), Vector3(0.0, 0.0, 0.55)]],
+	["k8-cabin-from-above-left", 1.0, false, 0.0, ["pod", Vector3(-1.1, 1.5, 1.5), Vector3(0.1, -0.2, 0.6)]],
 ]
 const MESSAGE := "JUMP LIP  2 MI / 4.0 S
 ASCENT J0 > N2 UPPER
