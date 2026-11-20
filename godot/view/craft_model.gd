@@ -18,8 +18,9 @@
 ## Steel cables run from an eye under each engine's tail to two hardpoint eyes on the pod's
 ## nose, exactly where the sim anchors them (the nose ring, either side of centre); the binder
 ## arc crackles between the engines. In VR the pod is hidden (you sit in it), so the view hands
-## over its cockpit frame (pod_frame), which carries its own nose and eyes. The slot jets follow
-## the steering vanes. Their turbulent outer layers mix around a chain of shrinking shock cells.
+## over its cockpit frame (pod_frame), which carries its own nose and eyes. Each engine's jet is a
+## volume of gas (view/flame.gdshader) on a centre line traced here: out of the nozzle the way the
+## steering vanes point, then swept round into the slipstream (_trace_plume).
 ##   add_child(model); model.build(view)          once
 ##   model.sync(sim, inp, delta)                  every frame, after the floating origin moves
 extends Node3D
@@ -89,7 +90,7 @@ var fans: Array[Node3D] = []         # per engine: holds its twin intake rotors
 var rotors := [[], []]               # per engine: the two fan rotors (spin about their own Z)
 var vanes := [[], []]                # per engine: the thrust-vectoring vanes in the nozzle (swing with steering)
 var vane_angle := 0.0                # their current deflection, radians (+ = trailing edges right, a right turn)
-var _wake_yaw := 0.0                 # gas farther downstream was emitted before the vanes finished moving
+var _wake_yaw := 0.0                 # where the vanes were a moment ago: the gas further down the plume left them then
 var strobes: Array[Node3D] = []      # the fin-tip strobes (double flash)
 var binder_mats: Array[StandardMaterial3D] = []   # the binder emitters' glowing cores
 const FlameShader := preload("res://view/flame.gdshader")
@@ -98,8 +99,12 @@ const FlameHolder := preload("res://art/engine/flame_holder.png")
 const EffectExclusion := preload("res://view/effect_exclusion.gd")
 const NOZZLE_EXIT := 4.30
 var _flap_phase := [0.0, 2.56]
-const FLAME_H := 0.62                # the plume's height at the nozzle (2 x 0.62 x scale 0.5)
-var flame_mats := [[], []]           # per engine: [outer plume, inner core] ShaderMaterials (view/flame.gdshader)
+const PLUME_STATIONS := 12           # the plume's centre line is traced at this many stations (flame.gdshader's STATIONS)
+const PLUME_SLOT := Vector2(0.92, 0.27)   # the nozzle slot's half-width and half-height, m
+const PLUME_MAX := 11.5              # the longest plume, m
+var flame_mats := [[], []]           # per engine: [the plume's ShaderMaterial] (view/flame.gdshader)
+var plume_len := [0.0, 0.0]          # per engine: the plume's length, m
+var plume_line := [PackedFloat32Array(), PackedFloat32Array()]   # per engine: its centre line, m to the engine's right at each station
 var nozzle_mats: Array[ShaderMaterial] = []   # per engine: the fire in the nozzle (view/nozzle_glow.gdshader)
 var nozzle_lights: Array[OmniLight3D] = []   # light the track behind a burning engine
 var _burn := [0.0, 0.0]              # eased burner and ramjet shares, per engine
@@ -289,36 +294,29 @@ func build(v) -> void:
 		core_m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		em.add_child(core_m)
 		binder_mats.append(cmat)
-		# Both gas layers originate at the moving vane exits. Cross-section belongs
-		# to the meshes so vectoring keeps its true angle on the wide slot nozzle.
+		# The jet: one volume of gas behind the nozzle. The node stays square to the engine; the
+		# vanes' deflection is in the plume's centre line, traced every frame (_trace_plume).
 		var flame := Node3D.new()
 		flame.position.z = NOZZLE_EXIT
 		eng.add_child(flame)
 		flames.append(flame)
-		var cone_root := Node3D.new()   # cones hang along -Y; sync turns that to +Z (back) and stretches it
-		cone_root.name = "cones"
-		flame.add_child(cone_root)
-		for layer in 2:
-			var cone := MeshInstance3D.new()
-			var cm := Kit.cyl(1.0, 1.0, 1.0, 32)
-			cm.rings = 47
-			cm.cap_top = false
-			cm.cap_bottom = false
-			cone.mesh = cm
-			cone.scale = Vector3(0.96, 1.0, 0.289) if layer == 0 else Vector3(0.86, 0.81, 0.246)
-			cone.position.y = -0.5 * cone.scale.y
-			# Vertex displacement widens the mixing layer beyond the source cylinder.
-			cone.custom_aabb = AABB(Vector3(-3.6,-0.5,-1.8), Vector3(7.2,1.0,3.6))
-			var fmat := ShaderMaterial.new()
-			fmat.shader = FlameShader
-			fmat.render_priority = layer
-			fmat.set_shader_parameter("layer", float(layer))
-			fmat.set_shader_parameter("seed", float(k) * 3.7)
-			fmat.set_shader_parameter("flow_map", FlowTexture)
-			cone.material_override = fmat
-			cone.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-			cone_root.add_child(cone)
-			flame_mats[k].append(fmat)
+		var plume := MeshInstance3D.new()
+		plume.name = "plume"
+		var tube := BoxMesh.new()            # a unit box, a row of faces per station: the shader lays it along the line
+		tube.size = Vector3.ONE
+		tube.subdivide_depth = PLUME_STATIONS - 2
+		plume.mesh = tube
+		plume.custom_aabb = AABB(Vector3(-8.0, -1.6, -0.2), Vector3(16.0, 3.2, 16.0))
+		var fmat := ShaderMaterial.new()
+		fmat.shader = FlameShader
+		fmat.set_shader_parameter("seed", float(k) * 3.7)
+		fmat.set_shader_parameter("flow_map", FlowTexture)
+		fmat.set_shader_parameter("slot", PLUME_SLOT)
+		plume.material_override = fmat
+		plume.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		flame.add_child(plume)
+		flame_mats[k].append(fmat)
+		plume_line[k].resize(PLUME_STATIONS)
 		# Realism spike: the fire in the nozzle itself (view/nozzle_glow.gdshader). From the seat the
 		# plume is seen end-on and nearly vanishes; the nozzle is what the pilot actually looks at.
 		var fire := MeshInstance3D.new()
@@ -329,6 +327,7 @@ func build(v) -> void:
 		fire.position.z = 0.07   # just behind the nozzle's flat glow slab
 		var gmat := ShaderMaterial.new()
 		gmat.shader = preload("res://view/nozzle_glow.gdshader")
+		gmat.render_priority = 1   # over the plume it is seen through, from the seat
 		gmat.set_shader_parameter("seed", float(k) * 3.7 + 1.9)
 		fire.material_override = gmat
 		fire.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -925,7 +924,7 @@ func sync(sim, inp: Dictionary, delta: float) -> void:
 	var brakes := [inp.brkL, inp.brkR]   # each engine's flaps answer to its own brake
 	var steer: float = sim.eL.thrust - sim.eR.thrust + 0.72*(inp.brkR-inp.brkL)
 	vane_angle = lerpf(vane_angle, clampf(steer*1.2,-1.0,1.0)*VANE_MAX, 1.0-exp(-delta*8.0))
-	_wake_yaw = lerpf(_wake_yaw, vane_angle, 1.0-exp(-delta*6.0))
+	_wake_yaw = lerpf(_wake_yaw, vane_angle, 1.0-exp(-delta*3.5))
 	for k in 2:
 		var e = bodies[k]
 		var eng := engines[k]
@@ -979,29 +978,29 @@ func sync(sim, inp: Dictionary, delta: float) -> void:
 		binder_mats[k].albedo_color = BINDER_COL.lerp(Color(0.8, 0.45, 1.0), strain) * (0.7 + 0.5 * pulse)
 		# flame
 		var flame := flames[k]
-		flame.rotation.y = vane_angle
-		flame.position.x = (NOZZLE_EXIT-4.02) * tan(vane_angle)
 		var burning: bool = not e.flameout and e.thrust > 0.02
 		flame.visible = burning
 		var fade := 1.0 - exp(-delta * 6.0)   # the burner lights and dies over ~0.2 s, not in a frame
 		_burn[k] = lerpf(_burn[k], 1.0 if burning and sim.mode != "normal" else 0.0, fade)
 		_ram[k] = lerpf(_ram[k], 1.0 if burning and sim.mode == "ramjet" else 0.0, fade)
 		var lamp: OmniLight3D = nozzle_lights[k]
-		lamp.position = flame.position + flame.basis.z*1.2 + Vector3.DOWN*0.2
 		lamp.light_color = Color(1.0,0.48,0.19).lerp(Color(0.34,0.61,1.0),_ram[k])
 		lamp.light_energy = _burn[k] * (2.2 + 0.8 * sin(Time.get_ticks_msec() * 0.031 + k * 2.0)) * minf(e.thrust, 1.2) if burning else 0.0
 		if burning:
-			# the plume's length: a short cone on dry thrust (the shader shows only its near part),
-			# a long one on the burner, longer still on the ramjet
-			var flame_len: float = lerpf(0.65 + 3.6*e.thrust, 4.4 + 7.6*e.thrust, _burn[k]) * (1.0 + 0.22*_ram[k])
-			var cones: Node3D = flame.get_node("cones")
-			cones.transform = Transform3D(Basis(Vector3.RIGHT, -PI / 2.0) * Basis.from_scale(Vector3(1, flame_len, 1)), Vector3.ZERO)
-			for fmat in flame_mats[k]:
-				(fmat as ShaderMaterial).set_shader_parameter("wake_bend", clampf(sin(_wake_yaw-vane_angle)*flame_len,-1.55,1.55))
-				(fmat as ShaderMaterial).set_shader_parameter("thrust", e.thrust)
-				(fmat as ShaderMaterial).set_shader_parameter("burner", _burn[k])
-				(fmat as ShaderMaterial).set_shader_parameter("ramjet", _ram[k])
-				(fmat as ShaderMaterial).set_shader_parameter("aspect", flame_len / FLAME_H)
+			# the plume's length: a short jet on dry thrust, a long one on the burner, longer still on the ramjet
+			# (the pod's nose is 13 m behind the nozzles: the flame stops short of it)
+			var reach: float = minf(lerpf(0.6 + 2.6*e.thrust, 3.4 + 4.6*e.thrust, _burn[k]) * (1.0 + 0.22*_ram[k]), PLUME_MAX)
+			plume_len[k] = reach
+			var swing: Vector2 = _trace_plume(k, e, reach, vh)
+			lamp.position = flame.position + Vector3(plume_at(k, 1.2), -0.2, 1.2)
+			var across: float = maxf(PLUME_SLOT.x, 0.48 + 0.05 * reach) * 1.8    # the tube's half-width at its widest (flame.gdshader's MARGIN)
+			var fmat: ShaderMaterial = flame_mats[k][0]
+			fmat.set_shader_parameter("centre", plume_line[k])
+			fmat.set_shader_parameter("reach", reach)
+			fmat.set_shader_parameter("thrust", e.thrust)
+			fmat.set_shader_parameter("burner", _burn[k])
+			fmat.set_shader_parameter("ramjet", _ram[k])
+			(flame.get_node("plume") as MeshInstance3D).custom_aabb = AABB(Vector3(swing.x - across, -across, -0.2), Vector3(swing.y - swing.x + across * 2.0, across * 2.0, reach + 0.4))
 			nozzle_mats[k].set_shader_parameter("thrust", e.thrust)
 			nozzle_mats[k].set_shader_parameter("burner", _burn[k])
 			nozzle_mats[k].set_shader_parameter("ramjet", _ram[k])
@@ -1022,6 +1021,44 @@ func sync(sim, inp: Dictionary, delta: float) -> void:
 	for i in 2:
 		var s := -1.0 if i == 0 else 1.0
 		pod_flaps[i].rotation.y = s * FLAP_OPEN * 0.8 * pod_flap_open   # trailing edge swings out
+
+
+## The jet's centre line: metres to the engine's right at PLUME_STATIONS stations down its length
+## (into plume_line[k]); returns its leftmost and rightmost reach. The gas leaves the nozzle the
+## way the vanes point, at its own speed; the air it is thrown into is going straight back past the
+## engine (and across it, in a slide: it comes from where the engine is going, not where it
+## points). As the two mix the jet is carried round into the slipstream: a kink at the nozzle that
+## bends away downstream. Standing still there is no slipstream and the jet is a straight line at
+## the vanes' angle. Gas further down left the nozzle a moment ago, when the vanes were at
+## _wake_yaw: flick the levers and the plume whips.
+func _trace_plume(k: int, e, reach: float, speed: float) -> Vector2:
+	var jet: float = lerpf(900.0, 2400.0, _burn[k]) * (1.0 + 0.25 * _ram[k])    # the gas's own speed out of the nozzle, m/s
+	var across := 0.0
+	if speed > 20.0:
+		across = tan(clampf(wrapf(atan2(e.vy, e.vx) - e.th, -PI, PI), -0.4, 0.4))
+	var mixing := 0.3 * reach
+	var line: PackedFloat32Array = plume_line[k]
+	var x := (NOZZLE_EXIT - 4.02) * tan(vane_angle)    # the vanes' pivots are that far inside the nozzle
+	var dz := reach / float(PLUME_STATIONS - 1)
+	var swing := Vector2(x, x)
+	for i in PLUME_STATIONS:
+		line[i] = x
+		swing = Vector2(minf(swing.x, x), maxf(swing.y, x))
+		var z := (i + 0.5) * dz
+		var mixed := 1.0 - exp(-z / mixing)
+		var own: float = jet * (1.0 - mixed)
+		var air: float = speed * mixed
+		var vanes_then := lerpf(vane_angle, _wake_yaw, smoothstep(0.0, 0.7, z / reach))
+		x += dz * (tan(vanes_then) * own + across * air) / (own + air + 1.0)
+	plume_line[k] = line
+	return swing
+
+
+## The plume's centre, metres to the engine's right, `z` metres behind the nozzle.
+func plume_at(k: int, z: float) -> float:
+	var f := clampf(z / maxf(plume_len[k], 0.01), 0.0, 1.0) * float(PLUME_STATIONS - 1)
+	var i := mini(int(f), PLUME_STATIONS - 2)
+	return lerpf(plume_line[k][i], plume_line[k][i + 1], f - float(i))
 
 
 static func _flutter(phase: float, leaf: int, opening: float, pressure: float) -> float:

@@ -9,7 +9,8 @@
 ##   away from the triggers")
 ##   the MODE switch on the right console: push it up for SPEEDCRAFT, down for STARFIGHTER (live,
 ##   mid-lap; STARFIGHTER takes below 1,250 mph). Y hold 1 s flips it too. Y tap: restart
-##   menu tap: quick menu · menu hold 1.5 s: main menu / map selection
+##   menu tap: quick menu (driving partner, controls, camera: the seat or a chase view) · menu hold
+##   1.5 s: main menu / map selection
 ## Haptics: a kick on the sonic boom; a tick in that hand when a lever crosses the burner gate (the
 ## stick schemes); a thump in the left hand as the burner lights, a softer one as it goes out, a
 ## double tap when it can't (below top gear).
@@ -63,6 +64,16 @@ const GRAB_DECAY := 0.3       # s
 var _grab := 0.0              # the grab's shudder, 1 at the grab, decaying
 var _grab_t := 0.0
 var origin: XROrigin3D
+# The camera (Luke: "Will you also add a camera change to the pause menu?"): the seat, or outside
+# behind the pod. Outside, the horizon stays level and the view turns with the pod's heading and
+# nothing else: the pod banks and shudders in front of you, the world does not. Your head still
+# moves in it one for one. Picked in the quick menu, kept through restarts, saved with the controls.
+const CAMERAS := ["cockpit", "chase", "far"]
+const CAMERA_NAMES := {"cockpit": "COCKPIT", "chase": "CHASE", "far": "FAR CHASE"}
+const CAMERA_OFFSETS := {"chase": Vector3(0.0, 1.3, 5.2), "far": Vector3(0.0, 3.6, 12.0)}   # from the seated eye: up, and aft
+static var camera := "cockpit"
+static var _camera_loaded := false   # the saved choice is read once a run: after that the menu's is the latest
+var chase_hud: Label3D      # outside, the gauges are out of reading distance: the speed, the Mach line and the guidance, low and left
 var hands := {}
 var lever_pivots: Array[Node3D] = []
 var lever_tips: Array[StandardMaterial3D] = []
@@ -102,6 +113,9 @@ func _ready() -> void:
 	var prefs := _load_prefs()
 	if QuestControlsScript.SCHEMES.has(prefs.get("scheme", "")):
 		quest.scheme = prefs.scheme
+	if not _camera_loaded and CAMERAS.has(prefs.get("camera", "")):
+		camera = prefs.camera
+	_camera_loaded = true
 	var forced := false
 	for a in OS.get_cmdline_user_args():
 		forced = forced or a.begins_with("--handling=")
@@ -140,7 +154,7 @@ func _load_prefs() -> Dictionary:
 func _save_prefs() -> void:
 	var f := FileAccess.open(PREFS, FileAccess.WRITE)
 	if f:
-		f.store_string(JSON.stringify({"scheme": quest.scheme, "handling": handling_ask if handling_ask != "" else sim.P.handling}))
+		f.store_string(JSON.stringify({"scheme": quest.scheme, "handling": handling_ask if handling_ask != "" else sim.P.handling, "camera": camera}))
 
 
 ## Thumbstick click (either stick): sit where you are. Recentres the view AND the height, so
@@ -514,9 +528,13 @@ func _build_cockpit() -> void:
 	minimap_panel.set_live(sim.kind == "circuit" or sim.kind == "network")
 	menu_panel = Node3D.new()   # the main menu: a dark panel and its words, a metre out, never behind anything
 	menu_panel.name = "main_menu"
-	menu_panel.position = SEAT + Vector3(0.0, 0.02, -1.1)
+	menu_panel.position = Vector3(0.0, 0.02, -1.1)   # on the origin: in front of whichever camera is up (in the seat, over the dash)
 	menu_panel.visible = false
-	shell.add_child(menu_panel)
+	if origin:
+		origin.add_child(menu_panel)
+	else:   # (a cockpit built on its own, for the fittings' checks: there is no camera to hang it from)
+		menu_panel.position += SEAT
+		shell.add_child(menu_panel)
 	var back := MeshInstance3D.new()
 	var bq := QuadMesh.new()
 	bq.size = Vector2(1.05, 0.6)
@@ -539,6 +557,51 @@ func _build_cockpit() -> void:
 	words.position = Vector3(-0.47, 0.0, 0.01)
 	words.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	menu_panel.add_child(words)
+	if origin:
+		_build_chase_hud()
+
+
+## The outside views' readout: on the origin (level with the view, not stuck to the head), low and
+## to the left, clear of the pod below and the engines ahead.
+func _build_chase_hud() -> void:
+	chase_hud = Label3D.new()
+	chase_hud.name = "chase_hud"
+	chase_hud.font_size = 48
+	chase_hud.pixel_size = 0.0011
+	chase_hud.outline_size = 8
+	chase_hud.outline_modulate = Color(0.015, 0.025, 0.03, 0.9)
+	chase_hud.modulate = Color(0.74, 0.96, 0.98)
+	chase_hud.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	chase_hud.vertical_alignment = VERTICAL_ALIGNMENT_TOP
+	chase_hud.double_sided = false
+	chase_hud.no_depth_test = true
+	chase_hud.render_priority = 3
+	chase_hud.outline_render_priority = 2
+	chase_hud.position = Vector3(-0.92, -0.3, -1.6)
+	chase_hud.rotation.y = deg_to_rad(24.0)   # square to the eye it sits left of
+	chase_hud.visible = false
+	origin.add_child(chase_hud)
+
+
+## Put the origin where the chosen camera is. In the seat it is the rig's own (the eye point). Outside
+## it is that point carried up and aft in the pod's heading, level: `level` is the heading's frame
+## (carried onto a shaft's shape where there is one) and `floor` the rig's floor point in the world.
+func _place_origin(level: Basis, floor_at: Vector3) -> void:
+	if camera == "cockpit" or not CAMERA_OFFSETS.has(camera):
+		origin.transform = Transform3D(Basis.IDENTITY, SEAT)
+	else:
+		origin.global_transform = global_transform * Transform3D(level, floor_at + level * (SEAT + CAMERA_OFFSETS[camera]))
+	if chase_hud:
+		chase_hud.visible = camera != "cockpit"
+
+
+## The next camera (the quick menu's CAMERA line).
+func next_camera() -> void:
+	camera = CAMERAS[(CAMERAS.find(camera) + 1) % CAMERAS.size()]
+	_save_prefs()
+	print("CAMERA: ", camera)
+	_place_camera(1.0)
+	_update_hud()
 
 
 func _build_fade(xr_cam: XRCamera3D) -> void:
@@ -755,6 +818,7 @@ func _menu_hands(_l: XRController3D, r: XRController3D) -> void:
 func _menu_items() -> Array:
 	return [{"key": "partner", "label": "DRIVING PARTNER", "value": "ON" if partner_on else "OFF"},
 		{"key": "scheme", "label": "CONTROLS", "value": String(quest.scheme).to_upper()},
+		{"key": "camera", "label": "CAMERA", "value": String(CAMERA_NAMES[camera])},
 		{"key": "maps", "label": "CHOOSE MAP"},
 		{"key": "resume", "label": "RESUME"}]
 
@@ -766,6 +830,13 @@ func menu_choose() -> bool:
 			_save_prefs()
 			_scheme_flash = 4.0
 			print("CONTROLS: ", quest.scheme)
+			var at: int = menu.at
+			menu.items = _menu_items()
+			menu.at = at
+			_menu_show()
+			return true
+		"camera":
+			next_camera()
 			var at: int = menu.at
 			menu.items = _menu_items()
 			menu.at = at
@@ -843,7 +914,7 @@ func _place_camera(_k: float) -> void:
 	var r := CraftModelScript.ride(self, sim, _ride, get_process_delta_time())
 	var roll := _ease_cockpit_roll(craft.bank[2] + r.z, get_process_delta_time())
 	var pitch := r.y   # up and down the banking
-	var head := origin.position + cam.position
+	var head := SEAT + cam.position    # the seated head, whichever camera is up: the cockpit rolls about it
 	if sim.pod.path > 0 and sim.kind != "network":
 		# the shade line: the cockpit worked out flat, then carried onto the twisted road, where the
 		# corkscrews roll it right over (CraftModel.onto_road: past 90 deg, upside down under the canopy)
@@ -851,12 +922,17 @@ func _place_camera(_k: float) -> void:
 		var floor_flat := Vector3(sim.pod.x - org_x, sim.pod.z - 0.8 + CraftModelScript.POD_LIFT, -(sim.pod.y - org_y))
 		rig.transform = CraftModelScript.onto_road(sim, Transform3D(b_flat, floor_flat + b_yaw * head - b_flat * head), floor_flat,
 			_ride.roll, pitch, org_x, org_y)
+		# (on the corkscrews there is no level to hold: an outside camera rides the rig, turned over with it)
+		origin.transform = Transform3D(Basis.IDENTITY, SEAT + (CAMERA_OFFSETS.get(camera, Vector3.ZERO) as Vector3))
+		if chase_hud:
+			chase_hud.visible = camera != "cockpit"
 	else:
 		var Q := shaft_carry_at(sim.pod.x, sim.pod.y)   # (identity but up a shaft: there the world turns over round you)
 		var b_full: Basis = Q * Basis.from_euler(Vector3(pitch, yaw, roll))   # lean + the track's banking (capped), and its slope
 		var base := wz(sim.pod.x, sim.pod.y, sim.pod.z - 0.8 + CraftModelScript.POD_LIFT) + Q * Vector3.UP * (r.x - surface(sim.pod.x, sim.pod.y).x)   # floor 0.8 m below the pod body centre, lifted with the pod
 		rig.basis = b_full
 		rig.position = base + Q * (b_yaw * head) - b_full * head
+		_place_origin(Q * b_yaw, base)
 	var thr := [inp.thrL, inp.thrR]
 	for k in 2:
 		lever_pivots[k].rotation.x = deg_to_rad(lerpf(30.0, -30.0, thr[k]))
@@ -986,6 +1062,20 @@ func _update_hud() -> void:
 		"gear": quest.display_gear(), "overdrive": bool(inp.get("gearOverdrive", false)),
 		"blink": (Time.get_ticks_msec() / 250) % 2 == 0,
 	})
+	if chase_hud and chase_hud.visible:
+		var guide: String = approach_display.message if approach_display else ""   # (what the projector over the nose is showing)
+		var lit: String = {"ramjet": "RAMJET", "burner": "AFTERBURNER"}.get(sim.mode, "RAMJET ARMED" if sim.armed else "")
+		chase_hud.text = "%s MPH\n%s%s%s" % [_thousands(roundi(kmh / 1.609344)), cues.readout(), ("   " + lit) if lit != "" else "",
+			("\n\n" + guide) if guide != "" else ""]
+
+
+static func _thousands(n: int) -> String:
+	var digits := str(absi(n))
+	var out := ""
+	while digits.length() > 3:
+		out = "," + digits.right(3) + out
+		digits = digits.left(digits.length() - 3)
+	return ("-" if n < 0 else "") + digits + out
 
 
 func _update_skill_readout() -> void:
