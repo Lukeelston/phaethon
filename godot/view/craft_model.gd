@@ -102,6 +102,7 @@ var _flap_phase := [0.0, 2.56]
 const PLUME_STATIONS := 12           # the plume's centre line is traced at this many stations (flame.gdshader's STATIONS)
 const PLUME_SLOT := Vector2(0.92, 0.27)   # the nozzle slot's half-width and half-height, m
 const PLUME_MAX := 11.5              # the longest plume, m
+static var plumes := true            # (timings: false before build() leaves the jets' gas undrawn)
 var flame_mats := [[], []]           # per engine: [the plume's ShaderMaterial] (view/flame.gdshader)
 var plume_len := [0.0, 0.0]          # per engine: the plume's length, m
 var plume_line := [PackedFloat32Array(), PackedFloat32Array()]   # per engine: its centre line, m to the engine's right at each station
@@ -314,6 +315,7 @@ func build(v) -> void:
 		fmat.set_shader_parameter("slot", PLUME_SLOT)
 		plume.material_override = fmat
 		plume.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		plume.visible = plumes
 		flame.add_child(plume)
 		flame_mats[k].append(fmat)
 		plume_line[k].resize(PLUME_STATIONS)

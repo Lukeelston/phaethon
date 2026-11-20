@@ -43,6 +43,21 @@ func _run() -> void:
 			preload("res://view/network_world.gd").open_edge_probe = arg.trim_prefix("--edge-probe=")
 		if arg.begins_with("--roof-probe="):   # timings: the roof without its glass, or without its dome light
 			preload("res://view/canopy.gd").probe = arg.trim_prefix("--roof-probe=")
+	if "--no-plume" in OS.get_cmdline_user_args():   # timings: the jets' gas undrawn
+		preload("res://view/craft_model.gd").plumes = false
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--camera="):   # timings: the quick menu's chase views
+			Seat.camera = arg.trim_prefix("--camera=")
+			Seat._camera_loaded = true
+	if "--no-reflection" in OS.get_cmdline_user_args():   # timings: the windscreen without its reflection of the cockpit
+		preload("res://view/screen_reflection.gd").enabled = false
+	if "--reflection-every-frame" in OS.get_cmdline_user_args():   # timings: a picture every frame, to weigh one
+		preload("res://view/screen_reflection.gd").every = 0.0
+	if "--reflection-whole" in OS.get_cmdline_user_args():   # timings: the sheet over the whole pane, not cut to what shows
+		preload("res://view/screen_reflection.gd").whole = true
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--reflection="):   # (looking at it: the reflection this many times its strength)
+			preload("res://view/screen_reflection.gd").strength = float(arg.trim_prefix("--reflection="))
 	if "--no-scenic" in OS.get_cmdline_user_args():   # the scenic roads' land and edges left out
 		preload("res://view/network_world.gd").scenic_on = false
 	root.msaa_3d = Viewport.MSAA_4X
@@ -115,6 +130,7 @@ func _set_pose(offset: int) -> void:
 func _benchmark() -> void:
 	var road = seat.sim.roads[int(city.road)]
 	var vp := root.get_viewport_rid()
+	var burner := "--burner" in OS.get_cmdline_user_args()
 	# Two warm passes give the runtime a chance to compile newly visible materials.
 	# Every pass follows identical transforms even if the host display rate changes.
 	for lap in 3:
@@ -130,6 +146,8 @@ func _benchmark() -> void:
 				body.y += dy * 0.5 * (frame % 2)
 				body.vx = dx * 60.0
 				body.vy = dy * 60.0
+			if burner:      # both levers through the gate: the long plumes
+				seat.inp = {"thrL": 1.0, "thrR": 1.0, "brkL": 0.0, "brkR": 0.0, "repair": false, "reignite": true, "burner": true}
 			var begin := Time.get_ticks_usec()
 			seat._process(STEP)
 			var update_ms := (Time.get_ticks_usec() - begin) / 1000.0
@@ -141,6 +159,8 @@ func _benchmark() -> void:
 				gpu.append(RenderingServer.viewport_get_measured_render_time_gpu(vp))
 				draws.append(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME))
 			last = now
+	if burner:
+		print("TERMINAL_BENCH engines: mode %s, thrust %.2f %.2f, plume %.1f m, camera %s" % [seat.sim.mode, seat.sim.eL.thrust, seat.sim.eR.thrust, seat.craft.plume_len[0], Seat.camera])
 	var result := {"viewport": str(root.size), "frames": cpu.size(), "road": road.name,
 		"view_update_ms": _stats(cpu), "viewport_gpu_ms": _stats(gpu),
 		"wall_frame_ms": _stats(elapsed), "draw_calls": _stats(draws)}

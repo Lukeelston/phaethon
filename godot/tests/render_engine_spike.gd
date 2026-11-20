@@ -31,6 +31,12 @@ const VIEWS := [
 	["h4-housing-from-the-shoulder", 2.0, false, 0.0, ["pod", Vector3(0.22, 0.22, 0.72), Vector3(0.0, 0.44, 0.27)]],
 	["h5-canopy-from-outside", 2.0, false, 0.0, ["pod", Vector3(1.5, 0.95, -2.1), Vector3(0.0, 0.42, 0.0)]],
 	["h6-canopy-from-the-side", 2.0, false, 0.0, ["pod", Vector3(3.2, 0.5, -0.4), Vector3(0.0, 0.42, -0.4)]],
+	# the windscreen's reflection of the cockpit: from the seat, looking up into the glass, the head
+	# moved a hand's breadth, and what the mirror itself saw
+	["r1-seat-ahead", 2.0, false, 0.0, "seat", 0.0, -3.0],
+	["r2-seat-looking-up", 2.0, false, 0.0, "seat", 0.0, 18.0],
+	["r3-seat-head-right", 2.0, false, 0.0, ["pod", Vector3(0.14, 0.12, 0.6), Vector3(0.14, 0.44, -0.4)]],
+	["r4-seat-head-left", 2.0, false, 0.0, ["pod", Vector3(-0.14, 0.12, 0.6), Vector3(-0.14, 0.44, -0.4)]],
 ]
 const MESSAGE := "JUMP LIP  2 MI / 4.0 S
 ASCENT J0 > N2 UPPER
@@ -50,6 +56,15 @@ func _run() -> void:
 		return
 	if "--open" in OS.get_cmdline_user_args():
 		preload("res://view/canopy.gd").roofed = false
+	if "--no-reflection" in OS.get_cmdline_user_args():
+		preload("res://view/screen_reflection.gd").enabled = false
+	if "--reflection-every-frame" in OS.get_cmdline_user_args():   # timings: a picture every frame, to weigh one
+		preload("res://view/screen_reflection.gd").every = 0.0
+	if "--reflection-whole" in OS.get_cmdline_user_args():   # timings: the sheet over the whole pane, not cut to what shows
+		preload("res://view/screen_reflection.gd").whole = true
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--reflection="):
+			preload("res://view/screen_reflection.gd").strength = float(arg.trim_prefix("--reflection="))
 	root.msaa_3d = Viewport.MSAA_4X
 	DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
 	Seat.track_override = "network"
@@ -103,6 +118,13 @@ func _run() -> void:
 			for frame in 60:
 				seat.craft.sync(seat.sim, seat.inp, 1.0 / 120.0)
 		var guided: bool = str(view[0]).begins_with("h")
+		if str(view[0]).begins_with("r") and seat.approach_display:     # (nothing over the glass but the glass)
+			seat.approach_display.set_message("")
+			seat.approach_display._process(1.0)
+		if str(view[0]).begins_with("r") and seat.screen_reflection:    # a fresh picture of the cockpit as it stands
+			seat.screen_reflection.take()
+			for frame in 6:
+				await process_frame
 		if guided and seat.approach_display:
 			seat.approach_display.set_message(MESSAGE)
 			seat.approach_display._process(1.0)
@@ -127,6 +149,9 @@ func _run() -> void:
 		for frame in 2:
 			await process_frame
 		await RenderingServer.frame_post_draw
+		if str(view[0]).begins_with("r1") and seat.screen_reflection:   # the mirror's own picture, beside the views of it
+			print("REFLECTION sheet: %d cells, %.0f %% of the screen; sights %s" % [seat.screen_reflection.cells, seat.screen_reflection.share * 100.0, seat.screen_reflection.sights])
+			seat.screen_reflection.port.get_texture().get_image().save_png(out_dir.path_join("r0-the-picture.png"))
 		var path := out_dir.path_join(str(view[0]) + ".png")
 		if root.get_texture().get_image().save_png(path) != OK:
 			push_error("Couldn't save " + path)

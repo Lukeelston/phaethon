@@ -36,6 +36,7 @@ const CockpitInteriorScript := preload("res://vr/cockpit_interior.gd")
 const ModeSwitchScript := preload("res://vr/mode_switch.gd")
 const CanopyScript := preload("res://view/canopy.gd")
 const MinimapPanelScript := preload("res://vr/minimap_panel.gd")
+const ScreenReflectionScript := preload("res://view/screen_reflection.gd")
 const Kit := preload("res://view/mesh_kit.gd")
 const BrakeDiagnosticsScript := preload("res://vr/brake_diagnostics.gd")
 var _brake_trace: RefCounted
@@ -73,6 +74,7 @@ const CAMERA_NAMES := {"cockpit": "COCKPIT", "chase": "CHASE", "far": "FAR CHASE
 const CAMERA_OFFSETS := {"chase": Vector3(0.0, 1.3, 5.2), "far": Vector3(0.0, 3.6, 12.0)}   # from the seated eye: up, and aft
 static var camera := "cockpit"
 static var _camera_loaded := false   # the saved choice is read once a run: after that the menu's is the latest
+var screen_reflection      # the cockpit, faintly, in the windscreen (view/screen_reflection.gd); null without the roof
 var chase_hud: Label3D      # outside, the gauges are out of reading distance: the speed, the Mach line and the guidance, low and left
 var hands := {}
 var lever_pivots: Array[Node3D] = []
@@ -526,6 +528,11 @@ func _build_cockpit() -> void:
 	minimap_panel.transform = MinimapPanelScript.mount(SEAT)
 	minimap_panel.build()
 	minimap_panel.set_live(sim.kind == "circuit" or sim.kind == "network")
+	if ScreenReflectionScript.available():   # last: it takes its picture of everything the cockpit holds
+		screen_reflection = ScreenReflectionScript.new()
+		# what the glass is to show, besides the coaming along its foot: the instruments and the map
+		var inv: Transform3D = canopy.global_transform.affine_inverse()
+		screen_reflection.build(canopy, shell, [[inv * dashboard.global_position + Vector3(0.0, 0.12, 0.0), 0.3], [inv * minimap_panel.global_position, 0.17]])
 	menu_panel = Node3D.new()   # the main menu: a dark panel and its words, a metre out, never behind anything
 	menu_panel.name = "main_menu"
 	menu_panel.position = Vector3(0.0, 0.02, -1.1)   # on the origin: in front of whichever camera is up (in the seat, over the dash)
