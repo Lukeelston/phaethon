@@ -200,6 +200,33 @@ SCENIC = [
                (16, .5, ("r", -6), 1100, ("r", -6), 1100, 1), (20, .5, ("r", -6), 900, ("r", -6), 900, 1),
                (24, .3, -4, 400, -4, 400, 1)]),
 ]
+# One interior link in each of the four large highway cells. Mouths are specified
+# as (highway, station on its map axis in km, shoulder side, driving direction).
+# Interior poses are (east km, north km, heading degrees); radii are in km.
+BACKROADS = [
+    ("SWash", ("E3", 133, -1, 1), ("N1", 395, -1, -1), 11,
+     [(162, 483, -40), (178, 460, -92), (158, 438, -151), (130, 429, -153)],
+     [(0.22, 0), (0.56, 0), (0.68, 0), (0.85, 260)]),
+    ("SFrost", ("E3", 455, -1, -1), ("N2", 409, -1, -1), 14,
+     [(436, 485, -143), (418, 453, -125), (382, 441, -169), (348, 435, -157)],
+     [(0.22, 180), (0.39, 780), (0.56, 320), (0.73, 490), (0.90, 415)]),
+    ("SReed", ("E1", 249, 1, 1), ("N2", 214, 1, 1), 10,
+     [(267, 115, 83), (249, 143, 139), (223, 166, 120), (231, 185, 18), (268, 188, 8)],
+     [(0.09, 42), (0.20, 68), (0.32, 44), (0.47, 12), (0.64, 0), (0.77, 100)]),
+    ("SRed", ("E1", 469, 1, -1), ("N3", 213, 1, 1), 12,
+     [(446, 113, 139), (423, 140, 123), (413, 162, 73), (438, 181, 23), (474, 188, 21)],
+     [(0.18, 0), (0.36, 0), (0.50, 0), (0.69, 0), (0.81, 150)]),
+]
+
+
+def backroad_mouth(parent, station, side, direction):
+    axis = parent.p[:, 0 if parent.name.startswith("E") else 1]
+    i = int(np.argmin(abs(axis - station * KM)))
+    tx, ty = parent.t[i]
+    x, y = parent.p[i] + side * OFF * np.array([-ty, tx])
+    return x, y, heading_deg(tx * direction, ty * direction)
+
+
 scenic_roads = []   # (road index, its SCENIC entry), filled by build()
 
 
@@ -710,6 +737,25 @@ def build():
         joins += [(len(roads), 0, roads.index(P0)), (len(roads), 1, roads.index(P1))]
         scenic_roads.append((len(roads), spec))
         roads.append(R)
+    # Append after the existing scenic roads to preserve saved road and junction indices.
+    by_name = {road.name: i for i, road in enumerate(roads)}
+    for name, entry, exit_, radius, interior, relief in BACKROADS:
+        parent, receiver = by_name[entry[0]], by_name[exit_[0]]
+        start = backroad_mouth(roads[parent], *entry[1:])
+        finish = backroad_mouth(roads[receiver], *exit_[1:])
+        poses = [start] + [(x * KM, y * KM, h) for x, y, h in interior] + [finish]
+        segments = []
+        for a, b in zip(poses, poses[1:]):
+            segments.extend(dubins(a, b, radius * KM))
+        road = Road(name, "backroad", *start, 180.0, segments)
+        # Hold the parent deck level through both physical joins. Rise and fall
+        # with zero grade at each crest, using the simulation's Hermite heights.
+        level = EXPRESS_H if entry[0].startswith("N") else 0.0
+        end_level = EXPRESS_H if exit_[0].startswith("N") else 0.0
+        profile = [(0, level), (.035, level), *relief, (.965, end_level), (1, end_level)]
+        road.keys = [[round(f * (road.N - 1)), h, 0.0] for f, h in profile]
+        joins.extend([(len(roads), 0, parent), (len(roads), 1, receiver)])
+        roads.append(road)
     return roads, joins, cities, ew, ns, jumps, onramps, shafts
 
 
@@ -735,6 +781,22 @@ def scenic_table(roads):
             rows.append([i, round(side[0], 1), float(lrun), round(side[1], 1), float(rrun), float(gap)])
         assert all(a[0] < b[0] for a, b in zip(rows, rows[1:])), f"{R.name}: its land stations aren't in order"
         out.append([r, spec["sea"], rows])
+    # Frostline is cut into a high saddle. Its two flanks trade sides at
+    # the crest, then fade back into the existing landscape before the merge.
+    r = next(i for i, road in enumerate(roads) if road.name == "SFrost")
+    road = roads[r]
+    rows = []
+    for fraction, left, right in [
+        (.045, -4, -4), (.12, 180, 90), (.26, 470, -65), (.39, 630, -190),
+        (.47, 280, 230), (.56, -85, 430), (.67, 100, 210), (.75, -4, -4),
+    ]:
+        i = round(fraction * (road.N - 1))
+        h = road.h(i)
+        # At the ends the road land must meet both the deck and the base terrain.
+        edge = 1 if .045 < fraction < .75 else max(1, h + 4)
+        rows.append([i, max(-4, h + left) if edge == 1 else -4, 1750,
+                     max(-4, h + right) if edge == 1 else -4, 2200, edge])
+    out.append([r, 0, rows])
     return out
 
 
@@ -1014,7 +1076,7 @@ def plot(roads, cities, out):
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     fig, ax = plt.subplots(figsize=(10, 10))
-    col = {"highway": "#2a6fdb", "ramp": "#6a8", "city": "#d33", "turn": "#999", "jump": "#f80", "on": "#a0a", "side": "#0a7", "scenic": "#c0f"}
+    col = {"highway": "#2a6fdb", "ramp": "#6a8", "city": "#d33", "turn": "#999", "jump": "#f80", "on": "#a0a", "side": "#0a7", "scenic": "#c0f", "backroad": "#a65b28"}
     for R in roads:
         ax.plot(R.p[:, 0] / KM, R.p[:, 1] / KM, color=col[R.kind], lw=1.6 if R.kind == "highway" else 0.9)
     for name, biome, cx, cy, r, i in cities:

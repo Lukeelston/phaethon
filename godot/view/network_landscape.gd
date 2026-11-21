@@ -52,7 +52,7 @@ var profiling := false       # (a harness's: this frame's parts into `profile`, 
 var profile := {}
 var _decor_job := {}
 var scenic = null            # the scenic roads' land (view/network_scenic.gd), when the world has any
-var _scenic_gap := Vector2(INF, -INF)   # the stretch of x between the scenic roads' reaches: nothing is asked of them there
+var _scenic_tiles := {}   # coarse lookup for authored land, including interior mountain passes
 const PROP_CELL := 256.0
 
 func build(sim, world) -> void:
@@ -61,11 +61,13 @@ func build(sim, world) -> void:
 	world.scenery_ground_height = -4.0
 	world.landscape = self   # the road's banks take this land's colours and material
 	scenic = world.scenic
-	if scenic != null and scenic.boxes.size() == 2:   # (one down each edge of the map: the country between is none of theirs)
-		var lo: float = minf(scenic.boxes[0].end.x, scenic.boxes[1].end.x) * scenic.CELL
-		var hi: float = maxf(scenic.boxes[0].position.x, scenic.boxes[1].position.x) * scenic.CELL
-		if hi > lo:
-			_scenic_gap = Vector2(lo, hi)
+	if scenic != null:
+		for box: Rect2i in scenic.boxes:
+			var lo := Vector2i((Vector2(box.position) * scenic.CELL / TILE).floor())
+			var hi := Vector2i((Vector2(box.end) * scenic.CELL / TILE).floor())
+			for x in range(lo.x, hi.x + 1):
+				for y in range(lo.y, hi.y + 1):
+					_scenic_tiles[Vector2i(x, y)] = true
 	noise.seed = 28471
 	noise.frequency = 0.00011
 	noise.fractal_octaves = 4
@@ -179,7 +181,7 @@ func region_at(p: Vector2) -> String:
 func height_at(p: Vector2) -> float:
 	var c := Vector2i(roundi(p.x / STEP), roundi(p.y / STEP))
 	var factor: float = clearance.get(c, 1.0)
-	if scenic != null and (p.x < _scenic_gap.x or p.x > _scenic_gap.y):
+	if _scenic_tiles.has(Vector2i((p / TILE).floor())):
 		var mine: Vector2 = scenic.land(c, p)
 		if mine.x >= 1.0:
 			return mine.y

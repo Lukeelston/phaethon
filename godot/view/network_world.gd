@@ -76,8 +76,14 @@ const FIN_FROM := [45.0, 90.0]    # the deck's height: none below, all of it abo
 const FIN_H := [7.0, 58.0]        # above the wall's foot: midway, at a pylon
 const FIN_SET := 3.2
 const FIN_COL := Color(0.5, 0.51, 0.5)
-const SCENIC_NAMES := {"SCoast": "COAST ROAD", "SDrop": "THE DROP"}   # their boards on the highways
-const SCENIC_ROUTES := {"SCoast": "S12", "SDrop": "S13"}               # ... and their route markers (the side roads are S0 to S11)
+const SCENIC_NAMES := {
+	"SCoast": "COAST ROAD", "SDrop": "THE DROP", "SWash": "SIROCCO WASH",
+	"SFrost": "FROSTLINE PASS", "SReed": "REEDWATER CAUSEWAY", "SRed": "RED TABLE CUT",
+}
+const SCENIC_ROUTES := {
+	"SCoast": "S12", "SDrop": "S13", "SWash": "S14", "SFrost": "S15", "SReed": "S16", "SRed": "S17",
+}
+enum { PAVED, SAND, RED_GRAVEL, CAUSEWAY }
 const FLANK_ROCK := Color(0.46, 0.44, 0.41, 0.0)   # a scenic road's cut and cliff faces: basalt grey, lighter than the forest over them
 const LINE_W := 0.6
 const EDGE_SEGS := 6              # identical shoulder topology on both sides of every chunk boundary
@@ -169,6 +175,7 @@ var _s := []              # per road: distance along it at each sample (PackedFl
 var _heights := []        # immutable exact sample heights, shared by all streamed decoration
 var _height_curves := {}  # current Hermite interval per road for fractional junction queries
 var _deco_templates := {} # repeated straight, flat road furniture; asphalt UVs remain per chunk
+var _unsealed := {}
 var _asph: ShaderMaterial
 var _shelter_road := -1
 var _shelter_asphalt: ShaderMaterial
@@ -248,6 +255,13 @@ func build(s, v) -> void:
 	_asph.set_shader_parameter("base", Vector3(0.21, 0.205, 0.205))
 	_asph.set_shader_parameter("spec", 0.3)   # realism spike: asphalt's real 4 % reflectance, so it sheens toward the suns
 	_asph.set_shader_parameter("lane_half", 60.0)
+	for surface in [SAND, RED_GRAVEL]:
+		var track_material := ShaderMaterial.new()
+		track_material.shader = preload("res://view/network_unsealed.gdshader")
+		track_material.set_shader_parameter("aggregate", preload("res://art/road/pavement_detail.png"))
+		track_material.set_shader_parameter("earth", Color("#b18a52") if surface == SAND else Color("#985831"))
+		track_material.set_shader_parameter("gravel", 0.0 if surface == SAND else 1.0)
+		_unsealed[surface] = track_material
 	for r in sim.roads.size():
 		var R: CraftSim.TrackPath = sim.roads[r]
 		var acc := PackedFloat64Array()
@@ -719,13 +733,29 @@ func _start_chunk(r: int, k: int) -> void:
 			t.set_uv(Vector2.ZERO) # the formed barrier faces author UVs on this shared surface
 		st.append(t)
 	_job = {"key": key, "r": r, "c0": c0, "c1": c1, "i": c0, "ox": ox, "oy": oy, "node": node, "st": st, "joins": joins, "fine_joins": fine_joins,
-		"deco_spans": {},
+		"deco_spans": {}, "surface": backroad_surface(R.name, (c0 + c1) * 0.5 / (R.N - 1)),
 		"n_lamps": 0, "made": false, "signs": _signs.get(key, []), "si": 0, "us": 0, "d": 0.0,
 		"rv": PackedVector3Array(), "rn": PackedVector3Array(), "ru": PackedVector2Array(), "shoulder_uv": PackedVector2Array(), "traffic_colors": PackedColorArray(), "rows": 0, "cols": 0,
 		"u0": fposmod(_s[r][c0], ASPHALT_PERIOD) - _s[r][c0]}   # (the asphalt's u, continuous along the chunk)
 	var template_key := _deco_template_key(_job, R)
 	_job.template_key = template_key
 	_job.template = _deco_templates.get(template_key, []) if template_key != "" else []
+
+
+## Unsealed sections stop at the paved highway approaches. The causeway rail
+## occupies the wetland crossing; both endpoints use ordinary highway furniture.
+static func backroad_surface(road_name: String, fraction: float) -> int:
+	match road_name:
+		"SWash":
+			if fraction >= 0.045 and fraction <= 0.68:
+				return SAND
+		"SRed":
+			if fraction >= 0.05 and fraction <= 0.69:
+				return RED_GRAVEL
+		"SReed":
+			if fraction >= 0.045 and fraction <= 0.44:
+				return CAUSEWAY
+	return PAVED
 
 
 func _deco_template_key(J: Dictionary, R: CraftSim.TrackPath) -> String:
@@ -761,7 +791,8 @@ func _deco_template_key(J: Dictionary, R: CraftSim.TrackPath) -> String:
 				support_mask |= 1 << (slot*2+side)
 			slot += 1
 	# All discrete furniture periods divide 120 (6/8/40); colour phase divides8.
-	return "%.10f:%.10f:%.10f:%s:%s:%s:%s:%s:%s:%s" % [R.tx[start], R.ty[start], R.len[start], R.w[start], R.mode[start], height, start % 120, left_open, right_open, support_mask]
+	var surface := backroad_surface(R.name, (start + finish) * 0.5 / (R.N - 1))
+	return "%.10f:%.10f:%.10f:%s:%s:%s:%s:%s:%s:%s:%s" % [R.tx[start], R.ty[start], R.len[start], R.w[start], R.mode[start], height, start % 120, left_open, right_open, support_mask, surface]
 
 
 ## Build on the chunk in hand until `end` (usec): its samples, then its meshes, then its boards one at
@@ -819,6 +850,7 @@ func pillar_specs(r: int, i: int) -> Array:
 		return []   # a scenic road lies on its own land: a mountainside's bench, a sea cliff's top
 	var R: CraftSim.TrackPath = sim.roads[r]
 	var thick := 20.0 + h * 0.02 if high else 14.0
+	var footing := -12.0 if R.name == "SReed" and backroad_surface(R.name, float(i) / (R.N - 1)) == CAUSEWAY else 0.0
 	if _support_clearance == null:
 		_support_clearance = SupportClearance.new()
 		_support_clearance.setup(sim, shaft, grid, _heights)
@@ -827,7 +859,7 @@ func pillar_specs(r: int, i: int) -> Array:
 		var off: float = (-1.0 if side == 0 else 1.0) * (R.w[i] / 2.0 - 30.0)
 		var pillar := {"id": -(r * 1000000 + i * 2 + side + 1), "r": 0.0, "halfSize": thick / 2.0,
 			"x": R.px[i] + R.nx[i] * off, "y": R.py[i] + R.ny[i] * off,
-			"zMin": 0.0, "zMax": h - DECK, "vx": 0.0, "vy": 0.0}
+			"zMin": footing, "zMax": h - DECK, "vx": 0.0, "vy": 0.0}
 		if not _support_clearance.blocks(r,pillar):
 			out.append(pillar)
 	_pillar_specs_cache[key] = out
@@ -912,7 +944,8 @@ func _sample(J: Dictionary, R: CraftSim.TrackPath, i: int) -> void:
 		open_i = [_open(r, i, -1.0), _open(r, i, 1.0)]
 	if J.joins and not _joining_at(r, j).is_empty():
 		open_j = [_open(r, j, -1.0), _open(r, j, 1.0)]
-	for ln in sec.lines:   # the line at each bank foot; the shoulder material carries the outside stripe
+	var surface: int = J.surface
+	for ln in ([] if surface == SAND or surface == RED_GRAVEL else sec.lines):   # the line at each bank foot; the shoulder material carries the outside stripe
 		# An internal shoulder is the junction's drivable opening, not a lane edge.
 		var side := 0 if ln[0] < 0.0 else 1
 		if open_i[side] or open_j[side]:
@@ -948,10 +981,10 @@ func _sample(J: Dictionary, R: CraftSim.TrackPath, i: int) -> void:
 		_quad(deco, [_p(R, ox, oy, i, slab, hi - DECK), _p(R, ox, oy, i, -slab, hi - DECK), _p(R, ox, oy, j, -slab_j, hj - DECK), _p(R, ox, oy, j, slab_j, hj - DECK)], Color(0.32, 0.32, 0.31))
 		for pillar in pillar_specs(r, i):
 			var thick: float = pillar.halfSize * 2.0
-			var center := Vector3(pillar.x - ox, pillar.zMax / 2.0, -(pillar.y - oy))
-			_box(deco, center, Vector3(thick, pillar.zMax, thick), Color(0.6, 0.6, 0.58))
+			var center := Vector3(pillar.x - ox, (pillar.zMin + pillar.zMax) / 2.0, -(pillar.y - oy))
+			_box(deco, center, Vector3(thick, pillar.zMax - pillar.zMin, thick), Color(0.6, 0.6, 0.58))
 		# a sky bridge: a fin outside each wall, scalloped between pylons (FIN_*)
-		var fin_i := _fin_height(hi, i) if fins and not city and R.role == "" and not on_shaft and not scenic_here else 0.0
+		var fin_i := _fin_height(hi, i) if fins and surface == PAVED and not city and R.role == "" and not on_shaft and not scenic_here else 0.0
 		var fin_j := _fin_height(hj, j) if fin_i > 0.0 else 0.0
 		if fin_i > 0.0 and fin_j > 0.0:
 			var fin_station := float(i % 120) * 24.0
@@ -987,6 +1020,16 @@ func _sample(J: Dictionary, R: CraftSim.TrackPath, i: int) -> void:
 			continue
 		var wa := _p(R, ox, oy, i, sgn * hw, hi + te)   # (on the ramp's top)
 		var wb := _p(R, ox, oy, j, sgn * hw_j, hj + te_j)
+		if surface != PAVED:
+			# Timber guide stakes mark the wash. The bridge instead carries a
+			# low continuous rail so the water is visible from the seat.
+			var bridge := surface == CAUSEWAY
+			if bridge:
+				_wall(deco, wa, wb, 0.95, 1.40, RAIL_CAP, up_j)
+			if i % (4 if bridge else 8) == 0:
+				_box(deco, wa + _up * 0.90, Vector3(0.52, 1.80, 0.55), RAIL_CAP if bridge else Color(0.31, 0.22, 0.14))
+				_box(lglow, wa + _up * 1.55, Vector3(0.55, 0.35, 0.57), Color(0.77, 0.86, 0.78) if bridge else Color(0.95, 0.58, 0.17))
+			continue
 		if scenic_here and scenic.open(r, i, sgn > 0.0):
 			# The land falls away here: nothing stands in the way of the view. The forcefield that turns
 			# you back is still there (the sims'); what shows is a lit rail, knee high, on slim posts.
@@ -1389,6 +1432,12 @@ func _bank_row(J: Dictionary, R: CraftSim.TrackPath, i: int, sgn: float) -> Arra
 	var crest := Vector2(R.px[i] + R.nx[i] * sgn * (foot + BANK_RUN), R.py[i] + R.ny[i] * sgn * (foot + BANK_RUN))
 	var height: float = k * lerpf(BANK_H[0], BANK_H[1], smoothstep(-0.45, 0.45, _bank_noise.get_noise_2dv(crest)))
 	var run: float = BANK_RUN * k
+	# Loose shoulders meet the graded edge, then roll out into the surrounding soil.
+	# Row positions are functions of the station, including at a streaming seam.
+	if (R.name == "SWash" or R.name == "SRed") and _unsealed.has(backroad_surface(R.name, float(i) / (R.N - 1))):
+		foot = hw
+		base -= 0.52
+		height *= 0.55
 	var offs := [foot, foot + 0.45 * run, foot + run, foot + run + BANK_BACK * k]
 	var ys := [base, base + 0.62 * height, base + height, BANK_FLOOR]
 	var out := []
@@ -1814,7 +1863,7 @@ func _finish(J: Dictionary, R: CraftSim.TrackPath) -> void:
 			arr[Mesh.ARRAY_INDEX] = split[0]
 		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
 		var in_shelter := r == _shelter_road and c1 >= int(halls[r][0]) and c0 <= int(halls[r][1])
-		mesh.surface_set_material(0, _shelter_asphalt if in_shelter else _asph)
+		mesh.surface_set_material(0, _shelter_asphalt if in_shelter else _unsealed.get(J.surface, _asph))
 		if not split.is_empty() and open_edge_probe != "none":
 			var glass := arr.duplicate()
 			glass[Mesh.ARRAY_INDEX] = split[1]

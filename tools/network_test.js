@@ -33,7 +33,7 @@ function check(msg, cond) { console.log(`${cond ? 'ok  ' : 'FAIL'} ${msg}`); ok 
 const sim = PS.makeSim({ track: 'network', handling: 'speed' });
 const { S, T } = sim;
 check(`build: kind ${T.kind}, ${T.roads ? T.roads.length : 0} roads, ${T.roads ? T.roads.reduce((a, R) => a + R.N, 0) : 0} samples, ${T.junctions ? T.junctions.length : 0} junctions, ${T.cities ? T.cities.length : 0} cities`,
-  T.kind === 'network' && T.roads.length === 118 && T.junctions.length === 179 && T.cities.length === 5 && T.jumps.length === 20 && T.shafts.length === 12);
+  T.kind === 'network' && T.roads.length === 122 && T.junctions.length === 187 && T.cities.length === 5 && T.jumps.length === 20 && T.shafts.length === 12);
 if (T.kind !== 'network') { console.log('NETWORK FAIL'); process.exit(1); }
 
 // zones: the child's centreline inside the parent's corridor (plus its own half width) through the zone
@@ -340,6 +340,26 @@ for (const [mph, deg] of [[4000, 2], [2500, 3], [1500, 3], [800, 3]]) {
   const r = drift(mph, deg);
   check(`edges: drifting ${deg} deg at the left edge at ${mph} mph: up the ramp to ${r.top.toFixed(0)} m off the centre (the wall at 200, the ramp from 140), ${r.walls} wall contacts, ${r.last.toFixed(0)} m off after 12 s`,
     r.top > 140 && r.top < 200 && r.walls === 0 && r.last < r.top - 20);
+}
+
+// Drive each interior link between its two parent highways in both directions.
+for (const name of ['SWash', 'SFrost', 'SReed', 'SRed']) {
+  const id = road(name), R = T.roads[id];
+  const ends = R.jx.map(k => T.junctions[k]).sort((a, b) => a.b0 - b.b0);
+  for (const dir of [1, -1]) {
+    const [entry, exit] = dir > 0 ? ends : [ends[1], ends[0]];
+    const begin = dir > 0 ? 0 : R.N - 1, end = R.N - 1 - begin;
+    const depart = dir * entry.sense, arrive = dir * exit.sense;
+    const start = NR.across(entry, false, begin) - depart * 270;
+    const finish = NR.across(exit, false, end) + arrive * 270;
+    const trip = fly({ road: entry.a, i: start, dir: depart, mph: 1500 },
+      [{ road: id, i: Math.floor(R.N / 2) }, { road: exit.a, i: finish }], 420);
+    const changes = trip.changes.filter(c => c.bi === 2).map(c => c.to[0]);
+    const pod = trip.s.S.pod;
+    check(`backroads: ${T.roads[entry.a].name} > ${name} > ${T.roads[exit.a].name}, ${(trip.frames / 60).toFixed(1)} s, ${trip.scrapes} wall contacts`,
+      !legal(trip.changes) && changes.length === 2 && changes[0] === id && changes[1] === exit.a &&
+      pod.path === exit.a && (pod.hint - finish) * arrive >= 0 && !trip.events.some(e => e.type === 'crash'));
+  }
 }
 
 console.log(ok ? 'NETWORK OK' : 'NETWORK FAIL');
