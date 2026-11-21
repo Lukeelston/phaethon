@@ -112,6 +112,7 @@ const EXIT_GREEN := Color(0.25, 1.0, 0.55)      # an exit's lane: its rails and 
 const LANE_SAMPLES := 333         # an exit's lane runs this far back from its mouth along the parent road: 8 km
 const LANE_SOLID := 125           # ... its rails solid for the last 3 km, dashed before
 const LANE_HALF := 26.0           # m from its middle to each rail
+const LANE_ON := 40               # ... and they carry on along the exit itself, this far past the stretch it shares with its parent: 1 km
 const BRAKE_MI := [4, 2, 1]       # braking boards, miles before a city's STARFIGHTER zone
 const MILE := 1609.344
 const Signs := preload("res://view/highway_signs.gd")
@@ -2209,6 +2210,16 @@ func _index_exits() -> void:
 			if not exit_lanes.has(p):
 				exit_lanes[p] = []
 			exit_lanes[p].append([mini(back, mouth), maxi(back, mouth), way, clampf(lateral, -flat, flat), mouth, c])
+			# ... and on along the exit itself, down its own middle (which begins where the lane's does): through the
+			# stretch the two roads share and LANE_ON beyond. The sim gives a craft to the road it is deeper inside,
+			# and the exit is that only once it has curved away from the lane's line: a craft that held the lane to
+			# the mouth and went straight on missed it (125 exits of 126, measured). Held, these rails carry it off.
+			# (Solid all the way: its "mouth" for that is its own middle. No exit of its own: -1.)
+			var reach: int = mini(absi(int(J[5]) - int(J[4])) + LANE_ON, int(C.N) - 1)
+			var on_first: int = 0 if start else int(C.N) - 1 - reach
+			if not exit_lanes.has(c):
+				exit_lanes[c] = []
+			exit_lanes[c].append([on_first, on_first + reach, 1 if start else -1, 0.0, on_first + reach / 2, -1])
 	for choices: Array in stations.values():
 		if choices.size() > 1:
 			choices.sort_custom(func(a,b): return a.side < b.side if a.side != b.side else a.mouth < b.mouth)

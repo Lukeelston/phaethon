@@ -4,6 +4,9 @@
 ##   long      it runs 8 km back the way an exiting craft comes (less only where the road itself ends)
 ##   placed    on the exit's own side, on the flat inside the edge ramp, clear of the centre line
 ##   painted   a chunk of road with a lane in it carries the lane's green rails and arrows
+##   carries   the rails go on along the exit's own middle, through the stretch it shares with its parent
+##             and a kilometre beyond; a craft on them 30 samples past the mouth is on the exit's road
+##             within half a second (the sim's own hand-over), and one that went straight on is not
 ## Prints EXIT LANES PASS.
 extends SceneTree
 
@@ -40,6 +43,10 @@ func _run() -> void:
 	var misplaced := []
 	var longest := 0.0
 	var by_side := {-1: 0, 1: 0}
+	var not_carried := []
+	var not_handed := []
+	var handed := 0
+	var straight_on := 0
 	for key in W._exits:
 		var info: Dictionary = W._exits[key]
 		var p: int = key.x
@@ -48,6 +55,42 @@ func _run() -> void:
 		for lane in W.exit_lanes.get(p, []):
 			if int(lane[4]) == int(info.mouth) and int(lane[5]) == int(key.y):
 				mine = lane
+		# the rails' run along the exit itself, and whether holding them hands the craft over
+		var C = sim.roads[key.y]
+		var from_start: bool = int(key.z) == 0
+		var onward := []
+		for lane in W.exit_lanes.get(key.y, []):
+			if int(lane[5]) < 0 and (int(lane[0]) == 0) == from_start:
+				onward = lane
+		if onward.is_empty() or int(onward[1]) - int(onward[0]) < 100 or absf(float(onward[3])) > 0.01 or (int(onward[2]) > 0) != from_start:
+			not_carried.append("%s to %s at %d: %s" % [P.name, C.name, int(info.mouth), onward])
+		elif not mine.is_empty():
+			for trial in [[30, true], [0, false]]:      # on the rails 30 samples along the exit; and where a craft that went straight on from the lane would be
+				var along: int = trial[0]
+				var ci: int = along if from_start else C.N - 1 - along
+				var c_way := 1.0 if from_start else -1.0
+				var held: bool = trial[1]
+				var pi := int(info.mouth) + int(mine[2]) * 30
+				var px: float = C.px[ci] if held else P.px[pi] + P.nx[pi] * float(mine[3])
+				var py: float = C.py[ci] if held else P.py[pi] + P.ny[pi] * float(mine[3])
+				var tx: float = C.tx[ci] * c_way if held else P.tx[pi] * float(mine[2])
+				var ty: float = C.ty[ci] * c_way if held else P.ty[pi] * float(mine[2])
+				sim.respawn_on(p, pi, int(mine[2]))
+				var shift := Vector2(px - sim.pod.x, py - sim.pod.y)
+				for b in sim.bodies:
+					b.x += shift.x
+					b.y += shift.y
+					b.vx = tx * 670.0
+					b.vy = ty * 670.0
+				for step in 120:
+					sim.step({"thrL": 0.3, "thrR": 0.3, "brkL": 0.0, "brkR": 0.0, "repair": false, "reignite": true}, 1.0 / 240.0)
+				var taken: bool = sim.pod.path == int(key.y) and sim.crash_t <= 0.0
+				if held:
+					handed += int(taken)
+					if not taken:
+						not_handed.append("%s to %s at %d: on %s%s" % [P.name, C.name, int(info.mouth), sim.roads[sim.pod.path].name, ", crashed" if sim.crash_t > 0.0 else ""])
+				else:
+					straight_on += int(not taken)
 		if mine.is_empty():
 			missing.append("%s to %s at %d" % [P.name, sim.roads[key.y].name, int(info.mouth)])
 			continue
@@ -70,6 +113,9 @@ func _run() -> void:
 	_check("every ordinary exit has its lane: %d exits, %d lanes (missing: %s)" % [W._exits.size(), lanes, missing.slice(0, 4)], missing.is_empty() and lanes > 100)
 	_check("each runs 8 km back from its mouth, or to its road's end (short: %s; the longest %.1f km)" % [short.slice(0, 4), longest], short.is_empty() and longest > 7.9 and longest < 8.2)
 	_check("each lies on its exit's own side, on the flat inside the edge ramp (%d to the left, %d to the right; wrong: %s)" % [by_side[-1], by_side[1], misplaced.slice(0, 4)], misplaced.is_empty())
+	_check("each lane's rails carry on down the middle of its exit's own road, through the shared stretch and beyond (without: %s)" % [not_carried.slice(0, 4)], not_carried.is_empty())
+	_check("a craft on those rails 30 samples past the mouth is handed to the exit's road within half a second: %d of %d (not: %s)" % [handed, lanes, not_handed.slice(0, 4)], handed == lanes and lanes > 100)
+	_check("... and one that held the lane and then went straight on stays on its road, as before: %d of %d" % [straight_on, lanes], straight_on == lanes)
 	# painted: build the chunk of E3 that holds a lane's middle and look for the lane's green in its lit paint
 	var road := -1
 	var pick := []
