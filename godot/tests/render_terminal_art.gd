@@ -21,6 +21,7 @@ var gpu := PackedFloat64Array()
 var cpu := PackedFloat64Array()
 var elapsed := PackedFloat64Array()
 var draws := PackedFloat64Array()
+var prims := PackedFloat64Array()
 
 
 func _initialize() -> void:
@@ -69,6 +70,8 @@ func _run() -> void:
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--reflection="):   # (looking at it: the reflection this many times its strength)
 			preload("res://view/screen_reflection.gd").strength = float(arg.trim_prefix("--reflection="))
+	if "--whole-trees" in OS.get_cmdline_user_args():   # timings: every tree drawn whole at any distance, as before push 26
+		preload("res://view/network_biome_props.gd").far_shapes = false
 	if "--no-scenic" in OS.get_cmdline_user_args():   # the scenic roads' land and edges left out
 		preload("res://view/network_world.gd").scenic_on = false
 	# The pilot's saved hour, weather, paint and chase stay out of pictures and timings: a fair afternoon
@@ -194,12 +197,14 @@ func _benchmark() -> void:
 				elapsed.append((now - last) / 1000.0)
 				gpu.append(RenderingServer.viewport_get_measured_render_time_gpu(vp))
 				draws.append(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME))
+				prims.append(Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME))
 			last = now
 	if burner:
 		print("TERMINAL_BENCH engines: mode %s, thrust %.2f %.2f, plume %.1f m, camera %s" % [seat.sim.mode, seat.sim.eL.thrust, seat.sim.eR.thrust, seat.craft.plume_len[0], Seat.camera])
 	var result := {"viewport": str(root.size), "frames": cpu.size(), "road": road.name,
 		"view_update_ms": _stats(cpu), "viewport_gpu_ms": _stats(gpu),
-		"wall_frame_ms": _stats(elapsed), "draw_calls": _stats(draws)}
+		"wall_frame_ms": _stats(elapsed), "draw_calls": _stats(draws), "primitives": _stats(prims),
+		"near_tiles": seat.landscape.near_tiles}
 	print("TERMINAL_BENCH ", JSON.stringify(result))
 	var output := FileAccess.open(out_dir.path_join("timing.json"), FileAccess.WRITE)
 	if output:

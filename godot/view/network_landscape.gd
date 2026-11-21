@@ -9,6 +9,9 @@ const GRID := 16
 const RANGE := 8
 const MAX_TILES := 289
 const PROP_RANGE := 4
+const PROP_NEAR := 4000.0    # m: a tile this near the craft draws its trees whole (view/network_biome_props.gd) ...
+const PROP_FAR := 12000.0    # ... one this near, their far shapes; the rest, their distant ones
+const PROP_NEAR_STEP := 250.0   # ... looked at again each time the craft has moved this far
 const GROUPS := 96
 const REGIONS := [
 	["plains", Vector2(300000, 300000), 65000.0, Color(0.37, 0.49, 0.20), 140.0],
@@ -48,6 +51,9 @@ const ANCHOR_REACH := 1024.0
 var _revealing: Array[Vector2i] = []        # tiles still fading in
 var _deco_revealing: Array[Vector2i] = []   # ... and tiles whose props are
 var _deco_far := false       # the centre moved: props out of range are to go
+var _detail_at := Vector2(INF, INF)   # where the craft was when the tiles' detail was last sorted
+var _detail_new := false     # a tile's props have just been made (they start in their far shapes)
+var near_tiles := 0          # tiles drawing their trees whole (the tests read it)
 var _deco_want := true       # some tile in range may still lack its props
 const DECOR_SLICE_US := 400  # a prop slice's work (it does a group at least)
 var profiling := false       # (a harness's: this frame's parts into `profile`, usec)
@@ -386,6 +392,7 @@ func _decorate_slice() -> void:
 		tiles[key].node.add_child(root)
 		tiles[key].deco = root
 		tiles[key].deco_born = Time.get_ticks_msec()
+		_detail_new = true
 		for kind in batches:
 			prop_library.batch(root,kind,batches[kind])
 		_deco_revealing.append(key)
@@ -567,6 +574,7 @@ func sync(ox: float, oy: float) -> void:
 				tile.deco.queue_free()
 				tile.erase("deco")
 				tile.erase("deco_revealed")
+				tile.erase("deco_near")
 	if _deco_want and _decor_job.is_empty():   # the next tile in range without its props (none: nothing more to look for until something changes)
 		_deco_want = false
 		for key in tiles:
@@ -585,6 +593,21 @@ func sync(ox: float, oy: float) -> void:
 		if reveal>=1.0:
 			tile.deco_revealed=true
 			_deco_revealing.remove_at(k)
+	if _detail_new or absf(ox - _detail_at.x) > PROP_NEAR_STEP or absf(oy - _detail_at.y) > PROP_NEAR_STEP:
+		_detail_new = false   # which tiles are near enough to draw their trees whole
+		_detail_at = Vector2(ox, oy)
+		near_tiles = 0
+		for key in tiles:
+			var tile: Dictionary = tiles[key]
+			if not tile.has("deco"):
+				continue
+			var gap := Vector2(maxf(maxf(key.x * TILE - ox, ox - (key.x + 1) * TILE), 0.0), maxf(maxf(key.y * TILE - oy, oy - (key.y + 1) * TILE), 0.0))
+			var level := 0 if gap.length_squared() < PROP_NEAR * PROP_NEAR else (1 if gap.length_squared() < PROP_FAR * PROP_FAR else 2)
+			near_tiles += int(level == 0)
+			if tile.get("deco_near") != level:
+				tile.deco_near = level
+				for batch in tile.deco.get_children():
+					prop_library.detail(batch, level)
 	var t_deco := Time.get_ticks_usec()
 	if not _decor_job.is_empty() and Time.get_ticks_usec()-start<1800:
 		_decorate_slice()

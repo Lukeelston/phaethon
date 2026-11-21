@@ -134,6 +134,38 @@ func _run() -> void:
 	check("neighboring terrain tiles meet exactly", seam < 0.01)
 	check("regional vegetation and habitation are present", land.get("prop_library") != null)
 	if land.get("prop_library") != null:
+		# the growing things' three shapes (view/network_biome_props.gd): whole near the craft, far and distant beyond
+		var lib = land.prop_library
+		var shapes := []
+		var fewer := true
+		var outline := 0.0
+		for kind in lib.far:
+			var counts := [lib.triangles(lib.cache[kind]), lib.triangles(lib.far[kind]), lib.triangles(lib.distant[kind])]
+			shapes.append("%s %d / %d / %d" % [kind, counts[0], counts[1], counts[2]])
+			fewer = fewer and counts[1] * 2 < counts[0] and counts[2] * 2 <= counts[1]
+			var whole: AABB = (lib.cache[kind] as Mesh).get_aabb()
+			for other: Mesh in [lib.far[kind], lib.distant[kind]]:
+				var box := other.get_aabb()
+				outline = maxf(outline, absf(box.end.y - whole.end.y) / whole.end.y)
+				outline = maxf(outline, absf(maxf(box.size.x, box.size.z) - maxf(whole.size.x, whole.size.z)) / maxf(whole.size.x, whole.size.z))
+		check("each growing thing has a far shape of under half its triangles and a distant one of half that again (whole / far / distant: %s)" % ", ".join(shapes), fewer and shapes.size() == 6)
+		check("... that stand as tall and spread as wide as the whole one (off by %.0f%% at most)" % (outline * 100.0), outline < 0.25)
+		var holder := Node3D.new()
+		lib.batch(holder, "oak", [Transform3D.IDENTITY])
+		var one := holder.get_child(0) as MultiMeshInstance3D
+		var begun: bool = one.multimesh.mesh == lib.distant.oak
+		lib.detail(one, 0)
+		var near_whole: bool = one.multimesh.mesh == lib.cache.oak
+		lib.detail(one, 1)
+		var mid_far: bool = one.multimesh.mesh == lib.far.oak
+		lib.detail(one, 2)
+		lib.batch(holder, "urban", [Transform3D.IDENTITY])
+		lib.detail(holder.get_child(1), 2)
+		check("a batch begins in its distant shape and draws whole, far or distant as the landscape says; buildings are whole at any distance",
+			begun and near_whole and mid_far and one.multimesh.mesh == lib.distant.oak and (holder.get_child(1) as MultiMeshInstance3D).multimesh.mesh == lib.cache.urban
+			and land.PROP_NEAR < land.PROP_FAR)
+		holder.free()
+	if land.get("prop_library") != null:
 		var count := 0
 		var unsupported := 0
 		var obstructing := 0

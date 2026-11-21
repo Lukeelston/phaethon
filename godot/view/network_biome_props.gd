@@ -1,13 +1,90 @@
 ## Regional silhouettes, shared by instanced batches. All dimensions are real metres.
+## The growing things come in three shapes: whole, a far shape of about a fifth of the triangles that
+## keeps the outline and the colours, and a distant one of a few dozen (a tree 4 km off is a dozen
+## pixels tall in the headset, one 12 km off three; the jungle plants nine hundred to a tile out to
+## 30 km, and drawn whole they were half a frame's GPU time there). The landscape says which a tile's
+## batches draw (detail()), by how near the craft is.
 extends RefCounted
 const Kit := preload("res://view/mesh_kit.gd")
+static var far_shapes := true   # (timings: false draws everything whole, as it was)
 var cache := {}
+var far := {}                   # kind -> its far shape (the kinds without one draw whole at any distance)
+var distant := {}               # kind -> its distant shape
 var material: ShaderMaterial
 func _init() -> void:
 	material = ShaderMaterial.new()
 	material.shader = preload("res://view/network_props.gdshader")
 	for kind in ["oak", "pine", "snowpine", "palm", "mangrove", "reeds", "scrub", "cactus", "rock", "farm", "outpost", "stilt", "urban", "industrial", "service", "solar", "wind", "basalt"]:
 		cache[kind] = _make(kind)
+	for kind in ["oak", "mangrove", "palm", "pine", "snowpine", "scrub"]:
+		far[kind] = _make_far(kind)
+		distant[kind] = _make_distant(kind)
+
+## A growing thing's far shape: the same trunk, crown and colours in a few plain solids.
+func _make_far(kind: String) -> ArrayMesh:
+	var p := []
+	var bark := Color(0.27,0.22,0.16)
+	var green := Color(0.22,0.37,0.13)
+	match kind:
+		"oak", "mangrove":
+			cyl(p,1.2,2.7,22,Vector3(0,11,0),bark,4)
+			for k in [0, 3, 5]:   # three of its seven crowns, grown to fill the others' places
+				var a: float = k*2.399
+				var at := Vector3(cos(a)*(6+k)*0.7,24+(k%3)*4,sin(a)*(6+k)*0.7)
+				p.append([Kit.ball(1.0,6),Kit.at(at,Vector3.ZERO,Vector3(10,8,11)*1.5),green*(0.72+0.055*k)])
+		"palm":
+			cyl(p,0.7,2,46,Vector3(0,23,0),bark,4)
+			for k in 5:           # five fronds for seven
+				var a := TAU*k/5
+				p.append([Kit.ball(1,4),Kit.at(Vector3(cos(a)*11,44,sin(a)*11),Vector3(0,-a,0.2),Vector3(17,2.4,5.5)),green*(0.8+k*0.035)])
+		"pine", "snowpine":
+			cyl(p,0.5,1.6,33,Vector3(0,16.5,0),bark,4)
+			cyl(p,0.2,12,20,Vector3(0,14,0),Color(0.12,0.25,0.18),6)
+			cyl(p,0.2,7.5,18,Vector3(0,27,0),Color(0.12,0.25,0.18),6)
+			if kind == "snowpine":
+				cyl(p,0,9,13,Vector3(0,18,0),Color(0.85,0.89,0.91),6)
+				cyl(p,0,5.5,12,Vector3(0,31,0),Color(0.85,0.89,0.91),6)
+		"scrub":
+			for z in [0.0, 4.0]:
+				p.append([Kit.ball(1.0,6),Kit.at(Vector3(2.5,2,z),Vector3.ZERO,Vector3(5.5,2.6,3.6)),Color(0.43,0.43,0.28)])
+	return Kit.compound(p)
+
+## ... and its distant one: a trunk and one solid for the crown.
+func _make_distant(kind: String) -> ArrayMesh:
+	var p := []
+	var bark := Color(0.27,0.22,0.16)
+	var green := Color(0.22,0.37,0.13)
+	match kind:
+		"oak", "mangrove":
+			cyl(p,1.5,2.7,22,Vector3(0,11,0),bark,3)
+			p.append([Kit.ball(1.0,6),Kit.at(Vector3(0,27,0),Vector3.ZERO,Vector3(21,11,21)),green*0.86])
+		"palm":
+			cyl(p,0.9,2,46,Vector3(0,23,0),bark,3)
+			p.append([Kit.ball(1.0,6),Kit.at(Vector3(0,44.5,0),Vector3.ZERO,Vector3(22,3.2,22)),green*0.88])
+		"pine", "snowpine":
+			cyl(p,0.2,11,34,Vector3(0,19,0),Color(0.12,0.25,0.18),5)
+			if kind == "snowpine":
+				cyl(p,0,7.5,20,Vector3(0,27,0),Color(0.85,0.89,0.91),5)
+		"scrub":
+			p.append([Kit.ball(1.0,4),Kit.at(Vector3(2.5,2,2),Vector3.ZERO,Vector3(5.5,2.6,5.5)),Color(0.43,0.43,0.28)])
+	return Kit.compound(p)
+
+## Which shape a batch draws: 0 whole (its tile is near the craft), 1 its far shape, 2 its distant one.
+func detail(batch: MultiMeshInstance3D, level: int) -> void:
+	var kind := String(batch.name)
+	var mesh: Mesh = cache[kind]
+	if far_shapes and level > 0 and far.has(kind):
+		mesh = distant[kind] if level > 1 else far[kind]
+	if batch.multimesh.mesh != mesh:
+		batch.multimesh.mesh = mesh
+
+static func triangles(mesh: Mesh) -> int:
+	var n := 0
+	for s in mesh.get_surface_count():
+		var arrays := mesh.surface_get_arrays(s)
+		var index = arrays[Mesh.ARRAY_INDEX]
+		n += (index.size() if index != null and index.size() > 0 else (arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array).size()) / 3
+	return n
 
 func box(parts: Array, size: Vector3, p: Vector3, c: Color, angle := 0.0) -> void:
 	parts.append([Kit.box(size), Kit.at(p,Vector3(0,angle,0)),c])
@@ -189,7 +266,7 @@ func _make(kind: String) -> ArrayMesh:
 func batch(parent: Node3D, kind: String, transforms: Array) -> void:
 	var mm := MultiMesh.new()
 	mm.transform_format = MultiMesh.TRANSFORM_3D
-	mm.mesh = cache[kind]
+	mm.mesh = distant[kind] if far_shapes and distant.has(kind) else cache[kind]   # (most tiles are distant ones: the landscape says when one is nearer)
 	mm.instance_count = transforms.size()
 	for i in transforms.size():
 		mm.set_instance_transform(i,transforms[i])
