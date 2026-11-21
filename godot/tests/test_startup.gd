@@ -522,6 +522,9 @@ func _run() -> void:
 	_check("then the cockpit is alive: instruments lit and reading (needles down, no warning lamps, speed 0), rim light on, map on, strobes flashing, the checklist on the glass: %s" % v.approach_display.message.replace("\n", " / "),
 		(v.dashboard.lamps.backlight as Color).a > 0.0 and _lit(telltales) == 0 and v.dashboard.values.mach < 0.01 and v.dashboard._speed == 0 and rim.b > 0.5 and v.minimap_panel.live
 		and v.craft.lights_on and v.approach_display.message.contains("ENGINE POWER  2 / 5") and (v.dashboard.labels.progress as Label3D).text.contains("LIFT THE RED GUARD"))
+	if "steps" in v.dashboard:
+		_check("... and under those words the strip has its rail of five steps, one behind and the second in hand: %s" % [v.dashboard.steps],
+			v.dashboard._steps.visible and int(v.dashboard.steps.get("done", -1)) == 1 and not bool(v.dashboard.steps.get("pair", true)) and not (v.dashboard.labels.g as Label3D).visible)
 	_fly(0.2)
 	# 2 ENGINE
 	_check("2 ENGINE: a flick lifts the guard: \"%s\"" % _work(_flick("engine", 1)), s.guard_open and not s.master)
@@ -548,6 +551,9 @@ func _run() -> void:
 		and v.overhead.ring_progress > 0.02 and v.overhead.ring_progress < 0.2)
 	bus = glass.sheet_mat.get_shader_parameter("bars")
 	_check("... and the glass has a bar for each engine, the left one filling (%.2f, %.2f)" % [bus.x, bus.y], bool(glass.sheet_mat.get_shader_parameter("pair")) and bus.x > 0.1 and bus.x < 0.4 and bus.y == 0.0 and glass.action.text == "STARTING")
+	if "steps" in v.dashboard:
+		_check("... the strip's rail the same: two steps behind, the third filling in its left half (%s)" % [v.dashboard.steps],
+			int(v.dashboard.steps.get("done", -1)) == 2 and bool(v.dashboard.steps.get("pair", false)) and float(v.dashboard.steps.bars[0]) > 0.1 and float(v.dashboard.steps.bars[1]) == 0.0)
 	if v.engine_audio:
 		_check("... its voice turning at cranking speed (spool %.2f), the right one still silent (%.4f)" % [v.engine_audio.voices[0].spool, _gain(1, "v8")],
 			v.engine_audio.crank[0] and v.engine_audio.voices[0].spool > -0.3 and v.engine_audio.voices[0].spool < -0.1 and _gain(1, "v8") < 0.001 and v.startup_audio.played.has("starter"))
@@ -606,6 +612,8 @@ func _run() -> void:
 	_check("CLEARED is on the glass, landed at once and larger than it stays (now %.2f of its size, %.1f s on; it came in at %.2f), the rail lit along its length" % [glass.action.scale.x, glass.checklist.cleared, Projector.arrival(0.0)],
 		glass.action.text == "CLEARED" and glass.checklist.done == 5 and glass.checklist.cleared > 1.5 and glass.action.scale.x == 1.0 and Projector.arrival(0.0) > 1.2 and Projector.arrival(0.2) > 1.0
 		and float(glass.sheet_mat.get_shader_parameter("cleared")) > 1.5 and glass.sheet.visible)
+	if "steps" in v.dashboard:
+		_check("... and all five of the strip's steps are ticked (%s)" % [v.dashboard.steps], v.dashboard._steps.visible and int(v.dashboard.steps.get("done", -1)) == 5)
 	var mean_g: float = _speed() / 2.0 / 9.81
 	_check("the g-meter has the launch: %.1f g along the craft now (%.1f on average over the 2 s) and %.1f across, %.1f g in all on the dial (%.2f of its scale; the tell-tale at %.1f)" % [v.g_along, mean_g, v.g_across, v.g_load(), v.dashboard.values.g, v.dashboard.g_peak],
 		v.g_along > 0.3 * mean_g and v.g_along < 3.0 * mean_g and absf(v.g_across) < 0.1 * maxf(v.g_along, 10.0) and v.g_load() > 1.0
@@ -613,6 +621,8 @@ func _run() -> void:
 	_fly(Sequence.CLEARED_S - 2.0 + Projector.CLOSE_TIME + 0.2, [1.0, 1.0])
 	_check("then the checklist is put away with the glass: the sheet hidden, the gutter's arrow given back, the top line its own size, and nothing of it running", not glass.sheet.visible and glass.checklist.is_empty()
 		and float(glass.surface.get_shader_parameter("pointer")) == 1.0 and glass.action.scale == Vector3.ONE and (glass.message != "" or (not glass.panel.visible and not glass.is_processing())))
+	if "steps" in v.dashboard:
+		_check("... and the strip's rail with it", not v.dashboard._steps.visible and v.dashboard.steps.is_empty())
 	var mph := _speed() * 2.236936
 	var answer := _work(_flick("park", 1))
 	_check("at %.0f mph the brake is refused: \"%s\"" % [mph, s.refusal], answer == "refused" and not s.park)

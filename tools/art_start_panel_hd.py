@@ -55,6 +55,7 @@ MARKS = {"batt": ("ON", "OFF"), "engine": ("ON", "OFF"), "park": ("SET", "OFF")}
 LAMPS = {"standby": .25, "batt": .5, "engine": .75, "park": 1.0}     # the lens map's blue: which lamp
 FACE_Z, RIM_Z = .0005, .0020                           # the faceplate, and the housing's rim round it
 PLATE_W, PLATE_H = .177, .096                          # the faceplate inside the rim
+SMALL = .0040                                          # the small legends' capitals: ON / OFF / SET, STBY, the numbers in their rings
 HINGE = (.026, .005)                                   # the guard's hinge pin: y, z
 LEGEND_Y, LAMP_Y, STANDBY_X = -.0445, -.0535, -.028    # a legend's middle, a lamp's, and the standby lamp beside 1 BATT
 RAIL = (.020, .016)                                    # the header rail's section: toward the cabin, and across
@@ -293,19 +294,21 @@ def paint_face(area, side, face):
         else:
             fill = np.maximum(fill, line(r - .0150, .00022))
             ao *= 1 - .5 * np.exp(-np.clip(r - .0118, 0, None) / .003)
-            canvas.text(face, MARKS[control][0], cx, .0167, .0032)
-            canvas.text(face, MARKS[control][1], cx, -.0199, .0032)
+            # (4 mm capitals, as every small legend here: at 0.4 m in the headset that is 14 pixels; the
+            # first cut's 3.2 and 2.8 mm were 11 and 10)
+            canvas.text(face, MARKS[control][0], cx, .0167, SMALL)
+            canvas.text(face, MARKS[control][1], cx, -.0167 - SMALL, SMALL)
             ao *= 1 - .45 * np.exp(-np.clip(box_distance(x - cx, y - LAMP_Y, .0172, .0039, .001), 0, None) / .0025)
         capital, ring_r, gap = .0046, .0041, .0024                   # the legend: its number in a ring, then its name
         name_w = face.width(LEGENDS[control], capital)
         left = cx - (2 * ring_r + gap + name_w) / 2
         fill = np.maximum(fill, line(np.hypot(x - left - ring_r, y - LEGEND_Y) - ring_r, .0002))
-        canvas.text(face, NUMBERS[control], left + ring_r, LEGEND_Y - .0031 / 2, .0031)
+        canvas.text(face, NUMBERS[control], left + ring_r, LEGEND_Y - SMALL / 2, SMALL)
         canvas.text(face, LEGENDS[control], left + 2 * ring_r + gap + name_w / 2, LEGEND_Y - capital / 2, capital)
     stripe = np.zeros(a.shape, f32)
     if side < 0:
         sx = CONTROLS["batt"][1] + STANDBY_X                          # the standby lamp, and its name under it
-        canvas.text(face, "STBY", sx, -.0116, .0028)
+        canvas.text(face, "STBY", sx, -.0088 - SMALL, SMALL)
         ao *= 1 - .5 * np.exp(-np.clip(np.hypot(x - sx, y) - .0052, 0, None) / .002)
         gx = CONTROLS["engine"][1]                                    # hazard stripes round the guard's footprint
         d = box_distance(x - gx, y - .0012, .0228, .0340, .003)

@@ -17,6 +17,8 @@ uniform float joint_every = 25.0;
 uniform float spec = 0.4;
 // Start station, length and spacing (m) of the fixed shelter light wells.
 uniform vec3 shelter = vec3(0.0);
+// 1: the mesh marks its rows under a roof (the Network's halls: blue with alpha at one), and no snow lies there.
+uniform float roof_marks = 0.0;
 
 // A box filtered independently along and across the road. A grazing viewing
 // angle can put several metres of road inside a pixel but only a few cm across.
@@ -155,6 +157,7 @@ void fragment() {
 	// snow (view/outlook.gd): blown along the road in long streaks, the traffic's wind keeping the rest clear
 	if (sky_snow > 0.0) {
 		float lying = sky_snow * 0.8 * smoothstep(0.50, 0.78, pfbm(vec2(p.x / 160.0, p.y / 9.0), period / 160.0));
+		lying *= 1.0 - roof_marks * smoothstep(0.5, 0.9, COLOR.a * COLOR.b);      // none under a roof
 		ALBEDO = mix(ALBEDO, vec3(0.80, 0.84, 0.88), lying);
 		rough = mix(rough, 0.92, lying);
 	}

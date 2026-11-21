@@ -18,7 +18,10 @@
 ##             odometer roller, with a digital readout next to it of the feat"). The feat is
 ##             read on the right strip's lower line for a few seconds, in place of the handling.
 ##             The left strip's lower line, free in flight, carries the g-meter's figure, its slip
-##             bar and the peak (they give way to the repair hint and to a run line of two lines)
+##             bar and the peak (they give way to the repair hint and to a run line of two lines).
+##             Through the start-up that line carries the checklist's five steps instead, under its
+##             two lines of words: a rail of cells, ticked as each is done, the one in hand filling
+##             (vr/gauge_steps.gdshader, fed what the glass is: StartupSequence.display())
 ## The binnacle is authored (tools/art_gauges_hd.py). The dials are one textured mesh
 ## (tools/art_gauge_faces.py), the glass another, and the needles share a third. Nothing is
 ## rebuilt, and a frame only touches what changed: a needle's transform, a lamp, the speed.
@@ -65,6 +68,7 @@ const PEAK_HOLD := 5.0              # s the tell-tale stays at the highest load 
 const PEAK_FALL := 0.5              # ... then it falls back to the needle, this much of the scale a second
 const G_READ := 0.2                 # s between readings of the figures (a figure redrawn every frame cannot be read)
 const SLIP := "res://vr/gauge_slip.gdshader"
+const STEPS := "res://vr/gauge_steps.gdshader"
 
 static var enabled := true          # false before the cockpit is built: the flat panel instead
 
@@ -116,6 +120,9 @@ var _g_mat: StandardMaterial3D
 var _slip_mat: ShaderMaterial
 var _slip: MeshInstance3D
 var _slip_sent := Vector2(-9.0, -9.0)
+var steps := {}            # the start-up's steps as the rail on the strip last drew them: done, bars, pair, alert ({}: no rail)
+var _steps_mat: ShaderMaterial
+var _steps: MeshInstance3D
 var _run_line := ""        # the run line as last weighed, and whether it fits on one line
 var _run_fits := true
 
@@ -459,6 +466,17 @@ func _build_text() -> void:
 	_slip_mat = _unlit(SLIP)
 	_slip_mat.set_shader_parameter("aspect", half.x / half.y)
 	_slip = _add(st.commit(), _slip_mat, "g_slip")
+	# the start-up's five steps, on the same line while the checklist's words have the two over it
+	st = SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	half = Vector2(0.150, 0.0050)
+	mid = line + 0.0025                                       # (clear of the words' second line, and of the strip's foot)
+	p = [Vector3(-half.x, mid - half.y, z), Vector3(half.x, mid - half.y, z), Vector3(half.x, mid + half.y, z), Vector3(-half.x, mid + half.y, z)]
+	_quad(st, Kit.on_arc(status[1], status[2], 0.0, R), p, [up, up, up, up], [Vector2(0, 1), Vector2(1, 1), Vector2(1, 0), Vector2(0, 0)], Color.WHITE)
+	_steps_mat = _unlit(STEPS)
+	_steps_mat.set_shader_parameter("aspect", half.x / half.y)
+	_steps = _add(st.commit(), _steps_mat, "startup_steps")
+	_steps.visible = false
 
 
 ## A figure on a strip that is not a centred line: its own place along the strip, and which way it is set.
@@ -679,7 +697,21 @@ func show_state(d: Dictionary) -> void:
 		_run_line = d.progress
 		_run_fits = not _run_line.contains("\n") and ThemeDB.fallback_font.get_string_size(_run_line, HORIZONTAL_ALIGNMENT_LEFT, -1,
 			(labels.progress as Label3D).font_size).x < (labels.progress as Label3D).width
-	_g_room = _power >= 0.5 and hurt.is_empty() and _run_fits
+	# ... and through the start-up the line is its rail of steps (the repair hint still comes first)
+	var rail: Dictionary = d.get("steps", {})
+	var railed := _power >= 0.5 and hurt.is_empty() and not rail.is_empty()
+	_steps.visible = railed
+	if not railed:
+		steps = {}
+	else:
+		var rail_now := {"done": int(rail.get("done", 0)), "bars": rail.get("bars", [0.0, 0.0]), "pair": bool(rail.get("pair", false)), "alert": bool(rail.get("alert", false))}
+		if rail_now != steps:
+			steps = rail_now
+			_steps_mat.set_shader_parameter("done", float(rail_now.done))
+			_steps_mat.set_shader_parameter("bars", Vector2(float(rail_now.bars[0]), float(rail_now.bars[1])))
+			_steps_mat.set_shader_parameter("pair", 1.0 if rail_now.pair else 0.0)
+			_steps_mat.set_shader_parameter("alert", 1.0 if rail_now.alert else 0.0)
+	_g_room = _power >= 0.5 and hurt.is_empty() and _run_fits and not railed
 	(labels.g as Label3D).visible = _g_room
 	(labels.g_peak as Label3D).visible = _g_room
 	_slip.visible = _g_room

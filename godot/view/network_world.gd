@@ -38,6 +38,12 @@ const FENCE_H := 6.0              # a city's zone: tall panels over the band
 const STRIP_H := 0.45             # the walls' lit strip (thinner and dimmer than the speed loop's: from the
                                   # cockpit both walls' strips run flat across the view at the horizon)
 const MAST_H := 24.0
+# What stands along a road stands straight up, whatever the grade: right on every road but one. On
+# Helios's face (25 to 75 degrees) a mast straight up lies almost along the deck and a sign gantry
+# hangs over it sideways, so past the steepest grade any other road has (a jump's catch ramp, 24
+# degrees) the furniture leans toward the deck's own up, and from STEEP_FULL on it is square to it.
+const STEEP_FROM := 0.4663        # tan 25 degrees
+const STEEP_FULL := 0.6494        # tan 33 degrees
 const MAST_EVERY := 40            # samples (~1 km); a city's zone every 8. (Every 240 m, their beacons
                                   # piled into a white band along the horizon: Luke, "the light poles being
                                   # so dense just washes the horizon out in light")
@@ -269,6 +275,7 @@ func build(s, v) -> void:
 	_asph = preload("res://art/road/asphalt.tres").duplicate() as ShaderMaterial
 	_asph.set_shader_parameter("period", ASPHALT_PERIOD)
 	_asph.set_shader_parameter("base", Vector3(0.21, 0.205, 0.205))
+	_asph.set_shader_parameter("roof_marks", 1.0)   # its rows under a roof are marked (_prepare_traffic_paint): no snow lies there
 	_asph.set_shader_parameter("spec", 0.3)   # realism spike: asphalt's real 4 % reflectance, so it sheens toward the suns
 	_asph.set_shader_parameter("lane_half", 60.0)
 	for surface in [SAND, RED_GRAVEL]:
@@ -401,6 +408,17 @@ func _prepare_traffic_paint() -> void:
 			for span in exclusions:
 				for i in range(maxi(0, span[0]), mini(R.N - 1, span[1]) + 1):
 					rows[i] = 0
+		# Under a roof no snow lies (asphalt.gdshader reads class 3's colour). The rows at a hall's two
+		# mouths stay class 0, so a roofed row only ever meets an unpainted one and the snow thins out
+		# over the first 24 m inside.
+		var roofs := []
+		if halls.has(r):
+			roofs.append(halls[r])
+		if r == int(CraftSim.NET_PRESSURE[0]):
+			roofs.append([CraftSim.NET_PRESSURE[1], CraftSim.NET_PRESSURE[2]])
+		for span in roofs:
+			for i in range(maxi(0, int(span[0]) + 1), mini(R.N, int(span[1]))):
+				rows[i] = 3
 		_traffic_paint.append(rows)
 
 
@@ -612,6 +630,34 @@ func _height_at(r: int, sample: float) -> float:
 		return 0.0
 	var u := (sample - float(curve[0])) * float(curve[2])
 	return ((float(curve[6]) * u + float(curve[5])) * u + float(curve[4])) * u + float(curve[3])
+
+
+## The up that road r's furniture stands along at sample i: straight up, but where the road is
+## steeper than STEEP_FROM it leans toward the deck's own normal, and from STEEP_FULL it is that
+## normal. A function of the road and the sample alone (the grade across the two samples either
+## side), so what one chunk ends with the next begins with.
+func _deck_up(r: int, R: CraftSim.TrackPath, i: int) -> Vector3:
+	var a := maxi(i - 1, 0)
+	var b := mini(i + 1, R.N - 1)
+	var run := 0.0
+	for k in range(a, b):
+		run += R.len[k]
+	var grade := (_h(r, b) - _h(r, a)) / maxf(run, 0.01)
+	if absf(grade) <= STEEP_FROM:
+		return Vector3.UP
+	var lean := grade * smoothstep(STEEP_FROM, STEEP_FULL, absf(grade))
+	return Vector3(-lean * R.tx[i], 1.0, lean * R.ty[i]).normalized()
+
+
+## How far under a roof sample f of road r is: 0 in the open, 1 well inside a city's hall or the
+## Aurora tube, rising over the first few samples in from a mouth (the weather stops there: outlook.gd).
+func roofed(r: int, f: float) -> float:
+	var under := 0.0
+	if halls.has(r):
+		under = smoothstep(0.0, 3.0, minf(f - float(halls[r][0]), float(halls[r][1]) - f))
+	if r == int(CraftSim.NET_PRESSURE[0]):
+		under = maxf(under, smoothstep(0.0, 3.0, minf(f - float(CraftSim.NET_PRESSURE[1]), float(CraftSim.NET_PRESSURE[2]) - f)))
+	return under
 
 
 ## A point `off` m left of road r's sample i, `h` up, against the chunk origin (ox, oy).
@@ -984,12 +1030,17 @@ func _sample(J: Dictionary, R: CraftSim.TrackPath, i: int) -> void:
 		_paint_row(R,r,ox,oy,i,J) # reuse the asphalt already generated above
 	j = i + span
 	hj = _h(r, j)
+	if not on_shaft:
+		_up = _deck_up(r, R, i)         # (straight up, but on Helios's face: square to the deck there)
+	var upright := Basis.IDENTITY if on_shaft or _up == Vector3.UP else Basis(across_i, _up, across_i.cross(_up))   # a post's or a mast's frame
 	var up_j := Vector3.UP
 	var across_j := Vector3(R.nx[j], 0.0, -R.ny[j])
 	if shaft.on(r, float(j)):
 		var end_frame: Array = shaft.at(r, float(j))
 		across_j = end_frame[4]
 		up_j = end_frame[5]
+	else:
+		up_j = _deck_up(r, R, j)
 	var hw_j: float = R.w[j]*0.5
 	var te_j: float = CraftSim.net_edge(R.w[j],hw_j).x
 	var open_i := [false, false]
@@ -1089,12 +1140,12 @@ func _sample(J: Dictionary, R: CraftSim.TrackPath, i: int) -> void:
 			# you back is still there (the sims'); what shows is a lit rail, knee high, on slim posts.
 			_wall(lglow, wa, wb, 0.55, 0.85, WALL_STRIP, up_j)
 			if i % 4 == 0:
-				_box(deco, wa + Vector3.UP * 0.42, Vector3(0.35, 0.85, 0.35), Color(0.3, 0.31, 0.33))
+				_box(deco, wa + _up * 0.42, Vector3(0.35, 0.85, 0.35), Color(0.3, 0.31, 0.33), upright)
 			if i % MAST_EVERY == 0:
 				var post := _p(R, ox, oy, i, sgn * (hw + 0.4), hi + te)
-				_box(deco, post + Vector3.UP * (MAST_H / 2.0), Vector3(0.6, MAST_H, 0.6), Color(0.3, 0.31, 0.33))
-				_box(glow, post + Vector3.UP * (MAST_H + 0.45), Vector3(0.9, 0.9, 0.9), STRIP_LIGHT)
-				_beacon(lamps, post + Vector3.UP * (MAST_H + 0.45), STRIP_LIGHT)
+				_box(deco, post + _up * (MAST_H / 2.0), Vector3(0.6, MAST_H, 0.6), Color(0.3, 0.31, 0.33), upright)
+				_box(glow, post + _up * (MAST_H + 0.45), Vector3(0.9, 0.9, 0.9), STRIP_LIGHT, upright)
+				_beacon(lamps, post + _up * (MAST_H + 0.45), STRIP_LIGHT)
 				J.n_lamps += 1
 			continue
 		var top := BAND_H
@@ -1129,9 +1180,9 @@ func _sample(J: Dictionary, R: CraftSim.TrackPath, i: int) -> void:
 			_quad(deco, [cap_a, cap_b, cap_b + sgn * across_j * 1.4, cap_a + sgn * across_i * 1.4], RAIL_CAP)
 		if i % (8 if city else MAST_EVERY) == 0 and not on_shaft:
 			var foot := _p(R, ox, oy, i, sgn * (hw + 0.4), hi + te)
-			_box(deco, foot + Vector3.UP * (MAST_H / 2.0), Vector3(0.6, MAST_H, 0.6), Color(0.3, 0.31, 0.33))
-			_box(glow, foot + Vector3.UP * (MAST_H + 0.45), Vector3(0.9, 0.9, 0.9), STRIP_LIGHT)
-			_beacon(lamps, foot + Vector3.UP * (MAST_H + 0.45), WALL_STRIP_SF if city else STRIP_LIGHT)
+			_box(deco, foot + _up * (MAST_H / 2.0), Vector3(0.6, MAST_H, 0.6), Color(0.3, 0.31, 0.33), upright)
+			_box(glow, foot + _up * (MAST_H + 0.45), Vector3(0.9, 0.9, 0.9), STRIP_LIGHT, upright)
+			_beacon(lamps, foot + _up * (MAST_H + 0.45), WALL_STRIP_SF if city else STRIP_LIGHT)
 			J.n_lamps += 1
 
 
@@ -1764,10 +1815,21 @@ func _flank_crops(B: Dictionary, a: Dictionary, b: Dictionary, r: int, j: int, s
 			_crop_stack(B, at, seed, ox, oy)
 		return
 	var tones: PackedColorArray = a.c
+	var steep_road := _deck_up(r, sim.roads[r], j) != Vector3.UP
 	for m in range(2, last - 1):   # from 40 m out to where the terrain takes over; not the buried lip
 		var width := da[(m + 1) * 2] - da[m * 2]
 		if absf(da[(m + 1) * 2 + 1] - da[m * 2 + 1]) > 1.1 * maxf(width, 1.0):
 			continue   # a cliff keeps its bare face
+		# ... and so does land that climbs as steeply along the road. Only Helios's face does (where the
+		# road itself is past STEEP_FROM): short of a cliff there, a rock lies in the slope, not level
+		# with one end in the air.
+		var lie := Vector3.UP
+		if steep_road:
+			lie = (pa[m + 1] - pa[m]).cross(pb[m] - pa[m]).normalized()
+			if lie.y < 0.0:
+				lie = -lie
+			if lie.y < 0.6727:      # (the same 1.1 in 1: 47.7 degrees)
+				continue
 		var size := 1.0 + 0.0012 * da[m * 2]
 		for n in (2 if width < 100.0 else (4 if width < 200.0 else 6)):
 			var seed := hash(Vector4i(r, j, side * 16 + m, n))
@@ -1782,7 +1844,7 @@ func _flank_crops(B: Dictionary, a: Dictionary, b: Dictionary, r: int, j: int, s
 			if (green or (snowy and at.y < 1500.0)) and at.y < 1900.0 and seed % 4 != 0:
 				_crop_conifer(B, at, seed, size, snowy, ox, oy)
 			else:
-				_crop_rock(B, at, seed, Color(tone.r * 0.6, tone.g * 0.6, tone.b * 0.6, 0.0), size, 1.0, ox, oy)
+				_crop_rock(B, at, seed, Color(tone.r * 0.6, tone.g * 0.6, tone.b * 0.6, 0.0), size, 1.0, ox, oy, lie)
 
 
 ## A conifer: a dark spire, five shared vertices in the land's own surface (no draw of its own). Its
@@ -1839,21 +1901,25 @@ func _crop_stack(B: Dictionary, at: Vector3, seed: int, ox: float, oy: float) ->
 
 
 ## Rock: a slab with a ridge along it, higher at one end, leaning; `lift` stands it up.
-func _crop_rock(B: Dictionary, at: Vector3, seed: int, stone: Color, size: float, lift: float, ox: float, oy: float) -> void:
+func _crop_rock(B: Dictionary, at: Vector3, seed: int, stone: Color, size: float, lift: float, ox: float, oy: float, lie := Vector3.UP) -> void:
 	var s := float((seed / 988027) % 983) / 983.0
 	var d1 := Vector3.RIGHT.rotated(Vector3.UP, float(seed % 628) / 100.0)
 	var d2 := d1.cross(Vector3.UP)
+	if lie != Vector3.UP:       # on a steep slope: its base in the slope, its ridge out from it
+		var tilt := Quaternion(Vector3.UP, lie)
+		d1 = tilt * d1
+		d2 = tilt * d2
 	var l1 := d1 * (6.0 + 9.0 * s) * size
 	var w2 := d2 * (3.5 + 4.5 * float(seed % 13) / 12.0) * size
 	var high := (3.0 + 6.0 * s) * size * lift
 	var lean := w2 * (float(seed % 17) / 16.0 - 0.5)
-	var up := Vector3.UP * 0.35
+	var up := lie * 0.35
 	var uv := Vector2(at.x + ox, at.z - oy) / 256.0
 	var base: int = B.v.size()
 	B.v.append_array(PackedVector3Array([at - l1 - w2, at + l1 * 0.8 - w2 * 0.7, at + l1 * 0.9 + w2, at - l1 * 0.7 + w2 * 0.8,
-		at - l1 * 0.45 + Vector3.UP * high + lean, at + l1 * 0.4 + Vector3.UP * high * (0.45 + 0.4 * float(seed % 5) / 4.0) + lean]))
+		at - l1 * 0.45 + lie * high + lean, at + l1 * 0.4 + lie * high * (0.45 + 0.4 * float(seed % 5) / 4.0) + lean]))
 	B.n.append_array(PackedVector3Array([(up - d1 - d2).normalized(), (up + d1 - d2).normalized(), (up + d1 + d2).normalized(), (up - d1 + d2).normalized(),
-		(Vector3.UP - d1 * 0.4).normalized(), (Vector3.UP + d1 * 0.4).normalized()]))
+		(lie - d1 * 0.4).normalized(), (lie + d1 * 0.4).normalized()]))
 	B.uv.append_array(PackedVector2Array([uv, uv, uv, uv, uv, uv]))
 	B.c.append_array(PackedColorArray([stone, stone, stone, stone, stone, stone]))
 	B.idx.append_array(PackedInt32Array([base, base + 1, base + 5, base, base + 5, base + 4, base + 1, base + 2, base + 5,
@@ -2393,6 +2459,9 @@ func _sign(node: Node3D, R: CraftSim.TrackPath, r: int, ox: float, oy: float, sp
 	var ty: float = R.ty[i] * dir
 	var t := Vector3(tx, 0.0, -ty)
 	var facing := Basis(Vector3.UP, atan2(-t.x,-t.z))
+	var up := Vector3.UP if shaft.on(r, float(i)) else _deck_up(r, R, i)
+	if up != Vector3.UP:   # on Helios's face a gantry stands square to the deck, its boards with it
+		facing = Basis(facing.x, up, facing.x.cross(up))
 	var mid := _p(R, ox, oy, i, 0.0, h0)
 	if kind == "terminal":   # a lit line across the road, and a gantry with the city's name
 		var st := SurfaceTool.new()
@@ -2418,7 +2487,7 @@ func _sign(node: Node3D, R: CraftSim.TrackPath, r: int, ox: float, oy: float, sp
 		_guides.add_hardware(node,span_name,_guides.hardware.span(hw),Transform3D(facing,mid))
 	var side := int(info.get("side",1 if small else 0))
 	var offset := float(side) * minf(hw*0.65,maxf(0.0,hw-size.x*0.5-2.0))
-	var center := mid + facing.x*offset + Vector3.UP*(BOARD_CLEAR+4.0+size.y/2.0)
+	var center := mid + facing.x*offset + up*(BOARD_CLEAR+4.0+size.y/2.0)
 	var holder := Node3D.new()
 	holder.name = "Sign_%s_%d_%d_%d" % [kind,i,dir,side]
 	node.add_child(holder,true)
@@ -2427,7 +2496,7 @@ func _sign(node: Node3D, R: CraftSim.TrackPath, r: int, ox: float, oy: float, sp
 	if kind in ["exit", "city", "jump"]:
 		_guides.add_hardware(holder,"ServiceWalk",_guides.hardware.service_rail(size),Transform3D(facing,center))
 	for rear in [false,true]:
-		var basis := facing.rotated(Vector3.UP,PI) if rear else facing
+		var basis := facing.rotated(up,PI) if rear else facing
 		var pos := center + basis.z*Signs.Gantry.FACE_Z
 		var paired_corner: bool = rear and info.has("reverse_lines")
 		var words: Array = info.reverse_lines if paired_corner else lines
@@ -2621,11 +2690,11 @@ func _section(w: float, joined := false) -> Dictionary:
 		var o1 := maxf(from, to)
 		lines.append([o0, o1, CraftSim.net_edge(w, o0).x, CraftSim.net_edge(w, o1).x, EDGE_FOOT])
 	var traffic_rows := []
-	for traffic_class in 3:
+	for traffic_class in 4:      # (3: under a roof. No paint, as 0, and blue with its alpha at one says so)
 		var colors := PackedColorArray()
 		colors.resize(o.size())
 		var visible: bool = (traffic_class == 1 and w >= 200.0) or (traffic_class == 2 and w >= 300.0)
-		colors.fill(Color(0.0, 0.0, float(traffic_class == 2), 0.0 if visible else 1.0))
+		colors.fill(Color(0.0, 0.0, float(traffic_class >= 2), 0.0 if visible else 1.0))
 		traffic_rows.append(colors)
 	var out := {"o": o, "h": h, "c": c, "s": s, "te": CraftSim.net_edge(w, hw).x, "lines": lines, "shoulder_rows": shoulder_rows, "traffic_rows": traffic_rows}
 	_sec_cache[key] = out
@@ -2840,7 +2909,17 @@ func _barrier_face(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, d: Vecto
 	st.set_uv(Vector2.ZERO)
 
 
-func _box(st: SurfaceTool, ctr: Vector3, size: Vector3, c: Color) -> void:
+func _box(st: SurfaceTool, ctr: Vector3, size: Vector3, c: Color, frame := Basis.IDENTITY) -> void:
+	if frame != Basis.IDENTITY:      # standing along another up than the world's (_deck_up)
+		var e := [frame.x * (size.x / 2.0), frame.y * (size.y / 2.0), frame.z * (size.z / 2.0)]
+		var w := [ctr - e[0] - e[1] - e[2], ctr + e[0] - e[1] - e[2], ctr + e[0] + e[1] - e[2], ctr - e[0] + e[1] - e[2],
+			ctr - e[0] - e[1] + e[2], ctr + e[0] - e[1] + e[2], ctr + e[0] + e[1] + e[2], ctr - e[0] + e[1] + e[2]]
+		st.set_color(c)
+		for f in [[0, 1, 2, 3, -frame.z], [5, 4, 7, 6, frame.z], [4, 0, 3, 7, -frame.x], [1, 5, 6, 2, frame.x], [3, 2, 6, 7, frame.y]]:
+			st.set_normal(f[4])
+			for q in [f[0], f[1], f[2], f[0], f[2], f[3]]:
+				st.add_vertex(w[q])
+		return
 	var hx := size.x / 2.0
 	var hy := size.y / 2.0
 	var hz := size.z / 2.0

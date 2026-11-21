@@ -7,7 +7,7 @@ extends SceneTree
 const Cluster := preload("res://vr/gauge_cluster.gd")
 const Layout := preload("res://vr/gauge_layout.gd")
 const CraftModel := preload("res://view/craft_model.gd")
-const CHECKS := 34
+const CHECKS := 35
 var fails := 0
 var passed := 0
 var d
@@ -160,6 +160,24 @@ func _initialize() -> void:
 	d.show_state(flown)
 	_check("its line on the strip gives way to the repair hint (%s), to the start-up's two lines (%s) and to a run line too long for one (%s), and comes back after" % [hint, two_lines, wrapped],
 		hint and two_lines and wrapped and d.labels.g.visible and d._slip.visible and d.labels.g_peak.visible)
+	# through the start-up that line is the checklist's rail of five steps (what StartupSequence.display() gives the glass)
+	flown.merge({"progress": "ENGINE POWER   2 / 5
+LIFT THE RED GUARD", "steps": {"done": 1, "mark": 17, "bars": [1.0, 0.4], "pair": false, "alert": false}}, true)
+	d.show_state(flown)
+	var railed: bool = d._steps.visible and not d.labels.g.visible and not d._slip.visible and int(d.steps.done) == 1 and float(d._steps_mat.get_shader_parameter("done")) == 1.0 		and (d._steps_mat.get_shader_parameter("bars") as Vector2).is_equal_approx(Vector2(1.0, 0.4)) and float(d._steps_mat.get_shader_parameter("pair")) == 0.0
+	flown.merge({"steps": {"done": 2, "bars": [0.3, 0.0], "pair": true, "alert": true}, "health": [1.0, 0.4]}, true)
+	d.show_state(flown)
+	var hint_first: bool = not d._steps.visible and d.steps.is_empty() and d.labels.warn.text == "HOLD X: REPAIR R"
+	flown.merge({"health": [1.0, 1.0]}, true)
+	d.show_state(flown)
+	var engines: bool = d._steps.visible and float(d._steps_mat.get_shader_parameter("done")) == 2.0 and float(d._steps_mat.get_shader_parameter("pair")) == 1.0 and float(d._steps_mat.get_shader_parameter("alert")) == 1.0
+	flown.merge({"power": 0.0}, true)
+	d.show_state(flown)
+	var dead: bool = not d._steps.visible
+	flown.merge({"power": 1.0, "steps": {}, "progress": "GLACIER  178.9 mi   FROM ERIDANUS  0:02"}, true)
+	d.show_state(flown)
+	_check("through the start-up that line is the checklist's rail of steps: one behind and the next filling (%s), the repair hint before it (%s), an engine in each half and a refusal (%s), dark with the battery off (%s); with the checklist gone so is the rail, and the g-meter is back" % [railed, hint_first, engines, dead],
+		railed and hint_first and engines and dead and not d._steps.visible and d.steps.is_empty() and d.labels.g.visible and d._slip.visible)
 	flown.merge({"g": 9.0, "power": 1.0, "sweep": 0.25}, true)
 	d.show_state(flown)
 	var swept: float = d.values.g

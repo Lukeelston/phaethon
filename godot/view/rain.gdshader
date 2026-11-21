@@ -11,6 +11,7 @@ uniform float travel = 0.0;                  // how far the craft has come, wrap
 uniform float fall = 0.0;                    // how far the rain has fallen, wrapped to its height
 uniform float speed = 0.0;                   // the craft's, m/s
 uniform vec3 tint = vec3(0.8, 0.85, 0.9);
+uniform float cover = 0.0;                   // 1 under a roof: nothing falls there
 uniform float snow = 0.0;                    // 1: flakes. They drift down a sixth as fast, wander, are short and broad, and nearly white
 
 varying float shown;
@@ -37,6 +38,6 @@ void fragment() {
 	// (a streak is a pixel or two wide: under multisampling its UV is read at pixel centres that lie
 	// outside it, so nothing here may go negative, or the blend takes light away: black specks)
 	float along = clamp(UV.y, 0.0, 1.0);
-	ALPHA = clamp(shown, 0.0, 1.0) * mix(0.30, 0.72, snow) * clamp(1.0 - pow(abs(2.0 * along - 1.0), 3.0), 0.0, 1.0)     // tapered to its ends
+	ALPHA = clamp(shown, 0.0, 1.0) * (1.0 - cover) * mix(0.30, 0.72, snow) * clamp(1.0 - pow(abs(2.0 * along - 1.0), 3.0), 0.0, 1.0)     // tapered to its ends
 		* mix(1.0, clamp(1.0 - pow(abs(2.0 * clamp(UV.x, 0.0, 1.0) - 1.0), 2.0), 0.0, 1.0), snow);      // (a flake is soft at its sides too)
 }

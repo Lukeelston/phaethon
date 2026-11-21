@@ -6,6 +6,8 @@
 ##              the road, the instruments dim; and back to the afternoon everything is as it was built
 ##   weather    rain: a lid of cloud, no sun's shadow, thicker fog (the land's own, set every frame,
 ##              follows), a wet road, the streaks; clear: no cloud deck; fair: as built again
+##   roof       in snow nothing falls in a city's hall or the Aurora tube, and no snow lies on the
+##              road there: the hall's rows are marked for the road's shader, and no others
 ##   elsewhere  off the Network nothing is turned, whatever is chosen
 ##   chosen     the menus' rows and the quick menu's lines step through the choices and save them; the
 ##              quick menu's turns the world where you sit
@@ -116,6 +118,46 @@ func _run() -> void:
 	v.landscape.sync(v.sim.pod.x, v.sim.pod.y)
 	_check("clear: no deck, no rain, dry, shadows again (%s); fair: the deck back at its own cover %.2f, the fog as it was (%.6f against %.6f)" % [clear_ok, float(deck.get_shader_parameter("cover")), env.fog_density, fair_fog],
 		clear_ok and clouds.visible and is_equal_approx(float(deck.get_shader_parameter("cover")), 0.62) and is_equal_approx(env.fog_density, fair_fog) and is_equal_approx(sun.light_energy, built.energy))
+
+	# under a roof
+	var world = v.network_world
+	var home := [int(v.sim.pod.path), int(v.sim.pod.hint)]
+	Outlook.weather = "snow"
+	Outlook.apply(v)
+	rain = v.get_node_or_null("outlook_rain") as MeshInstance3D
+	var hall_road: int = world.halls.keys()[0]
+	var hall: Array = world.halls[hall_road]
+	var hall_mid := (int(hall[0]) + int(hall[1])) / 2
+	var tube: Array = v.sim.NET_PRESSURE
+	var covers := []
+	for spot in [[hall_road, int(hall[0]) - 40], [hall_road, hall_mid], [int(tube[0]), (int(tube[1]) + int(tube[2])) / 2], [hall_road, int(hall[1]) + 40]]:
+		v.sim.respawn_on(int(spot[0]), int(spot[1]), 1)
+		Outlook.tick(v, 0.0)
+		covers.append(float((rain.material_override as ShaderMaterial).get_shader_parameter("cover")) if rain else -1.0)
+	_check("snow lies (%s) and falls in the open before a hall (cover %.2f) and after it (%.2f); nothing falls in the hall (%.2f) or in the Aurora tube (%.2f)" % [
+			_global("sky_snow"), covers[0], covers[3], covers[1], covers[2]],
+		is_equal_approx(float(_global("sky_snow")), 1.0) and rain != null and rain.visible and covers[0] == 0.0 and covers[3] == 0.0 and covers[1] == 1.0 and covers[2] == 1.0)
+	var marked := {}
+	for chunk in [hall_mid / int(world.CH), (int(hall[0]) - 80) / int(world.CH)]:
+		var key := Vector2i(hall_road, chunk)
+		if not world.chunks.has(key):
+			world._build_chunk(hall_road, chunk)
+		var road_mesh: Mesh = ((world.chunks[key][0] as Node3D).get_node("road") as MeshInstance3D).mesh
+		var colours: PackedColorArray = road_mesh.surface_get_arrays(0)[Mesh.ARRAY_COLOR]
+		var roofed_here := 0
+		for c in colours:
+			roofed_here += int(c.a * c.b > 0.9)
+		marked[chunk] = [roofed_here, colours.size()]
+	var inside: Array = marked[hall_mid / int(world.CH)]
+	var outside: Array = marked[(int(hall[0]) - 80) / int(world.CH)]
+	_check("no snow lies under the hall's roof: its road's rows are marked for the shader (%d of %d vertices in the chunk at its middle, %d of %d in one before it), and the road's material reads the marks (%s)" % [
+			inside[0], inside[1], outside[0], outside[1], world._asph.get_shader_parameter("roof_marks")],
+		inside[0] == inside[1] and inside[1] > 0 and outside[0] == 0 and outside[1] > 0 and is_equal_approx(float(world._asph.get_shader_parameter("roof_marks")), 1.0)
+			and world.roofed(hall_road, float(hall_mid)) == 1.0 and world.roofed(hall_road, float(hall[0]) - 1.0) == 0.0)
+	v.sim.respawn_on(home[0], home[1], 1)
+	Outlook.weather = "fair"
+	Outlook.apply(v)
+	v.landscape.sync(v.sim.pod.x, v.sim.pod.y)
 
 	# the quick menu turns it where you sit
 	v.menu_open(true)
