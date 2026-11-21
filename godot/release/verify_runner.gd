@@ -89,6 +89,9 @@ func _run() -> void:
 		var menu = get_tree().current_scene
 		var collisions := case_index % 2 == 1
 		var partner_enabled := case_index % 2 == 0
+		var pilot_craft := "shrike" if case_index % 2 == 0 else "phaethon"
+		if menu.craft_selector.selected != pilot_craft:
+			menu.craft_selector.button.pressed.emit()
 		case_index += 1
 		menu.collision_checkbox.button_pressed = collisions
 		menu.partner_checkbox.button_pressed = partner_enabled
@@ -96,12 +99,12 @@ func _run() -> void:
 		check(course + " partner checkbox persists", Settings.driving_partner_enabled() == partner_enabled)
 		if case_index <= 2:
 			await shot("menu-obstacles-" + ("on" if collisions else "off"))
-		var buttons := menu.find_children("*", "Button", true, false)
-		if not check(course + " launch button is available", buttons.size() >= 4):
+		var button := menu.find_child("Course_" + course, true, false) as Button
+		if not check(course + " launch button is available", button != null):
 			_finish()
 			return
 		capture.clear_buffer()
-		buttons[COURSES.find(course)].pressed.emit()
+		button.pressed.emit()
 		await get_tree().scene_changed
 		var view = get_tree().current_scene
 		if not check(course + " opens CraftView", view is View):
@@ -110,6 +113,7 @@ func _run() -> void:
 		check(course + " scene loaded", view.sim.kind == course if course in ["range", "network"] else view.sim.track_name == ("eridanus" if course == "emergency" else course))
 		check(course + " opens its selected mission", not view.sim.job.is_empty() if course == "emergency" else view.sim.job.is_empty())
 		check(course + " launch respects obstacle collisions", view.sim.P.obstacleCollisions == collisions)
+		check(course + " launches " + pilot_craft, view.sim.P.vehicle == pilot_craft and view.craft.engines[0].has_node("ShrikeFairing") == (pilot_craft == "shrike"))
 		check(course + " launch builds the selected partner state", view.partner_on == partner_enabled and (view.partner != null) == partner_enabled)
 		check(course + " skill tracker and audio loaded", view.skill_score != null and view.skill_audio != null)
 		if course == "gp":
@@ -165,6 +169,7 @@ func _run() -> void:
 		check(course + " restart keeps selected course", view.sim.kind == course if course in ["range", "network"] else view.sim.track_name == ("eridanus" if course == "emergency" else course))
 		check(course + " restart clears throttle", view.inp.thrL == 0.0 and view.inp.thrR == 0.0)
 		check(course + " restart retains obstacle collisions", view.sim.P.obstacleCollisions == collisions)
+		check(course + " restart retains pilot craft", view.sim.P.vehicle == pilot_craft)
 		check(course + " restart retains partner", view.partner_on == partner_enabled and (view.partner != null) == partner_enabled)
 		check(course + " restart starts a fresh skill run", view.skill_score.total == 0)
 		if course == "network":

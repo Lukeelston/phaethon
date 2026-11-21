@@ -120,6 +120,10 @@ func _run() -> void:
 		menu.set_process(false) # Explicitly XR-off diagnostic supplies controller samples below.
 		var collisions := index % 2 == 1
 		var partner_enabled := index % 2 == 0
+		var pilot_craft := "phaethon" if index % 2 == 0 else "shrike"
+		if menu.craft_selector.selected != pilot_craft:
+			menu.focus_row(menu.buttons.find(menu.craft_selector.button))
+			menu.activate()
 		menu.collision_checkbox.button_pressed = collisions
 		menu.partner_checkbox.button_pressed = partner_enabled
 		check(stop + " obstacle checkbox persists", Settings.obstacle_collisions_enabled() == collisions)
@@ -145,6 +149,7 @@ func _run() -> void:
 		if stop == "carving":
 			check("Carving starts in Speedcraft with visible corner guidance",view.sim.P.handling=="speed" and view.gp_world!=null and view.gp_world.corners.size()>10 and view.gp_world.chevrons>0)
 		check(stop + " launch respects obstacle checkbox", view.sim.P.obstacleCollisions == collisions)
+		check(stop + " launches " + pilot_craft, view.sim.P.vehicle == pilot_craft and (view.shell.find_child("ShrikePlate", true, false) != null) == (pilot_craft == "shrike"))
 		check(stop + " launch builds the selected partner state", view.partner_on == partner_enabled and (view.partner != null) == partner_enabled)
 		check(stop + " skill tracker and audio loaded", view.skill_score != null and view.skill_audio != null)
 		check(stop + " has XR origin and camera", view.origin is XROrigin3D and view.cam is XRCamera3D)

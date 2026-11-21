@@ -7,6 +7,7 @@ class_name CraftSim
 extends RefCounted
 
 const G := 9.81
+const PilotCraft := preload("res://sim/pilot_craft.gd")
 const DEFAULTS := {
 	"engineMass": 1200.0, "engineLen": 8.0, "engineGap": 6.0,
 	"podMass": 500.0, "podLen": 4.0, "podWidth": 2.4,
@@ -649,6 +650,11 @@ var _overrides := {}
 
 
 func _init(overrides: Dictionary = {}) -> void:
+	var vehicle := PilotCraft.known(overrides.get("vehicle", PilotCraft.STANDARD))
+	var vehicle_params := PilotCraft.tuning(vehicle)
+	vehicle_params.merge(overrides, true)
+	vehicle_params["vehicle"] = vehicle
+	overrides = vehicle_params
 	_overrides = overrides.duplicate()
 	P = DEFAULTS.duplicate()
 	# the grand prix is a STARFIGHTER track unless a handling is asked for

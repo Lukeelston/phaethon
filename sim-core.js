@@ -777,6 +777,9 @@
   function pointVel(b, px, py) { return [b.vx - b.w * (py - b.y), b.vy + b.w * (px - b.x)]; }
 
   function makeSim(overrides) {
+    const vehicle = overrides && overrides.vehicle === 'shrike' ? 'shrike' : 'phaethon';
+    const chassis = vehicle === 'shrike' ? { engineMass: 1000, podMass: 410, engineGap: 7.2, cableLen: 12.5 } : {};
+    overrides = Object.assign({}, chassis, overrides, { vehicle });
     // the grand prix is a STARFIGHTER track unless a handling is asked for
     const hname = (overrides && overrides.handling) || (COURSES[(overrides && overrides.track) || ''] && overrides.track !== 'carving' ? 'starfighter' : DEFAULTS.handling);
     const P = Object.assign({}, DEFAULTS, HANDLING[hname] || {}, TRACKS[(overrides && overrides.track) || ''] || {}, overrides || {}, { handling: hname });

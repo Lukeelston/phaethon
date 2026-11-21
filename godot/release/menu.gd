@@ -5,6 +5,7 @@ const UI := preload("res://release/release_config.gd")
 
 var collision_checkbox: CheckBox
 var partner_checkbox: CheckBox
+var craft_selector := preload("res://release/craft_selector.gd").new()
 
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
@@ -38,6 +39,8 @@ func _ready() -> void:
 	var breathing_room := Control.new()
 	breathing_room.custom_minimum_size.y = 6
 	left.add_child(breathing_room)
+	left.add_child(craft_selector)
+	craft_selector.build(false)
 	left.add_child(UI.label("CHOOSE YOUR BAD IDEA", 14, UI.MUTED))
 	var sprint: Button
 	var course_list: Container = left
@@ -49,6 +52,7 @@ func _ready() -> void:
 		left.add_child(course_list)
 	for course in UI.COURSES:
 		var button := UI.button(course.name, start_course.bind(course.id), 42)
+		button.name = "Course_" + course.id
 		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		course_list.add_child(button)
 		if course.id == "range":
@@ -76,6 +80,7 @@ func start_course(course: String) -> void:
 	if UI.course_index(course) < 0:
 		return
 	var overrides := UI.course_overrides(course)
+	View.vehicle_override = craft_selector.selected
 	View.track_override = overrides[0]
 	View.job_override = overrides[1]
 	View.spot_override = overrides[2]

@@ -71,6 +71,8 @@ const FLAP_RATE := 9.0                # flap travel, full range per second (~0.1
 # The engines are flat rounded slabs (Luke: "horizontally flat, rounded rectangular prisms"),
 # 2.4 m wide (the sim's 1.2 m collision radius) by 0.96 m tall. Air brakes: two flaps on top, two
 # underneath, [x, top (+1) or bottom (-1)], hinged at the front edge on the skin.
+const Shrike := preload("res://view/shrike_airframe.gd")
+const PilotCraft := preload("res://sim/pilot_craft.gd")
 const ENG_W := 2.4
 const ENG_H := 0.96
 const FLAPS_AT := [[-0.58, 1.0], [0.58, 1.0], [-0.58, -1.0], [0.58, -1.0]]
@@ -159,6 +161,7 @@ func build(v) -> void:
 	var nacelle_scene := load("res://art/engine/nacelle.glb") as PackedScene
 	view = v
 	var sim = v.sim
+	var shrike: bool = sim.P.vehicle == PilotCraft.SHRIKE
 	var finish := Finishes.machined()
 	var lit_mat := Kit.vertex_colors(true)
 	for k in 2:
@@ -167,18 +170,22 @@ func build(v) -> void:
 		add_child(eng)
 		engines.append(eng)
 		var body := MeshInstance3D.new()
-		body.mesh = _engine_body(out)
+		body.name = "ShrikeFairing" if shrike else "PhaethonFairing"
+		body.mesh = Shrike.engine(out) if shrike else _engine_body(out)
 		body.material_override = Finishes.painted_metal()
 		eng.add_child(body)
 		# One shared UV-mapped shell on each engine. The hot section, brakes and
 		# vectoring vanes still use their independent pivots and materials.
 		var shell := nacelle_scene.instantiate()
 		shell.name = "NacelleShell"
-		eng.add_child(shell)
 		var aft_leaf := _take_brake_mesh(shell, "AftBrakeLeaf")
 		var front_leaf := _take_brake_mesh(shell, "FrontBrakeLeaf")
+		if shrike:
+			shell.free()
+		else:
+			eng.add_child(shell)
 		var lights := MeshInstance3D.new()   # nav, tail, landing lights and the repulsor underglow
-		lights.mesh = _engine_lights(out)
+		lights.mesh = Shrike.lights(out) if shrike else _engine_lights(out)
 		lights.material_override = lit_mat
 		lights.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		eng.add_child(lights)
@@ -227,13 +234,15 @@ func build(v) -> void:
 			fm.material_override = Kit.polished(0.88, 0.31)
 			rotor.add_child(fm)
 		var legend := Label3D.new()
-		legend.text = "PHAETHON  /  " + ("L" if k == 0 else "R")
+		legend.text = ("SHRIKE  RS  /  " if shrike else "PHAETHON  /  ") + ("L" if k == 0 else "R")
 		legend.font_size = 48
 		legend.pixel_size = 0.0018
 		legend.outline_size = 0
 		legend.modulate = Color(0.12, 0.14, 0.17)
 		legend.rotation.x = -PI / 2.0
 		legend.position = Vector3(0, ENG_H / 2.0 + 0.036, -0.15)
+		if shrike:
+			legend.position = Vector3(0, 0.522, -0.55)
 		eng.add_child(legend)
 		# split air brakes, two on top and two underneath: hinged at the front edge, the trailing
 		# edge swings up (or down) into the airflow
@@ -278,7 +287,7 @@ func build(v) -> void:
 		var strobe := MeshInstance3D.new()
 		strobe.mesh = Kit.ball(0.08, 10)
 		strobe.material_override = view._mat(Color(1.0, 1.0, 1.0), true)
-		strobe.position = Vector3(0, 1.08, 1.35)
+		strobe.position = Shrike.fin_tip(out) if shrike else Vector3(0, 1.08, 1.35)
 		strobe.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		eng.add_child(strobe)
 		strobes.append(strobe)
@@ -355,6 +364,8 @@ func build(v) -> void:
 
 	pod = MeshInstance3D.new()
 	pod.mesh = pod_hull()   # materials live on its surfaces
+	if shrike:
+		Shrike.dress_pod(pod)
 	add_child(pod)
 	canopy = CanopyScript.build()   # windscreen and forcefield (view/canopy.gd)
 	pod.add_child(canopy)

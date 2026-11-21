@@ -494,6 +494,8 @@ func _build_cockpit() -> void:
 	rig.add_child(shell)
 	var hull := MeshInstance3D.new()
 	hull.mesh = CraftModelScript.pod_hull()
+	if sim != null and sim.P.vehicle == CraftModelScript.PilotCraft.SHRIKE:
+		CraftModelScript.Shrike.dress_pod(hull)
 	hull.position = Vector3(0, CraftModelScript.POD_FRAME_UP, 0)
 	shell.add_child(hull)
 	for s in [-1.0, 1.0]:   # where the cables hook (the hull carries the eyes themselves)
@@ -544,6 +546,8 @@ func _build_cockpit() -> void:
 	interior = CockpitInteriorScript.new()   # floor, frames, consoles, harness, rim light
 	shell.add_child(interior)
 	interior.build()
+	if sim != null and sim.P.vehicle == CraftModelScript.PilotCraft.SHRIKE:
+		CraftModelScript.Shrike.dress_coaming(interior.get_node("SegmentedCoaming"), CockpitInteriorScript.hd_parts and ResourceLoader.exists(CockpitInteriorScript.HD_PARTS.Coaming))
 	mode_switch = ModeSwitchScript.new()   # SPEEDCRAFT / STARFIGHTER, on the front of the right console
 	shell.add_child(mode_switch)
 	mode_switch.transform = ModeSwitchScript.mount()

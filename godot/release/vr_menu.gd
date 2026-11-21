@@ -19,6 +19,7 @@ var description: Label
 var start_button: Button
 var collision_checkbox: CheckBox
 var partner_checkbox: CheckBox
+var craft_selector := preload("res://release/craft_selector.gd").new()
 var start_index := 0
 var _confirm_down := true
 var _stick_down := true
@@ -83,7 +84,7 @@ func _build_screen() -> void:
 		margin.add_theme_constant_override("margin_" + edge, 32)
 	screen.add_child(margin)
 	var layout := VBoxContainer.new()
-	layout.add_theme_constant_override("separation", 12)
+	layout.add_theme_constant_override("separation", 8)
 	margin.add_child(layout)
 	layout.add_child(UI.label("PHAETHON", 56))
 	layout.add_child(UI.label("Two engines. One cockpit. We know it’s a little fucky.", 24, UI.MUTED))
@@ -106,7 +107,7 @@ func _build_screen() -> void:
 		buttons.append(button)
 	var details := VBoxContainer.new()
 	details.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	details.add_theme_constant_override("separation", 12)
+	details.add_theme_constant_override("separation", 7)
 	columns.add_child(details)
 	title = UI.label("", 32, UI.AMBER)
 	details.add_child(title)
@@ -122,6 +123,9 @@ func _build_screen() -> void:
 	partner_checkbox.custom_minimum_size.y = 56
 	details.add_child(partner_checkbox)
 	buttons.append(partner_checkbox)
+	details.add_child(craft_selector)
+	craft_selector.build(true)
+	buttons.append(craft_selector.button)
 	var spacer := Control.new()
 	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	details.add_child(spacer)
@@ -169,6 +173,7 @@ func start_selected() -> void:
 		return
 	launching = true
 	var overrides := UI.course_overrides(selected_course)
+	View.vehicle_override = craft_selector.selected
 	View.track_override = overrides[0]
 	View.job_override = overrides[1]
 	View.spot_override = overrides[2]

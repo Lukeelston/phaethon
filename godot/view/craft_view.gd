@@ -95,6 +95,7 @@ var hold_brake := [0.0, 0.0]
 var cam_offset := Vector3.ZERO   # --cam: debug close-up (forward, left, up)
 var handling_ask := ""             # the live handling switch: "speed" / "starfighter" (VR: the console
                                    # toggle or Y-hold; keyboard: M), sent with every step
+static var vehicle_override := ""
 static var track_override := ""    # an in-game track switch (VR: hold the menu button) wins over --track;
                                    # static, so it survives the scene reload that does the switch
 static var job_override := ""      # the job to fly ("emergency": the emergency run; "none": no job), wins over --job; static too
@@ -151,6 +152,7 @@ var _menu_was_muted := false
 
 func _ready() -> void:
 	var opts := {"obstacleCollisions": GameSettings.obstacle_collisions_enabled()}
+	opts["vehicle"] = CraftSimScript.PilotCraft.resolve(OS.get_cmdline_user_args(), vehicle_override)
 	var seek := 0.0
 	var mute := false
 	for a in OS.get_cmdline_user_args():
@@ -211,9 +213,11 @@ func _ready() -> void:
 			opts["startRoad"] = spot.x
 			opts["startSample"] = spot.y
 	partner_on = GameSettings.resolve_driving_partner(OS.get_cmdline_user_args())
-	if "--pod=heavy" in OS.get_cmdline_user_args():   # the heavy pod (Luke: "giving the pod some weight"): 1,500 kg, not
-		opts["podMass"] = 1500.0                       # 500, with thrust and drag scaled to the total mass so the
-		opts["forceScale"] = 3900.0 / 2900.0          # speed and acceleration are as before
+	if "--pod=heavy" in OS.get_cmdline_user_args():   # preserve each chassis's thrust-to-weight ratio with the heavy pod
+		var chassis := CraftSimScript.PilotCraft.tuning(opts.vehicle)
+		var engines := 2.0 * float(chassis.get("engineMass", CraftSimScript.DEFAULTS.engineMass))
+		opts["podMass"] = 1500.0
+		opts["forceScale"] = (engines + 1500.0) / (engines + float(chassis.get("podMass", CraftSimScript.DEFAULTS.podMass)))
 	sim = CraftSimScript.new(opts)
 	if sim.kind == "network":
 		for k in sim.net.found:
