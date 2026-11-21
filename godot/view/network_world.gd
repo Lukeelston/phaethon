@@ -274,6 +274,7 @@ func build(s, v) -> void:
 	_asph = preload("res://art/road/asphalt.tres").duplicate() as ShaderMaterial
 	_asph.set_shader_parameter("period", ASPHALT_PERIOD)
 	_asph.set_shader_parameter("base", Vector3(0.21, 0.205, 0.205))
+	_asph.set_shader_parameter("roof_marks", 1.0)   # its rows under a roof are marked (_prepare_traffic_paint): no snow lies there
 	_asph.set_shader_parameter("spec", 0.3)   # realism spike: asphalt's real 4 % reflectance, so it sheens toward the suns
 	_asph.set_shader_parameter("lane_half", 60.0)
 	for surface in [SAND, RED_GRAVEL]:
@@ -406,6 +407,17 @@ func _prepare_traffic_paint() -> void:
 			for span in exclusions:
 				for i in range(maxi(0, span[0]), mini(R.N - 1, span[1]) + 1):
 					rows[i] = 0
+		# Under a roof no snow lies (asphalt.gdshader reads class 3's colour). The rows at a hall's two
+		# mouths stay class 0, so a roofed row only ever meets an unpainted one and the snow thins out
+		# over the first 24 m inside.
+		var roofs := []
+		if halls.has(r):
+			roofs.append(halls[r])
+		if r == int(CraftSim.NET_PRESSURE[0]):
+			roofs.append([CraftSim.NET_PRESSURE[1], CraftSim.NET_PRESSURE[2]])
+		for span in roofs:
+			for i in range(maxi(0, int(span[0]) + 1), mini(R.N, int(span[1]))):
+				rows[i] = 3
 		_traffic_paint.append(rows)
 
 
@@ -634,6 +646,17 @@ func _deck_up(r: int, R: CraftSim.TrackPath, i: int) -> Vector3:
 		return Vector3.UP
 	var lean := grade * smoothstep(STEEP_FROM, STEEP_FULL, absf(grade))
 	return Vector3(-lean * R.tx[i], 1.0, lean * R.ty[i]).normalized()
+
+
+## How far under a roof sample f of road r is: 0 in the open, 1 well inside a city's hall or the
+## Aurora tube, rising over the first few samples in from a mouth (the weather stops there: outlook.gd).
+func roofed(r: int, f: float) -> float:
+	var under := 0.0
+	if halls.has(r):
+		under = smoothstep(0.0, 3.0, minf(f - float(halls[r][0]), float(halls[r][1]) - f))
+	if r == int(CraftSim.NET_PRESSURE[0]):
+		under = maxf(under, smoothstep(0.0, 3.0, minf(f - float(CraftSim.NET_PRESSURE[1]), float(CraftSim.NET_PRESSURE[2]) - f)))
+	return under
 
 
 ## A point `off` m left of road r's sample i, `h` up, against the chunk origin (ox, oy).
@@ -2656,11 +2679,11 @@ func _section(w: float, joined := false) -> Dictionary:
 		var o1 := maxf(from, to)
 		lines.append([o0, o1, CraftSim.net_edge(w, o0).x, CraftSim.net_edge(w, o1).x, EDGE_FOOT])
 	var traffic_rows := []
-	for traffic_class in 3:
+	for traffic_class in 4:      # (3: under a roof. No paint, as 0, and blue with its alpha at one says so)
 		var colors := PackedColorArray()
 		colors.resize(o.size())
 		var visible: bool = (traffic_class == 1 and w >= 200.0) or (traffic_class == 2 and w >= 300.0)
-		colors.fill(Color(0.0, 0.0, float(traffic_class == 2), 0.0 if visible else 1.0))
+		colors.fill(Color(0.0, 0.0, float(traffic_class >= 2), 0.0 if visible else 1.0))
 		traffic_rows.append(colors)
 	var out := {"o": o, "h": h, "c": c, "s": s, "te": CraftSim.net_edge(w, hw).x, "lines": lines, "shoulder_rows": shoulder_rows, "traffic_rows": traffic_rows}
 	_sec_cache[key] = out

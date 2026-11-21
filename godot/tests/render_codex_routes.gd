@@ -70,6 +70,12 @@ const VIEWS := [
 	["m26-face-gantry-from-the-side", "SHelios", 6943, 0.0, [-90.0, 0.0], Vector3(-230.0, 30.0, 0.0), 1300.0],
 	["m27-far-face-gantry-ahead", "SHelios", 7538, 0.0, [0.0, -2.0], Vector3(0.0, 2.0, 0.0), 1300.0],
 	["m28-face-rocks-beside-it", "SHelios", 7010, 0.0, [-90.0, -8.0], Vector3(130.0, 20.0, 0.0), 1300.0],
+	# under a roof (--weather=snow or rain: push 26): a city's hall and its mouth, the terminal's shelter, the Aurora tube, and the open road for comparison
+	["n1-in-a-hall", "Glacier", 750, 0.0, [0.0, 2.0], Vector3.ZERO],
+	["n2-at-a-hall-mouth", "Glacier", 664, 0.0, [0.0, 2.0], Vector3.ZERO],
+	["n3-in-the-shelter", "Eridanus", 750, 0.0, [0.0, 2.0], Vector3.ZERO],
+	["n4-in-the-tube", "SAurora", 20000, 0.0, [0.0, 4.0], Vector3.ZERO],
+	["n5-in-the-open", "Glacier", 400, 0.0, [0.0, 2.0], Vector3.ZERO],
 ]
 
 

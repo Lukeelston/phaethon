@@ -74,6 +74,7 @@ const AIR_H := 3500.0            # m: the air's scale height (view/air.gdshaderi
 static var _haze_gain := Color(1, 1, 1)
 static var _night := 0.0
 static var _travel := 0.0
+static var cover := 0.0          # how far under a roof the craft is, eased: 1 and nothing falls (a hall, the Aurora tube)
 static var shader_globals := {}   # what the shaders' project-wide inputs were last set to (tests read this: the server gives nothing back without a renderer)
 
 
@@ -398,6 +399,12 @@ static func tick(view, delta: float) -> void:
 	_travel = fposmod(_travel + (speed + 14.0) * delta, RAIN_BOX.z)
 	rain.global_transform = (view.cam as Camera3D).global_transform
 	var m := rain.material_override as ShaderMaterial
+	# under a roof nothing falls: gone within three samples of a hall's mouth, back as soon outside
+	var under := 0.0
+	if view.network_world != null and not p.off_road:
+		under = view.network_world.roofed(int(p.path), view.sim._road_f(p))
+	cover = under if delta <= 0.0 else lerpf(cover, under, 1.0 - exp(-delta * 12.0))
+	m.set_shader_parameter("cover", cover)
 	m.set_shader_parameter("travel", _travel)
 	m.set_shader_parameter("speed", speed)
 	m.set_shader_parameter("fall", fposmod(Time.get_ticks_msec() / 1000.0 * (1.7 if _snowing else 9.0), RAIN_BOX.y))      # (flakes drift down; rain falls)
