@@ -9,6 +9,8 @@
 ##   var sw := ModeSwitch.new(); shell.add_child(sw); sw.transform = ModeSwitch.mount(); sw.build()
 ##   var flip := sw.poke(controller, delta)       per hand per frame: "speed", "starfighter" or ""
 ##   sw.show_state(down, blend, pending)          each frame
+## The same panel serves any two-way choice: set `legends`, `colours` and `throws` before build()
+## (the slide's switch on the left console is one: vr_cockpit.gd).
 class_name ModeSwitch
 extends Node3D
 
@@ -23,7 +25,10 @@ const THROW_V := 0.3                          # m/s: how fast a push has to be (
 const TIP := Vector3(0.0, -0.01, -0.07)       # the controller's tip, in its own frame
 const COOLDOWN := 1.0                         # s between throws (Luke: "a 1 second cool down between flips")
 
-var down := false          # switch position: true = STARFIGHTER
+var down := false          # switch position: true = STARFIGHTER (the lower legend)
+var legends: Array = ["SPEED", "STAR"]              # the lamps' legends: up, down
+var colours: Array = [SPEED_COL, SF_COL]            # ... and their colours
+var throws: Array = ["speed", "starfighter"]        # what poke() answers for a throw up, and down
 var lever: Node3D
 var lamp_sp: StandardMaterial3D
 var lamp_sf: StandardMaterial3D
@@ -34,8 +39,8 @@ var _cool := 0.0
 
 ## Where the panel sits in the cockpit rig (floor origin, forward -Z): on the front of the right
 ## console, beside the right lever, angled up at the pilot.
-static func mount() -> Transform3D:
-	return Transform3D(Basis(Vector3.RIGHT, -0.75), Vector3(0.585, 0.43, 0.08))
+static func mount(side := 1.0) -> Transform3D:
+	return Transform3D(Basis(Vector3.RIGHT, -0.75), Vector3(0.585 * side, 0.43, 0.08))   # (side -1: the same place on the left console)
 
 
 func build() -> void:
@@ -85,8 +90,8 @@ func build() -> void:
 		bat.mesh = CockpitInterior._hd_mesh(HD_SWITCH, "Bat")
 		bat.material_override = null
 	lever.add_child(bat)
-	lamp_sp = _lamp(Vector3(0, 0.05, 0.004), "SPEED")
-	lamp_sf = _lamp(Vector3(0, -0.05, 0.004), "STAR")
+	lamp_sp = _lamp(Vector3(0, 0.05, 0.004), str(legends[0]))
+	lamp_sf = _lamp(Vector3(0, -0.05, 0.004), str(legends[1]))
 	show_state(false, 0.0, false)
 
 
@@ -128,11 +133,11 @@ func poke(ctrl: Node3D, delta: float) -> String:
 	if vy < -THROW_V and not down:
 		down = true
 		_cool = COOLDOWN
-		return "starfighter"
+		return str(throws[1])
 	if vy > THROW_V and down:
 		down = false
 		_cool = COOLDOWN
-		return "speed"
+		return str(throws[0])
 	return ""
 
 
@@ -145,5 +150,5 @@ func show_state(is_down: bool, blend: float, pending: bool) -> void:
 		lever.rotation.x = swing
 	var blink := 0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.012)
 	if lamp_sp:
-		lamp_sp.albedo_color = SPEED_COL * (0.25 + 2.0 * (1.0 - blend))
-		lamp_sf.albedo_color = SF_COL * (0.25 + 2.0 * blend) if not pending else SF_COL * (0.25 + 1.8 * blink)
+		lamp_sp.albedo_color = (colours[0] as Color) * (0.25 + 2.0 * (1.0 - blend))
+		lamp_sf.albedo_color = (colours[1] as Color) * (0.25 + 2.0 * blend) if not pending else (colours[1] as Color) * (0.25 + 1.8 * blink)

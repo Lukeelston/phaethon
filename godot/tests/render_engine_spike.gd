@@ -74,6 +74,13 @@ const VIEWS := [
 	["c6-nose-from-outside", 1.0, false, 0.0, ["pod", Vector3(1.6, 0.7, -2.9), Vector3(0.0, -0.1, -0.9)]],
 	["c7-pod-from-the-side", 1.0, false, 0.0, ["pod", Vector3(3.6, 0.6, -0.9), Vector3(0.0, -0.1, -0.5)]],
 	["c8-footwell-from-the-seat", 1.0, false, 0.0, ["pod", Vector3(0.0, -0.05, 0.35), Vector3(0.0, -0.35, -1.5)]],
+	# the slide in an air-brake turn as it is flown (one grip a third in, both levers up; --grip for
+	# the switch at GRIP: no slide), and its switch on the left console
+	["s1-seat-squeeze-right", 4.0, true, 1.2, "seat", 96.0, -8.0],
+	["s2-seat-squeeze-left", 4.0, true, 1.2, "seat", 96.0, -8.0],
+	["s3-slide-switch-from-the-seat", 1.0, false, 0.0, ["pod", Vector3(0.0, 0.12, 0.6), Vector3(-0.585, -0.17, 0.08)]],
+	["s4-slide-switch-close", 1.0, false, 0.0, ["pod", Vector3(-0.3, 0.08, 0.42), Vector3(-0.585, -0.17, 0.08)]],
+	["s5-both-switches-from-the-seat", 1.0, false, 0.0, "seat", 96.0, -30.0],
 ]
 const MESSAGE := "JUMP LIP  2 MI / 4.0 S
 ASCENT J0 > N2 UPPER
@@ -93,7 +100,9 @@ func _run() -> void:
 		return
 	if "--open" in OS.get_cmdline_user_args():
 		preload("res://view/canopy.gd").roofed = false
-	Seat._nose_loaded = true       # (the pilot's saved choice stays out of the pictures)
+	Seat._nose_loaded = true       # (the pilot's saved choices stay out of the pictures)
+	Seat._slide_loaded = true
+	Seat.slide_feel = "--grip" not in OS.get_cmdline_user_args()
 	if "--closed-nose" in OS.get_cmdline_user_args():
 		preload("res://view/craft_model.gd").nose_closed = true
 	if "--no-reflection" in OS.get_cmdline_user_args():
@@ -141,7 +150,12 @@ func _run() -> void:
 		for frame in total:
 			var turning: bool = frame >= total - turn
 			seat.inp = {"thrL": 1.0, "thrR": 1.0, "brkL": 0.0, "brkR": 0.0, "repair": false, "reignite": true, "burner": bool(view[2])}
-			if turning and str(view[0]).contains("hard-left"):
+			if turning and str(view[0]).contains("squeeze"):      # as the eighth flight's log has an air-brake turn
+				var side := "L" if str(view[0]).contains("left") else "R"
+				seat.inp["thr" + side] = 0.74
+				seat.inp["brk" + side] = 0.16
+				seat.inp["brk" + ("R" if side == "L" else "L")] = 0.10
+			elif turning and str(view[0]).contains("hard-left"):
 				seat.inp.thrL = 0.25
 				seat.inp.brkL = 1.0
 			elif turning and float(view[3]) > 0.0:    # hard right: the right engine eased and its brake out
@@ -200,7 +214,7 @@ func _run() -> void:
 			quit(1)
 			return
 		var p = seat.sim.pod
-		print("ENGINE_SHOT %s  %.0f mph  mode %s  thrust %.2f %.2f  vane %.1f deg" % [view[0], sqrt(p.vx * p.vx + p.vy * p.vy) * 2.23694, seat.sim.mode,
-			seat.sim.eL.thrust, seat.sim.eR.thrust, rad_to_deg(seat.craft.vane_angle)])
+		print("ENGINE_SHOT %s  %.0f mph  mode %s  thrust %.2f %.2f  vane %.1f deg  slide %.1f deg at %.0f g" % [view[0], sqrt(p.vx * p.vx + p.vy * p.vy) * 2.23694, seat.sim.mode,
+			seat.sim.eL.thrust, seat.sim.eR.thrust, rad_to_deg(seat.craft.vane_angle), rad_to_deg(seat._slide), seat._slide_load])
 	seat.free()
 	quit()

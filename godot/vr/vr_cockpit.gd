@@ -58,23 +58,31 @@ const COCKPIT_ROLL_ACCEL := deg_to_rad(90.0)
 var _comfort_roll := 0.0
 var _comfort_roll_rate := 0.0
 # The rear stepping out, made visible (Luke: "is the vehicle kicking the back out at all when turning? ...
-# I don't feel it in practice. not full fledged 'drifting', but a little slide"). The sim does let the
-# pod settle up to three degrees outside a loaded turn (craft_sim.gd's tow_swing, at its full three
-# degrees in any hard turn), but from the seat that is the engines three degrees across the screen,
-# eased in over a quarter second, and nothing else. This is that same slide shown from where you sit:
-# the cockpit yaws a few degrees further into the turn about the nose hitch, so the seat swings
-# outward, on a lightly damped spring: it steps out, overshoots a touch, and catches as the turn lets
-# go. Looks and feel only: the sim's pod, its heading and its walls are where they were.
-const TOW_SWING_MAX := deg_to_rad(3.0)    # the sim's own limit (craft_sim.gd)
-const SLIDE_MAX := deg_to_rad(6.0)        # the cockpit's extra yaw at the sim's full swing
-const SLIDE_ARM := 2.2                    # the pivot this far ahead of your head, m: the seat swings 0.23 m out at full slide
+# I don't feel it in practice. not full fledged 'drifting', but a little slide"). In a turn the
+# cockpit yaws a few degrees further into it about the nose hitch, so the seat swings outward, on a
+# lightly damped spring: it steps out, overshoots a touch, and catches as the turn lets go. Looks and
+# feel only: the sim's pod, its heading and its walls are where they were.
+# What sets it off is the cornering load itself. It first followed the sim's own swing (craft_sim.gd's
+# tow_swing), and Luke flew it and "didn't feel the slide": that swing waits for the levers to be
+# split by 0.15 and is full at 0.65, and at speed he steers with the air brakes alone, a split of
+# 0.03 half the time and under 0.26 for 95 % of a flight, so it never came to a fifth of a degree.
+# Those small splits are still real turns: the load goes with the split whatever the speed (0.03:
+# 4 g, 0.08: 10 g, 0.17: 21 g, 0.26: 33 g; tests/probe_slide.gd --small). So: nothing while a lane
+# is being held, a degree in a gentle turn, most of it by 20 g, all of it by 24.
+const SLIDE_MAX := deg_to_rad(7.0)        # the cockpit's extra yaw in a hard turn
+const SLIDE_LOAD := Vector2(5.0, 24.0)    # the cornering load it steps out over, g: none at the first, all at the second
+const SLIDE_LOAD_T := 0.18                # s: the load is read through this much smoothing (the pair's own quick wag is not a turn)
+const SLIDE_ARM := 2.2                    # the pivot this far ahead of your head, m: the seat swings 0.27 m out at full slide
 const SLIDE_HZ := 1.6                     # the spring: out in about a fifth of a second ...
 const SLIDE_ZETA := 0.5                   # ... lightly damped: one overshoot, then still
 const SLIDE_RATE := deg_to_rad(45.0)      # and never faster than this
 const SLIDE_SCRUB := 0.22                 # the scrub in your hands while it moves, at most (controller amplitude)
-static var slide_feel := true             # (false: the cockpit keeps the sim's heading exactly)
+static var slide_feel := true             # the SLIDE / GRIP switch on the left console (false: the cockpit keeps the sim's heading exactly)
+static var _slide_loaded := false         # (its saved setting is read once a run, as the camera's)
+var slide_switch                          # vr/mode_switch.gd again: SLIDE up, GRIP down
 var _slide := 0.0
 var _slide_rate := 0.0
+var _slide_load := 0.0                    # the cornering load, smoothed, g (+ a left turn)
 var _buzz_hold := {}   # controller -> seconds an event buzz still owns it (the shudder waits)
 const SHAKE_M := 0.004   # cockpit shake per unit of air-brake shudder, metres
 const GRAB_SHAKE_M := 0.007   # the gear's grab: the cockpit's jolt, metres (fore and aft, a little up)
@@ -140,6 +148,9 @@ func _ready() -> void:
 	if not _nose_loaded and prefs.get("nose", "open") == "closed":   # (once a run: after that the menu's own choice stands)
 		set_nose_closed(true)
 	_nose_loaded = true
+	if not _slide_loaded and prefs.has("slide"):
+		slide_feel = prefs.slide != "off"
+	_slide_loaded = true
 	var forced := false
 	for a in OS.get_cmdline_user_args():
 		forced = forced or a.begins_with("--handling=")
@@ -179,7 +190,7 @@ func _save_prefs() -> void:
 	var f := FileAccess.open(PREFS, FileAccess.WRITE)
 	if f:
 		f.store_string(JSON.stringify({"scheme": quest.scheme, "handling": handling_ask if handling_ask != "" else sim.P.handling, "camera": camera,
-			"nose": "closed" if CraftModelScript.nose_closed else "open"}))
+			"nose": "closed" if CraftModelScript.nose_closed else "open", "slide": "on" if slide_feel else "off"}))
 
 
 ## Thumbstick click (either stick): sit where you are. Recentres the view AND the height, so
@@ -537,6 +548,16 @@ func _build_cockpit() -> void:
 	shell.add_child(mode_switch)
 	mode_switch.transform = ModeSwitchScript.mount()
 	mode_switch.build()
+	# The slide's own switch (Luke: "can you make the slide a physical thing in the cockpit?"): the same
+	# guarded toggle, on the front of the left console. Up is SLIDE, down is GRIP (no slide).
+	slide_switch = ModeSwitchScript.new()
+	slide_switch.name = "SlideSwitch"
+	slide_switch.legends = ["SLIDE", "GRIP"]
+	slide_switch.colours = [Color(1.0, 0.62, 0.15), Color(0.75, 0.9, 1.0)]
+	slide_switch.throws = ["slide", "grip"]
+	shell.add_child(slide_switch)
+	slide_switch.transform = ModeSwitchScript.mount(-1.0)
+	slide_switch.build()
 	canopy = CanopyScript.build()
 	canopy.position = Vector3(0, CraftModelScript.POD_FRAME_UP, 0)
 	shell.add_child(canopy)
@@ -757,6 +778,13 @@ func _read_input(delta: float) -> void:
 				_save_prefs()
 				_buzz(hand, 0.9, 0.06)
 				print("HANDLING: switch to ", flip)
+	# the SLIDE switch, the same way
+	if slide_switch and hands_live and not _await_neutral_controls:
+		for hand in [l, r]:
+			var thrown: String = slide_switch.poke(hand, delta)
+			if thrown != "":
+				set_slide(thrown == "slide")
+				_buzz(hand, 0.9, 0.06)
 	if _pressed_once("recenter", _button(l, "primary_click") or _button(r, "primary_click")):
 		recenter()
 	_diag(delta, l, r, p)
@@ -952,10 +980,26 @@ func _ease_cockpit_roll(raw_roll: float, delta: float) -> float:
 	return _comfort_roll
 
 
-## The slide's angle now, radians, + = the nose further left (a left turn): toward the sim's swing
-## on a spring (see SLIDE_MAX).
+## The cornering load now, g, + in a left turn: the engines' turn rate times the speed along their
+## heading (the sim's own measure of a loaded turn).
+func turn_load() -> float:
+	var along: float = sim.pod.vx * cos(sim.pair_th) + sim.pod.vy * sin(sim.pair_th)
+	return (sim.eL.w + sim.eR.w) * 0.5 * maxf(0.0, along) / 9.81
+
+
+## Turn the slide on or off (the SLIDE / GRIP switch), and remember it.
+func set_slide(on: bool) -> void:
+	slide_feel = on
+	_save_prefs()
+	print("SLIDE: ", "on" if on else "off")
+
+
+## The slide's angle now, radians, + = the nose further left (a left turn): toward what the
+## cornering load asks for, on a spring (see SLIDE_MAX).
 func _ease_slide(delta: float) -> float:
-	var target := clampf(sim.tow_swing / TOW_SWING_MAX, -1.0, 1.0) * SLIDE_MAX if slide_feel else 0.0
+	_slide_load += (turn_load() - _slide_load) * (1.0 - exp(-clampf(delta, 0.0, 0.05) / SLIDE_LOAD_T))
+	var asked := signf(_slide_load) * smoothstep(SLIDE_LOAD.x, SLIDE_LOAD.y, absf(_slide_load))
+	var target := asked * SLIDE_MAX if slide_feel else 0.0
 	var w := TAU * SLIDE_HZ
 	var remaining := clampf(delta, 0.0, 0.05)
 	while remaining > 0.000001:
@@ -1028,6 +1072,8 @@ func _process(delta: float) -> void:
 	CanopyScript.update(canopy, sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy), sim.hblend, sim.mode, delta)
 	if mode_switch:
 		mode_switch.show_state(handling_ask == "starfighter", sim.hblend, handling_ask == "starfighter" and sim.hblend == 0.0)
+	if slide_switch:
+		slide_switch.show_state(not slide_feel, 0.0 if slide_feel else 1.0, false)
 	# Crash: fade to black, respawn happens in the dark, fade back up.
 	var target := 1.0 if sim.crash_t > 0.0 else 0.0
 	fade_v = move_toward(fade_v, target, delta * 4.0)

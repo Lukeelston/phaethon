@@ -8,9 +8,14 @@ const Model := preload("res://sim/craft_sim.gd")
 const DT := 1.0 / 480.0
 
 func _initialize() -> void:
+	# --small: the lever differences a pilot actually steers with at speed (the eighth flight's:
+	# median 0.03, three quarters under 0.08, nine tenths under 0.17, 95 % under 0.26), at its speeds.
+	var small := "--small" in OS.get_cmdline_user_args()
+	var speeds: Array = [2000.0, 3500.0, 5500.0] if small else [600.0, 1200.0, 2000.0, 3000.0]
+	var turns: Array = [["lever eased by 0.03", 1.0 - 0.03 / 0.8, 0.0], ["lever eased by 0.08", 1.0 - 0.08 / 0.8, 0.0], ["lever eased by 0.17", 1.0 - 0.17 / 0.8, 0.0], ["lever eased by 0.26", 1.0 - 0.26 / 0.8, 0.0], ["lever eased by 0.40", 0.5, 0.0]] if small else [["ease a lever to 60%", 0.6, 0.0], ["ease a lever to 25%", 0.25, 0.0], ["half brake", 1.0, 0.5], ["full brake", 1.0, 1.0], ["lever 25% + full brake", 0.25, 1.0]]
 	print("mph    turn                 peak g   swing set  pod out   nose in   slip    yaw rate")
-	for mph: float in [600.0, 1200.0, 2000.0, 3000.0]:
-		for turn in [["ease a lever to 60%", 0.6, 0.0], ["ease a lever to 25%", 0.25, 0.0], ["half brake", 1.0, 0.5], ["full brake", 1.0, 1.0], ["lever 25% + full brake", 0.25, 1.0]]:
+	for mph: float in speeds:
+		for turn in turns:
 			var sim := Model.new({"track": "range", "startY": -3000.0})
 			for body in sim.bodies:
 				body.vx = mph / 2.23694
