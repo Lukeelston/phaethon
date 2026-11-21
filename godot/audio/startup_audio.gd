@@ -1,29 +1,47 @@
 ## The start-up's own sounds (vr/startup_sequence.gd): the switches, the guard, the battery bus
-## coming up, the self-test's chime, the binder striking, each engine's starter, the parking brake's
-## clamp, and the blip of a refused control. All of them are worked out here from sines and noise,
-## once a run (about a quarter of a second, in the dark of the first load); none is a recording.
-## The engines' own voices (turning over, catching, idling) are EngineAudio's, told by its `off`
-## and `crank`.
-## Unverified by ear: their lengths, levels and pitches are measured (tests/test_startup_audio.gd),
-## and that is all that can be said of them until a pilot has heard them.
-##   add_child(a); a.setup()        once, inside the tree
-##   a.play("click")                a sound by name; play("starter", 1) for the right engine's
+## coming up behind its contactor, the self-test's chime, the fuel pumps priming and the binder
+## striking, each engine's starter and the moment it catches, the parking brake's clamp and its air,
+## and the knock of a refused control.
+## Every one is cut from a field recording (Luke, after the eleventh flight: the synthesised ones
+## "sound like an 80's racing arcade box. Use real free assets if you must"): a metal switch, a
+## hinged lid, a sprung button, a large relay, a server's fans, a motorcycle's fuel pump, a Tesla
+## coil, a car's starter turning an engine that will not fire, a five-litre V8 lighting, a breaker
+## and an air valve. tools/startup_audio_bake.py trims, layers and levels them into res://audio/startup;
+## its CREDITS.md lists each source (all CC0).
+## The engines' own voices (turning over, catching, idling) are still EngineAudio's, told by its
+## `off` and `crank`.
+## A switch's sound comes from its pod when the panel is fitted (a 3D player there, panned by where
+## the head is turned); the rest are the whole cockpit's, and a starter and a catch are their engine's.
+## Unverified by ear: lengths, peaks and loudness are measured (each new sound was set as loud as
+## the one it replaced), and that is all that can be said until a pilot has heard them.
+##   add_child(a); a.setup(overhead.pods)      once, inside the tree ({} or nothing: no pods)
+##   a.play("toggle_on")                        a sound by name; play("starter", 1) for the right engine's
+##   a.hum(power, running, delta)               every frame: the fans, heard while the engines are dark
 class_name StartupAudio
 extends Node
 
-const Sequence := preload("res://vr/startup_sequence.gd")
-const RATE := 32000
-const NAMES := ["click", "clack", "button", "power", "down", "chime", "arc", "starter", "clamp", "release", "refuse"]
-const LEVEL_DB := {"click": -9.0, "clack": -8.0, "button": -7.0, "power": -10.0, "down": -12.0, "chime": -14.0,
-	"arc": -8.0, "starter": -9.0, "clamp": -6.0, "release": -6.0, "refuse": -12.0}
+const DIR := "res://audio/startup/"
+const RATE := 48000
+const NAMES := ["toggle_on", "toggle_off", "paddle_on", "paddle_off", "guard_up", "guard_down", "button", "power", "down",
+	"avionics", "chime", "pump", "arc", "starter", "catch", "clamp", "release", "refuse"]
 const POLYPHONY := 3
-static var _bank := {}      # name -> AudioStreamWAV, worked out once a run
+## The pod a control's sound comes from (OverheadPanel.pods' keys: -1 left, 1 right).
+const AT_POD := {"toggle_on": -1.0, "toggle_off": -1.0, "guard_up": -1.0, "guard_down": -1.0,
+	"button": 1.0, "paddle_on": 1.0, "paddle_off": 1.0}
+const BY_ENGINE := ["starter", "catch"]     # one player an engine, panned with it
+const LOOP := "avionics"
+const VARY := 1.03                          # a switch's every throw up to 3% higher or lower than the last
+const HUM_TAU := 1.2                        # s: the fans' loop coming in under the power-up, and going
+static var _bank := {}      # name -> Array[AudioStreamWAV]: its takes
+static var _levels := {}    # name -> dB
 
-var players := {}           # name -> [AudioStreamPlayer]: centre, or [left, right] for the starters
+var players := {}           # name -> [player]: one, or [left, right] for an engine's
 var played: Array[String] = []   # what has been asked for, in order (the tests read it)
+var hum_gain := 0.0         # the fans' loop, 0..1 (the tests read it)
+var _hum: AudioStreamPlayer
 
 
-func setup() -> void:
+func setup(pods := {}) -> void:
 	bank()
 	var bus := "Cockpit"
 	if AudioServer.get_bus_index(bus) < 0:
@@ -31,19 +49,56 @@ func setup() -> void:
 		AudioServer.add_bus(i)
 		AudioServer.set_bus_name(i, bus)
 		AudioServer.set_bus_send(i, "Master")
-	for name: String in NAMES:
+	for sound: String in NAMES:
+		var takes: Array = _bank[sound]
+		if sound == LOOP:
+			_hum = AudioStreamPlayer.new()
+			_hum.stream = takes[0]
+			_hum.volume_db = -80.0
+			_hum.bus = bus
+			add_child(_hum)
+			players[sound] = [_hum]
+			continue
 		var list := []
-		for k in (2 if name == "starter" else 1):
-			var p := AudioStreamPlayer.new()
-			p.stream = _bank[name]
-			p.volume_db = LEVEL_DB[name]
-			p.max_polyphony = POLYPHONY
-			# a starter is its engine's: panned with it (the pops' bus carries the pan and no low-pass)
-			var side := "EngineL_pops" if k == 0 else "EngineR_pops"
-			p.bus = side if name == "starter" and AudioServer.get_bus_index(side) >= 0 else bus
-			add_child(p)
+		if sound in BY_ENGINE:
+			for k in 2:
+				var p := AudioStreamPlayer.new()
+				p.stream = takes[mini(k, takes.size() - 1)]
+				# (one take for both: the right engine's a little lower, as its starter is)
+				p.pitch_scale = 0.96 if k == 1 and takes.size() == 1 else 1.0
+				# the pops' bus carries the engine's pan and no low-pass
+				var side := "EngineL_pops" if k == 0 else "EngineR_pops"
+				p.bus = side if AudioServer.get_bus_index(side) >= 0 else bus
+				list.append(p)
+				add_child(p)
+		elif AT_POD.has(sound) and pods.has(AT_POD[sound]):
+			var p := AudioStreamPlayer3D.new()
+			p.stream = _varied(takes)
+			p.attenuation_model = AudioStreamPlayer3D.ATTENUATION_DISABLED   # 0.4 m away: placed, not faded
+			p.attenuation_filter_cutoff_hz = 20500.0                        # ... nor dulled
+			p.bus = bus
 			list.append(p)
-		players[name] = list
+			(pods[AT_POD[sound]] as Node3D).add_child(p)
+		else:
+			var p := AudioStreamPlayer.new()
+			p.stream = _varied(takes) if AT_POD.has(sound) else takes[0]
+			p.bus = bus
+			list.append(p)
+			add_child(p)
+		for p in list:
+			p.volume_db = _levels[sound]
+			p.max_polyphony = POLYPHONY
+		players[sound] = list
+
+
+## A switch's takes, played in turn at a slightly different pitch each time.
+static func _varied(takes: Array) -> AudioStreamRandomizer:
+	var r := AudioStreamRandomizer.new()
+	r.playback_mode = AudioStreamRandomizer.PLAYBACK_RANDOM_NO_REPEATS
+	r.random_pitch = VARY
+	for w: AudioStreamWAV in takes:
+		r.add_stream(-1, w)
+	return r
 
 
 func play(sound: String, side := 0) -> void:
@@ -51,167 +106,53 @@ func play(sound: String, side := 0) -> void:
 	if not players.has(sound):
 		return
 	var list: Array = players[sound]
-	(list[mini(side, list.size() - 1)] as AudioStreamPlayer).play()
+	var p: Node = list[mini(side, list.size() - 1)]
+	if is_instance_valid(p):
+		p.call("play")
 
 
 ## Stop a sound that is still running (a starter, when the engines are cut mid-start).
 func stop(sound: String) -> void:
-	for p: AudioStreamPlayer in players.get(sound, []):
-		p.stop()
+	for p: Node in players.get(sound, []):
+		if is_instance_valid(p):
+			p.call("stop")
 
 
-## Every sound, worked out on first asking.
+## The fans and gyros left running on the battery: heard with the bus up (power 0..1) and the
+## engines dark, gone under them once they run (running 0..1). Call every frame.
+func hum(power: float, running: float, delta: float) -> void:
+	var want := clampf(power, 0.0, 1.0) * (1.0 - clampf(running, 0.0, 1.0))
+	hum_gain = lerpf(hum_gain, want, 1.0 if delta <= 0.0 else 1.0 - exp(-delta / HUM_TAU))
+	if _hum == null:
+		return
+	if hum_gain < 0.003:
+		if _hum.playing:
+			_hum.stop()
+		return
+	_hum.volume_db = float(_levels[LOOP]) + linear_to_db(hum_gain)
+	if not _hum.playing:
+		_hum.play()
+
+
+## Every sound's takes, loaded on first asking.
 static func bank() -> Dictionary:
 	if _bank.is_empty():
-		var rng := RandomNumberGenerator.new()
-		rng.seed = 20261120
-		for name: String in NAMES:
-			_bank[name] = _wav(_make(name, rng))
+		var manifest: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(DIR + "manifest.json"))
+		for sound: String in NAMES:
+			var spec: Dictionary = manifest.sounds[sound]
+			var takes := []
+			for f: String in spec.files:
+				var w := (ResourceLoader.load(DIR + f) as AudioStreamWAV).duplicate() as AudioStreamWAV
+				w.loop_mode = AudioStreamWAV.LOOP_FORWARD if spec.get("loop", false) else AudioStreamWAV.LOOP_DISABLED
+				if spec.get("loop", false):
+					w.loop_begin = 0
+					w.loop_end = w.data.size() >> 1   # 16-bit mono frames
+				takes.append(w)
+			_bank[sound] = takes
+			_levels[sound] = float(spec.level_db)
 	return _bank
 
 
-static func _wav(samples: PackedFloat32Array) -> AudioStreamWAV:
-	var peak := 0.0001
-	for v in samples:
-		peak = maxf(peak, absf(v))
-	var bytes := PackedByteArray()
-	bytes.resize(samples.size() * 2)
-	var k := 0.7 / peak             # every sound peaks at -3 dB; its player sets its level
-	for i in samples.size():
-		bytes.encode_s16(i * 2, clampi(roundi(samples[i] * k * 32767.0), -32768, 32767))
-	var w := AudioStreamWAV.new()
-	w.format = AudioStreamWAV.FORMAT_16_BITS
-	w.mix_rate = RATE
-	w.stereo = false
-	w.data = bytes
-	return w
-
-
-## A struck thing: a sine at `hz` dying over `tau`, from `at` seconds in.
-static func _ring(out: PackedFloat32Array, at: float, hz: float, tau: float, amp: float) -> void:
-	var from := int(at * RATE)
-	var n := mini(out.size() - from, int(tau * 7.0 * RATE))
-	var w := TAU * hz / RATE
-	var decay := exp(-1.0 / (tau * RATE))
-	var a := amp
-	for i in n:
-		out[from + i] += a * sin(w * i)
-		a *= decay
-
-
-## A burst of noise dying over `tau`, through a one-pole low-pass at `hz`, from `at` seconds in.
-static func _burst(out: PackedFloat32Array, rng: RandomNumberGenerator, at: float, hz: float, tau: float, amp: float) -> void:
-	var from := int(at * RATE)
-	var n := mini(out.size() - from, int(tau * 7.0 * RATE))
-	var k := 1.0 - exp(-TAU * hz / RATE)
-	var decay := exp(-1.0 / (tau * RATE))
-	var a := amp
-	var y := 0.0
-	for i in n:
-		y += (rng.randf_range(-1.0, 1.0) - y) * k
-		out[from + i] += a * y
-		a *= decay
-
-
-static func _blank(seconds: float) -> PackedFloat32Array:
-	var out := PackedFloat32Array()
-	out.resize(int(seconds * RATE))
-	return out
-
-
-static func _make(sound: String, rng: RandomNumberGenerator) -> PackedFloat32Array:
-	match sound:
-		"click":        # a toggle going over centre: the snap, and the panel answering
-			var o := _blank(0.07)
-			_burst(o, rng, 0.0, 6000.0, 0.0022, 1.0)
-			_ring(o, 0.0, 2900.0, 0.004, 0.5)
-			_ring(o, 0.001, 210.0, 0.012, 0.6)
-			return o
-		"clack":        # the guard: a hollow cover, landing twice
-			var o := _blank(0.14)
-			for hit in [[0.0, 1.0], [0.034, 0.45]]:
-				_burst(o, rng, hit[0], 5000.0, 0.003, hit[1])
-				_ring(o, hit[0], 1150.0, 0.011, 0.7 * hit[1])
-				_ring(o, hit[0], 3300.0, 0.005, 0.3 * hit[1])
-			return o
-		"button":       # the start button: a deep thock, then its return
-			var o := _blank(0.16)
-			_ring(o, 0.0, 135.0, 0.03, 1.0)
-			_burst(o, rng, 0.0, 2500.0, 0.004, 0.6)
-			_burst(o, rng, 0.085, 4000.0, 0.003, 0.25)
-			return o
-		"power":        # the battery bus: a contactor, then inverters and gyros winding up
-			var o := _blank(1.5)
-			_ring(o, 0.0, 95.0, 0.04, 1.0)
-			_burst(o, rng, 0.0, 3000.0, 0.005, 0.6)
-			var phase := 0.0
-			var phase2 := 0.0
-			for i in o.size():
-				var t := float(i) / RATE
-				var rise := 1.0 - exp(-t / 0.35)
-				var env := minf(t / 0.05, 1.0) * exp(-maxf(0.0, t - 0.9) / 0.22)
-				phase += TAU * lerpf(180.0, 400.0, rise) / RATE
-				phase2 += TAU * lerpf(700.0, 2350.0, rise) / RATE
-				o[i] += env * (0.22 * sin(phase) + 0.08 * sin(2.0 * phase) + 0.05 * sin(phase2))
-			return o
-		"down":         # the bus dying: the same wound down
-			var o := _blank(0.9)
-			_ring(o, 0.0, 95.0, 0.035, 0.8)
-			var phase := 0.0
-			for i in o.size():
-				var t := float(i) / RATE
-				phase += TAU * lerpf(400.0, 90.0, 1.0 - exp(-t / 0.3)) / RATE
-				o[i] += 0.3 * exp(-t / 0.28) * (sin(phase) + 0.3 * sin(2.0 * phase))
-			return o
-		"chime":        # the self-test, passed: two soft notes
-			var o := _blank(0.75)
-			_ring(o, 0.0, 880.0, 0.11, 0.7)
-			_ring(o, 0.0, 1760.0, 0.05, 0.15)
-			_ring(o, 0.19, 1318.5, 0.16, 0.7)
-			_ring(o, 0.19, 2637.0, 0.06, 0.12)
-			return o
-		"arc":          # the binder striking: a crack, a buzz that settles into a hum
-			var o := _blank(0.9)
-			_burst(o, rng, 0.0, 9000.0, 0.012, 1.0)
-			var y := 0.0
-			for i in o.size():
-				var t := float(i) / RATE
-				y += (rng.randf_range(-1.0, 1.0) - y) * 0.35
-				var buzz := 0.5 + 0.5 * signf(sin(TAU * 120.0 * t))
-				o[i] += 0.55 * exp(-t / 0.16) * y * buzz + 0.25 * minf(t / 0.1, 1.0) * exp(-maxf(0.0, t - 0.5) / 0.12) * (sin(TAU * 120.0 * t) + 0.4 * sin(TAU * 240.0 * t))
-			return o
-		"starter":      # an engine's starter: a geared motor winding up under load, let go as it catches
-			var o := _blank(Sequence.CRANK_S + 0.55)
-			var phase := 0.0
-			var y := 0.0
-			for i in o.size():
-				var t := float(i) / RATE
-				var up := 1.0 - exp(-t / 0.55)
-				var hz := lerpf(150.0, 640.0, up)
-				phase += TAU * hz / RATE
-				var env := minf(t / 0.04, 1.0) * exp(-maxf(0.0, t - Sequence.CRANK_S) / 0.14)
-				var mesh := 0.75 + 0.25 * sin(phase * 7.0)                     # the gear's teeth
-				var labour := 1.0 - 0.18 * maxf(0.0, sin(TAU * (2.0 + 9.0 * up) * t))   # each compression drags it
-				y += (rng.randf_range(-1.0, 1.0) - y) * 0.2
-				o[i] = env * labour * (0.5 * sin(phase) * mesh + 0.22 * sin(2.0 * phase) + 0.12 * sin(3.0 * phase) + 0.07 * sin(5.0 * phase) + 0.1 * y)
-			return o
-		"clamp":        # the parking brake going on: a heavy latch
-			var o := _blank(0.3)
-			_ring(o, 0.0, 72.0, 0.05, 1.0)
-			_ring(o, 0.0, 1400.0, 0.02, 0.25)
-			_burst(o, rng, 0.0, 2500.0, 0.006, 0.5)
-			return o
-		"release":      # ... and coming off: the latch, and the air let out of it
-			var o := _blank(0.5)
-			_ring(o, 0.0, 84.0, 0.04, 0.9)
-			_burst(o, rng, 0.0, 2500.0, 0.005, 0.5)
-			_burst(o, rng, 0.03, 7000.0, 0.09, 0.4)
-			return o
-		_:              # "refuse": two flat blips
-			var o := _blank(0.3)
-			for at in [0.0, 0.14]:
-				var from := int(at * RATE)
-				for i in int(0.085 * RATE):
-					var t := float(i) / RATE
-					o[from + i] += minf(t / 0.004, 1.0) * minf((0.085 - t) / 0.01, 1.0) * (sin(TAU * 233.0 * t) + 0.35 * sin(TAU * 699.0 * t))
-			return o
+static func level_db(sound: String) -> float:
+	bank()
+	return _levels[sound]

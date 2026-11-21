@@ -201,7 +201,7 @@ func _ready() -> void:
 	if engine_audio:
 		startup_audio = StartupAudioScript.new()
 		add_child(startup_audio)
-		startup_audio.setup()
+		startup_audio.setup(overhead.pods if overhead != null else {})   # a switch's sound comes from its pod
 	if cold and overhead != null and replay.is_empty() and cruise < 0.0:
 		startup.cold()
 		for k in 2:                       # parked: her air brakes were left out
@@ -1115,6 +1115,8 @@ func _apply_startup(delta: float) -> void:
 	craft.lights_on = startup.power > 0.5
 	if engine_audio:
 		engine_audio.test_stage = startup.turbine if held else 0.0
+	if startup_audio:                   # the fans: heard on the battery until the engines run
+		startup_audio.hum(startup.power, 0.5 * (float(startup.running(0)) + float(startup.running(1))), delta)
 	var headlight: Light3D = null       # the lamp that lights the road's signs: the battery's too
 	if rig:
 		headlight = rig.get_node_or_null("GuideSignHeadlight") as Light3D
@@ -1131,31 +1133,35 @@ func _sound(sound: String, side := 0) -> void:
 
 func _startup_event(e: String) -> void:
 	match e:
-		"batt_on":
-			_sound("click")
+		"batt_on":                   # the switch, then the contactor and the fans winding up
+			_sound("toggle_on")
 			_sound("power")
 		"batt_off":
-			_sound("click")
+			_sound("toggle_off")
 			_sound("down")
-		"guard_open", "guard_close":
-			_sound("clack")
-		"master_on":
-			_sound("click")
+		"guard_open":
+			_sound("guard_up")
+		"guard_close":
+			_sound("guard_down")
+		"master_on":                 # the fuel pumps prime as the binder strikes
+			_sound("toggle_on")
+			_sound("pump")
 			_sound("arc")
 		"master_off":
-			_sound("click")
+			_sound("toggle_off")
 		"shutdown":
 			if startup_audio:
 				startup_audio.stop("starter")
+				startup_audio.stop("catch")
 		"start", "dead":
 			_sound("button")
 		"refused":
 			_sound("refuse")
 		"park_set":
-			_sound("click")
+			_sound("paddle_on")
 			_sound("clamp")
 		"park_release":
-			_sound("click")
+			_sound("paddle_off")
 			_sound("release")
 			for side in ["left", "right"]:
 				_buzz(hands[side], 0.7, 0.1)
@@ -1163,7 +1169,8 @@ func _startup_event(e: String) -> void:
 			_sound("chime")
 		"crank0", "crank1":
 			_sound("starter", int(e.right(1)))
-		"light0", "light1":          # it catches: a kick in the hand that works it
+		"light0", "light1":          # it catches: its first bark, and a kick in the hand that works it
+			_sound("catch", int(e.right(1)))
 			_buzz(_engine_hand(int(e.right(1))), 1.0, 0.18)
 		"check":
 			for side in ["left", "right"]:

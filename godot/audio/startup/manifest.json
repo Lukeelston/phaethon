@@ -1,0 +1,117 @@
+{
+	"rate": 48000,
+	"sounds": {
+		"toggle_on": {
+			"files": [
+				"toggle_on_0.wav",
+				"toggle_on_1.wav"
+			],
+			"level_db": -8.5
+		},
+		"toggle_off": {
+			"files": [
+				"toggle_off_0.wav",
+				"toggle_off_1.wav"
+			],
+			"level_db": -8.5
+		},
+		"paddle_on": {
+			"files": [
+				"paddle_on.wav"
+			],
+			"level_db": -11.0
+		},
+		"paddle_off": {
+			"files": [
+				"paddle_off.wav"
+			],
+			"level_db": -11.0
+		},
+		"guard_up": {
+			"files": [
+				"guard_up.wav"
+			],
+			"level_db": -5.0
+		},
+		"guard_down": {
+			"files": [
+				"guard_down.wav"
+			],
+			"level_db": -4.0
+		},
+		"button": {
+			"files": [
+				"button.wav"
+			],
+			"level_db": -6.0
+		},
+		"power": {
+			"files": [
+				"power.wav"
+			],
+			"level_db": -8.5
+		},
+		"down": {
+			"files": [
+				"down.wav"
+			],
+			"level_db": -15.0
+		},
+		"avionics": {
+			"files": [
+				"avionics.wav"
+			],
+			"level_db": -31.0,
+			"loop": true
+		},
+		"chime": {
+			"files": [
+				"chime.wav"
+			],
+			"level_db": -14.0
+		},
+		"pump": {
+			"files": [
+				"pump.wav"
+			],
+			"level_db": -6.0
+		},
+		"arc": {
+			"files": [
+				"arc.wav"
+			],
+			"level_db": -10.0
+		},
+		"starter": {
+			"files": [
+				"starter_0.wav",
+				"starter_1.wav"
+			],
+			"level_db": -8.5
+		},
+		"catch": {
+			"files": [
+				"catch.wav"
+			],
+			"level_db": -8.5
+		},
+		"clamp": {
+			"files": [
+				"clamp.wav"
+			],
+			"level_db": -6.0
+		},
+		"release": {
+			"files": [
+				"release.wav"
+			],
+			"level_db": -7.5
+		},
+		"refuse": {
+			"files": [
+				"refuse.wav"
+			],
+			"level_db": -4.0
+		}
+	}
+}

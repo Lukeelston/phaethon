@@ -184,13 +184,25 @@ func _sounds() -> void:
 	var t0 := Time.get_ticks_msec()
 	var bank: Dictionary = Sounds.bank()
 	var took := Time.get_ticks_msec() - t0
-	_check("every sound is worked out once, in %d ms (under 1,500)" % took, bank.size() == Sounds.NAMES.size() and took < 1500)
-	var lengths := {"click": [0.03, 0.12], "clack": [0.08, 0.2], "button": [0.1, 0.25], "power": [1.0, 2.0], "down": [0.5, 1.2], "chime": [0.4, 1.0],
-		"arc": [0.5, 1.2], "starter": [Sequence.CRANK_S, Sequence.CRANK_S + 0.8], "clamp": [0.15, 0.5], "release": [0.3, 0.8], "refuse": [0.2, 0.4]}
+	_check("every sound is loaded once, in %d ms (under 1,500)" % took, bank.size() == Sounds.NAMES.size() and took < 1500)
+	# recordings (tools/startup_audio_bake.py): a switch is a tenth of a second or four, a starter outlasts its crank
+	var lengths := {"toggle_on": [0.1, 0.4], "toggle_off": [0.1, 0.4], "paddle_on": [0.2, 0.6], "paddle_off": [0.2, 0.6],
+		"guard_up": [0.15, 0.5], "guard_down": [0.15, 0.5], "button": [0.15, 0.45], "power": [2.0, 3.5], "down": [0.6, 1.4],
+		"avionics": [1.5, 4.0], "chime": [1.0, 2.6], "pump": [1.0, 2.0], "arc": [0.8, 1.8],
+		"starter": [Sequence.CRANK_S, Sequence.CRANK_S + 0.8], "catch": [1.0, 2.0], "clamp": [0.25, 0.7], "release": [0.7, 1.4], "refuse": [0.2, 0.4]}
 	var report := []
 	var all_ok := true
+	var takes := []
 	for sound: String in Sounds.NAMES:
-		var w: AudioStreamWAV = bank[sound]
+		for w: AudioStreamWAV in bank[sound]:
+			takes.append([sound, w])
+	_check("two takes of each throw of a toggle and of the starter (one an engine), %d files in all, each with its level (the starter at %.1f dB)" % [takes.size(), Sounds.level_db("starter")],
+		(bank.toggle_on as Array).size() == 2 and (bank.toggle_off as Array).size() == 2 and (bank.starter as Array).size() == 2 and takes.size() == 21
+		and Sounds.level_db("starter") < 0.0 and Sounds.level_db("avionics") < -20.0)
+	_check("the fans' loop loops, and nothing else does", (bank.avionics[0] as AudioStreamWAV).loop_mode == AudioStreamWAV.LOOP_FORWARD and (bank.starter[0] as AudioStreamWAV).loop_mode == AudioStreamWAV.LOOP_DISABLED)
+	for take: Array in takes:
+		var sound: String = take[0]
+		var w: AudioStreamWAV = take[1]
 		var n := w.data.size() / 2
 		var peak := 0.0
 		var sum := 0.0
@@ -205,10 +217,11 @@ func _sounds() -> void:
 		var seconds := float(n) / Sounds.RATE
 		var rms := sqrt(sum / n)
 		var range: Array = lengths[sound]
-		var ok := seconds >= float(range[0]) and seconds <= float(range[1]) and peak > 0.6 and peak <= 0.71 and rms > 0.01
+		var ok := seconds >= float(range[0]) and seconds <= float(range[1]) and peak > 0.6 and peak <= 0.71 and rms > 0.01 \
+			and w.format == AudioStreamWAV.FORMAT_16_BITS and not w.stereo and w.mix_rate == Sounds.RATE
 		all_ok = all_ok and ok
 		report.append("%s %.2f s peak %.2f rms %.3f ~%d Hz%s" % [sound, seconds, peak, rms, roundi(crossings / 2.0 / seconds), "" if ok else " (!)"])
-	_check("each is the length it should be, peaks at -3 dB and is not silence: %s" % ", ".join(report), all_ok)
+	_check("each is the length it should be, mono at 48 kHz, peaks at -3 dB and is not silence: %s" % ", ".join(report), all_ok)
 
 
 # ---- a hand on the panel ----
@@ -484,6 +497,20 @@ func _run() -> void:
 		s.all_running() and v.overhead.ring_colour.g > 1.0 and v.overhead.ring_progress == 1.0 and v.craft.flames[0].visible and v.craft.flames[1].visible and v.approach_display.message.contains("RUN-UP  4 / 5"))
 	if v.engine_audio:
 		_check("... and both idling: v8 %.3f / %.3f at spool %.2f" % [_gain(0, "v8"), _gain(1, "v8"), v.engine_audio.voices[0].spool], _gain(0, "v8") > 0.05 and _gain(1, "v8") > 0.05 and v.engine_audio.voices[0].spool > -0.05)
+		var heard: Array[String] = v.startup_audio.played
+		_check("what was heard on the way, in order: %s" % ", ".join(heard),
+			heard.find("toggle_on") < heard.find("power") and heard.find("power") < heard.find("guard_up") and heard.has("guard_down") and heard.find("guard_up") < heard.find("pump")
+			and heard.has("arc") and heard.find("arc") < heard.find("button") and heard.count("starter") == 2 and heard.count("catch") == 2 and heard.find("starter") < heard.find("catch")
+			and not heard.has("refuse"))
+		var at_left: Node = v.startup_audio.players.toggle_on[0]
+		var at_right: Node = v.startup_audio.players.button[0]
+		_check("a switch's sound comes from its own pod (BATT's from the left, START's from the right), a starter from its engine",
+			at_left is AudioStreamPlayer3D and at_left.get_parent() == v.overhead.pods[-1.0] and at_right is AudioStreamPlayer3D and at_right.get_parent() == v.overhead.pods[1.0]
+			and v.startup_audio.players.guard_up[0].get_parent() == v.overhead.pods[-1.0] and v.startup_audio.players.paddle_on[0].get_parent() == v.overhead.pods[1.0]
+			and (v.startup_audio.players.starter as Array).size() == 2 and (v.startup_audio.players.catch as Array).size() == 2)
+		var fans: float = v.startup_audio.hum_gain
+		_fly(4.0)
+		_check("the fans' loop, heard on the battery (%.2f as the engines came up), has gone under them (%.3f)" % [fans, v.startup_audio.hum_gain], fans > v.startup_audio.hum_gain and v.startup_audio.hum_gain < 0.05)
 	# 4 PARK: the run-up
 	at0 = Vector2(v.sim.pod.x, v.sim.pod.y)
 	_fly(0.5, [1.0, 0.0])
