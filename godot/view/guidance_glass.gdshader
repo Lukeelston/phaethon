@@ -7,6 +7,7 @@ uniform float scan : hint_range(0.0, 1.0) = 0.0;
 uniform vec4 signal : source_color = vec4(0.45,0.92,1.0,1.0);
 uniform float direction = 0.0;
 uniform bool wrong_way = false;
+uniform float pointer = 1.0;       // 0: the gutter's arrow is left out (the start-up draws its own pointer there)
 
 float segment(vec2 p, vec2 a, vec2 b) {
 	vec2 ab = b-a;
@@ -37,7 +38,7 @@ void fragment() {
 		vec2 tip = aim*0.14;
 		glyph = min(segment(icon,-aim*0.14,tip),min(segment(icon,tip,normal*0.097),segment(icon,tip,-normal*0.097)));
 	}
-	float arrow = 1.0-smoothstep(0.014,0.023+aa,glyph);
+	float arrow = (1.0-smoothstep(0.014,0.023+aa,glyph))*pointer;
 	float flare = (1.0-smoothstep(0.0,0.066,abs(UV.y-scan)))*smoothstep(0.0,0.08,scan)*(1.0-smoothstep(0.91,1.0,scan));
 	float marks = max(rim*mix(0.32,0.96,brackets),max(divider*0.48,gutter*0.55));
 	float etched = 0.023*cos(UV.y*175.93)*(1.0-smoothstep(0.008,0.022,aa));

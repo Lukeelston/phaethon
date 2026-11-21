@@ -12,6 +12,9 @@
 ##                   brow and a strut frame of its own up there, half a metre outside the swept
 ##                   screen: Luke: "it attached the new hud to a jerry rigged roof".)
 ##   open cockpit    a short brow of glazing from the oblong screen's top edge up to a header.
+## While the craft is being started the same glass carries the start-up's checklist, and that one
+## moves (Luke: "animation to the startup sequence display"): see set_checklist and
+## view/startup_glass.gdshader. Outside the start-up none of that is drawn or run.
 extends Node3D
 
 const Kit := preload("res://view/mesh_kit.gd")
@@ -19,6 +22,12 @@ const Finish := preload("res://view/craft_materials.gd")
 const Glass := preload("res://view/guidance_glass.gdshader")
 const Beam := preload("res://view/projector_beam.gdshader")
 const Picture := preload("res://view/guidance_image.gdshader")
+const Checklist := preload("res://view/startup_glass.gdshader")
+const TICK_TIME := 0.45        # a step ticked off keeps its page on the glass this long, s, before the next is written
+const SETTLE_TIME := 0.6       # ... and its segment of the rail is wiped full and flashed over this long
+const TYPE_TIME := 0.36        # a new page arrives over this long, line by line
+const SWEEP_TIME := 0.45       # the sweep across a line whose words changed
+const BEAT_HZ := 1.25          # the pointer's beat while a control is waited for (a headset wants nothing blinking past 3 Hz)
 const SIZE := Vector2(0.94, 0.228)
 const OPEN_TIME := 0.36
 const CLOSE_TIME := 0.24
@@ -53,6 +62,17 @@ var image_mat: ShaderMaterial
 var beam: MeshInstance3D                             # (the roof's mount) the fan of light from the lens to the image's top edge
 var beam_mat: ShaderMaterial
 var lens_mat: StandardMaterial3D                     # (the roof's mount) the emitter's lens: dark glass until it projects
+var sheet := MeshInstance3D.new()                    # the start-up's drawing, between the glass and its type: hidden outside the start-up
+var sheet_mat := ShaderMaterial.new()
+var checklist := {}                                  # the start-up's state as last given (StartupSequence.display()); {} outside the start-up
+var clock := 0.0                                     # s the checklist has been up
+var ticking := 0.0                                   # s left of a step being ticked off (its page stays up meanwhile)
+var typing := 1.0                                    # 0..1: a new page arriving
+var sweeping := 1.0                                  # 0..1: the sweep across the middle line (1: none)
+var ticked := 1.0                                    # 0..1: the last step's segment of the rail being wiped full (1: settled)
+var _ticked_at := -10.0                              # the clock when that step was ticked off
+var _written := ""                                   # the page the type shows: it trails `message` while a step is ticked off
+var _stowing := false                                # the start-up is over: the sheet goes out with the glass, or at the next page
 const LENS_IDLE := Color("#16343a")
 const LENS_LIT := Color("#8fe9f0")
 
@@ -85,6 +105,15 @@ func build(canopy: Node3D) -> void:
 	route = _label("Route", -0.323, -0.004, 0.00054)
 	advice = _label("Advisory", -0.323, -0.069, 0.00050)
 	status = _label("Status", 0.435, -0.069, 0.00050, true)
+	sheet.name = "Checklist"
+	sheet.mesh = quad
+	sheet_mat.shader = Checklist
+	sheet_mat.render_priority = 4         # over the glass, under the type
+	sheet.material_override = sheet_mat
+	sheet.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	sheet.visible = false
+	panel.get_parent().add_child(sheet)       # (beside the panel, not under it: the panel's children are its lines of type)
+	sheet.position = panel.position + Vector3(0.0, 0.0, 0.0008)
 	if port:
 		# The readout's picture is drawn in a room of its own, not in the cockpit: it is no fitting of the
 		# hull's. (The projector is under the roof on every course now, for the start-up's checklist, and
@@ -354,8 +383,24 @@ func set_message(value: String) -> void:
 	if value.is_empty():
 		set_process(true)
 		return
+	if _stowing:
+		_stow()            # (the start-up's sheet does not stay up under another page)
+	if ticking > 0.0 and not opening:
+		return             # a step is being ticked off: its page stays up until that is done (animate() writes this one)
+	_write(value)
+	if opening:
+		panel.show()
+		_reveal()
+		set_process(true)
+
+
+## Set the type to a page, and the glass's colours to what it says.
+func _write(value: String) -> void:
 	var lines := value.split("\n")
 	var metrics := lines[0].split("  ",false,1)
+	if not checklist.is_empty() and metrics[0] != action.text:
+		typing = 0.0       # a new page of the checklist arrives line by line
+	_written = value
 	_fit(action, metrics[0], 0.37)
 	_fit(countdown, metrics[1] if metrics.size()>1 else "", 0.366)
 	_fit(route, lines[1].replace(" > ", "  ›  "), 0.757)
@@ -377,11 +422,92 @@ func set_message(value: String) -> void:
 	var direction := -1 if metrics[0]=="LEFT EXIT" else (1 if metrics[0]=="RIGHT EXIT" else 0)
 	surface.set_shader_parameter("direction", float(direction))
 	surface.set_shader_parameter("wrong_way", metrics[0]=="WRONG WAY")
+	sheet_mat.set_shader_parameter("signal", tint)
 	_redraw()
-	if opening:
-		panel.show()
-		_reveal()
-		set_process(true)
+
+
+## The start-up's checklist in motion. `state` is StartupSequence.display() while the craft is being
+## started and {} at every other time: then the sheet is put away and none of this is run. Give it
+## before the page that goes with it (set_message): a step that has just been ticked off keeps its
+## page on the glass for TICK_TIME while its segment of the rail is wiped full, and only then is the
+## next step's page written, line by line. (CLEARED waits for nothing.) What the sheet draws from
+## the rest of the state is in view/startup_glass.gdshader.
+func set_checklist(state: Dictionary) -> void:
+	if state.is_empty():
+		if not checklist.is_empty():
+			checklist = {}
+			ticking = 0.0
+			typing = 1.0
+			sweeping = 1.0
+			_stowing = true    # (it goes out with the glass, or as the next page is written)
+			set_process(true)
+		return
+	if checklist.is_empty():           # the bus has come up: a sweep across the glass, the rail lit behind it
+		clock = 0.0
+		_ticked_at = 0.3               # (the battery's own step, ticked as the rail lights)
+		ticking = 0.0
+		typing = 0.0
+		sweeping = 1.0
+		_stowing = false
+		sheet.show()
+		surface.set_shader_parameter("pointer", 0.0)
+	elif int(state.done) > int(checklist.done):
+		_ticked_at = clock
+		if float(state.cleared) < 0.0:
+			ticking = TICK_TIME
+	elif int(state.mark) > int(checklist.mark):
+		sweeping = 0.0
+	checklist = state
+	set_process(true)
+
+
+## The checklist's clockwork, once a frame while it is up (a test steps it by hand).
+func animate(delta: float) -> void:
+	clock += delta
+	if ticking > 0.0:
+		ticking = maxf(0.0, ticking - delta)
+		if ticking == 0.0 and _written != message and not message.is_empty():
+			_write(message)
+	typing = minf(1.0, typing + delta / TYPE_TIME)
+	sweeping = minf(1.0, sweeping + delta / SWEEP_TIME)
+	ticked = clampf((clock - _ticked_at) / SETTLE_TIME, 0.0, 1.0)
+	var held := ticking > 0.0          # (the page still up is the finished step's: its bar stays full under it)
+	var bars: Array = [1.0, 1.0] if held else checklist.bars
+	var flare: Array = checklist.flare
+	var landed: float = checklist.cleared
+	sheet_mat.set_shader_parameter("age", clock)
+	sheet_mat.set_shader_parameter("phase", fposmod(clock * BEAT_HZ, 1.0))
+	sheet_mat.set_shader_parameter("done", float(checklist.done))
+	sheet_mat.set_shader_parameter("tick", ticked)
+	sheet_mat.set_shader_parameter("bars", Vector2(bars[0], bars[1]))
+	sheet_mat.set_shader_parameter("pair", bool(checklist.pair) and not held)
+	sheet_mat.set_shader_parameter("flare", Vector2(flare[0], flare[1]))
+	sheet_mat.set_shader_parameter("aim", float(checklist.aim))
+	sheet_mat.set_shader_parameter("ask", 1.0 if int(checklist.aim) != 0 and not held else 0.0)
+	sheet_mat.set_shader_parameter("alert", 1.0 if checklist.alert else 0.0)
+	sheet_mat.set_shader_parameter("sweep", sweeping)
+	sheet_mat.set_shader_parameter("cleared", landed)
+	action.scale = Vector3.ONE * arrival(landed)
+	_ink()
+	_redraw()
+
+
+## CLEARED arrives larger than it stays: the top line's size, so long after the brake came off.
+static func arrival(landed: float) -> float:
+	return 1.0 if landed < 0.0 else 1.0 + 0.28 * (1.0 - smoothstep(0.0, 0.45, landed))
+
+
+## Put the checklist's sheet away, and give the glass back its own arrow.
+func _stow() -> void:
+	if not _stowing and not sheet.visible:
+		return
+	_stowing = false
+	sheet.hide()
+	surface.set_shader_parameter("pointer", 1.0)
+	action.scale = Vector3.ONE
+	_ink()
+	_redraw()
+
 
 func _process(delta: float) -> void:
 	var target := 0.0 if message.is_empty() else 1.0
@@ -389,19 +515,35 @@ func _process(delta: float) -> void:
 	_reveal()
 	if deployment == target:
 		panel.visible = deployment > 0.0
-		set_process(false)
+		if _stowing or not panel.visible:
+			_stow()
+		if checklist.is_empty():
+			set_process(false)
+	if not checklist.is_empty():
+		animate(delta)
 
 func _reveal() -> void:
 	var scan := smoothstep(0.0,1.0,deployment)
 	surface.set_shader_parameter("scan", scan)
+	sheet_mat.set_shader_parameter("scan", scan)
 	_redraw()
 	if lens_mat:
 		lens_mat.albedo_color = LENS_IDLE.lerp(LENS_LIT, scan)
 	if beam:
 		beam.visible = deployment > 0.0
 		beam_mat.set_shader_parameter("lit", scan)
+	_ink()
+
+
+## The type's ink: each line comes in as the glass is revealed down to it, and on a page of the
+## checklist that has just been written, in its turn.
+func _ink() -> void:
+	var scan := smoothstep(0.0,1.0,deployment)
 	for label: Label3D in [action, countdown, route, advice, status]:
 		var row := 0.5-label.position.y/SIZE.y
 		var opacity := smoothstep(row, row+0.16, scan)
+		if typing < 1.0:
+			var turn := 0.0 if label == action or label == countdown else (0.25 if label == route else 0.5)
+			opacity *= smoothstep(turn, turn+0.5, typing)
 		label.modulate.a = opacity
 		label.outline_modulate.a = opacity*0.8

@@ -55,6 +55,7 @@ var profile := {}
 var _decor_job := {}
 var scenic = null            # the scenic roads' land (view/network_scenic.gd), when the world has any
 var far_helios: MeshInstance3D   # the mountain whole, for beyond the tiles (view/helios.gd far_mesh)
+var sun_gate: Node3D             # the armillary on its plateau (Helios.gate)
 var _scenic_tiles := {}   # coarse lookup for authored land, including interior mountain passes
 const PROP_CELL := 256.0
 
@@ -151,6 +152,19 @@ func build(sim, world) -> void:
 	far_helios.material_override = far_material
 	far_helios.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(far_helios)
+	# the Sun Gate: across the mountain's road where it crosses the plateau's middle
+	var road_way := Vector3(1.0, 0.0, 0.0)
+	for road in sim.roads:
+		if String(road.name) != "SHelios":
+			continue
+		var best := INF
+		for i in range(0, road.N, 4):
+			var gap := Vector2(road.px[i], road.py[i]).distance_squared_to(Helios.CENTRE)
+			if gap < best:
+				best = gap
+				road_way = Vector3(road.tx[i], 0.0, -road.ty[i]).normalized()
+	sun_gate = Helios.gate(road_way)
+	add_child(sun_gate)
 
 func setup_ground(ground_material: ShaderMaterial) -> void:
 	var centers := PackedVector3Array()
@@ -254,7 +268,7 @@ func color_at(p: Vector2, known_height := NAN) -> Color:
 	col *= 0.90 + n * 0.15
 	col.a = w[0] # grassland fraction for fixed geographic field patterns in the shader
 	if Helios.on(p):
-		col = Helios.colour(col, h, n)
+		col = Helios.colour(col, h, n, Helios.steep(p))
 	# the coast: sand on the beach and the seabed, the sea's own colour under the water's edge
 	if scenic != null and h < 7.0 and p.x < scenic.coast_hi + 700.0 and p.x < scenic.coast_x(p.y) + 700.0:
 		col = (scenic.SAND as Color).lerp(col, smoothstep(4.0, 7.0, h))
@@ -579,7 +593,13 @@ func sync(ox: float, oy: float) -> void:
 	clouds.material_override.set_shader_parameter("world_offset",Vector2(fposmod(ox,2304000.0),fposmod(-oy,2304000.0)))
 	far_helios.position = Vector3(Helios.CENTRE.x - ox, 0.0, oy - Helios.CENTRE.y)
 	clouds.material_override.set_shader_parameter("clearing_at", Vector2(far_helios.position.x, far_helios.position.z))
-	far_helios.visible = Vector2(ox, oy).distance_to(Helios.CENTRE) < 160000.0
+	var to_helios := Vector2(ox, oy).distance_to(Helios.CENTRE)
+	far_helios.visible = to_helios < 160000.0
+	sun_gate.position = Vector3(far_helios.position.x, Helios.HEIGHT, far_helios.position.z)
+	sun_gate.visible = far_helios.visible
+	# (from far off its lamp is a point of light on the summit: grown with distance so it stays a few pixels)
+	(sun_gate.get_node("sun") as Node3D).scale = Vector3.ONE * clampf(to_helios / 6000.0, 1.0, 14.0)
+	(sun_gate.get_node("light") as Node3D).visible = to_helios < 9000.0
 	# The air thins with height: from up the mountain the country below is seen through less of it.
 	var eye := get_viewport().get_camera_3d() if is_inside_tree() else null
 	var thin := Outlook.air_between(eye.global_position.y if eye != null else 0.0, 0.0)

@@ -157,9 +157,9 @@ func _run() -> void:
 		under += int(s < Helios.land(q) - 0.01)
 		high += int(s > Helios.land(q) + Helios.RIDGE + 450.0)      # (a little of the snow country's own relief is left at its very foot)
 		ridged = maxf(ridged, s - Helios.land(q))
-	var summit: float = land.height_at(Helios.CENTRE + Vector2(3100.0, 2600.0))
+	var summit: float = land.height_at(Helios.CENTRE + Vector2(1400.0, 900.0))
 	_check("away from the road the terrain is the mountain: %d vertices, %d under its surface, ridges up to %.0f m over it; %.0f m up 4 km from the summit" % [away, under, ridged, summit],
-		away > 1500 and under == 0 and high == 0 and ridged > 100.0 and summit > 9000.0)
+		away > 1500 and under == 0 and high == 0 and ridged > 100.0 and summit > 15000.0)
 
 	# far: one mesh; colours; nothing grows high up
 	var far: MeshInstance3D = land.far_helios
@@ -174,9 +174,9 @@ func _run() -> void:
 	var placed: Vector3 = far.position if far != null else Vector3.ZERO
 	_check("the mountain whole, for beyond the tiles: %d points, %.0f m at its top, %.1f m at its foot; from 108 km off it stands %.0f km east and %.0f km north of the craft" % [
 			verts.size(), peak, low, placed.x / 1000.0, -placed.z / 1000.0],
-		verts.size() == (Helios.RINGS + 1) * Helios.ROUND and absf(peak - Helios.HEIGHT) < 1.0 and absf(low + 4.0) < 0.5 and far.visible
+		verts.size() == (Helios.RINGS + 1) * Helios.ROUND and absf(peak - Helios.HEIGHT) < 1.0 and Helios.HEIGHT > 15000.0 and absf(low + 4.0) < 0.5 and far.visible
 			and absf(placed.x - 90000.0) < 1.0 and absf(placed.z + 60000.0) < 1.0)
-	var at_top: Color = land.color_at(Helios.CENTRE + Vector2(900.0, 0.0), 10300.0)
+	var at_top: Color = land.color_at(Helios.CENTRE + Vector2(900.0, 0.0), Helios.HEIGHT)
 	var at_mid: Color = land.color_at(Helios.CENTRE + Vector2(0.0, 23000.0), 3600.0)
 	var at_foot: Color = land.color_at(Helios.CENTRE + Vector2(0.0, 35000.0), 20.0)
 	var grows := {}
@@ -205,7 +205,7 @@ func _run() -> void:
 	Outlook.thin_air(from_top)
 	_check("the road's downhill edge is open on %d of %d rows; the air between the summit and the plain is %.2f of the ground's, level at the summit %.2f, along the ground %.2f" % [
 			open_one, rows, from_top, level_top, Outlook.air_between(0.0, 0.0)],
-		float(open_one) / rows > 0.7 and from_top > 0.3 and from_top < 0.45 and level_top < 0.12 and Outlook.air_between(0.0, 0.0) == 1.0
+		float(open_one) / rows > 0.5 and from_top > 0.15 and from_top < 0.45 and level_top < 0.12 and Outlook.air_between(0.0, 0.0) == 1.0
 			and Outlook.air_between(3000.0, 0.0) > from_top and is_equal_approx(Outlook._thin, from_top))
 	Outlook.thin_air(1.0)
 

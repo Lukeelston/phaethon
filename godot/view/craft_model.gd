@@ -1097,7 +1097,7 @@ func sync(sim, inp: Dictionary, delta: float) -> void:
 	for k in 2:
 		var e = bodies[k]
 		var eng := engines[k]
-		eng.position = view.wz(e.x, e.y, e.z + 0.1)
+		eng.position = view.body_place(e, 0.1) if view.has_method("body_place") else view.wz(e.x, e.y, e.z + 0.1)
 		var vh: float = sqrt(e.vx * e.vx + e.vy * e.vy)
 		var pitch: float = atan2(e.vz, maxf(vh, 1.0)) if vh > 5.0 else 0.0
 		# nose follows the banking's rise and fall (on the Network the climb is in the body's own vz:

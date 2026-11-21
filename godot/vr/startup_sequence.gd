@@ -31,6 +31,8 @@
 ##   s.flick("batt", 1, mph) / s.press_start(mph)      a control worked: what happened ("" nothing)
 ##   s.step(delta, [thrL, thrR], gear)                 every frame
 ##   inp = s.gate(inp)                                 what the sim is given
+##   s.message() / s.line() / s.display()              the checklist's page for the glass, its short form for an
+##                                                     instrument strip, and what the glass draws in motion round it
 class_name StartupSequence
 extends RefCounted
 
@@ -172,6 +174,19 @@ func catch_flare(k: int) -> float:
 	if stage[k] != "catch":
 		return 0.0
 	return sin(PI * clampf(1.0 - stage_t[k] / CATCH_S, 0.0, 1.0))
+
+
+## How far an engine is through its start, 0 stopped .. 1 at its idle: seven tenths of it on the
+## starter, the rest from the catch (the bar the glass fills while it cranks and catches).
+func start_progress(k: int) -> float:
+	match stage[k]:
+		"crank":
+			return 0.7 * (1.0 - stage_t[k] / CRANK_S)
+		"catch":
+			return 0.7 + 0.3 * (1.0 - stage_t[k] / CATCH_S)
+		"run":
+			return 1.0
+	return 0.0
 
 
 func _refuse(why: String) -> String:
@@ -419,6 +434,61 @@ func message() -> String:
 	if note == "":
 		note = "PUSH EACH LEVER, SHIFT A GEAR, HOLD BOTH LEVERS" if gears else "PUSH EACH LEVER, THEN HOLD BOTH"
 	return "RUN-UP  %s\n%s\n%s | HELD" % [count, route, note]
+
+
+## One amount, 0..1, as the glass's two bars end to end: the left one fills, then the right.
+static func _across(amount: float) -> Array:
+	return [clampf(amount * 2.0, 0.0, 1.0), clampf(amount * 2.0 - 1.0, 0.0, 1.0)]
+
+
+## What the glass draws in motion round the checklist's words (Luke: "animation to the startup
+## sequence display"; view/approach_projector.gd set_checklist, view/startup_glass.gdshader), or {}
+## when message() has nothing to say:
+##   done     how many of the five steps are behind you (the rail's lit segments; 5: cleared)
+##   mark     a tally that goes up whenever something on the page is done: a step, the self-test,
+##            the guard lifted, the binder charged, an engine turning, lit, running, a check ticked
+##            (the glass sweeps the line that changed)
+##   bars     [left, right], 0..1: the bus's self-test, then the binder's charge, then (pair) each
+##            engine from its starter to its idle, then the turbines spooling in the run-up; full
+##            when there is nothing left of the step but the control to work
+##   pair     the bars are the two engines', not one amount across both
+##   flare    [left, right], 0..1: an engine catching
+##   aim      where the control to work hangs: -1 overhead left, 1 overhead right, 0 no control to
+##            work (wait, or the levers)
+##   alert    a refusal is on the page
+##   cleared  seconds since the brake came off, -1 before
+func display() -> Dictionary:
+	if power < 0.5 or (cleared and _cleared_t <= 0.0):
+		return {}
+	var shown := {"done": step_number() - 1, "mark": 0, "bars": [1.0, 1.0], "pair": false, "flare": [0.0, 0.0], "aim": 0,
+		"alert": refusal != "", "cleared": -1.0}
+	var sub := 0
+	if cleared:
+		shown.done = STEPS
+		shown.cleared = CLEARED_S - _cleared_t
+	elif not master:
+		shown.bars = _across(selftest / SELFTEST_S if selftest >= 0.0 else float(tested))
+		shown.aim = -1
+		sub = int(tested) + 2 * int(guard_open)
+	elif starting():
+		shown.bars = [start_progress(0), start_progress(1)]
+		shown.pair = true
+		shown.flare = [catch_flare(0), catch_flare(1)]
+		sub = 2
+		for k in 2:
+			sub += ["off", "wait", "crank", "catch", "run"].find(stage[k])
+	elif not all_running():
+		shown.bars = _across(charge)
+		shown.aim = 1
+		sub = int(charge >= 1.0)
+	elif not checks_done():
+		shown.bars = _across(1.0 if checks.turbines else turbine)
+		for key in checks:
+			sub += int(checks[key] and (key != "gear" or gears))
+	else:
+		shown.aim = 1 if park else 0
+	shown.mark = int(shown.done) * 16 + sub
+	return shown
 
 
 ## The same, short, for an instrument strip.

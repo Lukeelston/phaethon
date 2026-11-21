@@ -3,6 +3,7 @@
 shader_type spatial;
 render_mode cull_disabled;
 global uniform float sky_wet;           // 0 dry, 1 in the rain (view/outlook.gd)
+global uniform float sky_snow;          // snow lying: blown across the road in long streaks
 
 #include "res://view/noise.gdshaderinc"
 #include "res://view/pavement_shoulder.gdshaderinc"
@@ -150,6 +151,12 @@ void fragment() {
 		// Baked diffuse floor illumination. The same real fixtures light both eyes
 		// and the stone wear remains visible through the pools.
 		EMISSION = ALBEDO * vec3(0.45, 0.75, 0.88) * (1.25 * indoors * pool);
+	}
+	// snow (view/outlook.gd): blown along the road in long streaks, the traffic's wind keeping the rest clear
+	if (sky_snow > 0.0) {
+		float lying = sky_snow * 0.8 * smoothstep(0.50, 0.78, pfbm(vec2(p.x / 160.0, p.y / 9.0), period / 160.0));
+		ALBEDO = mix(ALBEDO, vec3(0.80, 0.84, 0.88), lying);
+		rough = mix(rough, 0.92, lying);
 	}
 	// rain (view/outlook.gd): the surface darkens and takes a film of water, deepest in the worn lanes
 	ALBEDO *= 1.0 - 0.42 * sky_wet;

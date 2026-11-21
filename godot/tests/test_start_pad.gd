@@ -1,0 +1,151 @@
+## The starting pad (Luke: "personal starting pads for each insertion point - something that lets the
+## pilot run through a preflight"; view/start_pad.gd, CraftSim.net_home and net_pad_right):
+##   off        a flight not chosen from a menu starts on the centre line, as it always did, with no pad
+##   asked      a menu's flight starts in a bay at the right-hand roadside: on the flat inside the edge
+##              ramp, facing up the road, at rest, with the pad built round it
+##   everywhere at every start point the bay is on the flat, clear of the wall, inside the outermost
+##              lane's reach (its traffic moves over for the parked craft) and outside the next lane's
+##   back       a crash puts the craft back on the pad; reach a city and the pad is at that city's terminal
+##   follows    the pad's lamps, gate and ground power follow the start-up: held and red from cold, a
+##              lamp for each step, green with the gate up and the lead away once the craft may go
+##   traffic    parked on a pad, the craft's way is the way it faces and nothing comes at it on its road
+## Prints START PAD PASS.
+extends SceneTree
+
+const View := preload("res://view/craft_view.gd")
+const Sim := preload("res://sim/craft_sim.gd")
+const Startup := preload("res://vr/startup_sequence.gd")
+const UI := preload("res://release/release_config.gd")
+const Outlook := preload("res://view/outlook.gd")
+const Livery := preload("res://view/livery.gd")
+const Chase := preload("res://view/network_chase.gd")
+var failures := 0
+
+
+func _initialize() -> void:
+	View.track_override = "network"
+	View.job_override = "none"
+	View.best_dir = OS.get_user_data_dir().path_join("test_start_pad_")
+	Outlook.pinned = true
+	Livery.pinned = true
+	Chase.pinned = true
+	_run.call_deferred()
+
+
+func _check(label: String, passed: bool) -> void:
+	print(("PASS " if passed else "FAIL ") + label)
+	failures += int(not passed)
+
+
+func _view(spot: String, on_pad: bool):
+	View.spot_override = spot
+	View.pad_start = on_pad
+	var v = View.new()
+	root.add_child(v)
+	await process_frame
+	v.set_process(false)
+	return v
+
+
+## How far the pod is to the right of its road's centre line, the way it faces.
+func _right(sim) -> float:
+	var R = sim.roads[sim.pod.path]
+	var i: int = sim.pod.hint
+	var way := 1.0 if cos(sim.pod.th) * R.tx[i] + sin(sim.pod.th) * R.ty[i] >= 0.0 else -1.0
+	return -((sim.pod.x - R.px[i]) * R.nx[i] + (sim.pod.y - R.py[i]) * R.ny[i]) * way
+
+
+func _run() -> void:
+	# off
+	var v = await _view("city:GLACIER", false)
+	_check("not asked: on the centre line (%.2f m right of it), no pad" % _right(v.sim), absf(_right(v.sim)) < 0.5 and v.pad == null and not bool(v.sim.P.get("pads", false)))
+	v.queue_free()
+	await process_frame
+
+	# asked
+	v = await _view("city:GLACIER", true)
+	var sim = v.sim
+	var R = sim.roads[sim.pod.path]
+	var w: float = R.w[sim.pod.hint]
+	var right := _right(sim)
+	var road_h: float = sim.net_height(sim.pod.path, float(sim.pod.hint))
+	var speed: float = Vector2(sim.pod.vx, sim.pod.vy).length()
+	_check("asked: %.1f m right of the centre of a %.0f m road (the pad's place %.1f), on the flat (the ramp there %.2f m), %.2f m over the road, at rest (%.2f m/s); the menu's word used up (%s)" % [
+			right, w, Sim.net_pad_right(w), sim.net_edge(w, right).x, sim.pod.z - road_h, speed, not View.pad_start],
+		absf(right - Sim.net_pad_right(w)) < 0.5 and sim.net_edge(w, right).x == 0.0 and absf(sim.pod.z - road_h - float(sim.P.rideH)) < 0.01 and speed < 0.01 and not View.pad_start)
+	var pad = v.pad
+	v._sync_world()
+	var under: Vector3 = v.wz(sim.pod.x, sim.pod.y, road_h)
+	var ahead_of: Vector3 = v.wz(sim.eL.x, sim.eL.y, road_h)
+	var to_engines: Vector3 = pad.global_transform.affine_inverse() * ahead_of if pad else Vector3.ZERO
+	_check("the pad is built round it: under the pod (%.2f m off), its front toward the engines (they stand %.1f m ahead and %.1f m to the left in its own frame), home %s" % [
+			pad.global_position.distance_to(under) if pad else -1.0, -to_engines.z, -to_engines.x, pad.home if pad else []],
+		pad != null and pad.global_position.distance_to(under) < 0.05 and absf(-to_engines.z - pad.ahead) < 0.3 and absf(absf(to_engines.x) - float(sim.P.engineGap) / 2.0) < 0.2 and pad.home == sim.net_home())
+	var meshes: int = pad.find_children("*", "MeshInstance3D", true, false).size() if pad else 0
+	var words: int = pad.find_children("*", "Label3D", true, false).size() if pad else 0
+	_check("it is %d meshes and %d lines of lettering; its board reads %s" % [meshes, words, [pad.lines[0].text, pad.lines[1].text, pad.lines[2].text] if pad else []],
+		meshes <= 16 and words == 7 and pad.lines[0].text == "GLACIER" and pad.lines[1].text.begins_with("PAD") and pad.lines[2].text.contains("PHAETHON"))
+
+	# back
+	sim.pod.x += 400.0
+	v._respawn()
+	_check("a crash puts it back on the pad (%.1f m right, %.2f m/s)" % [_right(sim), Vector2(sim.pod.vx, sim.pod.vy).length()], absf(_right(sim) - Sim.net_pad_right(w)) < 0.5)
+	var other: int = (int(sim.net.from) + 1) % int(sim.cities.size())
+	sim.net.from = other
+	sim.net["arrived"] = true
+	pad.sync(0.016)
+	var there: Dictionary = sim.cities[other]
+	_check("reach another city and the pad stands at its terminal: %s (home %s)" % [pad.lines[0].text, pad.home],
+		pad.lines[0].text == String(there.name) and int(pad.home[0]) == int(there.road) and int(pad.home[1]) == int(there.i))
+
+	# follows
+	sim.respawn()      # (the craft on the pad where it now stands: far from it the pad is not drawn, nor its lamps worked)
+	pad.sync(0.016)
+	var seq = Startup.new()
+	seq.cold()
+	pad.show_startup(seq)
+	pad.sync(3.0)
+	var held_red: bool = (pad.big_lamp.material_override as StandardMaterial3D).albedo_color.r > 2.0 and pad.gate_open == 0.0 and pad.lead.visible and absf(pad.gate.rotation.z) < 0.01
+	var cold_steps: Array = pad.lit.duplicate()
+	var first: int = pad.flashing
+	seq.batt = true
+	pad.show_startup(seq)
+	var after_batt: Array = [pad.lit.duplicate(), pad.flashing]
+	seq.hot()
+	pad.show_startup(seq)
+	pad.sync(3.0)
+	var free_green: bool = (pad.big_lamp.material_override as StandardMaterial3D).albedo_color.g > 2.0 and pad.gate_open == 1.0 and not pad.lead.visible and absf(pad.gate.rotation.z) > 1.3
+	_check("from cold it is held: the big lamp red, the gate down, ground power on (%s), no step lit %s and the first flashing (%d); the battery on lights its lamp and the next flashes %s; running and released: green, the gate up, the lead away (%s), every step lit %s" % [
+			held_red, cold_steps, first, after_batt, free_green, pad.lit],
+		held_red and cold_steps == [false, false, false, false] and first == 0 and after_batt == [[true, false, false, false], 1] and free_green and pad.lit == [true, true, true, true])
+
+	# traffic
+	var T = v.traffic_net
+	sim.respawn()
+	T.update(0.016)
+	var as_car = T._pod_as_car()
+	_check("parked on the pad the craft's way is the way it faces (%d), and its road is cleared of what comes the other way (road %d, way %d)" % [as_car.dir, T.proad, T.pdir],
+		as_car.dir == int(sim.net_home()[2]) and T.proad == sim.pod.path and T.pdir == as_car.dir)
+	v.queue_free()
+	await process_frame
+
+	# everywhere
+	var s = Sim.new({"track": "network", "handling": "speed", "pads": true})
+	var bad := []
+	var places := 0
+	for entry in UI.INSERTIONS:
+		var spot: Array = View.start_spot(entry[2])
+		if spot.is_empty():
+			continue
+		var road: int = s.cities[spot[0]].road if spot.size() == 1 else int(spot[0])
+		var at: int = s.cities[spot[0]].i if spot.size() == 1 else int(spot[1])
+		var Rd = s.roads[road]
+		var wide: float = Rd.w[mini(at, Rd.N - 1)]
+		var off := Sim.net_pad_right(wide)
+		var lanes: Array = [157.5, 112.5] if wide >= 300.0 else [75.0, 25.0]
+		places += 1
+		if s.net_edge(wide, off).x != 0.0 or off + 13.0 > wide / 2.0 - 8.0 or absf(lanes[0] - off) >= 22.0 or absf(lanes[1] - off) <= 22.0:
+			bad.append("%s: %.0f m road, pad %.1f m right, ramp %.2f m, lanes %.1f and %.1f m off" % [entry[1], wide, off, s.net_edge(wide, off).x, absf(lanes[0] - off), absf(lanes[1] - off)])
+	_check("at all %d start points the bay is on the flat, clear of the wall, within the outermost lane's reach and outside the next one's (wrong: %s)" % [places, bad], bad.is_empty() and places == UI.INSERTIONS.size() - 1)
+	print("START PAD %s (%d failures)" % ["PASS" if failures == 0 else "FAIL", failures])
+	quit(0 if failures == 0 else 1)

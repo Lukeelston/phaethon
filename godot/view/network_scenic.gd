@@ -60,6 +60,13 @@ func setup(s, heights := []) -> void:   # heights: the world's own per-sample he
 		var st: Array = entry[2]
 		var first := int(st[0][0])
 		var last := int(st[st.size() - 1][0])
+		if String(R.name) == MOUNTAIN:
+			# (its rows are every sixty samples: the road is its own land from the very foot of the mountain to the
+			# other, or the last few dozen samples up the slope had the terrain's coarse grid for a deck's company)
+			while first > 1 and s.net_height(r, float(first - 1)) > 0.5:
+				first -= 1
+			while last < R.N - 2 and s.net_height(r, float(last + 1)) > 0.5:
+				last += 1
 		var n := last - first + 1
 		var D := {"first": first, "last": last, "sea": int(entry[1]), "hw": float(R.w[first]) / 2.0, "e": s.net_edge_span(float(R.w[first]))}
 		if String(R.name) == MOUNTAIN:
@@ -332,12 +339,34 @@ func _nearest_lap(r: int, p: Vector2, cell: Vector2i, best: int) -> int:
 ## deck for as far as one of its triangles could reach across it, and the mountain itself past FLANK.
 func _mountain_ground(h: float, hw: float, lat: float, d: float, p: Vector2) -> Vector2:
 	var hill := Helios.land(p)
+	# (on the spire the grid's straight edges pass over the surface between its corners, by up to 300 m at the
+	# wall: under the road and its own land the corners are let down by that much more)
+	var sunk := SINK + Helios.sag(p)
 	if d < 0.0:
-		return Vector2(1.0, minf(h - 1.0, hill) - SINK)
-	var y := minf(lerpf(h - 1.0, hill, smoothstep(0.0, EASE, d)), hill) - SINK * (1.0 - smoothstep(FLANK - 300.0, FLANK, d))
+		return Vector2(1.0, minf(h - 1.0, hill) - sunk)
+	var y := minf(lerpf(h - 1.0, hill, smoothstep(0.0, EASE, d)), hill) - sunk * (1.0 - smoothstep(FLANK - 300.0, FLANK, d))
 	if absf(lat) < hw + UNDER:
-		y = minf(y, h - 1.0 - SINK)
+		y = minf(y, h - 1.0 - sunk)
 	return Vector2(1.0 - smoothstep(FLANK, FLANK + BLEND, d), y)      # (its ridges come back as slowly as the country does elsewhere)
+
+
+## Is road r's land at sample i to be built at every sample (not every fourth)? On the spire: a
+## sample is 24 m of plan and up to 93 m of wall, and a strip four samples long cut the corner of the curve.
+func fine(r: int, i: int) -> bool:
+	if not (roads.has(r) and roads[r].has("mountain")) or not on(r, i):
+		return false
+	var R = sim.roads[r]
+	return Helios.spire(Vector2(R.px[i], R.py[i]))
+
+
+## The road's climb at sample i, metres up a metre of plan the way its samples run (the mountain's road: 0 elsewhere).
+func climb(r: int, i: int) -> float:
+	if not (roads.has(r) and roads[r].has("mountain")) or not on(r, i):
+		return 0.0
+	var D: Dictionary = roads[r]
+	var a := maxi(i - 1, int(D.first)) - int(D.first)
+	var b := mini(i + 1, int(D.last)) - int(D.first)
+	return (D.h[b] - D.h[a]) / maxf(1.0, float(b - a) * float(sim.roads[r].len[i]))
 
 
 ## The height a point beside road r is known to stand at without asking the terrain (the mountain's
@@ -417,7 +446,12 @@ func row(r: int, i: int, left: bool) -> PackedFloat32Array:
 		for m in OFFS.size():
 			var out_m: float = OFFS[m]
 			var at := Vector2(R.px[i] + R.nx[i] * sgn * (edge + out_m), R.py[i] + R.ny[i] * sgn * (edge + out_m))
-			var hill := lerpf(h - 1.0, Helios.land(at), smoothstep(0.0, EASE, out_m))
+			# (on the spire its outer half meets what the terrain's coarse grid shows there, which stands over the true
+			# surface between the grid's corners: or a ledge ran up the wall where the two met)
+			var surface := Helios.land(at)
+			if Helios.spire(at):
+				surface = lerpf(surface, Helios.grid(at), smoothstep(500.0, 1250.0, out_m))
+			var hill := lerpf(h - 1.0, surface, smoothstep(0.0, EASE, out_m))
 			if m == OFFS.size() - 1:
 				hill -= 45.0
 			elif m > 1:

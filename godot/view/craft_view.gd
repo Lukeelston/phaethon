@@ -103,6 +103,7 @@ static var vehicle_override := ""
 static var track_override := ""    # an in-game track switch (VR: hold the menu button) wins over --track;
                                    # static, so it survives the scene reload that does the switch
 static var job_override := ""      # the job to fly ("emergency": the emergency run; "none": no job), wins over --job; static too
+static var pad_start := false      # set by a menu as it launches a flight: this one begins on its starting pad (used up in _ready; --pads asks too)
 static var spot_override := ""     # the Network road to start on (a scenic road's menu entry: "SCoast", "SDrop"); static too
 var eye := Vector3.INF            # --eye / --look: a fixed debug camera at sim (x, y, h), aimed at another point
 var look := Vector3.ZERO
@@ -150,6 +151,8 @@ var dust: Node3D
 var partner: Node3D          # the driving partner (view/driving_partner.gd), null when it's off
 var partner_on := false      # common release preference, overridden by launch flags
 var chase: Node3D            # chase mode on the Network (view/network_chase.gd), null when it's off
+var pad: Node3D              # the starting pad (view/start_pad.gd), when the flight began on one
+const StartPadScript := preload("res://view/start_pad.gd")
 var light_bars: Array = []   # the pilot's own, in the patrol craft (one on each model of the pod that is built)
 var siren: AudioStreamPlayer # ... and its siren
 var menu = MainMenuScript.new()   # the main menu (view/main_menu.gd): the flight waits while it's open
@@ -159,6 +162,8 @@ var _menu_was_muted := false
 
 func _ready() -> void:
 	var opts := {"obstacleCollisions": GameSettings.obstacle_collisions_enabled()}
+	var on_pad := pad_start      # (a menu's word for this flight alone, whatever course it is)
+	pad_start = false
 	if not Livery.pinned:    # the menus' paint (a test or a render that has chosen one keeps it)
 		Livery.current = GameSettings.choice("paint", Livery.ids())
 	Outlook.load_saved()     # ... and their time of day and weather
@@ -221,6 +226,9 @@ func _ready() -> void:
 			net_beaten = saved.get("beaten", {})
 			if int(saved.get("last", -1)) >= 0 and int(saved.get("last", -1)) < CraftSimScript.NET_CITIES.size():
 				opts["startCity"] = int(saved.last)
+		# A flight chosen from a menu begins on its pad, at the roadside, and a crash puts it back on one
+		# (tests and direct launches keep the centre line unless they ask: --pads).
+		opts["pads"] = (on_pad or "--pads" in OS.get_cmdline_user_args()) and "--no-pads" not in OS.get_cmdline_user_args()
 		var spot := start_spot(spot_override)
 		if spot.size() == 1:     # a city chosen on the menu: its terminal, whichever was last reached
 			opts["startCity"] = spot[0]
@@ -305,6 +313,10 @@ func _ready() -> void:
 			siren.stream = ChaseScript.wail()
 			siren.volume_db = -21.0
 			add_child(siren)
+	if sim.kind == "network" and bool(sim.P.get("pads", false)):
+		pad = StartPadScript.new()
+		add_child(pad)
+		pad.build(self)
 	if ChaseScript.enabled and traffic_net:
 		chase = ChaseScript.new()
 		add_child(chase)
@@ -1102,6 +1114,32 @@ func _pressure_point(x: float, y: float, clearance: float, station: float) -> Ve
 
 ## A sim body's point -> render position: on the Network a body's height is its own (the roads'
 ## heights are real in the sims: the deck lock, the jumps), elsewhere it's over the surface (w3).
+## Where a body is drawn. The sim is flat: it keeps the engines 22 m ahead of the pod in plan, and each
+## body rides its own stretch of road, so up a 75 degree wall they were drawn 82 m apart with the cables
+## stretched between. On a steep road of the Network the engines are placed from the pod instead, their
+## plan offsets laid along the slope at their true length.
+func body_place(b, lift := 0.0) -> Vector3:
+	var flat := wz(b.x, b.y, b.z + lift)
+	if sim.kind != "network" or b == sim.pod or sim.pod.off_road:
+		return flat
+	var P = sim.pod
+	var R = sim.roads[P.path]
+	if R.shaft or sim.in_pressure(P.path, P.hint):
+		return flat
+	var i: int = clampi(P.hint, 1, R.N - 2)
+	var grade: float = (sim.net_height(P.path, float(i + 1)) - sim.net_height(P.path, float(i - 1))) / (2.0 * float(R.len[i]))
+	var steepness := smoothstep(0.15, 0.4, absf(grade))
+	if steepness <= 0.0:
+		return flat
+	var t := Vector2(R.tx[i], R.ty[i])
+	var d := Vector2(b.x - P.x, b.y - P.y)
+	var along := d.dot(t)
+	var across := d - t * along
+	var shrink := 1.0 / sqrt(1.0 + grade * grade)
+	var carried := wz(P.x + across.x + t.x * along * shrink, P.y + across.y + t.y * along * shrink, P.z + along * grade * shrink + lift)
+	return flat.lerp(carried, steepness)
+
+
 func wz(x: float, y: float, z: float) -> Vector3:
 	if sim and sim.kind == "network":
 		if sim.pod.path == CraftSimScript.NET_PRESSURE[0]:
@@ -1506,6 +1544,8 @@ func _sync_world() -> void:
 			traffic_audio.update(Vector2(sim.pod.x, sim.pod.y), pv.normalized() if pv.length() > 1.0 else Vector2.ZERO, cars, wz, get_process_delta_time())
 		if traffic_net.race_result != "":
 			_net_race_result()
+		if pad:
+			pad.sync(get_process_delta_time())
 		if chase:
 			chase.update(get_process_delta_time())
 			if chase.result != "":

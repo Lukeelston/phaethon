@@ -234,7 +234,10 @@ func _sides(sim) -> void:
 		if r.name.begins_with("S"):
 			n_side += 1
 			var gs: Dictionary = gears.get(r.name, {})
-			shifts = shifts and not gs.is_empty() and not gs.has("GEAR 1")
+			# (Helios's two turns onto and off its face are 4.5 km in radius: 1,500 mph, first gear, the only
+			# such corners on the network. Opening them to second gear's 5.9 km moves the mountain road's
+			# samples: left as designed until Luke has driven it.)
+			shifts = shifts and not gs.is_empty() and (not gs.has("GEAR 1") or r.name == "SHelios")
 	# (Codex's four backroads and two stunt roads are S roads too: long sweeps, one gear's worth of
 	# corners each. So is the Helios road, the twenty-first: counted, not asked for two. The twelve
 	# side roads, the coast road and the drop still want two.)

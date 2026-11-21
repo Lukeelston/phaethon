@@ -153,6 +153,7 @@ var grade := true         # vehicles follow the road's grade (off: level at the 
 var collide := false      # traffic's forcefields in the sims (off: the craft passes through; the tests turn them on)
 var proad := -1           # the pilot's road and the way it's going on it: the way all traffic there goes
 var pdir := 0
+var oneway := {}          # road -> the way everything on it goes: the pilot's road, and every road it hands on to ahead (the way a craft joining it would go)
 var _warm := 3            # frames: every kind drawn once under the ground, so its shaders compile at the start, not on first sight
 
 
@@ -241,17 +242,27 @@ func update(delta: float) -> void:
 			buckets[key] = []
 		buckets[key].append(c)
 	var pod_car := _pod_as_car()
-	if pod_car and pod_car.v > 20.0:
+	# (standing on a pad too: nothing comes the wrong way past a craft parked at the roadside)
+	if pod_car and (pod_car.v > 20.0 or bool(sim.P.get("pads", false))):
 		proad = pod_car.road
 		pdir = pod_car.dir
-	if proad >= 0:   # nothing comes at you on your road: far ones turn round, near ones go
+	# Nothing comes at you on your road, nor on a road you may be about to join (they came the wrong way
+	# until the craft was on it: an exit taken into a stream of oncoming traffic). Far ones turn round, near ones go.
+	oneway.clear()
+	if proad >= 0:
+		oneway[proad] = pdir
+		var at_sample := float(sim.pod.hint)
+		for sp in _switch[proad]:
+			if int(sp[1]) == pdir and (float(sp[0]) - at_sample) * pdir > -20.0 and not oneway.has(int(sp[2])):
+				oneway[int(sp[2])] = int(sp[4])
 		for k in range(cars.size() - 1, -1, -1):
 			var c := cars[k]
-			if c.road != proad or c.dir == pdir or c == racer:
+			var way: int = oneway.get(c.road, 0)
+			if way == 0 or c.dir == way or c == racer:
 				continue
 			if Vector2(c.x - px, c.y - py).length_squared() > FLIP_FAR * FLIP_FAR:
 				c.lane = _lanes[c.road].size() - 1 - c.lane   # the same place across, the other way
-				c.dir = pdir
+				c.dir = way
 				_place(c)
 			else:
 				cars.remove_at(k)
@@ -325,6 +336,8 @@ func _pod_as_car() -> Car:
 	c.id = 0
 	c.road = P.path
 	c.dir = 1 if along >= 0.0 else -1
+	if absf(along) < 1.0:      # at rest: the way it faces (its speed says nothing)
+		c.dir = 1 if cos(P.th) * R.tx[i] + sin(P.th) * R.ty[i] >= 0.0 else -1
 	c.f = float(i)
 	c.v = absf(along)
 	c.lat = (P.x - R.px[i]) * R.nx[i] + (P.y - R.py[i]) * R.ny[i]
@@ -377,8 +390,8 @@ func _spawn(px: float, py: float, first: bool) -> void:
 	c.road = r
 	c.f = float(i)
 	c.dir = 1 if _rng.randf() < 0.5 else -1
-	if r == proad and pdir != 0:
-		c.dir = pdir
+	if oneway.has(r):
+		c.dir = oneway[r]
 	var roll := _rng.randf()
 	var express := _traffic_tier(r, c.f)
 	var car_cut := lerpf(0.58, 0.48, express)
@@ -563,7 +576,7 @@ func _drive(c: Car, arr: Array, idx: int, delta: float) -> void:
 				var take: bool = sp[5] or (c.plan != null and c.plan == sp)
 				if c.kind == RACER and c.chase != "fugitive":
 					take = _racer_takes(c, sp)
-				if take and int(sp[2]) == proad and int(sp[4]) != pdir and c != racer:
+				if take and int(oneway.get(int(sp[2]), int(sp[4]))) != int(sp[4]) and c != racer:
 					if sp[5]:
 						c.v = -1.0   # its road ends here and the only way on is against the pilot: gone
 					take = false
@@ -734,7 +747,7 @@ func _decide(c: Car) -> void:
 	c.decided = int(best[0])
 	c.vcap_road = -1   # read the road ahead again now (it may be slowing for this exit)
 	var take: bool = best[5] or _rng.randf() < c.turn_p
-	if int(best[2]) == proad and int(best[4]) != pdir and not best[5]:
+	if int(oneway.get(int(best[2]), int(best[4]))) != int(best[4]) and not best[5]:
 		take = false
 	c.plan = best if take else null
 

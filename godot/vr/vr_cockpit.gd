@@ -90,6 +90,18 @@ var slide_switch                          # vr/mode_switch.gd again: SLIDE up, G
 var _slide := 0.0
 var _slide_rate := 0.0
 var _slide_load := 0.0                    # the cornering load, smoothed, g (+ a left turn)
+# The g-meter on the centre dial (Luke: "a g-force meter"; vr/gauge_cluster.gd). What it reads is the
+# pod's own change of velocity, taken against the sim's clock (a frame that ran five steps of the sim
+# and one that ran six then read the same) along the pod's nose and across it, and smoothed just
+# enough to hold a needle still. The whole load is that with the 1 g the seat holds you up with, so
+# it stands at 1 at rest and falls toward 0 over a jump.
+const G_TAU := 0.15                       # s
+const G_NOT_A_LOAD := 250.0               # g: more than this in a frame is a respawn or a wall struck, not a load to read
+var g_along := 0.0                        # along the pod's nose, g: + speeding up
+var g_across := 0.0                       # across it, g: + a left turn
+var g_turn := 0.0                         # ... with a shaft's carrying taken out (it presses you into the seat, not across it): the slip bar
+var g_seat := 1.0                         # the 1 g the seat holds you up with: less as she leaves the ground, none in the air
+var _g_from := [0.0, 0.0, -1.0]           # the pod's velocity and the sim's clock at the last reading
 var _buzz_hold := {}   # controller -> seconds an event buzz still owns it (the shudder waits)
 const SHAKE_M := 0.004   # cockpit shake per unit of air-brake shudder, metres
 const GRAB_SHAKE_M := 0.007   # the gear's grab: the cockpit's jolt, metres (fore and aft, a little up)
@@ -1085,6 +1097,8 @@ func _apply_startup(delta: float) -> void:
 	for e: String in startup.events:
 		_startup_event(e)
 	startup.events.clear()
+	if pad:
+		pad.show_startup(startup)      # the pad's lamps, gate and ground power follow the sequence
 	var held: bool = startup.held()
 	for k in 2:
 		var stage: String = startup.stage[k]
@@ -1211,6 +1225,8 @@ func _engine_inp() -> Dictionary:
 ## The glass and the instrument strip carry the start-up's checklist while there is one; with the
 ## battery dead they carry nothing.
 func _hud_progress(in_cockpit: bool) -> String:
+	if approach_display:           # the checklist in motion on the glass ({} once the start-up has nothing to say: then nothing of it is run)
+		approach_display.set_checklist(startup.display())
 	if startup.power < 0.5:
 		if approach_display:
 			approach_display.set_message("")
@@ -1297,6 +1313,44 @@ func _ease_cockpit_roll(raw_roll: float, delta: float) -> float:
 func turn_load() -> float:
 	var along: float = sim.pod.vx * cos(sim.pair_th) + sim.pod.vy * sin(sim.pair_th)
 	return (sim.eL.w + sim.eR.w) * 0.5 * maxf(0.0, along) / 9.81
+
+
+## Read the load on the pilot for the g-meter (once a frame: g_along, g_across, g_turn, g_seat).
+func _read_g() -> void:
+	var p = sim.pod
+	var dt: float = sim.time - float(_g_from[2])
+	if float(_g_from[2]) >= 0.0 and dt > 0.0 and dt < 0.25:
+		var ax: float = (p.vx - float(_g_from[0])) / dt / 9.81
+		var ay: float = (p.vy - float(_g_from[1])) / dt / 9.81
+		var along: float = cos(p.th) * ax + sin(p.th) * ay
+		var across: float = -sin(p.th) * ax + cos(p.th) * ay
+		if sim.crash_t > 0.0 or absf(along) > G_NOT_A_LOAD or absf(across) > G_NOT_A_LOAD:
+			along = 0.0
+			across = 0.0
+			g_along = 0.0          # (and what went before it is no part of what comes after)
+			g_across = 0.0
+			g_turn = 0.0
+			g_seat = p.grip
+		var turn := across
+		if sim.kind == "network" and not p.off_road and sim.roads[p.path].shaft:
+			turn -= sim.roads[p.path].kap[p.hint] * (p.vx * p.vx + p.vy * p.vy) / 9.81
+		var k := 1.0 - exp(-dt / G_TAU)
+		g_along += (along - g_along) * k
+		g_across += (across - g_across) * k
+		g_turn += (turn - g_turn) * k
+		g_seat += (float(p.grip) - g_seat) * k      # (smoothed with the rest: a hop over a crest is not a flicker of the needle)
+	elif dt != 0.0:                # the first reading, a new sim, a long pause: nothing to go on
+		g_along = 0.0
+		g_across = 0.0
+		g_turn = 0.0
+		g_seat = p.grip
+	_g_from = [p.vx, p.vy, sim.time]
+
+
+## The whole load on the pilot, g: the seat's 1 g while the craft rides its hover (none of it once
+## she is off the ground), with what the engines, the air brakes and a turn put across that.
+func g_load() -> float:
+	return sqrt(g_seat * g_seat + g_along * g_along + g_across * g_across)
 
 
 ## Turn the slide on or off (the SLIDE / GRIP switch), and remember it.
@@ -1506,6 +1560,7 @@ func _update_hud() -> void:
 		minimap_panel.show_frame(minimap.update(sim.pod.th, get_process_delta_time()))
 	if tow_meter:
 		tow_meter.set_shader_parameter("loads", Vector2(craft.cable_strain[0], craft.cable_strain[1]))
+	_read_g()
 	dashboard.show_state({
 		"mph": kmh / 1.609344, "kmh": kmh, "mach": cues.mach, "backlight": lerpf(1.0, 0.5, maxf(1.0 if light_preset == "twilight" else 0.0, Outlook.darkness())), "mach_line": cues.readout(), "progress": progress,
 		"footer": "%s   /   %s" % [handling_text(), ctl],
@@ -1517,6 +1572,7 @@ func _update_hud() -> void:
 		"burner": sim.mode == "burner", "armed": sim.armed, "ramjet": sim.mode == "ramjet", "turbines": _turbines or _turbine_lamp,
 		"power": startup.power, "sweep": startup.selftest / StartupScript.SELFTEST_S if startup.selftest >= 0.0 else -1.0,
 		"gear": quest.display_gear(), "overdrive": bool(inp.get("gearOverdrive", false)),
+		"g": g_load(), "g_side": g_turn,
 		"blink": (Time.get_ticks_msec() / 250) % 2 == 0,
 	})
 	if screen_reflection:      # in the terminal's hall and before dawn the glass needs less to show

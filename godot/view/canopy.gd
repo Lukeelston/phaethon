@@ -9,7 +9,13 @@
 ##               to the immersion") a closed canopy over the opening, authored in tools/art_roof_hd.py:
 ##               a header rail, A and B pillars, cant rails, a stitched headliner, and glass from the
 ##               rim up to the header and down each side. Swept back ("I think it should be swept
-##               back pretty significantly"): the screen lies back ~70 degrees to a header over the brow. With it the oblong screen and its frame
+##               back pretty significantly"): the screen lies back ~70 degrees to a header over the brow.
+##               Open overhead ("the ceiling should sweep back even further so that you can see above
+##               during inverted flight"): behind the header, which carries the approach projector and
+##               the start panel, there is nothing between the cant rails until a hood that starts
+##               0.28 m behind the seated eye. From that eye the sky is open from 39 degrees ahead of
+##               straight up to 36 behind it and 52 either side, and no glass is drawn there: an upside-
+##               down road is seen through nothing at all. With the roof the oblong screen and its frame
 ##               are hidden (their meshes stay, for the gates that measure them). Canopy.roofed =
 ##               false before build() gives the open cockpit back.
 ## Both are built in pod-local coordinates (the hull's: forward -Z) and joined to the "exterior"
@@ -99,7 +105,7 @@ static func build() -> Node3D:
 				mi.material_override = pane
 				mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 			else:
-				# The headliner faces down, away from the sun and the sky, and with nothing of its own it is a
+				# The hood's liner faces down, away from the sun and the sky, and with nothing of its own it is a
 				# black slab. It gives back a little of its own colour (a courtesy light's worth). A real lamp
 				# under it did the same and cost every lit pixel of the cockpit a second light: a third of
 				# what the roof cost a headset's frame.

@@ -7,7 +7,7 @@
 extends Node3D
 
 const Kit := preload("res://view/mesh_kit.gd")
-const ON_ROOF := Vector3(0.0, 0.565, 0.82)      # on the closed canopy's roof, behind the header
+const ON_ROOF := Vector3(0.0, 0.482, 1.02)      # on the closed canopy's hood, behind the pilot's head and down on its crown (tests/test_canopy.gd)
 const ON_FIN := Vector3(0.0, 0.745, 1.72)       # across the top of the fin (a craft with no roof)
 const RED := Color(3.2, 0.12, 0.08)
 const BLUE := Color(0.12, 0.42, 3.4)

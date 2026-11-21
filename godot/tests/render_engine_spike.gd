@@ -109,6 +109,21 @@ const VIEWS := [
 	["x2-patrol-from-behind", 1.0, false, 0.0, ["pod", Vector3(1.4, 1.5, 5.0), Vector3(0.0, 0.45, 0.0)]],
 	["x3-patrol-on-your-tail", 2.0, false, 0.0, ["pod", Vector3(3.0, 2.2, -7.0), Vector3(0.0, 0.5, 40.0)]],
 	["x4-runner-from-the-seat", 2.0, false, 0.0, "seat", 96.0, -6.0],
+	# over the pilot's head (Luke: "the ceiling should sweep back even further so that you can see above
+	# during inverted flight"): from the seat at the headset's field, straight up (the picture's top is
+	# aft), up and ahead, up and back, up and to each side; and the canopy from outside, above
+	["u1-seat-straight-up", 1.0, false, 0.0, "seat", 96.0, 90.0],
+	["u2-seat-up-and-ahead", 1.0, false, 0.0, "seat", 96.0, 55.0],
+	["u3-seat-up-and-back", 1.0, false, 0.0, "seat", 96.0, 120.0],
+	["u4-seat-up-and-left", 1.0, false, 0.0, ["pod", Vector3(0.0, 0.12, 0.6), Vector3(-0.5, 0.986, 0.6)]],
+	["u5-seat-up-and-right", 1.0, false, 0.0, ["pod", Vector3(0.0, 0.12, 0.6), Vector3(0.5, 0.986, 0.6)]],
+	["u6-canopy-from-above", 1.0, false, 0.0, ["pod", Vector3(0.0, 2.7, 1.1), Vector3(0.0, 0.3, 0.45)]],
+	["u7-canopy-from-above-behind", 1.0, false, 0.0, ["pod", Vector3(-1.5, 1.9, 2.5), Vector3(0.0, 0.35, 0.4)]],
+	["u8-canopy-from-above-ahead", 1.0, false, 0.0, ["pod", Vector3(1.3, 1.9, -1.5), Vector3(0.0, 0.35, 0.55)]],
+	# ... and the cockpit rolled right over about the pilot's head, the road over the canopy (near enough
+	# the top of a corkscrew, without flying one): the head tipped back a little, and well back
+	["u9-seat-inverted-up-and-ahead", 1.0, false, 0.0, "seat", 96.0, 35.0],
+	["u10-seat-inverted-straight-up", 1.0, false, 0.0, "seat", 96.0, 90.0],
 ]
 const MESSAGE := "JUMP LIP  2 MI / 4.0 S
 ASCENT J0 > N2 UPPER
@@ -259,6 +274,10 @@ func _run() -> void:
 			seat._update_hud()
 			seat.dashboard.rolled = float(seat.dashboard.points) - (5.45 if str(view[0]).contains("rolling") else 0.0)
 			seat.dashboard.roll(0.0)
+		if str(view[0]).contains("inverted"):
+			var head: Vector3 = seat.cam.global_position
+			var over := Transform3D(Basis((seat.rig as Node3D).global_basis.z.normalized(), PI), Vector3.ZERO)
+			(seat.rig as Node3D).global_transform = Transform3D(Basis.IDENTITY, head) * over * Transform3D(Basis.IDENTITY, -head) * (seat.rig as Node3D).global_transform
 		if view[4] is String:
 			seat.cam.fov = float(view[5]) if float(view[5]) > 0.0 else wide
 			seat.cam.rotation_degrees = Vector3(-5.5 if float(view[5]) > 0.0 else -3.0, 0.0, 0.0)

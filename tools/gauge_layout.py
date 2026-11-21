@@ -102,6 +102,24 @@ ARCS = [("bat", 0, .855, .955, 236, 304, 12), ("hpL", 1, .855, .955, 240, 300, 8
 SPEED_WINDOW = (-.50, -.62, .50, -.22)
 GEAR_WINDOW = (-.115, .215, .115, .435)
 
+# The g-meter (Luke: "a g-force meter ... a real instrument, not just a number"): a sub-dial on the
+# centre face, right of the hub and over RAMJET (the mirror of TURBINES), with a needle of its own
+# and a tell-tale left at the highest load of the last few seconds. The craft pulls 35 g off the
+# line, 20 to 35 in the turns it is flown through and over 100 on full air brakes at Mach 7
+# (tests/probe_g.gd, tests/probe_slide.gd --small), and stands at 1 g at rest, so the scale is drawn
+# in decades: g_scale() is how far up it a load reads, 0..1.
+G_FULL = 100.0                     # the top of the scale, g
+G_HARD, G_LIMIT = 20.0, 50.0       # the amber band (a hard turn: the upper third) and the red one
+G_MARKS = (0, 1, 2, 5, 10, 20, 50, 100)   # its ticks; the decades carry figures
+# centre x, centre y, radius (of the face radius); the angle at zero and at full scale; the needle's
+# length (of the face radius); its height over the face and its hub's (m): under the Mach needle
+G_DIAL = (.354, .180, .190, 225, -45, .158, .0018, .0036)
+
+
+def g_scale(g):
+    return math.log1p(max(g, 0.0)) / math.log1p(G_FULL)
+
+
 LAMPS = ["backlight", "armed", "ramjet", "burner", "flameoutL", "flameoutR", "hotL", "hotR", "turbines"]
 for _key, _g, _r0, _r1, _a0, _a1, _n in ARCS:
     LAMPS += ["%s%d" % (_key, i) for i in range(_n)]

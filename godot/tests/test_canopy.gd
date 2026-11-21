@@ -8,6 +8,9 @@
 ##            the burner; blue in SPEEDCRAFT, magenta in STARFIGHTER; it wraps the nose
 ##   both     built into the flat view's pod and the VR cockpit, and marked "exterior"
 ##   flash    a forcefield's push (traffic's bump, a wall) flares it white-blue, gone in under half a second
+##   roof     the closed canopy (tools/art_roof_hd.py): fitted in both views; clear of the head; open
+##            over it from the header back to the hood, with no glass drawn there; the road ahead all
+##            glass; the patrol's light bar standing on the hood, out of the pilot's sight
 ## Prints CANOPY PASS.
 ## Run: Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_canopy.gd -- --track=range --mute
 extends SceneTree
@@ -15,6 +18,7 @@ extends SceneTree
 const Canopy := preload("res://view/canopy.gd")
 const CM := preload("res://view/craft_model.gd")
 const VRScript := preload("res://vr/vr_cockpit.gd")
+const LightBar := preload("res://view/light_bar.gd")
 const EYE_Y := 0.72 - CM.POD_FRAME_UP   # the VR eye (SEAT y 0.72 above the rig floor), pod-local
 var fails := 0
 var passed := 0
@@ -104,13 +108,23 @@ func _process(_d: float) -> bool:
 		var head := Vector3(0.0, 0.72, 0.6)
 		var solid := roof.mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX] as PackedVector3Array
 		var near := INF          # the nearest any of the roof's structure comes to the head
-		var over := INF          # the headliner straight above it
+		var cone := 180.0        # looking up: the least angle off straight up at which anything solid stands ...
+		var up_ahead := 180.0    # ... on the centre line ahead of it (the header) ...
+		var up_behind := 180.0   # ... and behind it (the hood) ...
+		var up_abeam := 180.0    # ... and straight out to either side (the cant rails)
 		var ahead_lo := -90.0    # looking forward: the highest structure under the eye line (the rim) ...
 		var ahead_hi := 90.0     # ... and the lowest above it (the header)
 		for p in solid:
 			near = minf(near, p.distance_to(head))
-			if Vector2(p.x - head.x, p.z - head.z).length() < 0.12 and p.y > head.y:
-				over = minf(over, p.y - head.y)
+			var d := p - head
+			if d.y > 0.05:
+				cone = minf(cone, rad_to_deg(atan2(Vector2(d.x, d.z).length(), d.y)))
+				if absf(d.x) < 0.03 and d.z < 0.0:
+					up_ahead = minf(up_ahead, rad_to_deg(atan2(-d.z, d.y)))
+				elif absf(d.x) < 0.03:
+					up_behind = minf(up_behind, rad_to_deg(atan2(d.z, d.y)))
+				if absf(d.z) < 0.03:
+					up_abeam = minf(up_abeam, rad_to_deg(atan2(absf(d.x), d.y)))
 			var fwd := head.z - p.z
 			if fwd > 0.05 and absf(atan2(p.x - head.x, fwd)) < deg_to_rad(20.0):
 				var el := rad_to_deg(atan2(p.y - head.y, Vector2(p.x - head.x, fwd).length()))
@@ -118,17 +132,46 @@ func _process(_d: float) -> bool:
 					ahead_lo = maxf(ahead_lo, el)
 				else:
 					ahead_hi = minf(ahead_hi, el)
-		_check("headroom: the headliner %.2f m over the eye, nothing of the roof nearer the head than %.2f m" % [over, near], over > 0.3 and over < 0.6 and near > 0.3)
+		_check("headroom: nothing of the roof nearer the head than %.2f m" % near, near > 0.3)
+		# (Luke: "the ceiling should sweep back even further so that you can see above during inverted flight")
+		_check("open over the head: nothing solid within %.0f deg of straight up; on the centre line from %.0f deg ahead of it (the header) to %.0f behind (the hood), and %.0f either side (the cant rails)" % [cone, up_ahead, up_behind, up_abeam],
+			cone > 33.0 and up_ahead > 35.0 and up_ahead < 45.0 and up_behind > 33.0 and up_behind < 60.0 and up_abeam > 45.0 and up_abeam < 70.0)
 		var under := "no structure under the eye line at all" if ahead_lo <= -90.0 else "the rim %.0f deg under the eye line" % -ahead_lo
 		_check("the road ahead is all glass: %s, the header %.0f deg over it" % [under, ahead_hi], ahead_lo < -8.0 and ahead_hi > 14.0)
 		var clear := pane.mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX] as PackedVector3Array
 		var box := AABB(clear[0], Vector3.ZERO)
+		var glazed := 180.0      # the least angle off straight up at which any of the glass is drawn
 		for p in clear:
 			box = box.expand(p)
-		# (only the shade band is glass: the rest of each pane is open to the forcefield, and costs the frame nothing)
-		_check("a shade band along the top of the screen and both windows: %.2f m wide, from %.2f to %.2f m over the eye line (out of the view ahead)" % [box.size.x, box.position.y - head.y, box.end.y - head.y],
-			box.size.x > 0.8 and box.position.y > head.y + 0.15 and box.end.y > head.y + 0.3 and box.position.x < -0.4 and box.end.x > 0.4)
-	var good := fails == 0 and passed == 11
+			glazed = minf(glazed, rad_to_deg(atan2(Vector2(p.x - head.x, p.z - head.z).length(), p.y - head.y)))
+		# (only the shade band is glass: the rest of each pane is open to the forcefield, and costs the frame nothing.
+		# Over the head there is none at all: a blended surface there would be the whole view of a pilot looking up)
+		_check("a shade band along the top of the screen and both windows: %.2f m wide, from %.2f to %.2f m over the eye line (out of the view ahead), none of it within %.0f deg of straight up" % [box.size.x, box.position.y - head.y, box.end.y - head.y, glazed],
+			box.size.x > 0.8 and box.position.y > head.y + 0.15 and box.end.y > head.y + 0.3 and box.position.x < -0.4 and box.end.x > 0.4 and glazed > 33.0)
+		# the patrol's light bar stands on the hood: over solid roof from end to end, down on its crown, and
+		# behind the hood's bow as the seated eye sees it (its lamps do not flash in the pilot's own sky)
+		var bar_at: Vector3 = LightBar.ON_ROOF - roof.position      # (the roof is drawn in the rig's frame, POD_FRAME_UP under the canopy's)
+		var covered := true
+		var seat_mid := -INF     # the hood's top under the bar's middle ...
+		var seat_end := -INF     # ... and under its ends
+		for step_x in 7:
+			for step_z in 3:
+				var spot := Vector2(lerpf(-0.33, 0.33, step_x / 6.0), bar_at.z + lerpf(-0.07, 0.07, step_z / 2.0))
+				var top := -INF
+				for p in solid:
+					if p.y > head.y + 0.2 and Vector2(p.x, p.z).distance_to(spot) < 0.035:
+						top = maxf(top, p.y)
+				covered = covered and top > -INF
+				if step_x == 3 and step_z == 1:
+					seat_mid = top
+				elif (step_x == 0 or step_x == 6) and step_z == 1:
+					seat_end = maxf(seat_end, top)
+		var under_bar := bar_at.y - 0.0225                      # the housing's underside
+		var lamp_top := Vector3(0.0, bar_at.y + 0.07, bar_at.z - 0.065) - head
+		var lamp_deg := rad_to_deg(atan2(lamp_top.z, lamp_top.y))
+		_check("the patrol's light bar stands on the hood: solid roof under all of it, its underside %.0f mm off the crown under its middle and %.0f mm over the roof at its ends; its lamps %.0f deg behind straight up, behind the hood's bow (%.0f)" % [(under_bar - seat_mid) * 1000.0, (under_bar - seat_end) * 1000.0, lamp_deg, up_behind],
+			covered and absf(under_bar - seat_mid) < 0.015 and under_bar - seat_end > -0.005 and under_bar - seat_end < 0.045 and lamp_deg > up_behind + 2.0)
+	var good := fails == 0 and passed == 13
 	print("CANOPY ", "PASS" if good else "FAIL (%d failed, %d passed)" % [fails, passed])
 	quit(0 if good else 1)
 	return true

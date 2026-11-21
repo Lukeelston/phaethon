@@ -12,6 +12,7 @@ instance uniform float stream_reveal = 1.0;
 uniform sampler2D terrain_detail : repeat_enable, filter_linear_mipmap_anisotropic;
 global uniform vec3 sky_haze;          // the haze's colour (display values): the afternoon's (0.58, 0.68, 0.80) unless view/outlook.gd says otherwise
 global uniform float sky_haze_scale;   // ... and how thick it is: 1 as it was; fog and rain thicken it
+global uniform float sky_snow;         // snow lying (view/outlook.gd): 0 none, 1 in a snowfall
 void vertex() {
 	tint = pow(COLOR.rgb, vec3(2.2));
 	local = UV*256.0;
@@ -63,6 +64,8 @@ void fragment() {
 	base *= 0.80 + 0.42 * shelter;
 	// Bare rock on the steep faces is its own grey-brown, not just a darker field colour.
 	base = mix(base, vec3(0.19, 0.175, 0.16) * (0.75 + 0.6 * shelter), rock * (1.0 - snow) * 0.45);
+	// snow lying: on everything but the steep rock, a little patchy
+	base = mix(base, vec3(0.80, 0.84, 0.88) * (0.90 + 0.14 * mottling), sky_snow * (1.0 - 0.72 * rock) * 0.92);
 	// (the haze scale is already thinned for the eye's height over the ground: here for this land's own height)
 	float eye = CAMERA_POSITION_WORLD.y;
 	float thin = air_between(eye, elevation) / air_between(eye, 0.0);

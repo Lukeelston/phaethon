@@ -17,6 +17,8 @@ const CAP_UP := 0.0085
 const GATE := 0.88
 const HEAT_AMBER := 0.6
 const HEAT_RED := 0.85
+const G_FULL := 100.0
+const G_HARD := 20.0
 const GAUGES := [
 	{"key": "mach", "x": 0.0, "y": 0.038, "ro": 0.129, "rg": 0.1205, "rf": 0.10122, "mouth": 0.1045, "face": 0.0515, "uv": [0.25, 0.25, 0.2425]},
 	{"key": "thrL", "x": -0.2115, "y": 0.021, "ro": 0.1, "rg": 0.0915, "rf": 0.07686, "mouth": 0.074, "face": 0.03, "uv": [0.695312, 0.195312, 0.189453]},
@@ -60,6 +62,10 @@ const WINDOWS := [
 const ODOMETER := [0.0, -0.1275, 0.0375, 0.012, 0.005, 6]   # the points counter: centre x, centre y, half width, half height, stand-off, drums
 const SPEED_WINDOW := [-0.5, -0.62, 0.5, -0.22]   # on the centre face: left, bottom, right, top
 const GEAR_WINDOW := [-0.115, 0.215, 0.115, 0.435]
+# the g-meter's sub-dial on the centre face: centre x, centre y, radius, angle at zero, angle at full scale,
+# needle length, the needle's height over the face and its hub's (m). A load of g reads
+# log(1 + g) / log(1 + G_FULL) of the way up its scale.
+const G_DIAL := [0.354, 0.18, 0.19, 225, -45, 0.158, 0.0018, 0.0036]
 const LAMPS := ["backlight", "armed", "ramjet", "burner", "flameoutL", "flameoutR", "hotL", "hotR", "turbines", "bat0", "bat1", "bat2", "bat3", "bat4", "bat5", "bat6", "bat7", "bat8", "bat9", "bat10", "bat11", "hpL0", "hpL1", "hpL2", "hpL3", "hpL4", "hpL5", "hpL6", "hpL7", "hpR0", "hpR1", "hpR2", "hpR3", "hpR4", "hpR5", "hpR6", "hpR7", "lcd"]
 const BLOCK_UV := [0.174316, 0.935059, 0.186035, 0.947754]
 const LCD_UV := [0.193848, 0.935547, 0.197754, 0.939453]

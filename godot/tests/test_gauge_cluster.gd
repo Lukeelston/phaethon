@@ -7,7 +7,7 @@ extends SceneTree
 const Cluster := preload("res://vr/gauge_cluster.gd")
 const Layout := preload("res://vr/gauge_layout.gd")
 const CraftModel := preload("res://view/craft_model.gd")
-const CHECKS := 26
+const CHECKS := 34
 var fails := 0
 var passed := 0
 var d
@@ -22,6 +22,12 @@ func _near(a: float, b: float) -> bool:
 func _roll(seconds: float) -> void:
 	for i in roundi(seconds / 0.05):
 		d.roll(0.05)
+
+
+## The g-meter's clockwork for some seconds, a twentieth at a time.
+func _settle(seconds: float) -> void:
+	for i in roundi(seconds / 0.05):
+		d.settle(0.05)
 
 
 func _initialize() -> void:
@@ -97,6 +103,72 @@ func _initialize() -> void:
 	var back: float = d.rolled
 	_roll(0.2)
 	_check("a new run spins it back to zero in half the time (%.0f after 0.2 s, then %.0f)" % [back, d.rolled], back > 400.0 and back < 660.0 and d.rolled == 0.0)
+	# the g-meter: the sub-dial's needle and its tell-tale, and on the status strip the figure, the slip bar and the peak
+	var up := func(pull: float) -> float: return log(1.0 + pull) / log(101.0)      # how far up its scale of decades a load reads
+	var flown := run.duplicate()
+	flown.merge({"progress": "GLACIER  178.9 mi   FROM ERIDANUS  0:02"}, true)
+	d.show_state(flown)
+	_settle(0.25)
+	_check("at rest the g-meter stands at 1 g, a seventh of the way up its scale (%.3f, %.1f deg), the tell-tale with it and the ball in the middle of its tube; the strip reads \"%s\" and \"%s\"" % [d.values.g, d.needle_angle("g"), d.labels.g.text, d.labels.g_peak.text],
+		_near(d.values.g, up.call(1.0)) and _near(d.needle_angle("g"), 225.0 - 270.0 * up.call(1.0)) and _near(d.needle_angle("g_peak"), d.needle_angle("g"))
+		and d.labels.g.text == "1.0 G" and d.labels.g_peak.text == "PEAK 1.0" and d.labels.g.visible and d._slip.visible and float(d._slip_mat.get_shader_parameter("ball")) == 0.0)
+	flown.merge({"g": 4.2, "g_side": 4.07}, true)
+	d.show_state(flown)
+	var stale: String = d.labels.g.text
+	_settle(0.25)
+	_check("a 4.2 g left turn: the needle follows the load at once (%.1f deg), the figure is read a fifth of a second later (\"%s\", then \"%s\"), and the ball runs right, where the pilot is thrown (%.2f of its travel)" % [d.needle_angle("g"), stale, d.labels.g.text, float(d._slip_mat.get_shader_parameter("ball"))],
+		_near(d.needle_angle("g"), 225.0 - 270.0 * up.call(4.2)) and stale == "1.0 G" and d.labels.g.text == "4.2 G"
+		and _near(float(d._slip_mat.get_shader_parameter("ball")), up.call(4.07)) and float(d._slip_mat.get_shader_parameter("hard")) == 0.0)
+	flown.merge({"g": 24.0, "g_side": -23.9}, true)
+	d.show_state(flown)
+	_settle(0.25)
+	_check("a hard right turn, 24 g: the needle is in the last third of its scale (%.2f), the tell-tale has gone up with it, and the ball is out to the left and orange (%.2f)" % [d.values.g, float(d._slip_mat.get_shader_parameter("ball"))],
+		d.values.g > 2.0 / 3.0 and _near(d.values.g, up.call(24.0)) and _near(d.values.g_peak, d.values.g) and d.labels.g.text == "24.0 G"
+		and float(d._slip_mat.get_shader_parameter("ball")) < -0.6 and float(d._slip_mat.get_shader_parameter("hard")) == 1.0)
+	flown.merge({"g": 1.0, "g_side": 0.0}, true)
+	d.show_state(flown)
+	_settle(Cluster.PEAK_HOLD - 0.3)
+	d.show_state(flown)
+	_check("the turn let go: the needle is back at 1 g (%.1f deg), and the tell-tale stays at the 24 g it was pushed to for %.0f s (%.1f deg, \"%s\")" % [d.needle_angle("g"), Cluster.PEAK_HOLD, d.needle_angle("g_peak"), d.labels.g_peak.text],
+		_near(d.needle_angle("g"), 225.0 - 270.0 * up.call(1.0)) and d.g_peak == 24.0 and _near(d.needle_angle("g_peak"), 225.0 - 270.0 * up.call(24.0)) and d.labels.g_peak.text == "PEAK 24.0" and d.labels.g.text == "1.0 G")
+	_settle(0.35)
+	d.show_state(flown)
+	var falling: float = d.g_peak
+	_settle(2.0)
+	d.show_state(flown)
+	_check("then it falls back down the scale to the needle (%.1f g a third of a second into the fall, then %.1f; \"%s\")" % [falling, d.g_peak, d.labels.g_peak.text],
+		falling < 20.0 and falling > 8.0 and d.g_peak == 1.0 and _near(d.needle_angle("g_peak"), d.needle_angle("g")) and d.labels.g_peak.text == "PEAK 1.0")
+	flown.merge({"g": 122.0, "g_side": 0.0}, true)
+	d.show_state(flown)
+	_settle(0.25)
+	var pegged: float = d.values.g
+	flown.merge({"g": 0.0}, true)
+	d.show_state(flown)
+	_settle(0.25)
+	_check("full air brakes at Mach 7, 122 g: the needle is on its top stop (%.3f of the scale) and the strip still has the figure (\"122 G\"); weightless over a jump it lies at zero (%.0f deg, \"%s\"), the tell-tale left at the top" % [pegged, d.needle_angle("g"), d.labels.g.text],
+		pegged > 1.0 and pegged < 1.04 and d.labels.g_peak.text == "PEAK 122" and _near(d.needle_angle("g"), 225.0) and d.labels.g.text == "0.0 G" and d.g_peak == 122.0)
+	flown.merge({"g": 1.0, "health": [1.0, 0.4]}, true)
+	d.show_state(flown)
+	var hint: bool = not d.labels.g.visible and not d._slip.visible and not d.labels.g_peak.visible and d.labels.warn.text == "HOLD X: REPAIR R"
+	flown.merge({"health": [1.0, 1.0], "progress": "ENGINE POWER   2 / 5\nLIFT THE RED GUARD"}, true)
+	d.show_state(flown)
+	var two_lines: bool = not d.labels.g.visible and not d._slip.visible
+	flown.merge({"progress": "OFF THE ROAD   ERIDANUS ON-RAMP  12.4 mi   (OR RESTART)"}, true)
+	d.show_state(flown)
+	var wrapped: bool = not d.labels.g.visible and not d._slip.visible
+	flown.merge({"progress": "GLACIER  178.9 mi   FROM ERIDANUS  0:02"}, true)
+	d.show_state(flown)
+	_check("its line on the strip gives way to the repair hint (%s), to the start-up's two lines (%s) and to a run line too long for one (%s), and comes back after" % [hint, two_lines, wrapped],
+		hint and two_lines and wrapped and d.labels.g.visible and d._slip.visible and d.labels.g_peak.visible)
+	flown.merge({"g": 9.0, "power": 1.0, "sweep": 0.25}, true)
+	d.show_state(flown)
+	var swept: float = d.values.g
+	flown.merge({"power": 0.0, "sweep": -1.0}, true)
+	d.show_state(flown)
+	_check("in the self-test its needle and tell-tale sweep with the rest (%.2f of the scale, the Mach needle's own); with the battery off they lie on the stop and the strip is blank" % swept,
+		_near(swept, 0.5) and d.values.g == 0.0 and d.values.g_peak == 0.0 and _near(d.needle_angle("g"), 225.0) and not d.labels.g.visible and not d._slip.visible)
+	flown.merge({"power": 1.0, "g": 1.0}, true)
+	d.show_state(flown)
 	# the longest things the strips show, for the clearance pass (labels size to their text)
 	d.show_state({"mph": 5387.0, "kmh": 8669.0, "mach_line": "MACH 7.0   MILE / 0.67 s",
 		"progress": "STOPPED IN BOX  95.46s   6.9 ft off   braked 4.47 mi out\nBEST 95.46s   (Y: go again)",

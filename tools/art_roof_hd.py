@@ -7,19 +7,30 @@ A closed canopy standing on the cockpit's rim, in the rig's frame like the other
 -Z, y up from the rig's floor, the hull's centre 0.6 above it; the seated eye is at (0, 0.72, 0.6)).
 Swept back (Luke, seeing the first one stand upright: "I think it should be swept back pretty
 significantly"): the screen leaves the rim's nose and lies back some 70 degrees from vertical to a
-header over the pilot's brow, its pillars with it, and the roof falls away behind the head.
-  header     a leather-wrapped rail across the top of the windscreen, 0.3 m ahead of the eye and
-             0.35 m over it (about 50 degrees up: the road ahead and the sky over it are all glass)
+header over the pilot's brow, its pillars with it. And open overhead (Luke, after the stunt roads
+had rolled him over: "I think maybe the ceiling should sweep back even further so that you can see
+above during inverted flight"): the screen runs on over the header and over the pilot's head, a
+fighter's canopy line, and the solid roof is a hood that starts behind the head.
+  header     a leather-wrapped bow across the top of the windscreen, 0.3 m ahead of the eye and
+             0.35 m over it (about 50 degrees up: the road ahead and the sky over it are all glass).
+             The approach projector and the start panel hang from it. Nothing solid behind it: it
+             is a slim bow in the glass, not the front of a ceiling
   pillars    an A-pillar each side, its foot well forward on the rim and its top back at the header's
              corner (65 degrees from vertical); a raked B-pillar behind the shoulders
-  rails      a short cant rail each side from the header back over the head to the B-pillars
-  roof       a crowned shell between them: Alcantara inside (0.36 m over the eye), quilted in padded
-             diamonds and stitched in the cockpit's orange thread; carbon weave under lacquer outside
+  rails      a cant rail each side from the header back to the B-pillars, more than 50 degrees out
+             from straight overhead
+  top        between the header, the rails and the hood: open, with no glass drawn in it at all.
+             From the seated eye, 39 degrees ahead of straight up to 36 behind it, and 52 either
+             side (the tool prints them: OPEN)
+  hood       a crowned shell from a second bow 0.28 m behind the eye back to the B-pillars:
+             Alcantara inside, quilted in padded diamonds and stitched in the cockpit's orange thread;
+             carbon weave under lacquer outside (the patrol's light bar stands on it)
   cowl       the same shell carried down behind the head to the rear of the rim
   glass      the shade band along the top of the windscreen and of each side window: a separate mesh
              ("RoofGlass", u across and v down the pane in its UVs) that the game gives its own material.
              Only the band: a whole pane of clear glass cost the headset 0.7 ms a frame to draw nothing
-             you could see (it is blended at four samples a pixel over the whole view)
+             you could see (it is blended at four samples a pixel over the whole view), so what the
+             pilot looks through, ahead and overhead, is open
 Forms are geometry; grain, nap, weave and stitching are synthesised in surface metres, and the
 occlusion is path traced over the finished shapes. Writes godot/art/cockpit/roof_hd.glb.
 """
@@ -57,7 +68,8 @@ def foot(deg):
 
 A_DEG, B_DEG = 50.0, 30.0        # the pillars' feet: degrees round the rim from the nose, and aft of abeam
 HEAD_Z, HEAD_BOW = .30, .14      # the header: its middle this far aft of the opening's centre line (the eye is at .6), its corners further
-TAIL_Z = 1.08                    # the roof's rear edge at the B-pillars' tops
+HOOD_Z, HOOD_BOW = .88, .08      # the hood's leading bow: its middle this far aft (0.28 m behind the eye), its corners this much further forward
+TAIL_Z = 1.08                    # the hood's rear edge at the B-pillars' tops
 GLASS_FROM = .74                 # the glass mesh starts this far up each pane (roof_glass.gdshader fades in from there)
 
 
@@ -72,11 +84,22 @@ def rail(side, t):
                      HEAD_Z + HEAD_BOW + (TAIL_Z - HEAD_Z - HEAD_BOW) * t))
 
 
-def roof(t, w):
-    """The roof's middle surface: t header .. rear, w across."""
+def crown(t, w):
+    """The canopy's upper surface, t header .. rear, w across: the front of it is open over the pilot's head, the hood is the rest."""
     edge = rail(1.0, t)
     front, back = HEAD_Z + HEAD_BOW * w * w, TAIL_Z + .08 * (1 - w * w)
     return np.array((w * edge[0], edge[1] + (.035 + .07 * t * (1 - t)) * (1 - w * w), front + (back - front) * t))
+
+
+def hood_from(w):
+    """How far back along the crown the hood begins, at w across: its leading edge is bowed aft in the middle."""
+    front, back = HEAD_Z + HEAD_BOW * w * w, TAIL_Z + .08 * (1 - w * w)
+    return (HOOD_Z - HOOD_BOW * w * w - front) / (back - front)
+
+
+def roof(t, w):
+    """The hood's middle surface: t from its leading bow .. rear, w across."""
+    return crown(hood_from(w) + (1 - hood_from(w)) * t, w)
 
 
 def screen(u, v):
@@ -96,7 +119,7 @@ def side_window(side, t, v):
 
 
 def cowl(q, v):
-    """Behind the head: q round the back from the right B-pillar to the left, v from the rim up to the roof's rear edge."""
+    """Behind the head: q round the back from the right B-pillar to the left, v from the rim up to the hood's rear edge."""
     base, top = foot(B_DEG + (180 - 2 * B_DEG) * q), roof(1.0, 1 - 2 * q)
     p = base + (top - base) * v
     out = np.array((p[0], .2, p[2] - .3))
@@ -257,9 +280,9 @@ def shell(part, inner_area, outer_area, surface, nt, nw, paint_inner, thick=(.01
 
 def canopy():
     part, glass = Part("Roof"), Part("RoofGlass")
-    # the roof and the cowl behind the head
-    span = shell(part, kit.rect(16, 16, 1100, 860), kit.rect(16, 900, 1100, 500), roof, 33, 25,
-                 paint_quilt)
+    # the hood and the cowl behind the head
+    span = shell(part, kit.rect(16, 16, 1100, 400), kit.rect(16, 440, 1100, 200), roof, 13, 25,
+                 lambda area, length, width: paint_quilt(area, length, width, border=.03))
     back = shell(part, kit.rect(1140, 16, 880, 300), kit.rect(1140, 330, 880, 200), lambda v, q: cowl(q, v), 9, 33,
                  lambda area, length, width: paint_quilt(area, length, width, border=.03))
     # the rails
@@ -268,6 +291,7 @@ def canopy():
     lengths["cant L"] = tube(part, kit.rect(1470, 560, 100, 620), [rail(-1, t) for t in np.linspace(0, 1, n)], .022, .017)
     lengths["cant R"] = tube(part, kit.rect(1580, 560, 100, 620), [rail(1, t) for t in np.linspace(0, 1, n)], .022, .017)
     lengths["header"] = tube(part, kit.rect(1360, 560, 100, 776), [header(w) for w in np.linspace(-1, 1, n)], .020, .016)
+    lengths["hood bow"] = tube(part, kit.rect(1910, 560, 100, 776), [roof(0.0, w) for w in np.linspace(-1, 1, n)], .020, .016)
     rake = {}
     for k, side in enumerate((-1, 1)):
         base, top = foot(-90 - A_DEG if side < 0 else -90 + A_DEG), header(side)
@@ -285,10 +309,19 @@ def canopy():
     for side in (-1, 1):
         ts = np.linspace(0, 1, 25)
         glass.patch(whole, 1, 1, [[side_window(side, t, v) for t in ts] for v in vs], vs, ts, lambda p: p - EYE)
-    print("ROOF", "roof %.2f x %.2f m, cowl %.2f x %.2f m, rails" % (span + back), {k: round(v, 2) for k, v in lengths.items()},
-          "headroom over the eye %.3f m;" % (roof((EYE[2] - HEAD_Z) / (TAIL_Z + .08 - HEAD_Z), 0)[1] - .014 - EYE[1]),
+    print("ROOF", "hood %.2f x %.2f m, cowl %.2f x %.2f m, rails" % (span + back), {k: round(v, 2) for k, v in lengths.items()},
           "lying back from vertical:", {k: round(v) for k, v in rake.items()},
           "the header %.2f m ahead of the eye, %.2f m over it" % (EYE[2] - brow[2], brow[1] - EYE[1]), flush=True)
+    # what is open over the seated eye, measured on the finished frame (a part's points are Blender's: x, -z, y)
+    solid = np.array(part.xyz)[:, (0, 2, 1)] * np.array((1.0, 1.0, -1.0)) - EYE
+    above = solid[solid[:, 1] > .05]
+    off = np.degrees(np.arctan2(np.hypot(above[:, 0], above[:, 2]), above[:, 1]))
+    middle, abeam = above[np.abs(above[:, 0]) < .03], above[np.abs(above[:, 2]) < .03]
+    fore_aft = np.degrees(np.arctan2(middle[:, 2], middle[:, 1]))
+    print("OPEN", "straight up: nothing solid within %.1f degrees of it; on the centre line from %.1f degrees ahead of vertical (the header) to %.1f behind it (the hood);"
+          % (off.min(), -fore_aft[fore_aft < 0].max(), fore_aft[fore_aft > 0].min()),
+          "abeam %.1f degrees either side (the cant rails); the hood's liner %.2f m over the eye and %.2f m behind it"
+          % (np.degrees(np.arctan2(np.abs(abeam[:, 0]), abeam[:, 1])).min(), roof(0.0, 0.0)[1] - .014 - EYE[1], roof(0.0, 0.0)[2] - EYE[2]), flush=True)
     return part, glass
 
 

@@ -139,7 +139,29 @@ def mach_face():
     f.text("BAT", -.628, -.668, .05, weight=600, track=.14, glow=170)
     f.box(*L.SPEED_WINDOW, .008)
     f.box(*L.GEAR_WINDOW, .008)
+    g_dial(f)
     return f.image()
+
+
+def g_dial(f):
+    """The g-meter's sub-dial on the centre face: a scale in decades (1 g at rest, 10 at the top,
+    100 at the stop), figures at the decades, amber where a turn is a hard one and red past that."""
+    cx, cy, r, a0, a1 = L.G_DIAL[:5]
+    f.cx, f.cy = f.at(cx, cy)                                         # (drawn about its own centre)
+    at = lambda g: sweep(a0, a1, L.g_scale(g))
+    for g in L.G_MARKS:
+        zone = RED if g >= L.G_LIMIT else ORANGE if g >= L.G_HARD else WHITE
+        decade = g in (0, 1, 10, 100)
+        f.tick(at(g), r * (.70 if decade else .80), r * .99, r * (.095 if decade else .055), zone)
+    f.band(a0, at(L.G_HARD), r * .965, r * 1.0)
+    f.band(at(L.G_HARD), at(L.G_LIMIT), r * .89, r * 1.0, ORANGE)     # a hard turn; and past it
+    f.band(at(L.G_LIMIT), a1, r * .89, r * 1.0, RED)
+    for g, out, lean in ((1, .46, 0), (10, .44, 0), (100, .50, 19)):    # (100 sits round from its tick, clear of the stop)
+        t = math.radians(at(g) + lean)
+        f.text(str(g), r * out * math.cos(t), r * out * math.sin(t), r * .25, RED if g >= L.G_LIMIT else WHITE, weight=800, slant=.17,
+               squeeze=.86 if g >= 100 else 1.0)
+    f.text("G", 0, -r * .86, r * .30, weight=800, slant=.17, glow=220)
+    f.cx, f.cy = f.w * S / 2, f.h * S / 2
 
 
 def thrust_face(letter):
@@ -247,7 +269,7 @@ def main():
              "extends RefCounted", ""]
     for name, value in (("R", L.R_ARC), ("HALF_W", L.HALF_W), ("Y_BOTTOM", L.Y_BOTTOM), ("SEAT", L.SEAT), ("DOME", L.DOME), ("CHAPTER", L.CHAPTER),
                         ("CHAPTER_R", L.CHAPTER_R), ("NEEDLE_UP", L.NEEDLE_UP), ("CAP_UP", L.CAP_UP), ("GATE", L.GATE),
-                        ("HEAT_AMBER", L.HEAT_AMBER), ("HEAT_RED", L.HEAT_RED)):
+                        ("HEAT_AMBER", L.HEAT_AMBER), ("HEAT_RED", L.HEAT_RED), ("G_FULL", L.G_FULL), ("G_HARD", L.G_HARD)):
         lines.append("const %s := %s" % (name, repr(float(value))))
     lines.append("const GAUGES := [\n\t%s,\n]" % ",\n\t".join(gd(g) for g in gauges))
     lines.append("# key, gauge, angle at zero, angle at full scale, length, full scale")
@@ -261,6 +283,10 @@ def main():
     lines.append("const ODOMETER := %s   # the points counter: centre x, centre y, half width, half height, stand-off, drums" % gd(list(L.ODOMETER)))
     lines.append("const SPEED_WINDOW := %s   # on the centre face: left, bottom, right, top" % gd(list(L.SPEED_WINDOW)))
     lines.append("const GEAR_WINDOW := %s" % gd(list(L.GEAR_WINDOW)))
+    lines.append("# the g-meter's sub-dial on the centre face: centre x, centre y, radius, angle at zero, angle at full scale,")
+    lines.append("# needle length, the needle's height over the face and its hub's (m). A load of g reads")
+    lines.append("# log(1 + g) / log(1 + G_FULL) of the way up its scale.")
+    lines.append("const G_DIAL := %s" % gd(list(L.G_DIAL)))
     lines.append("const LAMPS := %s" % gd(L.LAMPS))
     lines.append("const BLOCK_UV := %s" % gd(block_uv))
     lines.append("const LCD_UV := %s" % gd(lcd_uv))

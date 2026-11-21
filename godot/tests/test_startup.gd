@@ -52,6 +52,8 @@ func _run_for(s, seconds: float, thr := [0.0, 0.0], gear := 1) -> void:
 
 func _logic() -> void:
 	var s = Sequence.new()
+	var marks := []          # the glass's tally at each thing done: it must only go up
+	var glass := {}
 	var full := {"thrL": 1.0, "thrR": 1.0, "brkL": 0.0, "brkR": 0.0, "burner": true}
 	_check("a sequence is born running, the brake off: the sim is given exactly what is asked", s.is_hot() and s.cleared and is_same(s.gate(full), full) and s.message() == "")
 	s.cold()
@@ -60,6 +62,7 @@ func _logic() -> void:
 		s.park and not s.batt and not s.master and held.thrL == 0.0 and held.thrR == 0.0 and held.burner == false and held.brkL == 1.0 and held.brkR == 1.0
 		and full.thrL == 1.0 and full.brkL == 0.0 and s.power == 0.0)
 	_check("with the battery dead there is nothing to read, and the control to work is the battery: \"%s\", \"%s\"" % [s.message(), s.next_control()], s.message() == "" and s.next_control() == "batt" and s.step_number() == 1)
+	_check("... and nothing for the glass to draw", s.display().is_empty() and s.start_progress(0) == 0.0)
 	_check("the start button does nothing on a dead bus: \"%s\"" % s.press_start(), s.events.has("dead") and s.stage == ["off", "off"])
 	_check("the guard is in the way of a push down, and the first flick up only lifts it", s.flick("engine", -1) == "" and s.flick("engine", 1) == "guard_open" and s.guard_open and not s.master)
 	var did: String = s.flick("engine", 1)
@@ -70,16 +73,32 @@ func _logic() -> void:
 	_check("1 BATT: the bus comes up and the self-test starts", s.flick("batt", 1) == "batt_on" and s.batt and s.selftest == 0.0 and not s.tested)
 	_run_for(s, Sequence.SELFTEST_S * 0.5)
 	_check("... half way through it, power is up (%.2f) and the glass says so: %s" % [s.power, s.message().replace("\n", " / ")], s.power == 1.0 and s.selftest > 0.0 and s.message().contains("ENGINE POWER  2 / 5") and s.message().contains("LIFT THE RED GUARD") and s.message().contains("SELF TEST"))
+	glass = s.display()
+	marks.append(glass.mark)
+	_check("... and the glass is given it to draw: one step behind (the battery), the control to work overhead left, the bus's bar half way across (%s)" % [glass.bars],
+		glass.done == 1 and glass.aim == -1 and not glass.pair and absf(glass.bars[0] - 1.0) < 0.03 and glass.bars[1] < 0.03 and glass.cleared == -1.0 and not glass.alert)
 	_run_for(s, Sequence.SELFTEST_S * 0.5 + 0.05)
 	_check("... and it finishes in %.1f s" % Sequence.SELFTEST_S, s.tested and s.selftest < 0.0 and s.events.has("selftest_done") and s.next_control() == "guard")
+	marks.append(s.display().mark)
 	did = s.press_start()
 	_check("the start button is refused without engine power: \"%s\"" % s.refusal, did == "refused" and s.refusal == "ENGINE POWER FIRST")
+	_check("... which the glass is told, to put a bar under the words", s.display().alert and s.display().bars == [1.0, 1.0])
+	s.flick("engine", 1)
+	marks.append(s.display().mark)      # the guard lifted
+	s.flick("engine", 1)
+	glass = s.display()
+	marks.append(glass.mark)
+	_check("engine power on: two steps behind, the control to work overhead right, and the bar is the binder's charge, from nothing (%s)" % [glass.bars], glass.done == 2 and glass.aim == 1 and glass.bars == [0.0, 0.0])
+	s.flick("engine", -1)               # (off again, and the guard shut, for the checks that follow)
+	s.flick("engine", -1)
 	_check("2 ENGINE: lift the guard, then the switch", s.flick("engine", 1) == "guard_open" and s.next_control() == "engine" and s.flick("engine", 1) == "master_on" and s.master)
 	did = s.flick("batt", -1)
 	_check("the battery will not go off under engine power: \"%s\"" % s.refusal, did == "refused" and s.batt and s.refusal == "ENGINE POWER OFF FIRST")
 	_run_for(s, Sequence.GUARD_AFTER_S + 0.1)
 	_check("the binder charges in %.1f s, the guard falls shut over the switch, and the button is on offer: %s" % [Sequence.CHARGE_S, s.message().replace("\n", " / ")],
 		s.charge == 1.0 and not s.guard_open and s.next_control() == "start" and s.message().contains("PRESS 3 START") and s.message().contains("ARMED"))
+	marks.append(s.display().mark)
+	_check("... its bar full", s.display().bars == [1.0, 1.0] and s.display().done == 2)
 	s.flick("park", -1)
 	did = s.press_start(0.0)
 	_check("at rest it will not start without the parking brake: \"%s\", and the glass says so: %s" % [s.refusal, s.message().replace("
@@ -90,34 +109,60 @@ func _logic() -> void:
 	_check("3 START: the left engine turns over at once, the right waits its turn", s.press_start(0.0) == "start" and s.stage == ["wait", "wait"])
 	_run_for(s, 0.05)
 	_check("... %s" % [s.stage], s.stage == ["crank", "wait"] and s.events.has("crank0") and s.starting() and s.next_control() == "")
+	glass = s.display()
+	marks.append(glass.mark)
+	_check("the glass has a bar for each engine now: the left one just begun (%.3f), the right at nothing, no control to work" % glass.bars[0], glass.pair and glass.bars[0] > 0.0 and glass.bars[0] < 0.05 and glass.bars[1] == 0.0 and glass.aim == 0 and glass.done == 2)
 	_run_for(s, Sequence.STAGGER_S)
 	_check("... %.1f s later the right one too: %s" % [Sequence.STAGGER_S, s.message().replace("\n", " / ")], s.stage == ["crank", "crank"] and s.message().contains("LEFT CRANKING > RIGHT CRANKING"))
+	marks.append(s.display().mark)
 	_run_for(s, Sequence.CRANK_S - Sequence.STAGGER_S)
 	_check("... the left catches after %.1f s on the starter (a flare of %.2f), the right still cranking" % [Sequence.CRANK_S, s.catch_flare(0)], s.stage == ["catch", "crank"] and s.events.has("light0") and not s.events.has("light1"))
+	glass = s.display()
+	marks.append(glass.mark)
+	_check("... its bar seven tenths across as it catches (%.2f), the right engine's part way (%.2f)" % [glass.bars[0], glass.bars[1]], absf(glass.bars[0] - 0.7) < 0.02 and glass.bars[1] > 0.1 and glass.bars[1] < 0.3)
+	_run_for(s, Sequence.CATCH_S * 0.5)
+	_check("... and half way to its idle it flares (%.2f; bar %.2f)" % [s.display().flare[0], s.display().bars[0]], s.display().flare[0] > 0.9 and absf(s.display().bars[0] - 0.85) < 0.03 and s.display().flare[1] == 0.0)
 	var before: Dictionary = s.gate(full)
-	_run_for(s, Sequence.STAGGER_S + Sequence.CATCH_S + 0.05)
+	_run_for(s, Sequence.STAGGER_S + Sequence.CATCH_S * 0.5 + 0.05)
 	_check("... and both are running %.1f s after the button" % (Sequence.STAGGER_S + Sequence.CRANK_S + Sequence.CATCH_S), s.all_running() and s.events.has("running") and before.thrL == 0.0)
 	held = s.gate(full)
 	_check("4 PARK holds her: engines running, levers full, and the sim is given no thrust (%s / %s) and full air brakes (%s / %s)" % [held.thrL, held.thrR, held.brkL, held.brkR],
 		s.held() and held.thrL == 0.0 and held.thrR == 0.0 and held.brkL == 1.0 and held.brkR == 1.0 and not s.cleared)
+	glass = s.display()
+	marks.append(glass.mark)
+	_check("the glass: three steps behind, one bar again and empty (the turbines), no control to work but the levers", glass.done == 3 and not glass.pair and glass.bars == [0.0, 0.0] and glass.aim == 0 and glass.flare == [0.0, 0.0])
 	_check("without a gearbox the run-up asks for the levers and the turbines: %s" % s.message().split("\n")[1], s.message().contains("LEVERS -- -- > TURBINES --") and not s.message().contains("GEAR"))
 	s.gears = true
 	_check("with one, for a shift too: %s" % s.message().replace("\n", " / "), s.message().contains("RUN-UP  4 / 5") and s.message().contains("LEVERS -- -- > GEAR -- > TURBINES --") and s.next_control() == "park")
 	_run_for(s, 0.2, [0.7, 0.0])
 	_check("a lever tried is ticked, its own alone: %s" % [s.checks], s.checks.thrL and not s.checks.thrR and not s.checks.gear and not s.checks.turbines)
+	marks.append(s.display().mark)
 	_run_for(s, 0.2, [0.0, 0.7], 2)
 	_check("the other lever, and a shift from first to second: %s" % [s.checks], s.checks.thrR and s.checks.gear and not s.checks_done())
+	marks.append(s.display().mark)
 	_run_for(s, Sequence.TURBINE_UP_S * 0.5, [1.0, 1.0], 2)
 	_check("both levers held forward spool the turbines (%.0f%% half way): %s" % [s.turbine * 100.0, s.message().split("\n")[1]], s.turbine > 0.4 and s.turbine < 0.6 and not s.checks.turbines and s.message().contains("LEVERS OK OK > GEAR OK > TURBINES 50%"))
+	_check("... the glass's bar with them, half way across (%s)" % [s.display().bars], absf(s.display().bars[0] - 1.0) < 0.05 and s.display().bars[1] < 0.05)
 	_run_for(s, Sequence.TURBINE_UP_S * 0.5 + 0.05, [1.0, 1.0], 2)
 	_check("... to their test speed in %.1f s, and the checks are done: %s" % [Sequence.TURBINE_UP_S, s.message().replace("\n", " / ")], s.checks.turbines and s.checks_done() and s.events.has("turbines_ok") and s.message().contains("RELEASE PARK BRAKE  5 / 5") and s.message().contains("| READY"))
+	glass = s.display()
+	marks.append(glass.mark)
+	_check("the glass: four steps behind, the bar full, the control to work overhead right", glass.done == 4 and glass.bars == [1.0, 1.0] and glass.aim == 1)
 	_run_for(s, Sequence.TURBINE_DOWN_S + 0.1)
 	_check("let go, they wind down again", s.turbine == 0.0)
 	_check("the brake released: the air brakes stow and she is yours (the sim is given what is asked), and the glass says CLEARED for a moment", s.flick("park", -1) == "park_release" and is_same(s.gate(full), full) and s.gate(full).brkL == 0.0)
 	_run_for(s, 0.1)
 	_check("... \"%s\"" % s.message().split("\n")[0], s.cleared and s.events.has("cleared") and s.message().begins_with("CLEARED"))
+	glass = s.display()
+	marks.append(glass.mark)
+	var rising := true
+	for i in range(1, marks.size()):
+		rising = rising and marks[i] > marks[i - 1]
+	_check("the glass is told how long ago the brake came off (%.2f s), all five steps behind; and through the whole start its tally only ever went up (%s)" % [glass.cleared, marks],
+		absf(glass.cleared - 0.1) < 0.02 and glass.done == 5 and glass.aim == 0 and rising and marks.size() == 13)
 	_run_for(s, Sequence.CLEARED_S + 0.1)
 	_check("... and then nothing more", s.message() == "" and s.next_control() == "")
+	_check("... on the glass either", s.display().is_empty())
 	# in flight
 	_check("in flight a push down on the guarded switch does nothing; lifted first, it cuts both engines", s.flick("engine", -1, 3000.0) == "" and s.master and s.flick("engine", 1, 3000.0) == "guard_open" and s.flick("engine", -1, 3000.0) == "master_off" and s.stage == ["off", "off"])
 	held = s.gate(full)
@@ -226,6 +271,7 @@ func _fly(seconds: float, thr := [0.0, 0.0], brk := [0.0, 0.0]) -> void:
 		v.interior.set_power(v.startup.power)
 		v.interior.set_mode(v.sim.mode, v.sim.hblend)
 		v._update_hud()
+		v.approach_display._process(dt)       # (the checklist's own clockwork: no frames are drawn while this runs)
 		left -= dt
 
 
@@ -359,6 +405,8 @@ func _run() -> void:
 	_check("dark: no lamp of the cluster's %d is lit, its strips are blank, its needles lie on their stops, the rim light is out, the map is off, the glass is blank" % v.dashboard.lamps.size(),
 		dark == v.dashboard.lamps.size() and not (v.dashboard.labels.mach as Label3D).visible and v.dashboard.values.thrL == 0.0 and rim.r + rim.g + rim.b == 0.0
 		and not v.minimap_panel.live and v.approach_display.message == "")
+	var glass = v.approach_display
+	_check("... and none of the checklist's drawing is up or running (the sheet hidden, the projector idle)", not glass.sheet.visible and glass.checklist.is_empty() and not glass.is_processing())
 	_check("cold: both engines dark, the binder dead (no arc, its emitters and the cables unlit), the strobes out; parked: her air brakes out full (%.2f / %.2f, the pod's %.2f)" % [v.craft.flap_open[0], v.craft.flap_open[1], v.craft.pod_flap_open],
 		v.craft.held[0] and v.craft.held[1] and v.craft.energised == 0.0 and (v.craft.binder_arc.mesh as ArrayMesh).get_surface_count() == 0
 		and v.craft.cable_mats[0].emission_energy_multiplier == 0.0 and v.craft.binder_mats[0].albedo_color.b == 0.0 and not v.craft.lights_on and not v.craft.strobes[0].visible
@@ -381,7 +429,15 @@ func _run() -> void:
 	# 1 BATT
 	_check("a hand flicks 1 BATT up: \"%s\"" % _work(_flick("batt", 1)), s.batt)
 	_check("the same hand cannot throw the switch beside it in the same sweep (a rest between throws on a pod)", _flick("engine", 1).is_empty())
-	_fly(Sequence.SELFTEST_S * 0.5)
+	_fly(0.7)
+	_check("the bus comes up: the glass opens on the checklist (%.2f s up), its sheet drawn under the type with a pointer of its own in the gutter, the rail's first segment being wiped full (%.2f)" % [glass.clock, glass.ticked],
+		glass.sheet.visible and glass.panel.visible and glass.checklist.done == 1 and glass.clock > 0.1 and glass.clock < 0.6 and glass.ticked > 0.0 and glass.ticked < 1.0
+		and float(glass.surface.get_shader_parameter("pointer")) == 0.0 and absf(float(glass.sheet_mat.get_shader_parameter("age")) - glass.clock) < 0.001)
+	_fly(Sequence.SELFTEST_S * 0.5 - 0.7)
+	var bus: Vector2 = glass.sheet_mat.get_shader_parameter("bars")
+	_check("half way through the self-test its bar is half way across the glass (%s), the page is written in full (%.2f) and the pointer beats at %.2f Hz toward the left pod" % [bus, glass.typing, Projector.BEAT_HZ],
+		absf(bus.x - 1.0) < 0.05 and bus.y < 0.05 and glass.typing == 1.0 and glass.action.text == "ENGINE POWER" and float(glass.sheet_mat.get_shader_parameter("aim")) == -1.0
+		and float(glass.sheet_mat.get_shader_parameter("ask")) == 1.0 and Projector.BEAT_HZ < 3.0)
 	var telltales := ["burner", "armed", "ramjet", "turbines", "flameoutL", "flameoutR", "hotL", "hotR"]
 	_check("the self-test: every telltale lit (%d of %d), every needle half way up its sweep and back (mach %.2f, heat %.2f), eights in the speed" % [_lit(telltales), telltales.size(), v.dashboard.values.mach, v.dashboard.values.heatL],
 		_lit(telltales) == telltales.size() and v.dashboard.values.mach > 0.9 and is_equal_approx(v.dashboard.values.mach, v.dashboard.values.heatL) and v.dashboard._speed == 8888)
@@ -393,9 +449,18 @@ func _run() -> void:
 	_fly(0.2)
 	# 2 ENGINE
 	_check("2 ENGINE: a flick lifts the guard: \"%s\"" % _work(_flick("engine", 1)), s.guard_open and not s.master)
-	_fly(0.7)
+	_fly(0.1)
+	_check("... and a sweep crosses the middle line as its words change (%.2f of the way; \"%s\")" % [glass.sweeping, glass.route.text], glass.sweeping > 0.05 and glass.sweeping < 0.5 and glass.route.text.contains("FLICK 2 ENGINE UP") and glass.ticking == 0.0)
+	_fly(0.6)
 	_check("... it swings up (%.0f degrees), and the next flick throws the switch: \"%s\"" % [rad_to_deg(v.overhead.guard_swing), _work(_flick("engine", 1))], s.master and v.overhead.guard_swing > 1.5)
-	_fly(Sequence.CHARGE_S + 0.3)
+	_fly(0.1)
+	_check("the step is ticked off before the next is shown: its page stays on the glass (\"%s\", though the sequence has moved on to \"%s\"), its segment of the rail being wiped (%.2f), the pointer still" % [glass.action.text, glass.message.split("\n")[0], glass.ticked],
+		glass.ticking > 0.0 and glass.action.text == "ENGINE POWER" and glass.message.contains("START ENGINES") and glass.ticked > 0.0 and glass.ticked < 0.5 and glass.checklist.done == 2
+		and float(glass.sheet_mat.get_shader_parameter("ask")) == 0.0)
+	_fly(Projector.TICK_TIME + 0.05)
+	_check("... then the next step's page is written, line by line (\"%s\", %.2f of the way in: the top line %.2f, the foot %.2f)" % [glass.action.text, glass.typing, glass.action.modulate.a, glass.advice.modulate.a],
+		glass.ticking == 0.0 and glass.action.text == "START ENGINES" and glass.typing > 0.0 and glass.typing < 0.6 and glass.action.modulate.a > glass.advice.modulate.a)
+	_fly(Sequence.CHARGE_S + 0.3 - 0.15 - Projector.TICK_TIME)
 	_check("the binder strikes between the engines, its emitters alight (charge %.2f, core %.2f); the guard has fallen shut; the ring round START breathes" % [v.craft.energised, v.craft.binder_mats[0].albedo_color.b],
 		v.craft.energised == 1.0 and (v.craft.binder_arc.mesh as ArrayMesh).get_surface_count() > 0 and v.craft.binder_mats[0].albedo_color.b > 0.3 and not s.guard_open
 		and v.overhead.ring_colour.r > 0.2 and v.overhead.ring_progress == 1.0)
@@ -405,12 +470,15 @@ func _run() -> void:
 	_check("the left engine turns over (the right hand's, with crossed triggers: rumble %.2f there) and has not lit; the ring has begun to fill (%.2f)" % [v.startup_rumble(0), v.overhead.ring_progress],
 		s.stage == ["crank", "wait"] and v.craft.held[0] and v.startup_rumble(0) > 0.1 and v._hand_engine(1) == 0 and v._engine_hand(0) == v.hands.right
 		and v.overhead.ring_progress > 0.02 and v.overhead.ring_progress < 0.2)
+	bus = glass.sheet_mat.get_shader_parameter("bars")
+	_check("... and the glass has a bar for each engine, the left one filling (%.2f, %.2f)" % [bus.x, bus.y], bool(glass.sheet_mat.get_shader_parameter("pair")) and bus.x > 0.1 and bus.x < 0.4 and bus.y == 0.0 and glass.action.text == "STARTING")
 	if v.engine_audio:
 		_check("... its voice turning at cranking speed (spool %.2f), the right one still silent (%.4f)" % [v.engine_audio.voices[0].spool, _gain(1, "v8")],
 			v.engine_audio.crank[0] and v.engine_audio.voices[0].spool > -0.3 and v.engine_audio.voices[0].spool < -0.1 and _gain(1, "v8") < 0.001 and v.startup_audio.played.has("starter"))
 	_fly(Sequence.CRANK_S - 0.6 + Sequence.CATCH_S * 0.5)
 	_check("it catches: a burst of flame at its nozzle (thrust shown %.2f), and no thrust in the sim (%.3f)" % [v.craft.shown_thrust[0], v.sim.eL.thrust],
 		s.stage[0] == "catch" and not v.craft.held[0] and v.craft.flames[0].visible and v.craft.shown_thrust[0] > 0.4 and v.sim.eL.thrust < 0.01)
+	_check("... and its bar flares (%.2f)" % (glass.sheet_mat.get_shader_parameter("flare") as Vector2).x, (glass.sheet_mat.get_shader_parameter("flare") as Vector2).x > 0.9)
 	_fly(Sequence.STAGGER_S + Sequence.CATCH_S + 0.3)
 	_check("both running, the ring green, a pilot light in each nozzle, and the glass asks for the run-up: %s" % v.approach_display.message.replace("\n", " / "),
 		s.all_running() and v.overhead.ring_colour.g > 1.0 and v.overhead.ring_progress == 1.0 and v.craft.flames[0].visible and v.craft.flames[1].visible and v.approach_display.message.contains("RUN-UP  4 / 5"))
@@ -438,12 +506,23 @@ func _run() -> void:
 			v.engine_audio.voices[0].spool > 0.8 and v.engine_audio.stage > 0.7 and _gain(0, "turbine") > 0.05 and v.engine_audio.anger < 0.3)
 	_check("through all of it she has not moved (%.2f m, %.2f m/s), and the glass says so: %s" % [at0.distance_to(Vector2(v.sim.pod.x, v.sim.pod.y)), _speed(), v.approach_display.message.replace("\n", " / ")],
 		at0.distance_to(Vector2(v.sim.pod.x, v.sim.pod.y)) < 0.5 and _speed() < 0.2 and v.approach_display.message.contains("RELEASE PARK BRAKE  5 / 5"))
+	_check("standing on the brake with the engines run up, the g-meter reads the seat's own 1 g (%.2f; the needle %.2f of its scale)" % [v.g_load(), v.dashboard.values.g], absf(v.g_load() - 1.0) < 0.02 and absf(v.dashboard.values.g - 0.150) < 0.01)
 	_fly(Sequence.TURBINE_DOWN_S + 0.5)
 	_check("levers back: the turbines wind down and their lamp goes out", not v._turbine_lamp and _lit(["turbines"]) == 0)
 	_check("a hand flicks 4 PARK down: \"%s\"" % _work(_flick("park", -1)), not s.park and s.is_hot())
 	_fly(2.0, [1.0, 1.0])
 	_check("and she flies: %.0f m/s after 2 s of full levers, the fire the sim's own again (%.2f), the air brakes stowed (%.2f / %.2f, needles %.2f / %.2f)" % [_speed(), v.craft.shown_thrust[0], v.craft.flap_open[0], v.craft.flap_open[1], v.dashboard.values.brkL, v.dashboard.values.brkR],
 		_speed() > 20.0 and s.cleared and v.craft.shown_thrust[0] < 0.0 and v.craft.flap_open[0] < 0.01 and v.craft.flap_open[1] < 0.01 and v.dashboard.values.brkL < 0.01)
+	_check("CLEARED is on the glass, landed at once and larger than it stays (now %.2f of its size, %.1f s on; it came in at %.2f), the rail lit along its length" % [glass.action.scale.x, glass.checklist.cleared, Projector.arrival(0.0)],
+		glass.action.text == "CLEARED" and glass.checklist.done == 5 and glass.checklist.cleared > 1.5 and glass.action.scale.x == 1.0 and Projector.arrival(0.0) > 1.2 and Projector.arrival(0.2) > 1.0
+		and float(glass.sheet_mat.get_shader_parameter("cleared")) > 1.5 and glass.sheet.visible)
+	var mean_g: float = _speed() / 2.0 / 9.81
+	_check("the g-meter has the launch: %.1f g along the craft now (%.1f on average over the 2 s) and %.1f across, %.1f g in all on the dial (%.2f of its scale; the tell-tale at %.1f)" % [v.g_along, mean_g, v.g_across, v.g_load(), v.dashboard.values.g, v.dashboard.g_peak],
+		v.g_along > 0.3 * mean_g and v.g_along < 3.0 * mean_g and absf(v.g_across) < 0.1 * maxf(v.g_along, 10.0) and v.g_load() > 1.0
+		and absf(v.dashboard.values.g - minf(log(1.0 + v.g_load()) / log(101.0), 1.035)) < 0.01 and v.dashboard.g_peak >= v.g_load() - 0.01)
+	_fly(Sequence.CLEARED_S - 2.0 + Projector.CLOSE_TIME + 0.2, [1.0, 1.0])
+	_check("then the checklist is put away with the glass: the sheet hidden, the gutter's arrow given back, the top line its own size, and nothing of it running", not glass.sheet.visible and glass.checklist.is_empty()
+		and float(glass.surface.get_shader_parameter("pointer")) == 1.0 and glass.action.scale == Vector3.ONE and (glass.message != "" or (not glass.panel.visible and not glass.is_processing())))
 	var mph := _speed() * 2.236936
 	var answer := _work(_flick("park", 1))
 	_check("at %.0f mph the brake is refused: \"%s\"" % [mph, s.refusal], answer == "refused" and not s.park)

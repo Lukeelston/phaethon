@@ -100,4 +100,5 @@ func start_course(course: String) -> void:
 	View.track_override = overrides[0]
 	View.job_override = overrides[1]
 	View.spot_override = overrides[2]
+	View.pad_start = true      # (the Network: on its starting pad at the roadside)
 	get_tree().change_scene_to_file(UI.GAME_SCENE)

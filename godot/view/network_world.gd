@@ -108,6 +108,10 @@ const BOARD_H := 46.0
 const BOARD_CLEAR := 28.0
 const SIGN_BEFORE := 250          # samples (6 km) before a junction: its board
 const JUMP_AMBER := Color(1.0, 0.55, 0.08)
+const EXIT_GREEN := Color(0.25, 1.0, 0.55)      # an exit's lane: its rails and arrows (the jumps' are amber)
+const LANE_SAMPLES := 333         # an exit's lane runs this far back from its mouth along the parent road: 8 km
+const LANE_SOLID := 125           # ... its rails solid for the last 3 km, dashed before
+const LANE_HALF := 26.0           # m from its middle to each rail
 const BRAKE_MI := [4, 2, 1]       # braking boards, miles before a city's STARFIGHTER zone
 const MILE := 1609.344
 const Signs := preload("res://view/highway_signs.gd")
@@ -136,6 +140,8 @@ var sim: CraftSim
 var view
 var shaft                 # the shafts' shapes (view/network_shaft.gd)
 var pressure_line
+var _tube := {}           # the Aurora tube's line and keel height, for pierces_tube (found when first asked)
+const PressureSkin := preload("res://sim/pressure_surface.gd")
 var _up := Vector3.UP     # the road's up at the sample being built (a shaft's goes round with it)
 var landscape = null      # the NetworkLandscape, when the land is there: its colours and its material dress the banks
 var scenic = null         # the scenic roads' land (view/network_scenic.gd): the coast road, the drop
@@ -176,6 +182,7 @@ var skylines := []        # [node, cx, cy]
 var far_shafts := []      # [node, ox, oy]: each shaft's shape from far off, before its chunks stream in
 var _signs := {}
 var _approaches := {}     # road -> [first, last, direction, lateral centre] for amber exit guidance
+var exit_lanes := {}      # road -> [first, last, direction, lateral centre, mouth sample, the road it leads to]: each ordinary exit's lane on its parent road
 var _traffic_paint := []  # byte per road station: hidden, four lanes or eight lanes
 var halls := {}            # road -> [first, last sample] of its hall (the cities' terminals; CourseAudio reads it)
 var hall_samples := 0      # samples built under a hall's roof (tests)          # Vector2i(road, chunk) -> Array of sign specs
@@ -350,9 +357,10 @@ func build(s, v) -> void:
 	shelter_models.free()
 	_build_skylines()
 	_build_far_shafts()
-	pressure_line = preload("res://view/aurora_line.gd").new()
-	add_child(pressure_line)
-	pressure_line.build(sim)
+	if int(CraftSim.NET_PRESSURE[0]) < sim.roads.size():      # (a test's cut-down network has no such road)
+		pressure_line = preload("res://view/aurora_line.gd").new()
+		add_child(pressure_line)
+		pressure_line.build(sim)
 	far_roads = preload("res://view/network_far_roads.gd").new()
 	add_child(far_roads)
 	far_roads.build(self)
@@ -553,7 +561,8 @@ func sync(org_x: float, org_y: float) -> void:
 			var c: Array = chunks[key]
 			(c[0] as Node3D).position = Vector3(c[1] - _anchor_x, 0.0, -(c[2] - _anchor_y))
 	_chunk_root.position = Vector3(_anchor_x - org_x, 0.0, org_y - _anchor_y)
-	pressure_line.sync(org_x, org_y)
+	if pressure_line:
+		pressure_line.sync(org_x, org_y)
 	var t_place := Time.get_ticks_usec()
 	for sk in skylines:
 		(sk[0] as Node3D).position = Vector3(sk[1] - org_x, scenery_ground_height, -(sk[2] - org_y))
@@ -748,7 +757,7 @@ func _start_chunk(r: int, k: int) -> void:
 			t.set_uv(Vector2.ZERO) # the formed barrier faces author UVs on this shared surface
 		st.append(t)
 	_job = {"key": key, "r": r, "c0": c0, "c1": c1, "i": c0, "ox": ox, "oy": oy, "node": node, "st": st, "joins": joins, "fine_joins": fine_joins,
-		"deco_spans": {}, "surface": backroad_surface(R.name, (c0 + c1) * 0.5 / (R.N - 1)),
+		"deco_spans": {}, "lanes": _lanes_in(r, c0, c1), "lane_st": null, "lane_spans": {}, "surface": backroad_surface(R.name, (c0 + c1) * 0.5 / (R.N - 1)),
 		"n_lamps": 0, "made": false, "signs": _signs.get(key, []), "si": 0, "us": 0, "d": 0.0,
 		"rv": PackedVector3Array(), "rn": PackedVector3Array(), "ru": PackedVector2Array(), "shoulder_uv": PackedVector2Array(), "traffic_colors": PackedColorArray(), "rows": 0, "cols": 0,
 		"u0": fposmod(_s[r][c0], ASPHALT_PERIOD) - _s[r][c0]}   # (the asphalt's u, continuous along the chunk)
@@ -845,6 +854,31 @@ func _work(end: int) -> bool:
 	return done
 
 
+## Would this support stand inside the Aurora tube's glass? The tube is not a deck but a cylinder 320 m
+## tall on its keel, the length of the map: a higher road's pillar beside the keel came up through it
+## (K2's and K3's did). Such a pillar is left out; its neighbours along the deck carry it.
+func pierces_tube(pillar: Dictionary) -> bool:
+	if int(CraftSim.NET_PRESSURE[0]) >= sim.roads.size():
+		return false      # (a test's cut-down network: no such road)
+	if _tube.is_empty():
+		var T: CraftSim.TrackPath = sim.roads[CraftSim.NET_PRESSURE[0]]
+		var i0: int = CraftSim.NET_PRESSURE[1]
+		var i1: int = CraftSim.NET_PRESSURE[2]
+		var a := Vector2(T.px[i0], T.py[i0])
+		var b := Vector2(T.px[i1], T.py[i1])
+		_tube = {"a": a, "along": (b - a).normalized(), "long": a.distance_to(b), "keel": sim.net_height(CraftSim.NET_PRESSURE[0], float((i0 + i1) / 2))}
+	var radius: float = PressureSkin.RADIUS
+	var q: Vector2 = Vector2(pillar.x, pillar.y) - (_tube.a as Vector2)
+	var along: Vector2 = _tube.along
+	var s := q.dot(along)
+	if s < -PressureSkin.APRON or s > float(_tube.long) + PressureSkin.APRON:
+		return false
+	var d: float = maxf(absf(q.dot(Vector2(-along.y, along.x))) - float(pillar.halfSize), 0.0)
+	if d >= radius:
+		return false
+	return float(pillar.zMax) > float(_tube.keel) + radius - sqrt(radius * radius - d * d)
+
+
 ## One source for the rendered support boxes and their optional collision footprints.
 func pillar_specs(r: int, i: int) -> Array:
 	if CraftSim.in_pressure(r, i):
@@ -877,7 +911,7 @@ func pillar_specs(r: int, i: int) -> Array:
 		var pillar := {"id": -(r * 1000000 + i * 2 + side + 1), "r": 0.0, "halfSize": thick / 2.0,
 			"x": R.px[i] + R.nx[i] * off, "y": R.py[i] + R.ny[i] * off,
 			"zMin": footing, "zMax": h - DECK, "vx": 0.0, "vy": 0.0}
-		if not _support_clearance.blocks(r,pillar):
+		if not _support_clearance.blocks(r,pillar) and not pierces_tube(pillar):
 			out.append(pillar)
 	_pillar_specs_cache[key] = out
 	return out
@@ -938,6 +972,8 @@ func _sample(J: Dictionary, R: CraftSim.TrackPath, i: int) -> void:
 	if i == int(J.c0):
 		_road_row(J, R, sec, i, hi)
 	_road_row(J, R, sec, j, hj)
+	if not (J.lanes as Array).is_empty() and not in_hall:
+		_lane_row(J, R, i)
 	if not J.template.is_empty():
 		return
 	var span := _deco_span(J, R, i)
@@ -1098,6 +1134,68 @@ func _sample(J: Dictionary, R: CraftSim.TrackPath, i: int) -> void:
 			J.n_lamps += 1
 
 
+## The exit lanes that cross samples c0..c1 of road r (exit_lanes' rows).
+func _lanes_in(r: int, c0: int, c1: int) -> Array:
+	var out := []
+	for lane in exit_lanes.get(r, []):
+		if c1 > int(lane[0]) and c0 < int(lane[1]):
+			out.append(lane)
+	return out
+
+
+## An exit's lane over sample i: green rails either side of the way into the ramp's mouth for 8 km before
+## it, dashed far out and solid for the last 3 km, with arrows along it. (Coming the other way it is the
+## lane a craft that has just joined runs out along.) Not in a city's hall, where there is no lane paint.
+## Its own surface on the chunk (J.lane_st): painted into the furniture, every chunk within 8 km of an
+## exit lost the reused template and the four-sample spans, and cost half as much again to build.
+func _lane_row(J: Dictionary, R: CraftSim.TrackPath, i: int) -> void:
+	var r: int = J.r
+	var ox: float = J.ox
+	var oy: float = J.oy
+	var primed := false
+	for lane in J.lanes:
+		if i < int(lane[0]) or i >= int(lane[1]):
+			continue
+		if J.lane_st == null:
+			var tool := SurfaceTool.new()
+			tool.begin(Mesh.PRIMITIVE_TRIANGLES)
+			J.lane_st = tool
+		if not primed:
+			_paint_row(R, r, ox, oy, i, J)      # the paint reads this sample's asphalt, just made, not a second copy
+			primed = true
+		var st: SurfaceTool = J.lane_st
+		var mid: float = lane[3]
+		var first := i - i % 4
+		# four samples as one strip where the road runs straight and even (as _deco_span joins the furniture)
+		var span := 1
+		if not J.joins and first >= maxi(int(lane[0]), int(J.c0)) and first + 4 <= mini(int(lane[1]), int(J.c1)) and _lane_even(J, R, first):
+			span = 4 if i == first else 0
+		if span > 0 and (absi(int(lane[4]) - i) < LANE_SOLID or i % 8 < 4):
+			for side in [-1.0, 1.0]:
+				_strip(st, R, ox, oy, i, mid + side * LANE_HALF - 1.2, mid + side * LANE_HALF + 1.2, 0.0, 0.0, EXIT_GREEN, 0.0, 0.0, span)
+		# an arrow's tip is the sample before: its run back and its barb forward are both asphalt by now
+		var tip := i - 1
+		if tip % 25 == 0 and tip >= int(lane[0]) and absi(int(lane[4]) - tip) > 6:
+			_paint_arrow(st, R, ox, oy, tip, float(lane[2]), mid, 15.0, 44.0, 9.0, EXIT_GREEN)
+
+
+## Do samples first..first+4 run straight, one width, on one slope? (A reused template's chunk does throughout.)
+func _lane_even(J: Dictionary, R: CraftSim.TrackPath, first: int) -> bool:
+	if String(J.template_key) != "":
+		return true
+	if not J.lane_spans.has(first):
+		var r: int = J.r
+		var h0 := _h(r, first)
+		var h1 := _h(r, first + 4)
+		var even: bool = not _smap.has(R)
+		for row in range(first, first + 5):
+			if not even:
+				break
+			even = R.w[row] == R.w[first] and absf(R.tx[row] - R.tx[first]) + absf(R.ty[row] - R.ty[first]) <= 0.0000001 and absf(_h(r, row) - lerpf(h0, h1, float(row - first) / 4.0)) <= 0.000001
+		J.lane_spans[first] = even
+	return J.lane_spans[first]
+
+
 ## Keep every asphalt row, but avoid four copies of an identical straight wall/stripe.
 ## 4 divides the wall colour, mast and arrow periods. Low-deck pillars (period 6),
 ## halls, launch chevrons, rolls, changing openings and curved/graded profiles opt out.
@@ -1246,13 +1344,13 @@ func _hoop(J: Dictionary, R: CraftSim.TrackPath, i: int, hw: float, h: float, li
 ## Clip each arrow arm to actual pavement triangles in (sample, lateral) coordinates.
 ## A twisted road is triangulated, not a bilinear surface: interpolating row frames
 ## alone can put paint underneath the diagonal between two differently banked rows.
-func _paint_arrow(st: SurfaceTool, R: CraftSim.TrackPath, ox: float, oy: float, i: int, way: float, off: float, half_width: float, run: float, thickness: float) -> void:
+func _paint_arrow(st: SurfaceTool, R: CraftSim.TrackPath, ox: float, oy: float, i: int, way: float, off: float, half_width: float, run: float, thickness: float, colour := JUMP_AMBER) -> void:
 	var tip := float(i)
 	var tail := tip - way * run / CraftSim.NET_STEP
 	var wide := way * thickness / CraftSim.NET_STEP
 	for side in [-1.0,1.0]:
 		var edge: float = off + side * half_width
-		_paint_polygon(st,R,ox,oy,PackedVector2Array([Vector2(tip,off),Vector2(tip+wide,off),Vector2(tail+wide,edge),Vector2(tail,edge)]),JUMP_AMBER)
+		_paint_polygon(st,R,ox,oy,PackedVector2Array([Vector2(tip,off),Vector2(tip+wide,off),Vector2(tail+wide,edge),Vector2(tail,edge)]),colour)
 
 
 ## Project marking polygons onto the SAME triangles used by each road chunk.
@@ -1553,7 +1651,8 @@ func _flank_step(J: Dictionary, R: CraftSim.TrackPath, i: int) -> void:
 		J.bank = {"v": PackedVector3Array(), "n": PackedVector3Array(), "uv": PackedVector2Array(), "c": PackedColorArray(), "idx": PackedInt32Array(),
 			"prev": [_flank_row(J, R, i, false), _flank_row(J, R, i, true)]}
 	var j := i + 1
-	if j % BANK_EVERY != 0 and j != int(J.c1):
+	var fine: bool = scenic.fine(int(J.r), j)      # (the spire: a row at every sample)
+	if not fine and j % BANK_EVERY != 0 and j != int(J.c1):
 		return
 	var B: Dictionary = J.bank
 	for side in 2:
@@ -1571,7 +1670,8 @@ func _flank_step(J: Dictionary, R: CraftSim.TrackPath, i: int) -> void:
 					B.idx.append_array(PackedInt32Array([ia + m, ib + m + 1, ib + m, ia + m, ia + m + 1, ib + m + 1]))
 				else:
 					B.idx.append_array(PackedInt32Array([ia + m, ib + m, ib + m + 1, ia + m, ib + m + 1, ia + m + 1]))
-			_flank_crops(B, prev, row, int(J.r), j, side, J.ox, J.oy)
+			if not fine or j % BANK_EVERY == 0:      # (as many rocks as anywhere, not four times as many)
+				_flank_crops(B, prev, row, int(J.r), j, side, J.ox, J.oy)
 		B.prev[side] = row
 
 
@@ -1591,7 +1691,7 @@ func _flank_row(J: Dictionary, R: CraftSim.TrackPath, i: int, left: bool) -> Dic
 	# the land's colour, near and far (read every eighth sample: it is the dearest thing here). A sea
 	# cliff takes the colour of the land behind the road: its own foot is sand.
 	var key := "tone%d" % int(left)
-	if i % 8 == 0 or not J.has(key):
+	if i % 8 == 0 or not J.has(key) or scenic.fine(r, i):      # (every sample on the spire: its colour changes with every one)
 		var way := -sgn if sea else sgn
 		var near_at := Vector2(R.px[i] + R.nx[i] * way * 500.0, R.py[i] + R.ny[i] * way * 500.0)
 		var far_at := Vector2(R.px[i] + R.nx[i] * way * 1500.0, R.py[i] + R.ny[i] * way * 1500.0)
@@ -1599,6 +1699,7 @@ func _flank_row(J: Dictionary, R: CraftSim.TrackPath, i: int, left: bool) -> Dic
 		J[key] = [landscape.color_at(near_at, scenic.known_height(r, near_at)), landscape.color_at(far_at, scenic.known_height(r, far_at))]
 	var near: Color = J[key][0]
 	var far: Color = J[key][1]
+	var climbing: float = scenic.climb(r, i)
 	var p := PackedVector3Array()
 	var normals := PackedVector3Array()
 	var colours := PackedColorArray()
@@ -1610,7 +1711,14 @@ func _flank_row(J: Dictionary, R: CraftSim.TrackPath, i: int, left: bool) -> Dic
 		var b := mini(m + 1, count - 1)
 		var run := pairs[b * 2] - pairs[a * 2]
 		var rise := pairs[b * 2 + 1] - pairs[a * 2 + 1]
-		normals.append((Vector3.UP * run - outward * rise).normalized() if run > 0.01 else Vector3.UP)
+		var normal := (Vector3.UP * run - outward * rise).normalized() if run > 0.01 else Vector3.UP
+		if climbing != 0.0:      # (the mountain's road: its land leans with the road's own climb too, or a wall was lit as level ground)
+			var along := Vector3(R.tx[i], climbing, -R.ty[i]).normalized()
+			var across := (outward * run + Vector3.UP * rise).normalized() if run > 0.01 else outward
+			normal = across.cross(along).normalized()
+			if normal.y < 0.0:
+				normal = -normal
+		normals.append(normal)
 		var tone := near.lerp(far, smoothstep(300.0, 1300.0, off))
 		if sea:
 			tone = (scenic.SAND as Color).lerp(tone, smoothstep(4.0, 7.0, y))
@@ -1903,6 +2011,12 @@ func _finish(J: Dictionary, R: CraftSim.TrackPath) -> void:
 				mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES,arrays)
 				mesh.surface_set_material(n0,pair[1])
 				cpu_surfaces.append([arrays,pair[1]])
+	if J.lane_st != null:
+		var lane_arrays := (J.lane_st as SurfaceTool).commit_to_arrays()
+		if lane_arrays[Mesh.ARRAY_VERTEX] != null and lane_arrays[Mesh.ARRAY_VERTEX].size() > 0:
+			var lane_surface := mesh.get_surface_count()
+			mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, lane_arrays)
+			mesh.surface_set_material(lane_surface, _strip_mat)
 	# The land beside it is built afterwards (_bank_work), so the road itself comes in no later than
 	# it did: built with it, a respawn 60 km off was still short of chunks after 60 frames.
 	if landscape != null and scenic != null and (scenic.on(r, c0) or scenic.on(r, c1)):   # a scenic road's own land: its flank
@@ -2088,6 +2202,13 @@ func _index_exits() -> void:
 			stations[key] = []
 		stations[key].append(info)
 		_exits[Vector3i(p,c,end)] = info
+		# its lane on the parent road: LANE_SAMPLES back from the mouth the way an exiting craft comes, kept on the flat inside the edge ramp
+		var flat: float = P.w[mouth] / 2.0 - CraftSim.net_edge_span(P.w[mouth]) - LANE_HALF - 2.0
+		var back := clampi(mouth - way * LANE_SAMPLES, 0, P.N - 1)
+		if absi(back - mouth) > 40 and flat > 0.0:
+			if not exit_lanes.has(p):
+				exit_lanes[p] = []
+			exit_lanes[p].append([mini(back, mouth), maxi(back, mouth), way, clampf(lateral, -flat, flat), mouth, c])
 	for choices: Array in stations.values():
 		if choices.size() > 1:
 			choices.sort_custom(func(a,b): return a.side < b.side if a.side != b.side else a.mouth < b.mouth)

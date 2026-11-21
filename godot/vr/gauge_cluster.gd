@@ -5,7 +5,9 @@
 ## cockpit's rim, and the binnacle stands on the dashboard's fascia (vr/cockpit_interior.gd HD_DASH).
 ##   centre    Mach on the dial; in its face the digital speed (mph) and the gear, ARMED,
 ##             RAMJET and TURBINES legends (TURBINES: green while the second stage runs), and
-##             the battery as a lit arc round the foot
+##             the battery as a lit arc round the foot; and right of the hub the g-meter, a
+##             sub-dial with a needle of its own and a tell-tale (Luke: "a g-force meter ... a real
+##             instrument, not just a number"): see G_FULL, below
 ##   inboard   a thrust dial per engine, orange past the burner gate; BURNER and FLAMEOUT
 ##             legends; that engine's health as a lit arc (amber when damaged, blinking red
 ##             when it is sputtering)
@@ -14,12 +16,14 @@
 ##             line with the handling and controls on the right; and between them the points
 ##             counter, a row of drums that roll up as points are earned (Luke: "points on an
 ##             odometer roller, with a digital readout next to it of the feat"). The feat is
-##             read on the right strip's lower line for a few seconds, in place of the handling
+##             read on the right strip's lower line for a few seconds, in place of the handling.
+##             The left strip's lower line, free in flight, carries the g-meter's figure, its slip
+##             bar and the peak (they give way to the repair hint and to a run line of two lines)
 ## The binnacle is authored (tools/art_gauges_hd.py). The dials are one textured mesh
 ## (tools/art_gauge_faces.py), the glass another, and the needles share a third. Nothing is
 ## rebuilt, and a frame only touches what changed: a needle's transform, a lamp, the speed.
 ##   add_child(c); c.transform = GaugeCluster.mount(); c.build()     once
-##   c.show_state(d)                    every frame: dashboard.gd's keys, plus mach, backlight, turbines
+##   c.show_state(d)                    every frame: dashboard.gd's keys, plus mach, backlight, turbines, g, g_side
 extends Node3D
 
 const Kit := preload("res://view/mesh_kit.gd")
@@ -50,6 +54,17 @@ const ROLL_TIME := 0.7              # s for the counter to roll an award in ...
 const ROLL_SLOWEST := 20.0          # ... but never slower than this many points a second
 const FEAT_BRIGHT := 2.2            # s a feat is read at full brightness on the strip
 const FEAT_SHOWN := 6.0             # s before the strip goes back to the handling and controls
+# The g-meter. It reads the whole load on the pilot, in g: 1 standing still (the seat holding you up,
+# as an aircraft's reads on the ground), what a turn, the engines and the air brakes add to that, and
+# 0 weightless over a jump. The craft pulls 35 g off the line, 20 to 35 in the turns it is flown
+# through and past 100 on full air brakes at Mach 7, so its scale is in decades (g_scale): 1 g a
+# seventh of the way up, 10 at the top of the dial, 20 where the last third and the amber begin.
+const G_FULL: float = Layout.G_FULL # the top of the scale, g
+const G_HARD: float = Layout.G_HARD # a hard turn: amber on the dial, and the slip bar's ball turns orange
+const PEAK_HOLD := 5.0              # s the tell-tale stays at the highest load since ...
+const PEAK_FALL := 0.5              # ... then it falls back to the needle, this much of the scale a second
+const G_READ := 0.2                 # s between readings of the figures (a figure redrawn every frame cannot be read)
+const SLIP := "res://vr/gauge_slip.gdshader"
 
 static var enabled := true          # false before the cockpit is built: the flat panel instead
 
@@ -90,6 +105,19 @@ var _rolled_at := 0
 var _power := 1.0          # the battery bus (the start-up): every lamp's level is times this
 var _testing := false      # the self-test: every lamp lit ...
 var _sweep := -1.0         # ... and every needle here, 0..1 of its scale (-1: where it belongs)
+var g_now := 1.0           # the load on the pilot, g (the needle)
+var g_side := 0.0          # its part across the craft, g: + a left turn (the slip bar)
+var g_peak := 1.0          # the highest load of the last few seconds (the tell-tale)
+var _peak_age := 0.0       # s since the tell-tale was last pushed up
+var _g_read := G_READ      # s since the figures were read
+var _g_room := true        # the strip's lower line is free for them
+var _tell_mat: StandardMaterial3D
+var _g_mat: StandardMaterial3D
+var _slip_mat: ShaderMaterial
+var _slip: MeshInstance3D
+var _slip_sent := Vector2(-9.0, -9.0)
+var _run_line := ""        # the run line as last weighed, and whether it fits on one line
+var _run_fits := true
 
 
 static func available() -> bool:
@@ -118,6 +146,7 @@ func build() -> void:
 	_build_faces()
 	_build_digits()
 	_build_needles()
+	_build_g_meter()
 	_build_glass()
 	_build_text()
 	_build_odometer()
@@ -274,8 +303,94 @@ func _build_needles() -> void:
 		var g: Dictionary = Layout.GAUGES[nd[1]]
 		var base := Kit.on_arc(g.x, g.y, 0.0, R) * Transform3D(Basis(), Vector3(0, 0, g.face + Layout.NEEDLE_UP))
 		needles[nd[0]] = _add(mesh, _needle_mat, "needle_" + str(nd[0]))
-		_needle_info[nd[0]] = [base, nd[4] * g.rf, float(nd[2]), float(nd[3]), i]
+		_needle_info[nd[0]] = [base, nd[4] * g.rf, float(nd[2]), float(nd[3]), i, Vector3.ONE]
 		values[nd[0]] = -1.0
+
+
+## The g-meter's tell-tale, a unit long from the pivot along +x: a hairline out to an arrowhead that
+## rides the scale's rim, where it can be told from the needle.
+func _tell_tale_mesh() -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var out := Vector3(0, 0, 1)
+	Finish._quad(st, Vector3(0.0, 0.03, 0.0), Vector3(0.8, 0.03, 0.0), Vector3(0.8, -0.03, 0.0), Vector3(0.0, -0.03, 0.0), out)
+	Finish._triangle(st, Vector3(0.74, 0.0, 0.0), Vector3(1.2, 0.2, 0.0), Vector3(1.2, -0.2, 0.0), out)
+	return st.commit()
+
+
+## The g-meter's own needles, on the centre face's sub-dial (Layout.G_DIAL): the needle, a stubby
+## white blade (a blade as slim as the big dials' would be a hair at this size, and one their colour
+## is lost over the scale's amber and red); under it the tell-tale, which the needle pushes up the
+## scale and leaves behind; and a hub over the two. All of it rides under the Mach needle, which
+## sweeps across it. (No shadow under these: the big needles' falls 3 mm low, and under a 16 mm
+## needle that reads as a second one.)
+func _build_g_meter() -> void:
+	var dial: Array = Layout.G_DIAL
+	var face: Dictionary = Layout.GAUGES[0]
+	var pivot := Kit.on_arc(face.x, face.y, 0.0, R) * Transform3D(Basis(), Vector3(dial[0] * face.rf, dial[1] * face.rf, face.face))
+	var reach: float = dial[5] * face.rf
+	var up: float = dial[6]
+	_tell_mat = StandardMaterial3D.new()
+	_tell_mat.albedo_color = Color(0.25, 0.8, 0.9)
+	_tell_mat.roughness = 0.5
+	_tell_mat.emission_enabled = true
+	_tell_mat.emission = CYAN
+	_g_mat = StandardMaterial3D.new()
+	_g_mat.albedo_color = Color(0.95, 0.95, 0.9)
+	_g_mat.roughness = 0.4
+	_g_mat.emission_enabled = true
+	_g_mat.emission = BACKLIGHT
+	for part in [["g_peak", _tell_tale_mesh(), _tell_mat, up * 0.5, Vector3.ONE], ["g", _needle_mesh(), _g_mat, up, Vector3(1.0, 5.0, 2.2)]]:
+		needles[part[0]] = _add(part[1], part[2], "needle_" + str(part[0]))
+		_needle_info[part[0]] = [pivot * Transform3D(Basis(), Vector3(0, 0, part[3])), reach, float(dial[3]), float(dial[4]), -1, part[4]]
+		values[part[0]] = -1.0
+	var hub_mat := StandardMaterial3D.new()
+	hub_mat.albedo_color = Color(0.035, 0.037, 0.04)
+	hub_mat.roughness = 0.34
+	hub_mat.metallic = 0.5
+	var tall: float = dial[7]
+	var hub := _add(Kit.cyl(reach * 0.15, reach * 0.2, tall, 20), hub_mat, "g_hub")
+	hub.transform = pivot * Transform3D(Basis(Vector3.RIGHT, PI / 2.0), Vector3(0, 0, tall * 0.5))
+
+
+## How far up the g-meter's scale a pull of so many g reads, 0..1: in decades, so that 1 g and 100 are both on it.
+static func g_scale(pull: float) -> float:
+	return log(1.0 + maxf(pull, 0.0)) / log(1.0 + G_FULL)
+
+
+## ... and the pull at a place on the scale.
+static func g_at(place: float) -> float:
+	return exp(place * log(1.0 + G_FULL)) - 1.0
+
+
+## What the g-meter is to show: the whole load, and its part across the craft (+ a left turn). The
+## needle pushes the tell-tale up with it.
+func set_g(total: float, side: float) -> void:
+	g_now = maxf(total, 0.0)
+	g_side = side
+	if g_now >= g_peak:
+		g_peak = g_now
+		_peak_age = 0.0
+
+
+## The g-meter's clockwork over `dt` seconds (a long frame counts as a tenth of a second): the
+## tell-tale stays where the needle left it for PEAK_HOLD, then falls back to the needle; and the
+## figures on the strip are read again every G_READ.
+func settle(dt: float) -> void:
+	dt = clampf(dt, 0.0, 0.1)
+	_peak_age += dt
+	if _peak_age > PEAK_HOLD and g_peak > g_now:
+		g_peak = maxf(g_now, g_at(g_scale(g_peak) - PEAK_FALL * dt))
+	_g_read += dt
+	if _g_read >= G_READ:
+		_g_read = 0.0
+		labels.g.text = g_text(g_now) + " G"
+		labels.g_peak.text = "PEAK " + g_text(g_peak)
+
+
+## A pull as the strip prints it: tenths, until there is no room for them.
+static func g_text(pull: float) -> String:
+	return ("%.1f" % pull) if pull < 99.95 else str(roundi(pull))
 
 
 func _build_glass() -> void:
@@ -329,6 +444,37 @@ func _build_text() -> void:
 	_text("footer", systems, -systems[4] + 0.008, 23, Color(0.6, 0.6, 0.57), VERTICAL_ALIGNMENT_BOTTOM)
 	_text("feat", systems, -systems[4] + 0.008, 27, GREEN, VERTICAL_ALIGNMENT_BOTTOM)   # (in the footer's place while a feat is fresh)
 	(labels.feat as Label3D).visible = false
+	# the g-meter on the status strip's lower line: the figure, the slip bar, the peak
+	var line := -float(status[4]) + 0.008
+	_readout_at("g", status, -0.090, line, 32, Color(0.95, 0.95, 0.9), HORIZONTAL_ALIGNMENT_RIGHT)
+	_readout_at("g_peak", status, 0.090, line + 0.0012, 23, Color(0.62, 0.62, 0.58), HORIZONTAL_ALIGNMENT_LEFT)
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var half := Vector2(0.078, 0.0058)
+	var z: float = status[5] + 0.0012
+	var mid := line + 0.0078                                  # (the figure's own middle: capitals 32 high, standing on the line)
+	var p := [Vector3(-half.x, mid - half.y, z), Vector3(half.x, mid - half.y, z), Vector3(half.x, mid + half.y, z), Vector3(-half.x, mid + half.y, z)]
+	var up := Vector3(0, 0, 1)
+	_quad(st, Kit.on_arc(status[1], status[2], 0.0, R), p, [up, up, up, up], [Vector2(0, 1), Vector2(1, 1), Vector2(1, 0), Vector2(0, 0)], Color.WHITE)
+	_slip_mat = _unlit(SLIP)
+	_slip_mat.set_shader_parameter("aspect", half.x / half.y)
+	_slip = _add(st.commit(), _slip_mat, "g_slip")
+
+
+## A figure on a strip that is not a centred line: its own place along the strip, and which way it is set.
+func _readout_at(name: String, window: Array, x: float, y: float, size: int, colour: Color, align: int) -> void:
+	var l := Label3D.new()
+	l.name = name
+	l.pixel_size = PX
+	l.font_size = size
+	l.outline_size = 0
+	l.modulate = colour
+	l.horizontal_alignment = align
+	l.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
+	l.double_sided = false
+	l.transform = Kit.on_arc(window[1], window[2], 0.0, R) * Transform3D(Basis(), Vector3(x, y, window[5] + 0.0014))
+	add_child(l)
+	labels[name] = l
 
 
 ## The points counter: a small module standing just proud of the fascia between the two strips, its
@@ -401,11 +547,12 @@ func _set_needle(name: String, v: float, over := 0.0) -> void:
 	if is_equal_approx(v, values[name]):
 		return
 	values[name] = v
-	_needles_changed = true
 	var info: Array = _needle_info[name]
 	var angle := deg_to_rad(lerpf(info[2], info[3], v))
-	_needle_angles[info[4]] = angle
-	(needles[name] as MeshInstance3D).transform = (info[0] as Transform3D) * Transform3D(Basis(Vector3(0, 0, 1), angle).scaled(Vector3.ONE * float(info[1])), Vector3.ZERO)
+	if int(info[4]) >= 0:      # (the g-meter's needles cast no shadow for the dials' shader to move)
+		_needle_angles[info[4]] = angle
+		_needles_changed = true
+	(needles[name] as MeshInstance3D).transform = (info[0] as Transform3D) * Transform3D(Basis(Vector3(0, 0, 1), angle) * Basis.from_scale((info[5] as Vector3) * float(info[1])), Vector3.ZERO)
 
 
 ## Where a needle points: degrees anticlockwise from three o'clock, as the pilot sees it.
@@ -456,9 +603,10 @@ func arc_lit(key: String, count: int) -> int:
 
 ## d: dashboard.gd's keys, and optionally mach (float; else from mph at sea level), backlight
 ## (0..1: the instrument lighting, turned down in the dark), turbines (bool: the second
-## stage is running), and the start-up's two: power (0..1: the battery bus; at 0 nothing is lit
-## and nothing reads) and sweep (0..1 through the self-test, -1 when it is not running: every
-## lamp lit, every needle up its scale and back, eights in the digits).
+## stage is running), g and g_side (the load on the pilot and its part across the craft, + a left
+## turn: the g-meter; 1 and 0 when they are not given), and the start-up's two: power (0..1: the
+## battery bus; at 0 nothing is lit and nothing reads) and sweep (0..1 through the self-test, -1
+## when it is not running: every lamp lit, every needle up its scale and back, eights in the digits).
 func show_state(d: Dictionary) -> void:
 	_power = clampf(float(d.get("power", 1.0)), 0.0, 1.0)
 	var sweep: float = d.get("sweep", -1.0)
@@ -478,8 +626,11 @@ func show_state(d: Dictionary) -> void:
 	set_points(int(d.get("points", 0)))
 	(labels.points as Readout).text = str(points)
 	var now := Time.get_ticks_usec()
-	roll(float(now - _rolled_at) / 1e6 if _rolled_at > 0 else 0.0)
+	var since := float(now - _rolled_at) / 1e6 if _rolled_at > 0 else 0.0
+	roll(since)
 	_rolled_at = now
+	set_g(float(d.get("g", 1.0)), float(d.get("g_side", 0.0)))
+	settle(since)
 	var feat: String = d.get("feat", "")
 	var age: float = d.get("feat_age", 1e9)
 	var fresh := feat != "" and age < FEAT_SHOWN
@@ -495,6 +646,8 @@ func show_state(d: Dictionary) -> void:
 		(labels[strip] as Label3D).visible = _power >= 0.5 and (strip != "footer" or not fresh)
 	feat_label.visible = fresh and _power >= 0.5
 	_set_needle("mach", float(d.get("mach", mph / MPH_PER_MACH)) / MACH_FULL, 0.02)
+	_set_needle("g", g_scale(g_now), 0.035)
+	_set_needle("g_peak", g_scale(g_peak), 0.035)
 	var hurt := []
 	for k in 2:
 		var side := "L" if k == 0 else "R"
@@ -520,6 +673,22 @@ func show_state(d: Dictionary) -> void:
 		_arc("hp" + side, hp, GREEN if hp >= DAMAGED else (AMBER if hp >= BADLY else RED), 1.0 if hp >= BADLY or blink else 0.3)
 	labels.warn.text = "" if hurt.is_empty() else "HOLD X: REPAIR %s" % "+".join(hurt)
 	labels.warn.modulate = RED if minf(d.health[0], d.health[1]) < BADLY else AMBER
+	# the g-meter's line on the strip, while the strip has the room: the repair hint has that line
+	# first, and a run line that takes two (the start-up's checklist, a finished run) runs down into it
+	if d.progress != _run_line:
+		_run_line = d.progress
+		_run_fits = not _run_line.contains("\n") and ThemeDB.fallback_font.get_string_size(_run_line, HORIZONTAL_ALIGNMENT_LEFT, -1,
+			(labels.progress as Label3D).font_size).x < (labels.progress as Label3D).width
+	_g_room = _power >= 0.5 and hurt.is_empty() and _run_fits
+	(labels.g as Label3D).visible = _g_room
+	(labels.g_peak as Label3D).visible = _g_room
+	_slip.visible = _g_room
+	if _g_room:      # the ball goes where the pilot is thrown: right in a left turn
+		var slip := Vector2(signf(g_side) * g_scale(absf(g_side)), 1.0 if absf(g_side) >= G_HARD else 0.0)
+		if absf(slip.x - _slip_sent.x) > 0.002 or slip.y != _slip_sent.y:
+			_slip_sent = slip
+			_slip_mat.set_shader_parameter("ball", slip.x)
+			_slip_mat.set_shader_parameter("hard", slip.y)
 	_arc("bat", d.battery, CYAN if d.battery > 0.2 else RED, 1.0)
 	_lamp("burner", ORANGE, 1.0 if d.burner else 0.0)
 	_lamp("armed", YELLOW, 1.0 if d.armed else 0.0)
@@ -548,3 +717,5 @@ func show_state(d: Dictionary) -> void:
 		_digit_mat.set_shader_parameter("level", backlight)
 		_drum_mat.set_shader_parameter("level", backlight)
 		_needle_mat.emission_energy_multiplier = 1.7 * backlight
+		_tell_mat.emission_energy_multiplier = 1.6 * backlight
+		_g_mat.emission_energy_multiplier = 1.1 * backlight

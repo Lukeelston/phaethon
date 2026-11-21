@@ -62,3 +62,7 @@ sky_wet={
 "type": "float",
 "value": 0.0
 }
+sky_snow={
+"type": "float",
+"value": 0.0
+}

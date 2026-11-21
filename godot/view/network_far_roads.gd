@@ -18,7 +18,8 @@ func build(world) -> void:
 			var origin: Vector2 = world._wxy(r,first)
 			var vertices := PackedVector3Array()
 			var indices := PackedInt32Array()
-			var samples := range(first,end,STRIDE)
+			var stride := _stride(world,r,first,end)
+			var samples := range(first,end,stride)
 			samples.append(end)
 			for i in samples:
 				for side in [-1.0,1.0]:
@@ -46,7 +47,34 @@ func build(world) -> void:
 			instance.visibility_range_end=110000
 			instance.position=Vector3(origin.x,0,-origin.y)
 			add_child(instance)
-			pieces.append([instance,origin,r,first,end])
+			pieces.append([instance,origin,r,first,end,stride])
 			vertex_count+=vertices.size()
+## The widest stride whose chords stay under the deck over this block. A climb that steepens fast (the
+## face of Helios: 15 to 75 degrees in three kilometres) lifts a 190 m chord 20 m over the road it spans.
+## Most blocks are settled from the heights the ribbon reads anyway: a chord twice as long sags four times
+## as far, so a flat enough second difference at the stride answers without reading every sample.
+func _stride(world,r: int,first: int,end: int) -> int:
+	var coarse := PackedFloat32Array()
+	for i in range(first,end+1,STRIDE):
+		coarse.append(world._h(r,i))
+	var guess := 0.0
+	for k in range(1,coarse.size()-1):
+		guess=maxf(guess,((coarse[k-1]+coarse[k+1])*0.5-coarse[k])*0.25)
+	if guess<1.5:
+		return STRIDE
+	var heights := PackedFloat32Array()
+	for i in range(first,end+1):
+		heights.append(world._h(r,i))
+	var stride := STRIDE
+	while stride>1:
+		var worst := 0.0
+		for a in range(first,end,stride):
+			var b := mini(a+stride,end)
+			for m in range(a+1,b):
+				worst=maxf(worst,lerpf(heights[a-first],heights[b-first],float(m-a)/float(b-a))-heights[m-first])
+		if worst<=UNDER_DECK-1.0:
+			break
+		stride/=2
+	return stride
 func sync(ox: float,oy: float) -> void:
 	position=Vector3(-ox,0,oy)

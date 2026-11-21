@@ -91,8 +91,9 @@ func _run() -> void:
 				endpoint_error=maxf(endpoint_error,actual.distance_to(expected))
 		var rows := vertices.size()/2
 		for row in rows-1:
-			var start: int = piece[3]+row*far.STRIDE
-			var finish: int = mini(start+far.STRIDE,piece[4])
+			var stride: int = piece[5]      # (its own: finer where a climb steepens fast, _stride)
+			var start: int = piece[3]+row*stride
+			var finish: int = mini(start+stride,piece[4])
 			var mid: int = (start+finish)/2
 			var u := float(mid-start)/maxi(1,finish-start)
 			var normal := Vector3.UP

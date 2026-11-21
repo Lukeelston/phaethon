@@ -343,7 +343,7 @@ for (const [mph, deg] of [[4000, 2], [2500, 3], [1500, 3], [800, 3]]) {
 }
 
 // Drive the interior links and stunt bypasses through both highway junctions, in both directions.
-// (SHelios is 372 km, up a mountain and over its summit, 339 s of it: its time limit is its own.)
+// (SHelios is 325 km, up a mountain, up the Face of its spire and across the plateau, 286 s of it: its time limit is its own.)
 for (const name of ['SWash', 'SFrost', 'SReed', 'SRed', 'SNeedle', 'SHammer', 'SAurora', 'SHelios']) {
   const id = road(name), R = T.roads[id];
   const ends = R.jx.map(k => T.junctions[k]).sort((a, b) => a.b0 - b.b0);

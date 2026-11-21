@@ -42,10 +42,13 @@ Their plans and heights are ordinary roads' (the sims know nothing else about th
 carries the land beside each ([sample, the height the land reaches on the left, over how far, the
 same on the right, how far the land's edge lies under the deck]: view/network_scenic.gd shapes the
 terrain from it), which the sims only pass along.
-Helios (Luke, 2026-11-20): one mountain 10.4 km high north of E3 (helios_z, which the views mirror),
-and SHelios, a scenic road off E3's north shoulder that spirals up it clockwise, crosses the exact
-summit in an S, spirals down counter-clockwise and rejoins E3 (add_helios). Its heights are the
-mountain's surface (keys with the surface's own slopes); its land is the surface either side.
+Helios (Luke, 2026-11-20): one mountain north of E3 (helios_z, which the views mirror), and SHelios, a
+scenic road off E3's north shoulder that spirals up it clockwise, crosses its top, spirals down
+counter-clockwise and rejoins E3 (add_helios). Its heights are the mountain's surface (keys with the
+surface's own slopes); its land is the surface either side. Since 2026-11-21 ("an unreasonably steep
+mountain to climb vertically ... and plateau over the top") the dome carries a spire, 16 km high: from a
+shoulder 9 km out its pitch grows to 75 degrees, then rolls over onto a plateau 6 km across; the road
+leaves its inner lap for the Face, straight up the spire, across the plateau and down the far side.
 Roads are sampled exactly as the sims sample them (NET_STEP: straights in equal steps, arcs in
 exact chords, a last point at the end). Junction zones are found by walking: a road's end samples
 whose corridor overlaps its parent's (plus a margin), against the parent's nearest samples.
@@ -236,7 +239,18 @@ STUNT_ROADS = [
 # Helios (Luke, 2026-11-20): one giant mountain north of E3, between N2 and N3, and a road that winds up
 # it on a double spiral: in clockwise, an S over the exact summit, out counter-clockwise. The mountain
 # is helios_z and nothing else (the views mirror that function exactly), and the road lies on it.
-HELIOS = (400000.0, 549000.0, 10400.0, 36000.0)   # centre x, centre y (m), summit height (m), foot radius (m)
+HELIOS = (400000.0, 549000.0, 10400.0, 36000.0)   # centre x, centre y (m), the dome's height (m: its top is inside the spire), foot radius (m)
+# The spire (Luke, 2026-11-21: "I really meant like an unreasonably steep mountain to climb vertically ... I want
+# to drive an increasingly steep mountain and plateau over the top to something spectacular"). Inside the
+# shoulder the dome gives way to a tower: its pitch grows by the same angle with every metre in, from the
+# dome's own at the shoulder to the wall's; from the wall it eases the same way to level at the rim of a flat
+# plateau. (Pitch even per metre of plan, because the sims fly a road at its plan speed whatever its grade: a
+# craft's pitch then changes at a steady rate up the climb and another over the crest. See add_helios.)
+# (The wall at 80 deg: a 17.5 km summit, and everything along the road 5.8 times its plan length, not 3.9. A
+# crest of 2,400 m: 16,155 m, and the ideal pilot's pitch falling 48 deg/s over it; of 2,880 m, 40.)
+HELIOS_SPIRE = (9000.0, 3000.0, 2880.0, 75.0)   # shoulder radius, plateau radius, the crest's run in from the wall (m), the wall's pitch (deg)
+HELIOS_FACE = (4.5 * KM, 600.0)          # the Face: the radius of the turns onto and off it, the straight below each shoulder (m)
+HELIOS_FIT = 0.001                       # the road's height keys hold it this near the surface at every sample (m)
 HELIOS_RHO, HELIOS_D = 12 * KM, 6 * KM   # the spiral's inner radius, and how far each half turn steps in or out
 HELIOS_MOUTHS = ("E3", 345, 456)         # both on E3's north shoulder, travelling east: in at km 345, out at km 456
 HELIOS_TURN = 9 * KM                     # the two connectors' Dubins radius
@@ -244,16 +258,46 @@ HELIOS_LEAD = 24 * KM                    # the way in: straight up the spiral's 
 HELIOS_UNWIND = (60 * KM, 25.0)          # the way out: one last, wider left arc to the foot (Dubins all the way: 33 %; a straight: 24 %)
 HELIOS_KEY = 25                          # a height key every so many samples: the surface's own height and slope
 HELIOS_FLAT = 40                         # each mouth's samples at exactly 0 m
-HELIOS_GRADE = 0.22                      # its steepest
+HELIOS_GRADE = 0.22                      # the spiral laps' steepest (the Face is exempt: its limit is the wall's own pitch)
 HELIOS_LAND = (60, 30.0, 600.0)          # its land: a row every 60 samples while it's over 30 m up, each side's run (m)
+HELIOS_LAND_FIT = (4.0, 0.25)            # ... and more on the Face, so the views' blend between rows keeps each side within 4 m (or a quarter of its drop)
+
+
+def helios_spire():
+    """The spire's own figures, from HELIOS and HELIOS_SPIRE: the dome's height and pitch (rad) at the shoulder,
+    the wall's radius, pitch (rad) and height, the pitch gained per metre up the climb and lost per metre
+    over the crest (rad/m), the summit's height."""
+    _, _, H, R = HELIOS
+    rs, rp, lc, wall = HELIOS_SPIRE
+    us = rs / R
+    zs = H * (1 - us * us) ** 2
+    ts = math.atan(4 * H * us * (1 - us * us) / R)
+    tm = math.radians(wall)
+    rw = rp + lc
+    a = (tm - ts) / (rs - rw)
+    b = tm / lc
+    zw = zs + math.log(math.cos(ts) / math.cos(tm)) / a
+    return zs, ts, rw, tm, zw, a, b, zw - math.log(math.cos(tm)) / b
 
 
 def helios_z(x, y):
-    """The mountain: 10,400 m at its centre, 0 at and beyond its foot (steepest, 44 %, about 21 km out)."""
+    """The mountain. Outside the shoulder the dome: H (1 - u^2)^2, 0 at and beyond its foot (steepest, 44 %,
+    about 21 km out). Inside it the spire: the climb, whose pitch is the dome's at the shoulder and grows
+    by `a` a metre to the wall's; the crest, whose pitch falls by `b` a metre to nothing at the rim; the
+    plateau, level. (A slope tan(t0 + a s) has height ln(cos t0 / cos(t0 + a s)) / a.) Height and slope are
+    continuous everywhere; the curvature steps at the shoulder, the wall and the rim."""
     cx, cy, H, R = HELIOS
+    rs, rp, lc, wall = HELIOS_SPIRE
     r = math.hypot(x - cx, y - cy)
-    u = min(r / R, 1.0)
-    return H * (1 - u * u) ** 2
+    if r >= rs:
+        u = min(r / R, 1.0)
+        return H * (1 - u * u) ** 2
+    zs, ts, rw, tm, zw, a, b, top = helios_spire()
+    if r >= rw:
+        return zs + math.log(math.cos(ts) / math.cos(ts + a * (rs - r))) / a
+    if r > rp:
+        return zw + math.log(math.cos(b * (r - rp)) / math.cos(tm)) / b
+    return top
 
 
 def backroad_mouth(parent, station, side, direction):
@@ -637,20 +681,54 @@ def hermite_all(keys, N):
 
 def add_helios(roads, joins):
     """SHelios: off E3's north shoulder, up the mountain's west side to the spiral's start, round it clockwise
-    (two half turns, each HELIOS_D further in), an S of two half turns over the exact summit, round it
-    counter-clockwise (a half turn and a quarter, each further out), and back onto E3. Its plan's
-    spiral is explicit arcs; Dubins only joins it to E3. Its heights are the mountain's own."""
+    (a half turn, then as much of the next, HELIOS_D further in, as leaves room to turn), the Face (a
+    tighter right turn that ends pointing at the centre, straight up the spire's fall line, over the rim,
+    across the plateau through its exact centre, down the far face and a left turn off it: the way in,
+    turned half round about the summit), round it counter-clockwise (the rest of that lap and a quarter,
+    each further out), and back onto E3. Its plan's spiral is explicit arcs; Dubins only joins it to E3.
+    Its heights are the mountain's own.
+
+    What the sims do with a grade (sim-core.js railHover, craft_sim.gd _rail_hover): a body on a road is
+    held on its deck, down as well as up, whatever the crest or dip, and nothing but a shaft's climb pulls
+    gravity along a road. So the Face is flown at the plan speed the pilot holds: the climb is free, a craft
+    never leaves the deck over the rim (a crest a craft could follow unheld at 1,500 m/s is 229 km in
+    radius; let go at the wall, climbing 4.9 km/s as the tests' pilot does, it would coast 1,200 km up:
+    there is no flight to design), and its pitch changes at (plan speed) x (pitch per metre): the reason
+    the spire's pitch is even per metre of plan. What that costs: at a pitch t everything along the road is
+    1 / cos t its plan length (3.9 at the wall): the speed over the surface, and the craft's own bodies,
+    which the sims keep their plan distance apart."""
     cx, cy, H, foot = HELIOS
     rho, d = HELIOS_RHO, HELIOS_D
+    rs, rp, lc, wall = HELIOS_SPIRE
+    zs, ts, rw, tm, zw, pitch_up, pitch_over, top = helios_spire()
+    radius, below = HELIOS_FACE
     parent = next(i for i, R in enumerate(roads) if R.name == HELIOS_MOUTHS[0])
     start = backroad_mouth(roads[parent], HELIOS_MOUTHS[1], 1, 1)
     finish = backroad_mouth(roads[parent], HELIOS_MOUTHS[2], 1, 1)
-    spiral = [("R", rho + 1.5 * d, 180.0, "sp"), ("R", rho + 0.5 * d, 180.0, "sp"),   # in: W24, over the north, E18, round the south, W12
-              ("R", rho / 2, 180.0, "sp"), ("L", rho / 2, 180.0, "sp"),               # the summit's S: W12, the centre (heading south), E12
-              ("L", rho + 0.5 * d, 180.0, "sp"), ("L", rho + 1.5 * d, 90.0, "sp")]    # out: E12, over the north, W18, the south point (heading east)
-    way = [("W24", cx - rho - 2 * d, cy, 90.0), ("E18", cx + rho + d, cy, -90.0), ("W12", cx - rho, cy, 90.0),
-           ("summit", cx, cy, -90.0), ("E12", cx + rho, cy, 90.0), ("W18", cx - rho - d, cy, -90.0),
-           ("south", cx + d / 2, cy - rho - 1.5 * d, 0.0)]
+    # The Face's plan. Its straight starts `reach` from the centre, on the dome below the shoulder. The inner
+    # lap (radius `lap` about a point d / 2 east of the centre, clockwise from E18) is left `phi` round it by a
+    # right turn of `radius` whose centre is then sqrt(reach^2 + radius^2) from the mountain's: the turn's
+    # tangent through the summit is `reach` long. Every radius of the spire and `reach` itself are whole
+    # samples, and the straight is whole samples long, so each of the surface's joins lies on a sample.
+    reach, lap = rs + below, rho + 0.5 * d
+    assert all(abs(v / STEP - round(v / STEP)) < 1e-9 for v in (reach, rs, rw, rp)), "the spire's radii and the Face's reach must be whole samples"
+    cos_phi = (reach ** 2 + radius ** 2 - (d / 2) ** 2 - (lap - radius) ** 2) / (d * (lap - radius))
+    assert -1.0 < cos_phi < 1.0, f"SHelios: no turn of {radius:.0f} m off the inner lap reaches the Face"
+    phi = math.acos(cos_phi)
+    tcx, tcy = d / 2 + (lap - radius) * math.cos(phi), -(lap - radius) * math.sin(phi)   # the turn's centre, from the mountain's
+    bearing = math.atan2(-tcy, -tcx) + math.acos(radius / math.hypot(tcx, tcy))          # ... and from it, where the straight starts
+    turn = (-phi - bearing) % (2 * math.pi)
+    assert math.radians(20.0) < turn < math.radians(200.0), f"SHelios: the turn onto the Face is {math.degrees(turn):.0f} deg"
+    fx, fy = tcx + radius * math.cos(bearing), tcy + radius * math.sin(bearing)          # the straight's start, from the centre
+    fh = math.degrees(bearing) - 90.0                                                    # ... and its heading
+    lx, ly, lh = d / 2 + lap * math.cos(phi), -lap * math.sin(phi), -90.0 - math.degrees(phi)   # where the lap is left
+    spiral = [("R", rho + 1.5 * d, 180.0, "sp"), ("R", lap, math.degrees(phi), "sp"),     # in: W24, over the north, E18, part way round the south
+              ("R", radius, math.degrees(turn), "sp"), ("S", 2 * reach, 0, "sp"),         # the Face: the turn on, up, over and down
+              ("L", radius, math.degrees(turn), "sp"),                                    # ... and the turn off
+              ("L", lap, math.degrees(phi), "sp"), ("L", rho + 1.5 * d, 90.0, "sp")]      # out: the rest of that lap to W18, the south point (heading east)
+    way = [("W24", cx - rho - 2 * d, cy, 90.0), ("E18", cx + rho + d, cy, -90.0), ("turn on", cx + lx, cy + ly, lh),
+           ("face", cx + fx, cy + fy, fh), ("face's end", cx - fx, cy - fy, fh), ("turn off", cx - lx, cy - ly, lh),
+           ("W18", cx - rho - d, cy, -90.0), ("south", cx + d / 2, cy - rho - 1.5 * d, 0.0)]
 
     def connector(a, b):
         segs = dubins(a, b, HELIOS_TURN)
@@ -677,47 +755,92 @@ def add_helios(roads, joins):
         assert miss < 30.0 and turn < 0.5, f"SHelios misses {name} by {miss:.1f} m, {turn:.2f} deg"
         road.way.append((name, i))
     r = np.hypot(road.p[:, 0] - cx, road.p[:, 1] - cy)
-    assert r.min() < 30.0, f"SHelios passes {r.min():.1f} m from the summit"
     # the connectors' Dubins stretches keep off the mountain's steep ring
     assert r[:seg0[3] + 1].min() > 30 * KM and r[seg0[-4]:].min() > 30 * KM, "SHelios: a connector cuts in under 30 km"
+    # The Face's samples: its straight is whole samples of exactly STEP, through the exact centre, so the
+    # shoulders, the walls and the rims are samples too. `on`/`off`: where the lap is left and rejoined.
+    f0, f1 = seg0[first + 3], seg0[first + 4]
+    k = lambda q: round((reach - q) / STEP)
+    face = dict(on=seg0[first + 2], start=f0, shoulder=f0 + k(rs), wall=f0 + k(rw), rim=f0 + k(rp), centre=f0 + k(0.0),
+                rim2=f1 - k(rp), wall2=f1 - k(rw), shoulder2=f1 - k(rs), end=f1, off=seg0[first + 5])
+    assert f1 - f0 == 2 * k(0.0) and abs(road.len[f0:f1] - STEP).max() < 1e-6, "SHelios: the Face's straight isn't whole samples"
+    for name, q in [("shoulder", rs), ("wall", rw), ("rim", rp), ("centre", 0.0)]:
+        for i in {face[name], face.get(name + "2", face[name])}:
+            assert abs(r[i] - q) < 1e-3, f"SHelios: the Face's {name} is {abs(r[i] - q):.4f} m off sample {i}"
     # Heights: the surface's own, and its own slope along the road, so the sims' Hermite cubics lie on
-    # the mountain between keys; both mouths exactly level on the open ground. A slope is the central
-    # difference of the surface over the samples either side, per STEP: the sims' Hermite counts every
-    # sample as STEP long (a segment's are a shade shorter: slopes per real metre strayed 11 mm).
+    # the mountain between keys; both mouths exactly level on the open ground. A slope is the surface's
+    # rise per sample over STEP (the sims' Hermite counts every sample as STEP long; a segment's are a
+    # shade shorter), measured a quarter of a millimetre either way along the road's own chords: over whole
+    # samples, as it was on the dome, it strays where the Face's pitch runs away from a cubic.
     z = [helios_z(x, y) for x, y in road.p]
+    for i in range(face["rim"], face["rim2"] + 1):
+        assert abs(z[i] - top) < 1e-9
+        z[i] = top             # (the two rims' samples are the plateau's: level, to the last bit)
     last, flat = road.N - 1, HELIOS_FLAT
     assert max(z[:flat + 1]) == 0.0 and max(z[last - flat:]) == 0.0, "SHelios: a mouth is on the mountain"
-    # A cubic can't span a jump in curvature (it strays 0.2-0.3 m): the road's own where a new segment
-    # starts, the surface's at the foot. A key either side of each, a sample apart, each one's slope a
-    # one-sided (second order) difference over its own, smooth side: `side` is which way that is.
-    assert min(b - a for a, b in zip(seg0, seg0[1:])) > 8
-    side = {}
-    for i in seg0[1:-1]:
-        side.update({i - 1: -1, i: 1})
+
+    def key(i, e=1e-5):
+        if z[i] == 0.0 or face["rim"] <= i <= face["rim2"]:   # off the mountain (both mouths' HELIOS_FLAT samples too), or on the plateau: level
+            return [i, z[i], 0.0]
+        ahead = helios_z(*(road.p[i] + e * (road.p[i + 1] - road.p[i])))
+        behind = helios_z(*(road.p[i] - e * (road.p[i] - road.p[i - 1])))
+        return [i, z[i], (ahead - behind) / (2 * e * STEP)]
+    # A cubic can't span a jump in curvature: the road's own where a new segment starts, the surface's at
+    # the foot, the shoulder, the wall and the rim. Each has a key on it, or (the foot, which no sample is
+    # on) on the sample either side. Between those, a key every HELIOS_KEY samples, and more wherever the
+    # cubic between two would leave the surface by HELIOS_FIT at a sample (the Face: up to one a sample).
+    must = set(range(0, last, HELIOS_KEY)) | {flat, last - flat, last} | set(seg0[1:-1])
     for i in range(last):
-        if (z[i] == 0.0) != (z[i + 1] == 0.0):
-            assert min(abs(i - b) for b in seg0) > 4, f"SHelios: the foot within four samples of a new segment ({i})"
-            side.update({i: -1, i + 1: 1})
-    for i in sorted(set(range(0, last, HELIOS_KEY)) | {flat, last - flat, last} | set(side)):
-        w = side.get(i, 0)
-        if z[i] == 0.0:        # off the mountain (both mouths' HELIOS_FLAT samples too): level
-            road.keys.append([i, 0.0, 0.0])
-        elif w == 0:
-            road.keys.append([i, z[i], (z[i + 1] - z[i - 1]) / (2 * STEP)])
-        else:
-            road.keys.append([i, z[i], w * (-3 * z[i] + 4 * z[i + w] - z[i + 2 * w]) / (2 * STEP)])
-    # Off the mountain every key is level at 0: only each such run's two ends are kept (the same heights
-    # exactly, and the sims look a height up by walking the keys from the first).
-    level = [k[1] == 0.0 and k[2] == 0.0 for k in road.keys]
-    road.keys = [k for n, k in enumerate(road.keys) if not (0 < n < len(level) - 1 and level[n - 1] and level[n] and level[n + 1])]
+        if any((r[i] - q) * (r[i + 1] - q) <= 0.0 for q in (foot, rs, rw, rp)):
+            must |= {i, i + 1}
+
+    def between(a, b):
+        ka, kb = key(a), key(b)
+        if b - a < 2 or max(abs(hermite([ka, kb], i) - z[i]) for i in range(a + 1, b)) <= HELIOS_FIT:
+            return []
+        m = (a + b) // 2
+        return between(a, m) + [m] + between(m, b)
+    must = sorted(must)
+    for a, b in zip(must, must[1:]):
+        road.keys += [key(a)] + [key(i) for i in between(a, b)]
+    road.keys.append(key(last))
+    # Where every key is level and alike (off the mountain, and across the plateau) only each such run's
+    # two ends are kept (the same heights exactly: the sims look a height up through the keys).
+    level = [q[2] == 0.0 for q in road.keys]
+    same = [n > 0 and q[1] == road.keys[n - 1][1] for n, q in enumerate(road.keys)]
+    road.keys = [q for n, q in enumerate(road.keys) if not (0 < n < len(level) - 1 and level[n - 1] and level[n] and level[n + 1] and same[n] and same[n + 1])]
+    assert all(p[0] < q[0] for p, q in zip(road.keys, road.keys[1:])), "SHelios: its height keys aren't in order"
     hs = hermite_all(road.keys, road.N)
     assert all(abs(hs[i] - road.h(i)) < 1e-9 for i in range(0, road.N, 997))
     grade = np.abs(np.diff(hs)) / road.len[:-1]
     off = float(np.abs(hs - np.array(z)).max())
-    assert grade.max() <= HELIOS_GRADE, f"SHelios is {grade.max() * 100:.1f}% at sample {int(np.argmax(grade))}"
-    # (within 20 mm of the surface at every sample: 0.6 mm with a key every 25, 5 mm every 50, 27 mm every 75)
-    assert abs(hs.max() - H) < 2.0 and hs.min() >= 0.0 and off < 0.02, f"SHelios: {hs.min():.2f}-{hs.max():.2f} m, {off:.3f} m off the surface"
-    road.helios = (float(grade.max()), int(np.argmax(grade)), float(hs.max()), off)
+    # ... and between the samples, where the sims fly: against the surface under the middle of each chord
+    half = float(max(abs(road.h(i + 0.5) - helios_z(*((road.p[i] + road.p[i + 1]) / 2))) for i in range(last)))
+    # The laps keep HELIOS_GRADE. The Face (from where the lap is left to where it is rejoined) keeps the
+    # wall's own pitch; up it the grade grows at every sample from the shoulder to the wall, falls at every
+    # one from the wall to the rim, and the plateau between the rims is level. Down it, the same reversed.
+    laps = np.concatenate([grade[:face["on"]], grade[face["off"]:]])
+    assert laps.max() <= HELIOS_GRADE, f"SHelios' laps are {laps.max() * 100:.1f}%"
+    steep = int(np.argmax(grade))
+    assert grade.max() <= math.tan(tm) + 1e-9 and face["on"] <= steep < face["off"], f"SHelios is {grade.max() * 100:.1f}% at sample {steep}"
+    up = np.diff(hs)[face["shoulder"]:face["rim"]]
+    down = -np.diff(hs)[face["rim2"]:face["shoulder2"]][::-1]
+    n_up = face["wall"] - face["shoulder"]
+    for g in (up, down):
+        assert np.all(np.diff(g[:n_up]) > 0.0) and np.all(np.diff(g[n_up - 1:]) < 0.0), "SHelios: the Face's grade doesn't grow to the wall and ease to the rim"
+    assert abs(hs[face["rim"]:face["rim2"] + 1] - top).max() < 1e-6, "SHelios: the plateau isn't level"
+    assert (face["rim2"] - face["rim"]) * STEP >= 3 * KM, "SHelios: under 3 km of level road on the plateau"
+    assert abs(hs.max() - top) < 1e-6 and hs.min() >= 0.0 and off <= HELIOS_FIT + 1e-9 and half < 0.02, f"SHelios: {hs.min():.2f}-{hs.max():.2f} m, {off:.4f} m off the surface at a sample, {half:.4f} m between"
+    # The profile's true radii (of the curve the road draws in the vertical plane, not 1 / the grade's change):
+    # (1 + g^2)^1.5 / |g'|, tightest at the rim over the crest and at the shoulder up the climb.
+    g = np.diff(hs[f0:f1 + 1]) / STEP
+    rad = (1 + ((g[1:] + g[:-1]) / 2) ** 2) ** 1.5 / np.maximum(np.abs(np.diff(g)) / STEP, 1e-12)
+    n0 = face["shoulder"] - f0
+    crest = float(rad[face["wall"] - f0:face["rim"] - f0 - 1].min())
+    dip = float(rad[n0:face["wall"] - f0 - 1].min())
+    lap_at = int(np.argmax(np.where((np.arange(last) < face["on"]) | (np.arange(last) >= face["off"]), grade, 0.0)))
+    road.helios = (float(laps.max()), lap_at, float(hs.max()), off, half, float(grade.max()), steep, crest, dip)
+    road.face = face
     joins.extend([(len(roads), 0, parent), (len(roads), 1, parent)])
     scenic_roads.append((len(roads), dict(name="SHelios", sea=0)))   # (no plan, heights or land spec: all made here)
     roads.append(road)
@@ -731,13 +854,34 @@ def helios_land(road):
     on = [i for i in range(0, road.N, every) if helios_z(*road.p[i]) > above]
     assert on == list(range(on[0], on[-1] + every, every)), "SHelios leaves the mountain and comes back"
     assert on[0] >= every and on[-1] + every <= road.N - 1
-    rows = []
-    for i in [on[0] - every] + on + [on[-1] + every]:
+
+    def sides(i):
         x, y = road.p[i]
         nx, ny = -road.t[i, 1], road.t[i, 0]   # its left
         out = road.width / 2 + run
-        rows.append([i, round(max(-4.0, helios_z(x + nx * out, y + ny * out)), 2), run,
-                     round(max(-4.0, helios_z(x - nx * out, y - ny * out)), 2), run, 1])
+        return (round(max(-4.0, helios_z(x + nx * out, y + ny * out)), 2), round(max(-4.0, helios_z(x - nx * out, y - ny * out)), 2))
+    # On the Face the land beside the road climbs kilometres between two rows, and the views blend a side's
+    # height from row to row (a smoothstep of the samples between: view/network_scenic.gd setup) to ask
+    # whether it lies under the road (that edge is open). More rows there, until that blend is within
+    # HELIOS_LAND_FIT of the side's real height at every sample: metres, or that part of its drop from the road.
+    near, part = HELIOS_LAND_FIT
+
+    def between(a, b):
+        sa, sb = sides(a), sides(b)
+        for i in range(a + 1, b):
+            u = (i - a) / (b - a)
+            u = u * u * (3 - 2 * u)
+            h = road.h(i)
+            if any(abs(p + (q - p) * u - s) > max(near, part * abs(s - h)) for p, q, s in zip(sa, sb, sides(i))):
+                m = (a + b) // 2
+                return between(a, m) + [m] + between(m, b)
+        return []
+    at = [on[0] - every] + on + [on[-1] + every]
+    rows = []
+    for a, b in zip(at, at[1:] + [None]):
+        more = between(a, b) if b is not None and b > road.face["on"] and a < road.face["off"] else []
+        for i in [a] + more:
+            rows.append([i, sides(i)[0], run, sides(i)[1], run, 1])
     return rows
 
 
@@ -1243,9 +1387,14 @@ def check(roads, joins, J, cities, ew, ns, jumps=(), onramps=(), overlaps=()):
               f"tightest crest or dip {1 / abs(bend).max() / KM:.1f} km, tightest bend {tight / KM:.0f} km, "
               f"{stretch}ends at x {R.end[0] / KM:.1f} km")
         if hasattr(R, "helios"):
-            steep, at, top, off = R.helios
-            print(f"    {R.N} samples, {len(R.keys)} height keys within {off * 1000:.1f} mm of the mountain, summit {top:.2f} m, "
-                  f"steepest {steep * 100:.2f}% at sample {at}; " + ", ".join(f"{name} {i}" for name, i in R.way))
+            steep, at, top, off, half, wall, wall_at, crest, dip = R.helios
+            F = R.face
+            print(f"    {R.N} samples, {len(R.keys)} height keys within {off * 1000:.1f} mm of the mountain at every sample ({half * 1000:.1f} mm between), "
+                  f"summit {top:.2f} m, its laps' steepest {steep * 100:.2f}% at sample {at}; " + ", ".join(f"{name} {i}" for name, i in R.way))
+            print(f"    the Face: samples {F['on']}-{F['off']} (off the lap, and on again), straight {F['start']}-{F['end']}; shoulder {F['shoulder']}, wall {F['wall']}, rim {F['rim']}, "
+                  f"centre {F['centre']}, rim {F['rim2']}, wall {F['wall2']}, shoulder {F['shoulder2']}; steepest {wall * 100:.1f}% ({math.degrees(math.atan(wall)):.2f} deg) "
+                  f"at sample {wall_at}; {(F['rim2'] - F['rim']) * STEP / KM:.1f} km level; tightest crest {crest:.0f} m (at the rim), tightest dip {dip:.0f} m (at the shoulder)")
+            grade = np.concatenate([grade[:F["on"]], grade[F["off"]:]])   # (the Face's own limit is the wall's pitch: add_helios holds it)
         if hs.min() < -0.01:
             bad(f"{R.name} dips to {hs.min():.1f} m")
         if abs(grade).max() > 0.30:

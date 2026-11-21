@@ -14,7 +14,7 @@ extends RefCounted
 
 const Settings := preload("res://release/game_settings.gd")
 const TIMES := [["afternoon", "Afternoon"], ["dawn", "Dawn"], ["noon", "Noon"], ["dusk", "Dusk"], ["night", "Night"]]         # the menus' rows: [id, name]
-const WEATHERS := [["fair", "Fair"], ["clear", "Clear"], ["overcast", "Overcast"], ["fog", "Fog"], ["rain", "Rain"]]
+const WEATHERS := [["fair", "Fair"], ["clear", "Clear"], ["overcast", "Overcast"], ["fog", "Fog"], ["rain", "Rain"], ["snow", "Snow"]]
 
 ## What a time of day changes from the afternoon. sun, sun2: [degrees down from level (negative is
 ## up, as Node3D rotation), bearing, colour, energy]; disc: the suns' discs in the sky, of what
@@ -46,11 +46,13 @@ const WEATHER := {
 	"overcast": {"cover": 1.5, "grey": 0.82, "dim": 0.80, "sun": 0.22, "shadows": false, "disc": 0.0, "fog": 1.6, "cirrus": 0.0, "sky_fog": 0.25},
 	"fog": {"clouds": 0.0, "grey": 0.90, "dim": 0.92, "sun": 0.32, "shadows": false, "disc": 0.0, "fog": 5.0, "sky_fog": 0.9},
 	"rain": {"cover": 1.6, "grey": 0.86, "dim": 0.52, "sun": 0.15, "shadows": false, "disc": 0.0, "fog": 2.6, "cirrus": 0.0, "sky_fog": 0.5, "wet": 1.0, "rain": 1.0},
+	# snow: a bright grey sky (snow light: not rain's gloom), thick air, flakes, and snow lying ("white": the land, the props, the road in blown streaks)
+	"snow": {"cover": 1.5, "grey": 0.92, "dim": 0.90, "sun": 0.28, "shadows": false, "disc": 0.0, "fog": 2.4, "cirrus": 0.0, "sky_fog": 0.6, "snow": 1.0, "white": 1.0},
 }
 const AFTERNOON_HAZE := Color(0.58, 0.68, 0.80)      # the Network's own, as the land's fog and the shaders have it
 const CLOUDS := {"cover": 0.62, "cirrus": 0.42, "lit_col": Vector3(1.0, 0.975, 0.93), "shade_col": Vector3(0.27, 0.33, 0.46)}   # the deck's own (view/network_clouds.gdshader)
 const GLOBALS := {"sky_sun": Vector3(0.6824, 0.5, 0.5332), "sky_sun2": Vector3(0.7911, 0.4067, 0.4568), "sky_sun_glow": Vector3(1.0, 0.93, 0.8),
-	"sky_sun2_glow": Vector3(1.0, 0.6, 0.28), "sky_haze": Vector3(0.58, 0.68, 0.8), "sky_haze_scale": 1.0, "sky_wet": 0.0}      # as project.godot has them
+	"sky_sun2_glow": Vector3(1.0, 0.6, 0.28), "sky_haze": Vector3(0.58, 0.68, 0.8), "sky_haze_scale": 1.0, "sky_wet": 0.0, "sky_snow": 0.0}      # as project.godot has them
 const RAIN_DROPS := 900
 const RAIN_BOX := Vector3(22.0, 12.0, 90.0)          # the streaks' box round the eye: across, up, ahead (m)
 
@@ -58,6 +60,15 @@ static var time := "afternoon"
 static var weather := "fair"
 static var pinned := false       # a test or a render chose them: the saved choices do not replace them
 static var _fog := 1.0
+static var _snowing := false     # the box of quads is flakes, not streaks
+static var _sky_mat: ShaderMaterial      # the sky's own material, and what the hour and weather last gave it (for _aloft)
+static var _zenith_now := Color(0.19, 0.39, 0.78)
+static var _starlight_now := 0.0
+static var _grey_now := 0.0
+static var _aloft_was := -1.0
+static var _aloft_view := 0      # the flight whose sky _sky_mat is
+static var _applied := false     # apply() found and set this flight's sky (false: the world as built)
+static var aloft := 0.0          # how far over the air the eye is: 0 to 6 km, 0.6 at 10 km, 0.9 at 16 km
 static var _thin := 1.0          # the eye's height's part in the haze (thin_air)
 const AIR_H := 3500.0            # m: the air's scale height (view/air.gdshaderinc has the same)
 static var _haze_gain := Color(1, 1, 1)
@@ -174,6 +185,8 @@ static func apply(view) -> void:
 	var base: Dictionary = view.get_meta("outlook", {})
 	if base.is_empty():
 		if t.is_empty() and w.is_empty():      # the world as built: nothing found, nothing touched
+			_applied = false
+			_aloft_view = 0
 			_globals(GLOBALS)
 			_fog = 1.0
 			_haze_gain = Color(1, 1, 1)
@@ -217,6 +230,12 @@ static func apply(view) -> void:
 	var horizon: Color = _weathered(t.get("horizon", base.horizon), w)
 	var level: float = clampf(horizon.get_luminance() / maxf((base.horizon as Color).get_luminance(), 0.001), 0.03, 1.3)
 	(base.sky as ShaderMaterial).set_shader_parameter("zenith", zenith)
+	_sky_mat = base.sky
+	_applied = true
+	_aloft_view = view.get_instance_id()
+	_zenith_now = zenith
+	_grey_now = float(w.get("grey", 0.0))
+	_aloft_was = -1.0
 	(base.sky as ShaderMaterial).set_shader_parameter("horizon", horizon)
 	(base.sky as ShaderMaterial).set_shader_parameter("ground", (base.ground as Color) * level)
 	var amb: Array = t.get("ambient", [base.ambient_light_sky_contribution, base.ambient_light_energy])
@@ -231,7 +250,7 @@ static func apply(view) -> void:
 	var glow: Array = t.get("glow", [Color(1.0, 0.93, 0.8), Color(1.0, 0.6, 0.28)])
 	var suns: float = float(t.get("disc", 1.0)) * float(w.get("disc", 1.0)) if not t.has("moon") else 0.35 * float(w.get("disc", 1.0))
 	_globals({"sky_sun": sun_to, "sky_sun2": sun2_to, "sky_sun_glow": _v3(glow[0]) * suns, "sky_sun2_glow": _v3(glow[1]) * suns,
-		"sky_haze": _v3(horizon), "sky_haze_scale": minf(_fog, 3.5), "sky_wet": float(w.get("wet", 0.0))})
+		"sky_haze": _v3(horizon), "sky_haze_scale": minf(_fog, 3.5), "sky_wet": float(w.get("wet", 0.0)), "sky_snow": float(w.get("white", 0.0))})
 	# the cloud deck
 	if base.has("clouds"):
 		var deck: MeshInstance3D = base.clouds
@@ -254,22 +273,9 @@ static func apply(view) -> void:
 	# the stars
 	var stars := view.get_node_or_null("outlook_stars") as MeshInstance3D
 	var starlight: float = float(t.get("stars", 0.0)) * (1.0 - float(w.get("grey", 0.0))) * (0.0 if w.has("sky_fog") and float(w.sky_fog) > 0.6 else 1.0)
-	if stars == null and starlight > 0.0:
-		stars = MeshInstance3D.new()
-		stars.name = "outlook_stars"
-		var dome := SphereMesh.new()
-		dome.radius = 110000.0
-		dome.height = 220000.0
-		dome.radial_segments = 48
-		dome.rings = 24
-		stars.mesh = dome
-		var sm := ShaderMaterial.new()
-		sm.shader = preload("res://view/stars.gdshader")
-		sm.set_shader_parameter("dawn_dir", Vector3.DOWN)      # no dawn on any side: the whole dome
-		stars.material_override = sm
-		stars.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		stars.extra_cull_margin = 16384.0
-		view.add_child(stars)
+	_starlight_now = starlight
+	if stars == null:      # (always there: from high up they show by day: _aloft)
+		stars = _stars(view)
 	if stars:
 		stars.visible = starlight > 0.0
 		(stars.material_override as ShaderMaterial).set_shader_parameter("fade", starlight)
@@ -282,12 +288,15 @@ static func apply(view) -> void:
 		lamp.spot_range = 900.0 if lit_road else float(base.lamp[3])
 		lamp.light_specular = 0.5 if lit_road else float(base.lamp[4])
 	# the rain
+	var falling: float = maxf(float(w.get("rain", 0.0)), float(w.get("snow", 0.0)))      # (the same box of quads: streaks, or flakes)
+	_snowing = float(w.get("snow", 0.0)) > 0.0
 	var rain := view.get_node_or_null("outlook_rain") as MeshInstance3D
-	if rain == null and float(w.get("rain", 0.0)) > 0.0:
+	if rain == null and falling > 0.0:
 		rain = _rain()
 		view.add_child(rain)
 	if rain:
-		rain.visible = float(w.get("rain", 0.0)) > 0.0
+		rain.visible = falling > 0.0
+		(rain.material_override as ShaderMaterial).set_shader_parameter("snow", 1.0 if _snowing else 0.0)
 		(rain.material_override as ShaderMaterial).set_shader_parameter("tint", _v3(horizon.lerp(Color(1, 1, 1), 0.5)))
 
 
@@ -317,7 +326,70 @@ static func _rain() -> MeshInstance3D:
 
 
 ## Every frame: the rain rides with the eye and streams past at the craft's own speed.
+## The stars' dome, made when first wanted.
+static func _stars(view) -> MeshInstance3D:
+	var stars := view.get_node_or_null("outlook_stars") as MeshInstance3D
+	if stars != null:
+		return stars
+	stars = MeshInstance3D.new()
+	stars.name = "outlook_stars"
+	var dome := SphereMesh.new()
+	dome.radius = 110000.0
+	dome.height = 220000.0
+	dome.radial_segments = 48
+	dome.rings = 24
+	stars.mesh = dome
+	var sm := ShaderMaterial.new()
+	sm.shader = preload("res://view/stars.gdshader")
+	sm.set_shader_parameter("dawn_dir", Vector3.DOWN)      # no dawn on any side: the whole dome
+	sm.set_shader_parameter("fade", 0.0)
+	stars.material_override = sm
+	stars.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	stars.extra_cull_margin = 16384.0
+	stars.visible = false
+	view.add_child(stars)
+	return stars
+
+
+## The sky from high up. Over most of the air its blue goes to near black overhead while the horizon
+## keeps its pale band, and the stars are out at noon. (Luke: "plateau over the top to something
+## spectacular": the top of Helios is 16 km up.)
+static func _aloft(view) -> void:
+	if view.cam == null:
+		return
+	if _aloft_view != view.get_instance_id():      # a new flight: its own sky (the world as built is not recorded by apply)
+		_aloft_view = view.get_instance_id()
+		_aloft_was = -1.0
+		if not _applied:
+			_sky_mat = null
+			_starlight_now = 0.0
+			_grey_now = 0.0
+			for child in view.get_children():
+				if child is WorldEnvironment and child.environment != null and child.environment.sky != null:
+					_sky_mat = child.environment.sky.sky_material as ShaderMaterial
+			if _sky_mat != null and _sky_mat.get_shader_parameter("zenith") is Color:
+				_zenith_now = _sky_mat.get_shader_parameter("zenith")
+			else:
+				_sky_mat = null
+	if _sky_mat == null:
+		return
+	var height: float = (view.cam as Camera3D).global_position.y
+	aloft = 1.0 - exp(-maxf(height - 6000.0, 0.0) / 4200.0)
+	if absf(aloft - _aloft_was) < 0.004:
+		return
+	_aloft_was = aloft
+	_sky_mat.set_shader_parameter("zenith", _zenith_now.lerp(_zenith_now * 0.07, aloft))
+	var light := maxf(_starlight_now, aloft * aloft * (1.0 - _grey_now))
+	var stars := view.get_node_or_null("outlook_stars") as MeshInstance3D
+	if stars == null and light > 0.01:
+		stars = _stars(view)
+	if stars:
+		stars.visible = light > 0.01
+		(stars.material_override as ShaderMaterial).set_shader_parameter("fade", light)
+
+
 static func tick(view, delta: float) -> void:
+	_aloft(view)
 	var rain := view.get_node_or_null("outlook_rain") as MeshInstance3D
 	if rain == null or not rain.visible or view.cam == null:
 		return
@@ -328,4 +400,4 @@ static func tick(view, delta: float) -> void:
 	var m := rain.material_override as ShaderMaterial
 	m.set_shader_parameter("travel", _travel)
 	m.set_shader_parameter("speed", speed)
-	m.set_shader_parameter("fall", fposmod(Time.get_ticks_msec() / 1000.0 * 9.0, RAIN_BOX.y))
+	m.set_shader_parameter("fall", fposmod(Time.get_ticks_msec() / 1000.0 * (1.7 if _snowing else 9.0), RAIN_BOX.y))      # (flakes drift down; rain falls)

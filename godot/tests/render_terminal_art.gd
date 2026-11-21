@@ -3,6 +3,8 @@
 ## -s res://tests/render_terminal_art.gd -- --track=network --handling=speed --mute --out=DIR
 ## Optional: --captures-only, --benchmark-only, --flat-panel (the flat instrument panel and
 ## heads-up map instead of the gauge cluster and map pod). Timings are for one desktop eye.
+## Timings with the head tipped back (--look-up=60) and the cockpit rolled over (--inverted) weigh what
+## is seen through the top of the canopy: the sky, or with both the road as a corkscrew's top shows it.
 extends SceneTree
 
 const Seat := preload("res://vr/vr_cockpit.gd")
@@ -139,6 +141,9 @@ func _run() -> void:
 	if "--captures-only" not in OS.get_cmdline_user_args():
 		seat.cam.position = Vector3.ZERO
 		seat.cam.rotation = Vector3.ZERO
+		for arg in OS.get_cmdline_user_args():
+			if arg.begins_with("--look-up="):   # timings: the head tipped back this many degrees (90: straight up through the canopy)
+				seat.cam.rotation_degrees.x = float(arg.trim_prefix("--look-up="))
 		await _benchmark()
 	seat.free()
 	quit()
@@ -154,6 +159,7 @@ func _benchmark() -> void:
 	var vp := root.get_viewport_rid()
 	var burner := "--burner" in OS.get_cmdline_user_args()
 	var guidance := "--guidance" in OS.get_cmdline_user_args()
+	var inverted := "--inverted" in OS.get_cmdline_user_args()   # timings: the cockpit rolled right over about the pilot's head, the road over the canopy (the top of a corkscrew, near enough)
 	# Two warm passes give the runtime a chance to compile newly visible materials.
 	# Every pass follows identical transforms even if the host display rate changes.
 	for lap in 3:
@@ -174,6 +180,10 @@ func _benchmark() -> void:
 			var begin := Time.get_ticks_usec()
 			seat._process(STEP)
 			var update_ms := (Time.get_ticks_usec() - begin) / 1000.0
+			if inverted:
+				var head: Vector3 = seat.cam.global_position
+				var over := Transform3D(Basis((seat.rig as Node3D).global_basis.z.normalized(), PI), Vector3.ZERO)
+				(seat.rig as Node3D).global_transform = Transform3D(Basis.IDENTITY, head) * over * Transform3D(Basis.IDENTITY, -head) * (seat.rig as Node3D).global_transform
 			if guidance and seat.approach_display:      # the approach readout held up (the frame's own update has just stowed it)
 				seat.approach_display.set_message("JUMP LIP  2 MI / 4.0 S\nASCENT J0 > N2 UPPER\nMIN 3,000 MPH AT LIP | READY")
 				seat.approach_display._process(1.0)
