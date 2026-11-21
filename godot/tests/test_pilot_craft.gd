@@ -64,6 +64,33 @@ func check_airframe(craft) -> void:
 		check("engine %d has separate textured front and aft leaves" % k, brake != aft and brake.surface_get_material(0) == material and aft.surface_get_material(0) == material)
 
 
+func check_pod_controls(game, vr: bool) -> void:
+	var model = game.craft
+	var hull: MeshInstance3D = model.tail_lights.get_parent()
+	check("brakes and lamps ride on the pilot's visible hull", hull.is_visible_in_tree() and model.pod_flaps.all(func(f): return f.get_parent() == hull))
+	var previous_mesh: Mesh = hull.mesh
+	var closed: bool = model.nose_closed
+	model.set_nose_closed(not closed, game)
+	check("nose switch preserves the Shrike hardware", hull.mesh != previous_mesh and bool(hull.mesh.get_meta(&"shrike_hull", false)) and hull.has_node("ShrikeStrakes"))
+	model.set_nose_closed(closed, game)
+	check("nose switch restores the previous hull", hull.mesh == previous_mesh)
+	if vr:
+		check("the pilot sits in the same bucket shown from chase", game.shell.get_node("seat_back").mesh == model.pod.get_node("seat_back").mesh)
+	var previous: Dictionary = game.inp.duplicate()
+	for demand: Vector2 in [Vector2(.85, .0), Vector2(.0, .85), Vector2(.85, .85), Vector2.ZERO]:
+		game.inp.brkL = demand.x
+		game.inp.brkR = demand.y
+		game._sync_craft(1.0)
+		var lights: Vector2 = model.tail_lights.material_override.get_shader_parameter("brakes")
+		check("rear lamps follow each lever at " + str(demand), lights.is_equal_approx(demand))
+		check("pod brake doors follow the common brake demand", is_equal_approx(model.pod_flap_open, minf(demand.x, demand.y)))
+		if vr:
+			game._place_camera(1.0)
+			var angle := Vector2(game.brake_paddles[0].rotation.x, game.brake_paddles[1].rotation.x)
+			check("brake paddles show the correct independent travel", angle.is_equal_approx(demand * deg_to_rad(-18.0)))
+	game.inp = previous
+
+
 func _run() -> void:
 	var prefs_existed := FileAccess.file_exists(Settings.PREFS)
 	var previous := FileAccess.get_file_as_bytes(Settings.PREFS) if prefs_existed else PackedByteArray()
@@ -104,6 +131,7 @@ func _run() -> void:
 			check("visible pod trim matches the selection", game.craft.pod.has_node("ShrikeStrakes") == is_shrike)
 			if is_shrike:
 				check_airframe(game.craft)
+				check_pod_controls(game, vr)
 			if vr:
 				check("the pilot sees the selected cabin", (game.shell.find_child("ShrikePlate", true, false) != null) == is_shrike)
 				check("tow instrument matches the selection", (game.tow_meter != null) == is_shrike)

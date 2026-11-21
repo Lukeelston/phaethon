@@ -365,26 +365,407 @@ def engine(side):
     return m
 
 
+def body_point(table, u, perimeter):
+    step = u * (len(table) - 1)
+    i = min(int(step), len(table) - 2)
+    z, x, y, w, h = table[i] + (step - i) * (table[i + 1] - table[i])
+    a = TAU * perimeter - math.pi / 2
+    return vec(x + w * signed(math.cos(a), 0.78), y + h * signed(math.sin(a), 0.78), z)
+
+
+def faired_section(mesh, stations, region, span=(0, 1), segments=24, uv=lambda u, v: (u, v)):
+    """Loft a cambered body from z, x, y, half-width and half-height stations."""
+    table = np.asarray(stations)
+    mesh.grid(
+        len(stations) - 1,
+        segments,
+        lambda u, v: body_point(table, u, span[0] + v * (span[1] - span[0])),
+        region,
+        True,
+        uv,
+    )
+
+
+def tail_strip(mesh, side, lo, hi, lens):
+    """A curved lamp inset in the dark transom. The mounting pocket is wider than its lens."""
+
+    def point(u, v):
+        t = lo + (hi - lo) * u
+        z = 2.29 - 0.17 * t - 0.33 * t * t
+        y = -0.041 + 0.092 * t + 0.016 * math.sin(math.pi * t)
+        a = TAU * v
+        radius = (0.020 if lens else 0.031) * (1 - 0.5 * t * t)
+        return vec(
+            side * (0.08 + 0.81 * t),
+            y + radius * math.cos(a),
+            z + (0.014 if lens else -0.005) + radius * math.sin(a),
+        )
+
+    mesh.grid(6, 8, point, "metal" if lens else "carbon", reverse=side > 0)
+
+
+def tail_lamps():
+    lens = Mesh()
+    for side in (-1, 1):
+        for i in range(8):
+            tail_strip(lens, side, (i + 0.06) / 8, (i + 0.94) / 8, True)
+    return lens
+
+
 def pod():
     m = Mesh()
+    # A low spine blends into the deck behind the canopy. Narrow fins leave the middle open.
+    spine = [
+        (0.98, 0, 0.10, 0.04, 0.04),
+        (1.20, 0, 0.16, 0.25, 0.18),
+        (1.39, 0, 0.19, 0.34, 0.23),
+        (1.62, 0, 0.16, 0.33, 0.21),
+        (1.88, 0, 0.11, 0.26, 0.17),
+        (2.10, 0, 0.042, 0.18, 0.105),
+        (2.24, 0, -0.025, 0.045, 0.055),
+    ]
+    faired_section(m, spine, "teal", (0, 0.34), 10)
+    faired_section(m, spine, "spine", (0.34, 0.66), 16, lambda u, v: (1 - v, u))
+    faired_section(m, spine, "teal", (0.66, 1), 10)
+    deck = np.asarray(spine)
+    # Raised extractor blades sit on the curved hatch, with a dark gap beneath their rear edges.
+    for side in (-1, 1):
+        for station in (0.37, 0.445, 0.52, 0.595):
+
+            def hood(u, v, side=side, station=station):
+                arc = 0.5 + side * (0.039 + 0.103 * v)
+                t = station + 0.037 * u + 0.022 * v
+                return body_point(deck, t, arc) + vec(-side * 0.002, 0.004 + 0.017 * u, 0)
+
+            m.grid(1, 5, hood, "teal", reverse=side > 0)
+            m.grid(
+                1, 5, lambda u, v, hood=hood: hood(1, v) - vec(0, 0.018 * u, 0), "carbon", reverse=side > 0
+            )
     for s in (-1, 1):
         aerofoil(m, (s * 0.91, -0.17, -0.48), s, 0.77, 1.22, 1.13, 1.34)
-        # Fairings at the sides taper to the two trim jets.
+        # Raised hips carry the brake hinges. The glass and nose cage keep their sightlines.
+        hip = [
+            (-1.08, s * 0.89, -0.21, 0.035, 0.045),
+            (-0.82, s * 0.98, -0.215, 0.115, 0.118),
+            (-0.45, s * 1.045, -0.216, 0.155, 0.163),
+            (0.04, s * 1.055, -0.215, 0.164, 0.177),
+            (0.55, s * 1.04, -0.19, 0.18, 0.175),
+            (0.81, s * 1.03, -0.18, 0.191, 0.165),
+            (1.16, s * 0.997, -0.155, 0.185, 0.151),
+            (1.48, s * 0.92, -0.133, 0.167, 0.14),
+            (1.76, s * 0.79, -0.13, 0.139, 0.125),
+            (1.99, s * 0.61, -0.143, 0.09, 0.091),
+        ]
+        for a, b, ink in [
+            (0, 0.09, "carbon"),
+            (0.09, 0.41, "coachwork"),
+            (0.41, 0.59, "teal"),
+            (0.59, 0.91, "coachwork"),
+            (0.91, 1, "carbon"),
+        ]:
+            faired_section(
+                m,
+                hip,
+                ink,
+                (a, b),
+                8,
+                uv=(lambda u, v: (1 - u, 1 - v)) if a == 0.09 else (lambda u, v: (u, v)),
+            )
+        # Painted rails along the open nose carry the same taper as the sidepods.
+        rail = [
+            (-2.11, s * 0.22, -0.104, 0.035, 0.025),
+            (-1.91, s * 0.47, -0.102, 0.047, 0.032),
+            (-1.62, s * 0.69, -0.117, 0.061, 0.041),
+            (-1.32, s * 0.83, -0.151, 0.068, 0.05),
+            (-1.04, s * 0.925, -0.18, 0.084, 0.062),
+            (-0.79, s * 1.005, -0.194, 0.074, 0.061),
+        ]
+        faired_section(m, rail, "ivory", segments=14)
+        aerofoil(m, (s * 0.27, 0.10, 1.27), s, 0.61, 0.53, 0.48, 0.65, "teal")
+        # A machined heat shield, flared lip, dark throat and recessed centerbody per trim jet.
+        nozzle = [
+            (1.51, 0.20, 0.145),
+            (1.79, 0.228, 0.166),
+            (2.04, 0.215, 0.155),
+            (2.23, 0.190, 0.144),
+            (2.28, 0.187, 0.142),
+            (2.30, 0.171, 0.128),
+            (2.27, 0.151, 0.109),
+            (2.16, 0.14, 0.098),
+        ]
+        rings(m, nozzle, "exhaust", s * 0.56, 36, bias=-0.221, exponent=0.82)
+        collar(m, 2.224, 0.194, 0.149, 0.033, "metal", s * 0.56, bias=-0.221)
+        m.pipe((s * 0.56, -0.221, 2.08), (s * 0.56, -0.221, 2.15), 0.136, "carbon", 24)
         rings(
             m,
+            [(2.145, 0.081, 0.063), (2.18, 0.072, 0.056), (2.236, 0.014, 0.012)],
+            "bronze",
+            s * 0.56,
+            24,
+            bias=-0.221,
+        )
+        tail_strip(m, s, 0, 1, False)
+        # Vertical diffuser fences under the tail tuck up into the rear floor.
+        for x in (0.25, 0.69):
+            m.panel(
+                [
+                    vec(s * x, -0.33, 1.31),
+                    vec(s * x, -0.47, 1.40),
+                    vec(s * x, -0.39, 2.09),
+                    vec(s * x, -0.28, 2.16),
+                ],
+                (s, 0, 0),
+                "carbon",
+                0.024,
+            )
+    return m
+
+
+def pod_brake(side):
+    """Handed leaf centered on its hinge, with lettering readable from either flank."""
+    m = Mesh()
+    outline = [
+        (0, -0.11),
+        (0.06, -0.153),
+        (0.62, -0.135),
+        (0.83, -0.076),
+        (0.89, 0.022),
+        (0.78, 0.102),
+        (0.18, 0.156),
+        (0.025, 0.114),
+    ]
+    pts = [vec(-side * 0.16 * z * z, y + 0.037 * z, z) for z, y in outline]
+    uv = [(1 - z / 0.89 if side > 0 else z / 0.89, 0.5 - y / 0.32) for z, y in outline]
+    inside = [p + vec(-side * 0.027, 0, 0) for p in pts]
+    m.poly(pts, (side, 0, 0.12), "coachwork", uv)
+    m.poly(inside, (-side, 0, -0.12), "carbon", uv)
+    for i in range(len(pts)):
+        j = (i + 1) % len(pts)
+        m.poly([pts[i], inside[i], inside[j], pts[j]], (pts[i] + pts[j]) / 2 - vec(0, 0, 0.42), "metal")
+    for y in (-0.077, 0.061):
+        m.pipe((-side * 0.044, y, 0.055), (-side * 0.125, y * 0.4, 0.61), 0.013, "bronze", 8, 0.008)
+    m.pipe((-side * 0.01, -0.133, 0.026), (-side * 0.01, 0.13, 0.026), 0.022, "metal", 14)
+    return m
+
+
+# Ring stations run vertically up the lever, with an offset toward the palm.
+def sleeve(mesh, stations, region, segments=28):
+    def point(u, v):
+        t = u * (len(stations) - 1)
+        k = min(int(t), len(stations) - 2)
+        y, w, d, z = np.asarray(stations[k]) * (1 - t + k) + np.asarray(stations[k + 1]) * (t - k)
+        a = v * TAU
+        return vec(w * signed(math.cos(a), 0.74), y, z + d * signed(math.sin(a), 0.8))
+
+    mesh.grid(len(stations) - 1, segments, point, region)
+
+
+def race_grip():
+    """Palm swell, graphite finger ribs and an alloy crown. Coordinates match the lever stem."""
+    m = Mesh()
+
+    sleeve(
+        m,
+        [(-0.070, 0.017, 0.021, 0.003), (-0.064, 0.023, 0.026, 0.002), (-0.060, 0.024, 0.027, 0.001)],
+        "metal",
+    )
+    sleeve(
+        m,
+        [
+            (-0.061, 0.024, 0.026, 0.001),
+            (-0.053, 0.027, 0.030, 0.003),
+            (-0.034, 0.030, 0.033, 0.005),
+            (-0.006, 0.033, 0.037, 0.008),
+            (0.018, 0.034, 0.036, 0.006),
+            (0.036, 0.032, 0.032, 0.002),
+        ],
+        "grip",
+    )
+    for y, w, d, shift in [
+        (-0.047, 0.029, 0.032, 0.004),
+        (-0.030, 0.0317, 0.0355, 0.006),
+        (-0.011, 0.034, 0.038, 0.007),
+    ]:
+        sleeve(
+            m,
+            [(y - 0.0018, w, d, shift), (y, w + 0.0006, d + 0.0006, shift), (y + 0.0017, w, d, shift)],
+            "carbon",
+        )
+    sleeve(
+        m,
+        [
+            (0.035, 0.032, 0.033, 0.002),
+            (0.041, 0.034, 0.035, 0.002),
+            (0.047, 0.033, 0.035, 0.001),
+            (0.052, 0.027, 0.028, -0.002),
+            (0.054, 0.009, 0.012, -0.003),
+        ],
+        "teal",
+    )
+    sleeve(m, [(0.040, 0.0345, 0.0357, 0.002), (0.042, 0.0347, 0.0359, 0.002)], "bronze")
+    # Transverse pivot pin shows through both cheeks of the trigger housing.
+    m.pipe((-0.031, 0.030, -0.016), (0.031, 0.030, -0.016), 0.006, "metal", 16)
+    return m
+
+
+def throttle_link():
+    m = Mesh()
+    # Covers the lower swivel. A polished strut emerges through a wiper seal, with a
+    # ferrule below the grip. All pieces rotate together on the existing pivot.
+    sleeve(
+        m,
+        [
+            (0.055, 0.015, 0.015, 0),
+            (0.11, 0.014, 0.014, 0),
+            (0.275, 0.012, 0.012, 0),
+            (0.304, 0.013, 0.013, 0),
+        ],
+        "metal",
+        20,
+    )
+    rows = [(0.017, 0.033, 0.034, 0)]
+    for i in range(6):
+        y = 0.022 + i * 0.013
+        r = 0.034 - 0.0027 * i
+        rows.extend(
             [
-                (0.24, 0.032, 0.042),
-                (0.52, 0.093, 0.102),
-                (1.05, 0.156, 0.173),
-                (1.5, 0.162, 0.145),
-                (1.76, 0.108, 0.104),
+                (y, r * 0.87, r * 0.87, 0),
+                (y + 0.004, r, r, 0),
+                (y + 0.007, r, r, 0),
+                (y + 0.012, r * 0.83, r * 0.83, 0),
+            ]
+        )
+    sleeve(m, rows, "grip", 20)
+    sleeve(m, [(0.10, 0.016, 0.016, 0), (0.105, 0.017, 0.017, 0), (0.112, 0.016, 0.016, 0)], "metal", 20)
+    sleeve(
+        m,
+        [
+            (0.276, 0.014, 0.014, 0),
+            (0.280, 0.018, 0.018, 0),
+            (0.289, 0.019, 0.019, 0),
+            (0.295, 0.016, 0.016, 0),
+        ],
+        "bronze",
+        20,
+    )
+    return m
+
+
+def brake_paddle():
+    m = Mesh()
+    # Bow the blade away from the grip. Its lower tip sweeps in as the pilot squeezes.
+    outline = [
+        (-0.004, 0),
+        (0.000, -0.009),
+        (-0.019, -0.039),
+        (-0.023, -0.068),
+        (-0.016, -0.082),
+        (-0.021, -0.086),
+        (-0.031, -0.073),
+        (-0.030, -0.039),
+        (-0.013, -0.007),
+    ]
+    pts = [vec(-0.011, y, z) for z, y in outline]
+    m.panel(pts, (1, 0, 0), "metal", 0.022, "carbon")
+    for i in range(3):
+        y = -0.044 - i * 0.008
+        m.pipe((-0.0115, y, -0.029), (0.0115, y, -0.029), 0.0016, "bronze", 8)
+    return m
+
+
+def seat_pan():
+    # Both seat meshes are authored in cockpit rig coordinates so the VR harness
+    # and lever clearances are identical to the chase-view installation.
+    m = Mesh()
+    faired_section(
+        m,
+        [
+            (0.635, 0, 0.142, 0.17, 0.044),
+            (0.67, 0, 0.147, 0.267, 0.055),
+            (0.80, 0, 0.143, 0.286, 0.061),
+            (1.00, 0, 0.144, 0.282, 0.052),
+            (1.095, 0, 0.155, 0.225, 0.025),
+        ],
+        "carbon",
+    )
+    for z, end in [(0.654, 0.778), (0.783, 0.908), (0.913, 1.045)]:
+        faired_section(
+            m,
+            [
+                (z, 0, 0.176, 0.222, 0.012),
+                (z + 0.018, 0, 0.181, 0.243, 0.026),
+                (end - 0.018, 0, 0.182, 0.242, 0.026),
+                (end, 0, 0.178, 0.221, 0.012),
+            ],
+            "grip",
+        )
+    for side in (-1, 1):
+        faired_section(
+            m,
+            [
+                (0.64, side * 0.204, 0.183, 0.018, 0.020),
+                (0.71, side * 0.245, 0.19, 0.049, 0.049),
+                (0.88, side * 0.255, 0.202, 0.048, 0.070),
+                (1.01, side * 0.254, 0.205, 0.045, 0.063),
+                (1.08, side * 0.228, 0.192, 0.026, 0.030),
             ],
             "teal",
-            s * 0.90,
-            28,
-            bias=-0.20,
+            segments=18,
         )
-        collar(m, 1.44, 0.166, 0.153, 0.067, "ivory", s * 0.90, bias=-0.20)
+    return m
+
+
+def seat_back():
+    m = Mesh()
+
+    # Rotate the longitudinal loft upright with its upholstered face toward the windscreen.
+    def upright(rows, region):
+        start = len(m.pos)
+        faired_section(m, rows, region, segments=24)
+        for i in range(start, len(m.pos)):
+            x, y, z = m.pos[i]
+            m.pos[i] = vec(x, z, 1.095 - y - 0.08 * (z - 0.49))
+            x, y, z = m.norm[i]
+            m.norm[i] = unit(vec(x, z - 0.08 * y, -y))
+
+    upright(
+        [
+            (0.20, 0, 0, 0.23, 0.032),
+            (0.27, 0, 0, 0.27, 0.053),
+            (0.48, 0, 0, 0.283, 0.057),
+            (0.72, 0, 0, 0.282, 0.052),
+            (0.81, 0, 0, 0.235, 0.042),
+            (0.89, 0, 0, 0.143, 0.035),
+            (0.923, 0, 0, 0.115, 0.025),
+        ],
+        "carbon",
+    )
+    for bot, top, width in [
+        (0.28, 0.47, 0.188),
+        (0.475, 0.685, 0.204),
+        (0.69, 0.776, 0.188),
+        (0.80, 0.92, 0.124),
+    ]:
+        upright(
+            [
+                (bot, 0, 0.049, width * 0.83, 0.013),
+                (bot + 0.018, 0, 0.053, width, 0.023),
+                (top - 0.018, 0, 0.054, width, 0.023),
+                (top, 0, 0.047, width * 0.83, 0.011),
+            ],
+            "grip",
+        )
+    for side in (-1, 1):
+        upright(
+            [
+                (0.255, side * 0.213, 0.027, 0.022, 0.021),
+                (0.36, side * 0.237, 0.042, 0.047, 0.055),
+                (0.61, side * 0.247, 0.050, 0.048, 0.065),
+                (0.735, side * 0.244, 0.049, 0.049, 0.056),
+                (0.803, side * 0.201, 0.03, 0.028, 0.025),
+            ],
+            "teal",
+        )
     return m
 
 
@@ -452,5 +833,13 @@ if __name__ == "__main__":
             "ForwardBrake": brake(True),
             "AftBrake": brake(False),
             "PodStrakes": pod(),
+            "PortPodBrake": pod_brake(-1),
+            "StarboardPodBrake": pod_brake(1),
+            "TailLights": tail_lamps(),
+            "PilotGrip": race_grip(),
+            "ThrottleLink": throttle_link(),
+            "BrakePaddle": brake_paddle(),
+            "SeatBack": seat_back(),
+            "SeatPan": seat_pan(),
         }
     )

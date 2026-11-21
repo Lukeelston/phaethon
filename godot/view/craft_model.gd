@@ -64,8 +64,7 @@ const RIB_R := 0.014         # ... and are this thick: proud of the trim inside,
 ## pinstripes run on to the painted nose, and the cage's hoops and longerons stay as frames and
 ## stringers inside. Set it with set_nose_closed(): each hull is built once and kept.
 static var nose_closed := false
-static var _hull_cache: ArrayMesh
-static var _hull_closed_cache: ArrayMesh
+static var _pod_hulls: Dictionary[Vector2i, ArrayMesh] = {}
 const FLAP_OPEN := deg_to_rad(68.0)   # full brake
 const FLAP_RATE := 9.0                # flap travel, full range per second (~0.11 s open or shut)
 # The engines are flat rounded slabs (Luke: "horizontally flat, rounded rectangular prisms"),
@@ -130,6 +129,8 @@ var pod: MeshInstance3D
 var canopy: Node3D                   # the pod's windscreen and forcefield (view/canopy.gd)
 const CanopyScript := preload("res://view/canopy.gd")
 var pod_flaps: Array[Node3D] = []
+var tail_lights: MeshInstance3D
+var _brake_signal := Vector2.ZERO
 var pod_flap_open := 0.0
 var cables: Array[MeshInstance3D] = []
 var cable_mats: Array[StandardMaterial3D] = []
@@ -374,24 +375,38 @@ func build(v) -> void:
 		nozzle_lights.append(lamp)
 
 	pod = MeshInstance3D.new()
-	pod.mesh = pod_hull()   # materials live on its surfaces
+	pod.mesh = pod_hull(shrike)   # materials live on its surfaces
 	if shrike:
 		Shrike.dress_pod(pod)
+		Shrike.fit_seat(pod, Vector3.DOWN * POD_FRAME_UP)
+		tail_lights = MeshInstance3D.new()
+		tail_lights.name = "BrakeLights"
+		tail_lights.mesh = Shrike.part(&"TailLights")
+		var lens := ShaderMaterial.new()
+		lens.shader = preload("res://view/shrike_tail_lamps.gdshader")
+		tail_lights.material_override = lens
+		tail_lights.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		tail_lights.add_to_group("exterior")
+		pod.add_child(tail_lights)
 	add_child(pod)
 	canopy = CanopyScript.build()   # windscreen and forcefield (view/canopy.gd)
 	pod.add_child(canopy)
-	var flap_mat := Kit.polished(0.85, 0.2)
+	var flap_mat := null if shrike else Kit.polished(0.85, 0.2)
 	for s in [-1.0, 1.0]:
-		var pflap := Kit.compound([
-			[Kit.rounded_box(Vector3(0.05, 0.42, 0.85), 6.0), Kit.at(Vector3(0, 0, 0.43)), SILVER],
-			[Kit.rounded_box(Vector3(0.02, 0.36, 0.76), 6.0), Kit.at(Vector3(-0.03 * s, 0, 0.43)), Color(0.85, 0.08, 0.05)],   # red face inboard
-		])
 		var hinge := Node3D.new()
-		hinge.position = Vector3(s * 1.16, -0.28, 0.85)
-		pod.add_child(hinge)
 		var pm := MeshInstance3D.new()
-		pm.mesh = pflap
-		pm.material_override = flap_mat
+		if shrike:
+			hinge.position = Vector3(s * 1.247, -0.185, 0.80)
+			pm.mesh = Shrike.part(&"PortPodBrake" if s < 0 else &"StarboardPodBrake")
+		else:
+			hinge.position = Vector3(s * 1.16, -0.28, 0.85)
+			pm.mesh = Kit.compound([
+				[Kit.rounded_box(Vector3(0.05, 0.42, 0.85), 6.0), Kit.at(Vector3(0, 0, 0.43)), SILVER],
+				[Kit.rounded_box(Vector3(0.02, 0.36, 0.76), 6.0), Kit.at(Vector3(-0.03 * s, 0, 0.43)), Color(0.85, 0.08, 0.05)],
+			])
+			pm.material_override = flap_mat
+		pod.add_child(hinge)
+		pm.add_to_group("exterior")
 		hinge.add_child(pm)
 		pod_flaps.append(hinge)
 
@@ -556,11 +571,10 @@ static func _tri(st: SurfaceTool, i0: int, i1: int, i2: int, p0: Vector3, p1: Ve
 ## The pod: polished-metal outer skin (surface 0), matte trim inside (1), the leather lip round
 ## the cockpit (2), fittings (3), the nose cage (4), the paint (5: _outer_skin), the pinstripes and
 ## the lip's piping (6), lamps (7). Built once and shared (the flat view's pod and the VR cockpit).
-static func pod_hull() -> ArrayMesh:
-	if nose_closed and _hull_closed_cache:
-		return _hull_closed_cache
-	if not nose_closed and _hull_cache:
-		return _hull_cache
+static func pod_hull(shrike := false) -> ArrayMesh:
+	var key := Vector2i(int(nose_closed), int(shrike))
+	if _pod_hulls.has(key):
+		return _pod_hulls[key]
 	var nz := 76
 	var na := 96
 	var z0: float = HULL[0][0]
@@ -684,23 +698,26 @@ static func pod_hull() -> ArrayMesh:
 	var rubber := Finishes.rubber()
 	mesh.surface_set_material(2, rubber)
 
-	# fittings
-	Kit.compound([
-		[Kit.rounded_box(Vector3(0.07, 0.62, 0.85), 4.0), Kit.at(Vector3(0, 0.42, 1.6), Vector3(-0.35, 0, 0)), PAINT],   # raked fin, painted
-		[Kit.rounded_box(Vector3(0.076, 0.6, 0.09), 4.0), _fin_xf() * Transform3D(Basis(), Vector3(0, 0, -0.39)), DARK.lightened(0.15)],   # its leading edge
-		[Kit.rounded_box(Vector3(0.078, 0.035, 0.66), 4.0), _fin_xf() * Transform3D(Basis(), Vector3(0, 0.2, 0.03)), PIN],   # a pinstripe along its top
-		[Kit.rounded_box(Vector3(0.1, 0.2, 0.72), 4.0), Kit.at(Vector3(-1.1, -0.26, -0.15)), DARK],   # side intakes, behind the cage
-		[Kit.rounded_box(Vector3(0.1, 0.2, 0.72), 4.0), Kit.at(Vector3(1.1, -0.26, -0.15)), DARK],
-		[Kit.cyl(0.15, 0.19, 0.36, 28), Kit.at(Vector3(-0.5, -0.24, 2.1), Vector3(PI / 2.0, 0, 0)), DARK],   # trim thrusters
-		[Kit.cyl(0.15, 0.19, 0.36, 28), Kit.at(Vector3(0.5, -0.24, 2.1), Vector3(PI / 2.0, 0, 0)), DARK],
-		[Kit.cyl(0.168, 0.168, 0.035, 32), Kit.at(Vector3(-0.5, -0.24, 2.262), Vector3(PI / 2.0, 0, 0)), SILVER],   # their polished collars
-		[Kit.cyl(0.168, 0.168, 0.035, 32), Kit.at(Vector3(0.5, -0.24, 2.262), Vector3(PI / 2.0, 0, 0)), SILVER],
-		[Kit.cyl(0.025, 0.1, 0.12, 24), Kit.at(Vector3(-0.5, -0.24, 2.33), Vector3(PI / 2.0, 0, 0)), DARK.lightened(0.3)],   # and exhaust cones
-		[Kit.cyl(0.025, 0.1, 0.12, 24), Kit.at(Vector3(0.5, -0.24, 2.33), Vector3(PI / 2.0, 0, 0)), DARK.lightened(0.3)],
+	var hardware := [
 		[Kit.cyl(0.035, 0.035, 0.56, 10), Kit.at(Vector3(0, -0.05, -2.06), Vector3(0, 0, PI / 2.0)), DARK.lightened(0.2)],   # nose ring bar
 		[Kit.cyl(0.07, 0.07, 0.06, 14), Kit.at(Vector3(-0.18, -0.05, -2.1), Vector3(0, 0, PI / 2.0)), Color(0.75, 0.77, 0.8)],   # hardpoint eyes
 		[Kit.cyl(0.07, 0.07, 0.06, 14), Kit.at(Vector3(0.18, -0.05, -2.1), Vector3(0, 0, PI / 2.0)), Color(0.75, 0.77, 0.8)],
-	], mesh)
+	]
+	if not shrike:
+		hardware.append_array([
+			[Kit.rounded_box(Vector3(0.07, 0.62, 0.85), 4.0), Kit.at(Vector3(0, 0.42, 1.6), Vector3(-0.35, 0, 0)), PAINT],   # raked fin, painted
+			[Kit.rounded_box(Vector3(0.076, 0.6, 0.09), 4.0), _fin_xf() * Transform3D(Basis(), Vector3(0, 0, -0.39)), DARK.lightened(0.15)],   # its leading edge
+			[Kit.rounded_box(Vector3(0.078, 0.035, 0.66), 4.0), _fin_xf() * Transform3D(Basis(), Vector3(0, 0.2, 0.03)), PIN],   # a pinstripe along its top
+			[Kit.rounded_box(Vector3(0.1, 0.2, 0.72), 4.0), Kit.at(Vector3(-1.1, -0.26, -0.15)), DARK],   # side intakes, behind the cage
+			[Kit.rounded_box(Vector3(0.1, 0.2, 0.72), 4.0), Kit.at(Vector3(1.1, -0.26, -0.15)), DARK],
+			[Kit.cyl(0.15, 0.19, 0.36, 28), Kit.at(Vector3(-0.5, -0.24, 2.1), Vector3(PI / 2.0, 0, 0)), DARK],   # trim thrusters
+			[Kit.cyl(0.15, 0.19, 0.36, 28), Kit.at(Vector3(0.5, -0.24, 2.1), Vector3(PI / 2.0, 0, 0)), DARK],
+			[Kit.cyl(0.168, 0.168, 0.035, 32), Kit.at(Vector3(-0.5, -0.24, 2.262), Vector3(PI / 2.0, 0, 0)), SILVER],   # their polished collars
+			[Kit.cyl(0.168, 0.168, 0.035, 32), Kit.at(Vector3(0.5, -0.24, 2.262), Vector3(PI / 2.0, 0, 0)), SILVER],
+			[Kit.cyl(0.025, 0.1, 0.12, 24), Kit.at(Vector3(-0.5, -0.24, 2.33), Vector3(PI / 2.0, 0, 0)), DARK.lightened(0.3)],   # and exhaust cones
+			[Kit.cyl(0.025, 0.1, 0.12, 24), Kit.at(Vector3(0.5, -0.24, 2.33), Vector3(PI / 2.0, 0, 0)), DARK.lightened(0.3)],
+		])
+	Kit.compound(hardware, mesh)
 	mesh.surface_set_material(3, Kit.polished(0.6, 0.28))
 
 	# the cage: hoops round the section and longerons along it, on the skin's mid-line, the
@@ -750,6 +767,8 @@ static func pod_hull() -> ArrayMesh:
 				run.append(p)
 		if run.size() > 1:
 			_tube(cage, run, hoop_r * 0.8, bars)
+	if shrike:
+		cage.index()   # adjacent triangles share the tube's ring vertices and normals
 	cage.commit(mesh)
 	mesh.surface_set_material(4, trim if nose_closed else (Finishes.satin() if Finishes.hd else Kit.polished(1.0, 0.18)))
 	paint.index()
@@ -764,38 +783,42 @@ static func pod_hull() -> ArrayMesh:
 	coat.clearcoat = 1.0
 	coat.clearcoat_roughness = 0.06
 	mesh.surface_set_material(5, coat)
+	if shrike:
+		pins.index()
 	pins.commit(mesh)
 	mesh.surface_set_material(6, Kit.polished(0.3, 0.22))
 	# lamps (unshaded, as the engines'): nav lights at the widest point (red left, green right),
 	# tail lamps on the thrusters, the fin's tip lamp, the repulsor underglow
-	Kit.compound([
+	var lamps := [
 		[Kit.ball(0.035, 10), Kit.at(Vector3(-1.155, -0.31, -0.3)), NAV_L],
 		[Kit.ball(0.035, 10), Kit.at(Vector3(1.155, -0.31, -0.3)), NAV_R],
-		[Kit.box(Vector3(0.11, 0.022, 0.07)), Kit.at(Vector3(-0.5, -0.07, 2.2)), Color(1.0, 0.1, 0.08)],
-		[Kit.box(Vector3(0.11, 0.022, 0.07)), Kit.at(Vector3(0.5, -0.07, 2.2)), Color(1.0, 0.1, 0.08)],
-		[Kit.ball(0.03, 10), _fin_xf() * Transform3D(Basis(), Vector3(0, 0.3, 0.38)), Color(1.0, 1.0, 1.0)],
 		[Kit.box(Vector3(0.035, 0.01, 1.5)), Kit.at(Vector3(-0.5, -0.59, 0.3)), UNDERGLOW],
 		[Kit.box(Vector3(0.035, 0.01, 1.5)), Kit.at(Vector3(0.5, -0.59, 0.3)), UNDERGLOW],
-	], mesh)
+	]
+	if not shrike:
+		lamps.append_array([
+			[Kit.box(Vector3(0.11, 0.022, 0.07)), Kit.at(Vector3(-0.5, -0.07, 2.2)), Color(1.0, 0.1, 0.08)],
+			[Kit.box(Vector3(0.11, 0.022, 0.07)), Kit.at(Vector3(0.5, -0.07, 2.2)), Color(1.0, 0.1, 0.08)],
+			[Kit.ball(0.03, 10), _fin_xf() * Transform3D(Basis(), Vector3(0, 0.3, 0.38)), Color(1.0, 1.0, 1.0)],
+		])
+	Kit.compound(lamps, mesh)
 	mesh.surface_set_material(7, Kit.vertex_colors(true))
-	if nose_closed:
-		_hull_closed_cache = mesh
-	else:
-		_hull_cache = mesh
+	mesh.set_meta(&"shrike_hull", shrike)
+	_pod_hulls[key] = mesh
 	return mesh
 
 
 ## Close the nose or open it again, on every pod already standing under `under` (the cockpit's own
 ## hull, the craft's, a driving partner's): each takes the other hull.
 static func set_nose_closed(closed: bool, under: Node = null) -> void:
-	var before := pod_hull()
-	nose_closed = closed
-	var after := pod_hull()
-	if under == null or before == after:
+	if nose_closed == closed:
 		return
-	for part: MeshInstance3D in under.find_children("*", "MeshInstance3D", true, false):
-		if part.mesh == before:
-			part.mesh = after
+	nose_closed = closed
+	if under:
+		for part: MeshInstance3D in under.find_children("*", "MeshInstance3D", true, false):
+			if part.mesh and part.mesh.has_meta(&"shrike_hull"):
+				part.mesh = pod_hull(part.mesh.get_meta(&"shrike_hull"))
+
 
 
 ## The outer skin (surface 0, polished metal) and its paint (into `paint`: the top decks and the
@@ -1072,6 +1095,11 @@ func sync(sim, inp: Dictionary, delta: float) -> void:
 		pod.basis = road_attitude(sim, sim.pod.x, sim.pod.y, pclimb) * Basis.from_euler(Vector3(0.0, sim.pod.th - PI / 2.0, plean))
 	else:
 		pod.rotation = Vector3(pclimb, sim.pod.th - PI / 2.0, plean)
+	if tail_lights:
+		var signal_level := Vector2(inp.brkL, inp.brkR).clamp(Vector2.ZERO, Vector2.ONE)
+		if signal_level != _brake_signal:
+			(tail_lights.material_override as ShaderMaterial).set_shader_parameter("brakes", signal_level)
+			_brake_signal = signal_level
 	pod_flap_open = move_toward(pod_flap_open, clampf(minf(inp.brkL, inp.brkR), 0.0, 1.0), FLAP_RATE * delta)
 	for i in 2:
 		var s := -1.0 if i == 0 else 1.0

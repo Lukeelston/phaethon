@@ -49,7 +49,7 @@ static func dress_pod(hull: MeshInstance3D) -> void:
 		pod_paint.clearcoat = 0.8
 		fittings = ShaderMaterial.new()
 		fittings.shader = preload("res://view/shrike_trim.gdshader")
-	hull.set_surface_override_material(3, fittings)
+	# The nose tow pins retain their machined metal finish.
 	hull.set_surface_override_material(5, pod_paint)
 	hull.set_surface_override_material(6, fittings)
 	var trim := MeshInstance3D.new()
@@ -57,6 +57,15 @@ static func dress_pod(hull: MeshInstance3D) -> void:
 	trim.add_to_group("exterior")
 	trim.mesh = part(&"PodStrakes")
 	hull.add_child(trim)
+
+
+static func fit_seat(parent: Node3D, offset := Vector3.ZERO) -> void:
+	for id in [&"SeatBack", &"SeatPan"]:
+		var piece := MeshInstance3D.new()
+		piece.name = "seat_back" if id == &"SeatBack" else "seat_cushion"
+		piece.mesh = part(id)
+		piece.position = offset
+		parent.add_child(piece)
 
 
 static func dress_coaming(coaming: MeshInstance3D, hd: bool) -> ShaderMaterial:

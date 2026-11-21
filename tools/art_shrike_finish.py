@@ -12,6 +12,9 @@ REGIONS = {"skin": (4, 4, 2040, 1016)}
 for i, name in enumerate(("fin", "exhaust", "carbon", "metal", "brake", "ivory", "bronze", "teal")):
     REGIONS[name] = (4 + (i % 4) * 512, 1028 + (i // 4) * 512, 504, 504)
 
+# Subdivide the formerly plain teal swatch. All new hardware still uses the same atlas.
+REGIONS.update(teal=(1540, 1540, 248, 248), grip=(1796, 1540, 248, 248), coachwork=(1540, 1796, 504, 248))
+REGIONS.update(bronze=(1028, 1540, 248, 504), spine=(1284, 1540, 248, 504))
 TEAL, DARK, IVORY, GOLD = (21, 90, 95), (23, 33, 37), (218, 214, 191), (213, 140, 65)
 PAINT = {
     "skin": TEAL,
@@ -23,6 +26,9 @@ PAINT = {
     "ivory": IVORY,
     "bronze": (167, 119, 73),
     "teal": TEAL,
+    "grip": (40, 45, 44),
+    "coachwork": TEAL,
+    "spine": TEAL,
 }
 PROPERTIES = {
     "skin": (83, 52),
@@ -34,6 +40,9 @@ PROPERTIES = {
     "ivory": (93, 45),
     "bronze": (96, 190),
     "teal": (91, 49),
+    "grip": (180, 5),
+    "coachwork": (84, 48),
+    "spine": (83, 49),
 }
 FONT = ROOT / "godot/art/signs/RG2014EM.ttf"
 
@@ -128,6 +137,24 @@ def sheet(name, w, h):
             panel((x, 446, x + 224, 562), 10)
             for j in range(4):
                 path([(x + 42, 471 + j * 18), (x + 178, 471 + j * 18)], DARK, 6, 85)
+    elif name == "spine":
+        # The center stripe tapers with the aft deck. Captive quarter-turns and
+        # the raised louvers follow the same removable service panel.
+        color.polygon([(112, 0), (137, 0), (132, h), (122, h)], fill=IVORY)
+        path([(145, 0), (140, h)], GOLD, 3)
+        panel((18, 76, 229, 386), 15)
+        for yy in (105, 346):
+            for xx in (34, 212):
+                color.ellipse((xx - 4, yy - 4, xx + 4, yy + 4), fill=(153, 155, 143))
+                path([(xx - 2, yy + 1), (xx + 2, yy - 1)], DARK, 2, 94)
+        words((73, 322), "LIFT", 16, IVORY)
+    elif name == "coachwork":
+        color.polygon([(0, 57), (151, 71), (w, 25), (w, 111), (178, 142), (0, 114)], fill=IVORY)
+        path([(0, 120), (178, 148), (w, 117)], GOLD, 3)
+        words((w * 0.58, 83), "27", 49, DARK)
+        for x in (24, w - 25):
+            color.ellipse((x - 3, 183, x + 3, 189), fill=(136, 148, 145))
+            depth.ellipse((x - 3, 183, x + 3, 189), fill=78)
     elif name == "fin":
         color.polygon([(0, 0), (w, 0), (w, 87), (0, 145)], fill=TEAL)
         color.polygon([(0, 155), (w, 97), (w, 110), (0, 169)], fill=GOLD)
@@ -156,6 +183,12 @@ def sheet(name, w, h):
                 y / h + 0.016 * np.sin(x / 32), np.linspace(0, 1, len(patina)), patina[:, c]
             )
         grain += 2 * np.sin(y * 0.43) + 1.7 * np.sin(x * 0.76)
+    if name == "grip":
+        # Molded crossed ribs have a rounded crest in both the normal and roughness maps.
+        diamond = np.maximum(np.cos((x + y) * np.pi / 9), np.cos((x - y) * np.pi / 9))
+        rib = np.clip((diamond - 0.42) * 2.2, 0, 1)
+        bump += 13 * rib
+        grain += 5 * rib
     if name == "carbon":
         weave = np.where(((x // 8 + y // 8) % 2) == 0, np.cos((x + y) * 0.7), np.cos((x - y) * 0.7))
         grain += 3.5 * weave

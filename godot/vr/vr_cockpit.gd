@@ -3,13 +3,13 @@
 ## Touch controllers stand in for the printed levers, in four schemes (QuestControls;
 ## the quick menu selects them, the choice is saved): trigger throttles, throttle + steer,
 ## grab the levers, stick levers. Buttons, every scheme:
-##   A reignite · B arm ramjet · X repair · thumbstick click recenter (view and seat height)
+##   A reignite Â· B arm ramjet Â· X repair Â· thumbstick click recenter (view and seat height)
 ##   trigger throttles: right stick flick up / down shifts gear; left stick flick up lights the
 ##   burner (top gear), down puts it out (the triggers never do: Luke, "take the afterburners
 ##   away from the triggers")
 ##   the MODE switch on the right console: push it up for SPEEDCRAFT, down for STARFIGHTER (live,
 ##   mid-lap; STARFIGHTER takes below 1,250 mph). Y hold 1 s flips it too. Y tap: restart
-##   menu tap: quick menu (driving partner, controls, camera: the seat or a chase view) · menu hold
+##   menu tap: quick menu (driving partner, controls, camera: the seat or a chase view) Â· menu hold
 ##   1.5 s: main menu / map selection
 ## Haptics: a kick on the sonic boom; a tick in that hand when a lever crosses the burner gate (the
 ## stick schemes); a thump in the left hand as the burner lights, a softer one as it goes out, a
@@ -106,6 +106,7 @@ var chase_hud: Label3D      # outside, the gauges are out of reading distance: t
 var hands := {}
 var lever_pivots: Array[Node3D] = []
 var lever_tips: Array[StandardMaterial3D] = []
+var brake_paddles: Array[Node3D] = []
 var tow_meter: ShaderMaterial
 var dashboard   # the instruments: the gauge cluster (vr/gauge_cluster.gd), or the flat panel (vr/dashboard.gd)
 var _skill_readout: Label3D
@@ -494,17 +495,27 @@ func _build_cockpit() -> void:
 	shell.name = "shell"
 	rig.add_child(shell)
 	var hull := MeshInstance3D.new()
-	hull.mesh = CraftModelScript.pod_hull()
-	if sim != null and sim.P.vehicle == CraftModelScript.PilotCraft.SHRIKE:
+	hull.name = "PodHull"
+	var shrike: bool = sim != null and sim.P.vehicle == CraftModelScript.PilotCraft.SHRIKE
+	hull.mesh = CraftModelScript.pod_hull(shrike)
+	if shrike:
 		CraftModelScript.Shrike.dress_pod(hull)
 	hull.position = Vector3(0, CraftModelScript.POD_FRAME_UP, 0)
 	shell.add_child(hull)
+	if shrike and craft:
+		# The seat and chase cameras both see the hull on the cockpit rig. Carry the
+		# working hinges and lamps with that hull, including its bank and shudder.
+		for hinge in craft.pod_flaps:
+			hinge.reparent(hull, false)
+		craft.tail_lights.reparent(hull, false)
 	for s in [-1.0, 1.0]:   # where the cables hook (the hull carries the eyes themselves)
 		var mark := Marker3D.new()
 		mark.name = "hardpoint_%s" % ("l" if s < 0.0 else "r")
 		mark.position = Vector3(0.18 * s, CraftModelScript.POD_FRAME_UP + CraftModelScript.POD_EYE_H, -2.1)
 		rig.add_child(mark)   # anchors, not fittings: on the rig, steady through the shudder
-	if SeatFinish.hd:
+	if shrike:
+		CraftModelScript.Shrike.fit_seat(shell)
+	elif SeatFinish.hd:
 		_shaped_seat(leather)
 	else:
 		_rbox(shell, Vector3(0.62, 0.78, 0.13), Vector3(0, 0.54, 1.1), leather, -0.12, 5.0).name = "seat_back"   # its top is the headrest
@@ -514,22 +525,32 @@ func _build_cockpit() -> void:
 		pivot.position = Vector3(0.46 * s, 0.1, 0.2)   # beside the seat, clear of the instrument panel
 		shell.add_child(pivot)
 		var shaft := MeshInstance3D.new()
-		shaft.mesh = Kit.cyl(0.016, 0.016, 0.32, 12)
-		if SeatFinish.hd:   # realism spike: a round satin shaft with a ferrule under the grip
-			shaft.mesh = Kit.compound([[Kit.cyl(0.016, 0.016, 0.32, 28), Transform3D.IDENTITY, Color(0.75, 0.77, 0.8)],
-				[Kit.cyl(0.021, 0.0225, 0.018, 28), Kit.at(Vector3(0, 0.132, 0)), Color(0.42, 0.44, 0.47)]])
-		var steel := StandardMaterial3D.new()
-		steel.albedo_color = Color(0.75, 0.77, 0.8)
-		steel.metallic = 0.9
-		steel.roughness = 0.25
-		shaft.material_override = SeatFinish.satin() if SeatFinish.hd else steel
-		shaft.position = Vector3(0, 0.16, 0)
+		if shrike:
+			shaft.mesh = CraftModelScript.Shrike.part(&"ThrottleLink")
+		else:
+			shaft.mesh = Kit.cyl(0.016, 0.016, 0.32, 12)
+			if SeatFinish.hd:   # realism spike: a round satin shaft with a ferrule under the grip
+				shaft.mesh = Kit.compound([[Kit.cyl(0.016, 0.016, 0.32, 28), Transform3D.IDENTITY, Color(0.75, 0.77, 0.8)],
+					[Kit.cyl(0.021, 0.0225, 0.018, 28), Kit.at(Vector3(0, 0.132, 0)), Color(0.42, 0.44, 0.47)]])
+			var steel := StandardMaterial3D.new()
+			steel.albedo_color = Color(0.75, 0.77, 0.8)
+			steel.metallic = 0.9
+			steel.roughness = 0.25
+			shaft.material_override = SeatFinish.satin() if SeatFinish.hd else steel
+			shaft.position = Vector3(0, 0.16, 0)
 		pivot.add_child(shaft)
 		var knob := MeshInstance3D.new()
 		knob.name = "PilotGrip"
-		knob.mesh = CockpitInteriorScript.deck_mesh("Grip")
+		knob.mesh = CraftModelScript.Shrike.part(&"PilotGrip") if shrike else CockpitInteriorScript.deck_mesh("Grip")
 		knob.position = Vector3(0, 0.36, 0)
 		pivot.add_child(knob)
+		if shrike:
+			var paddle := MeshInstance3D.new()
+			paddle.name = "BrakePaddle"
+			paddle.mesh = CraftModelScript.Shrike.part(&"BrakePaddle")
+			paddle.position = Vector3(-s * 0.032, 0.030, -0.021)
+			knob.add_child(paddle)
+			brake_paddles.append(paddle)
 		var indicator := MeshInstance3D.new()
 		indicator.name = "GateIndicator"
 		indicator.mesh = Kit.rounded_box(Vector3(0.036, 0.012, 0.045), 4.0, 6)
@@ -1060,6 +1081,9 @@ func _place_camera(_k: float) -> void:
 	var thr := [inp.thrL, inp.thrR]
 	for k in 2:
 		lever_pivots[k].rotation.x = deg_to_rad(lerpf(30.0, -30.0, thr[k]))
+		if not brake_paddles.is_empty():
+			var brake: float = inp.brkL if k == 0 else inp.brkR
+			brake_paddles[k].rotation.x = deg_to_rad(-18.0) * clampf(brake, 0.0, 1.0)
 		lever_tips[k].albedo_color = Color(1.0, 0.55, 0.15) if thr[k] >= sim.P.gate else Color(0.16, 0.17, 0.19)
 
 
