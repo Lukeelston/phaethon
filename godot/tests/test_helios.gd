@@ -7,6 +7,7 @@
 ##   far        the whole mountain as one mesh for beyond the tiles; its colours: rock, then snow; nothing grows high up
 ##   view       the road's downhill edge is open (see-through) most of the way; the air thins with height
 ##   named      its signs and its two start points
+##   stands     on the face, masts and gantries stand square to the deck; everywhere else straight up, as before
 ## Prints HELIOS PASS.
 extends SceneTree
 
@@ -217,6 +218,53 @@ func _run() -> void:
 			starts.append("%s: sample %d, %.0f m up" % [entry[1], int(spot[1]) if spot.size() == 3 else -1, sim.net_height(r, float(spot[1])) if spot.size() == 3 else -1.0])
 	_check("its signs say %s, route %s; it has %d start points (%s)" % [world.SCENIC_NAMES.get("SHelios", "?"), world.SCENIC_ROUTES.get("SHelios", "?"), starts.size(), starts],
 		world.SCENIC_NAMES.get("SHelios", "") == "MOUNT HELIOS" and world.SCENIC_ROUTES.get("SHelios", "") == "S21" and starts.size() == 2)
+	# stands: what stands along the face stands square to its deck (the road builder's _deck_up)
+	var wall := 0
+	var steepest := 0.0
+	for i in range(1, R.N - 1):
+		var g := absf(world._h(r, i + 1) - world._h(r, i - 1)) / (float(R.len[i - 1]) + float(R.len[i]))
+		if g > steepest:
+			steepest = g
+			wall = i
+	var stood: Vector3 = world._deck_up(r, R, wall)
+	var along: Vector3 = world._p(R, 0.0, 0.0, wall + 1, 0.0, world._h(r, wall + 1)) - world._p(R, 0.0, 0.0, wall - 1, 0.0, world._h(r, wall - 1))
+	var square := Vector3(R.nx[wall], 0.0, -R.ny[wall]).cross(along).normalized()
+	if square.y < 0.0:
+		square = -square
+	_check("on the wall (sample %d, %.0f degrees) a mast stands %.2f degrees from square to the deck, %.0f from straight up" % [wall, rad_to_deg(atan(steepest)), rad_to_deg(stood.angle_to(square)), rad_to_deg(stood.angle_to(Vector3.UP))],
+		rad_to_deg(stood.angle_to(square)) < 0.5 and rad_to_deg(stood.angle_to(Vector3.UP)) > 60.0)
+	var leaning := []
+	var gentle_lean := 0
+	for k in sim.roads.size():
+		var K = sim.roads[k]
+		for i in K.N:
+			if world.shaft.on(k, float(i)) or world._deck_up(k, K, i) == Vector3.UP:
+				continue
+			if k != r:
+				leaning.append("%s at %d" % [K.name, i])
+				break
+			var a := maxi(i - 1, 0)
+			var b := mini(i + 1, K.N - 1)
+			gentle_lean += int(absf(world._h(k, b) - world._h(k, a)) / (float(K.len[a]) * float(b - a)) < tan(deg_to_rad(24.9)))
+	_check("everywhere else it stands straight up, as it did: no other road's leans (%s), nor Helios's own under 25 degrees (%d samples)" % [leaning, gentle_lean],
+		leaning.is_empty() and gentle_lean == 0)
+	var gantries := []
+	var crooked := 0
+	for key in world._signs:
+		if not (key is Vector2i) or key.x != r:
+			continue
+		for spec in world._signs[key]:
+			var at := int(spec[0])
+			var up: Vector3 = world._deck_up(r, R, at)
+			if up == Vector3.UP:
+				continue
+			if not world.chunks.has(key):
+				world._build_chunk(r, key.y)
+			var span := (world.chunks[key][0] as Node3D).get_node_or_null("SignSpan_%d" % at) as Node3D
+			var tilt := rad_to_deg(span.transform.basis.y.angle_to(up)) if span else 999.0
+			crooked += int(tilt > 0.5)
+			gantries.append("%s at %d, %.0f degrees from straight up, %.2f from the deck's up" % [spec[2], at, rad_to_deg(up.angle_to(Vector3.UP)), tilt])
+	_check("the gantries on the face stand with it: %s" % [gantries], gantries.size() >= 2 and crooked == 0)
 	v.free()
 	print("HELIOS %s (%d failures)" % ["PASS" if failures == 0 else "FAIL", failures])
 	quit(0 if failures == 0 else 1)

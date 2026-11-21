@@ -63,6 +63,13 @@ const VIEWS := [
 	["m20-gate-ahead", "SHelios", 7215, 0.0, [0.0, 8.0], Vector3.ZERO],
 	["m21-gate-from-above", "SHelios", 7215, 0.0, [0.0, -14.0], Vector3(0.0, 420.0, 700.0)],
 	["m22-sky-straight-up-on-top", "SHelios", 7180, 0.0, [0.0, 60.0], Vector3.ZERO],
+	# what stands along the face (push 26): the open sides' rail and its posts, a mast, the corner boards' gantries, the rocks beside it
+	["m23-face-edge-rail", "SHelios", 6990, -92.0, [-8.0, -1.0], Vector3(0.0, 1.5, 0.0), 1300.0],
+	["m24-face-mast", "SHelios", 6997, -80.0, [-14.0, 8.0], Vector3(0.0, 3.0, 0.0), 1300.0],
+	["m25-face-gantry-ahead", "SHelios", 6937, 0.0, [0.0, 4.0], Vector3(0.0, 2.0, 0.0), 1300.0],
+	["m26-face-gantry-from-the-side", "SHelios", 6943, 0.0, [-90.0, 0.0], Vector3(-230.0, 30.0, 0.0), 1300.0],
+	["m27-far-face-gantry-ahead", "SHelios", 7538, 0.0, [0.0, -2.0], Vector3(0.0, 2.0, 0.0), 1300.0],
+	["m28-face-rocks-beside-it", "SHelios", 7010, 0.0, [-90.0, -8.0], Vector3(130.0, 20.0, 0.0), 1300.0],
 ]
 
 
