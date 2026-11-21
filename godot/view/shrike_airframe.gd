@@ -3,131 +3,63 @@
 extends RefCounted
 
 const Kit := preload("res://view/mesh_kit.gd")
-const Fairings := preload("res://view/craft_fairings.gd")
 const Finish := preload("res://view/craft_materials.gd")
 const PETROL := Color("#12666a")
 const IVORY := Color("#f1e5c9")
 const COPPER := Color("#e49749")
 const CARBON := Color("#243236")
 const ALLOY := Color("#9caead")
-const FIN_CANT := 0.76
-static var engines := {}
-static var seat_trim: ArrayMesh
+static var meshes: Dictionary
 static var pod_paint: StandardMaterial3D
+static var fittings: ShaderMaterial
 
 
-## Revolve a strip between elliptic sections (z, half-width, half-height).
-## Sections can turn back inside the intake, forming the lip and its recessed throat.
-static func _strip(a: Vector3, b: Vector3) -> ArrayMesh:
-	var st := SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	for j in 32:
-		for corner in [0, 1, 2, 0, 2, 3]:
-			var sec := b if corner in [1, 2] else a
-			var theta := TAU * float(j + int(corner >= 2)) / 32.0
-			var c := cos(theta)
-			var s := sin(theta)
-			var dz := b.x - a.x
-			st.set_normal(Vector3(dz * c * sec.z, dz * s * sec.y,
-				-((b.y-a.y) * c*c * sec.z + (b.z-a.z) * s*s * sec.y)).normalized())
-			st.add_vertex(Vector3(sec.y * c, sec.z * s, sec.x))
-	return st.commit()
-
-
-static func _blade(parts: Array, xf: Transform3D, scale_y: float, scale_z: float) -> void:
-	# Spanwise paint bands follow the swept edges, including the clipped tip.
-	var bands := [[0.0, -0.82, 1.60, CARBON], [0.15, -0.58, 1.68, IVORY],
-		[1.12, 1.22, 2.09, PETROL], [1.29, 1.54, 2.17, COPPER], [1.43, 1.82, 2.22, COPPER]]
-	for i in bands.size() - 1:
-		var a: Array = bands[i]
-		var b: Array = bands[i+1]
-		var profile := PackedVector2Array([Vector2(a[0]*scale_y, a[1]*scale_z),
-			Vector2(b[0]*scale_y, b[1]*scale_z), Vector2(b[0]*scale_y, b[2]*scale_z),
-			Vector2(a[0]*scale_y, a[2]*scale_z)])
-		parts.append([Fairings.fin(profile, 0.066), xf, a[3]])
-
-
-static func _tail_root(out: float) -> Transform3D:
-	return Kit.at(Vector3(out * 0.82, 0.26, 0.52), Vector3(0, 0, -out * FIN_CANT))
+## Only a selected Shrike loads these meshes and maps. Both engines, all four
+## fans, the moving leaves and the pilot shell share one atlas and material.
+static func part(id: StringName) -> Mesh:
+	if meshes.is_empty():
+		var scene := (load("res://art/shrike/bodywork.glb") as PackedScene).instantiate()
+		var finish := load("res://art/shrike/enamel.tres") as StandardMaterial3D
+		for node in scene.find_children("*", "MeshInstance3D", true, false):
+			var mesh: Mesh = node.mesh
+			mesh.surface_set_material(0, finish)
+			meshes[node.name] = mesh
+		scene.free()
+	return meshes[id]
 
 
 static func fin_tip(out: float) -> Vector3:
-	return _tail_root(out) * Vector3(0, 1.40, 2.1)
-
-
-static func engine(out: float) -> ArrayMesh:
-	if engines.has(out):
-		return engines[out]
-	var parts := []
-	# The two intake bells converge around the gearbox; the impellers remain visible.
-	var rings := [Vector3(-3.57, 0.35, 0.35), Vector3(-3.98, 0.375, 0.375),
-		Vector3(-4.10, 0.404, 0.402), Vector3(-4.13, 0.46, 0.445),
-		Vector3(-4.03, 0.505, 0.487), Vector3(-3.84, 0.53, 0.503),
-		Vector3(-3.71, 0.536, 0.506), Vector3(-3.02, 0.55, 0.49),
-		Vector3(-2.80, 0.55, 0.48), Vector3(-1.70, 0.55, 0.43), Vector3(0.54, 0.45, 0.34)]
-	var colors := [CARBON, ALLOY, IVORY, IVORY, PETROL, COPPER, IVORY, PETROL, PETROL, CARBON]
-	for i in rings.size() - 1:
-		var strip := _strip(rings[i], rings[i+1])
-		for x in [-0.55, 0.55]:
-			parts.append([strip, Kit.at(Vector3(x, 0, 0)), colors[i]])
-	for x in [-0.55, 0.55]:
-		parts.append([Kit.cyl(0.36, 0.36, 0.04, 24), Kit.at(Vector3(x, 0, -3.57), Vector3(PI/2, 0, 0)), CARBON])
-	var spine := [Vector3(-3.12, 0.08, 0.12), Vector3(-2.42, 0.98, 0.42),
-		Vector3(-1.12, 1.19, 0.50), Vector3(0.72, 1.18, 0.50),
-		Vector3(1.75, 1.10, 0.44), Vector3(3.1, 1.02, 0.38)]
-	for i in spine.size() - 1:
-		parts.append([_strip(spine[i], spine[i+1]), Transform3D.IDENTITY, PETROL])
-	parts.append([Kit.rounded_box(Vector3(0.64, 0.068, 1.49), 5.0), Kit.at(Vector3(0, 0.48, -0.55)), IVORY])
-	_blade(parts, _tail_root(out), 1.0, 1.0)
-	# Keel ties the exhaust case to its tow eye. Cheek blisters support the
-	# forward brake pivots and the inboard binder emitter.
-	parts.append([Fairings.fin(PackedVector2Array([Vector2(0, -0.82), Vector2(0.60, 0.43),
-		Vector2(0.57, 0.62), Vector2(0, 0.57)]), 0.16),
-		Kit.at(Vector3(0, -0.37, 2.88), Vector3(0, 0, PI)), ALLOY])
-	parts.append([Kit.cyl(0.12, 0.12, 0.20), Kit.at(Vector3(0, -0.95, 3.4), Vector3(0, 0, PI/2)), CARBON])
-	for side in [-1.0, 1.0]:
-		parts.append([Kit.rounded_box(Vector3(0.34, 0.56, 1.35), 4.0),
-			Kit.at(Vector3(side * 1.08, 0, -2.67)), PETROL])
-		parts.append([Kit.rounded_box(Vector3(0.24, 0.22, 1.55), 4.0),
-			Kit.at(Vector3(side * 0.93, 0.27, 2.98)), IVORY])
-		for i in 5:
-			parts.append([Kit.box(Vector3(0.19, 0.035, 0.065)),
-				Kit.at(Vector3(side * 0.93, 0.377, 2.65 + 0.14*i), Vector3(-0.24,0,0)), CARBON])
-	for y in [-0.36, 0.36]:
-		parts.append([Kit.box(Vector3(2.0, 0.055, 0.28)), Kit.at(Vector3(0, y, 3.94)), ALLOY])
-	engines[out] = Kit.compound(parts)
-	return engines[out]
+	return Vector3(out * (0.77 + 1.62*sin(0.76)), 0.25 + 1.62*cos(0.76), 1.98)
 
 
 static func lights(out: float) -> ArrayMesh:
 	return Kit.compound([
-		[Kit.ball(0.057, 10), _tail_root(out) * Kit.at(Vector3(0, 1.18, 2.10)),
+		[Kit.ball(0.057, 10), Kit.at(fin_tip(out) + Vector3(-0.08*out, -0.09, 0.09)),
 			Color("#ef413b") if out < 0 else Color("#49dc91")],
 		[Kit.box(Vector3(0.44, 0.04, 0.035)), Kit.at(Vector3(0, 0.39, 4.0)), Color("#e84432")],
 		[Kit.box(Vector3(0.09, 0.045, 0.08)), Kit.at(Vector3(out * 0.81, -0.39, -3.92)), IVORY]])
 
 
 static func dress_pod(hull: MeshInstance3D) -> void:
-	if seat_trim == null:
-		var parts := []
-		for side in [-1.0, 1.0]:
-			_blade(parts, Kit.at(Vector3(side * 0.91, -0.18, 0.27), Vector3(0, 0, -side * 1.31)), 0.48, 0.69)
-		seat_trim = Kit.compound(parts)
+	if pod_paint == null:
 		pod_paint = Finish.painted_metal().duplicate()
 		pod_paint.vertex_color_use_as_albedo = false
 		pod_paint.albedo_color = PETROL
 		pod_paint.clearcoat_enabled = true
 		pod_paint.clearcoat = 0.8
+		fittings = ShaderMaterial.new()
+		fittings.shader = preload("res://view/shrike_trim.gdshader")
+	hull.set_surface_override_material(3, fittings)
 	hull.set_surface_override_material(5, pod_paint)
+	hull.set_surface_override_material(6, fittings)
 	var trim := MeshInstance3D.new()
 	trim.name = "ShrikeStrakes"
 	trim.add_to_group("exterior")
-	trim.mesh = seat_trim
-	trim.material_override = Finish.painted_metal()
+	trim.mesh = part(&"PodStrakes")
 	hull.add_child(trim)
 
 
-static func dress_coaming(coaming: MeshInstance3D, hd: bool) -> void:
+static func dress_coaming(coaming: MeshInstance3D, hd: bool) -> ShaderMaterial:
 	if hd:
 		var original := coaming.mesh.surface_get_material(0) as BaseMaterial3D
 		var livery := original.duplicate() as BaseMaterial3D
@@ -153,3 +85,41 @@ static func dress_coaming(coaming: MeshInstance3D, hd: bool) -> void:
 	mark.position.z = 0.0115
 	mark.add_to_group("exterior")
 	plate.add_child(mark)
+
+	# Recessed load windows on either side of the badge follow the coaming's arc.
+	var bars := SurfaceTool.new()
+	bars.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var housings := []
+	for side in [-1.0, 1.0]:
+		var mount := Kit.at(Vector3(side*0.180, 0.578, -0.888), Vector3(0, -side*0.34, 0))
+		housings.append([Finish.beveled_plate(Vector3(0.139,0.048,0.012),0.003), mount, CARBON])
+		var legend := Label3D.new()
+		legend.text = "L  TOW" if side < 0.0 else "TOW  R"
+		legend.font_size = 40
+		legend.pixel_size = 0.00030
+		legend.outline_size = 0
+		legend.modulate = IVORY
+		legend.transform = mount * Transform3D(Basis.IDENTITY, Vector3(0,-0.011,0.008))
+		legend.add_to_group("exterior")
+		coaming.add_child(legend)
+		for corner in [0,2,1,0,3,2]:
+			var x := -0.063 if corner in [0,3] else 0.063
+			var y := 0.001 if corner in [0,1] else 0.016
+			bars.set_uv(Vector2(0.5 + side*x/0.126, 0.25 if side < 0.0 else 0.75))
+			bars.set_normal(mount.basis.z)
+			bars.add_vertex(mount * Vector3(x,y,0.007))
+	var surround := MeshInstance3D.new()
+	surround.mesh = Kit.compound(housings)
+	surround.material_override = Finish.powder_coat()
+	surround.add_to_group("exterior")
+	coaming.add_child(surround)
+	var glass := MeshInstance3D.new()
+	glass.name = "TowLoad"
+	glass.mesh = bars.commit()
+	glass.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	glass.add_to_group("exterior")
+	var meter := ShaderMaterial.new()
+	meter.shader = preload("res://view/shrike_tow_meter.gdshader")
+	glass.material_override = meter
+	coaming.add_child(glass)
+	return meter

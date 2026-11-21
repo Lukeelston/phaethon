@@ -106,6 +106,7 @@ var chase_hud: Label3D      # outside, the gauges are out of reading distance: t
 var hands := {}
 var lever_pivots: Array[Node3D] = []
 var lever_tips: Array[StandardMaterial3D] = []
+var tow_meter: ShaderMaterial
 var dashboard   # the instruments: the gauge cluster (vr/gauge_cluster.gd), or the flat panel (vr/dashboard.gd)
 var _skill_readout: Label3D
 var _skill_award: Label3D
@@ -547,7 +548,7 @@ func _build_cockpit() -> void:
 	shell.add_child(interior)
 	interior.build()
 	if sim != null and sim.P.vehicle == CraftModelScript.PilotCraft.SHRIKE:
-		CraftModelScript.Shrike.dress_coaming(interior.get_node("SegmentedCoaming"), CockpitInteriorScript.hd_parts and ResourceLoader.exists(CockpitInteriorScript.HD_PARTS.Coaming))
+		tow_meter = CraftModelScript.Shrike.dress_coaming(interior.get_node("SegmentedCoaming"), CockpitInteriorScript.hd_parts and ResourceLoader.exists(CockpitInteriorScript.HD_PARTS.Coaming))
 	mode_switch = ModeSwitchScript.new()   # SPEEDCRAFT / STARFIGHTER, on the front of the right console
 	shell.add_child(mode_switch)
 	mode_switch.transform = ModeSwitchScript.mount()
@@ -568,6 +569,8 @@ func _build_cockpit() -> void:
 	if sim.kind == "network":
 		_mount_approach_projector(canopy)
 	dashboard = GaugeClusterScript.new() if GaugeClusterScript.available() else DashboardScript.new()
+	if dashboard is GaugeClusterScript:
+		dashboard.ivory_thrust_dials = tow_meter != null
 	shell.add_child(dashboard)
 	dashboard.transform = DashboardScript.mount()
 	dashboard.build()
@@ -1175,6 +1178,8 @@ func _update_hud() -> void:
 	var ctl: String = QuestControlsScript.HINTS[quest.scheme] if _scheme_flash > 0.0 else QuestControlsScript.NAMES[quest.scheme]
 	if minimap_panel.live:
 		minimap_panel.show_frame(minimap.update(sim.pod.th, get_process_delta_time()))
+	if tow_meter:
+		tow_meter.set_shader_parameter("loads", Vector2(craft.cable_strain[0], craft.cable_strain[1]))
 	dashboard.show_state({
 		"mph": kmh / 1.609344, "kmh": kmh, "mach": cues.mach, "backlight": 0.5 if light_preset == "twilight" else 1.0, "mach_line": cues.readout(), "progress": progress,
 		"footer": "%s   /   %s" % [handling_text(), ctl],

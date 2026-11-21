@@ -11,6 +11,7 @@ uniform vec4 lamp[40];              // colour, and level in alpha
 uniform vec4 needle[8];             // gauge, pivot x, pivot y, length (metres); length 0 = unused
 uniform float needle_angle[8];      // radians, anticlockwise from three o'clock
 uniform float energy = 1.5;
+uniform bool ivory_thrust_dials = false;
 
 void fragment() {
 	vec4 print = texture(atlas, UV);
@@ -37,6 +38,15 @@ void fragment() {
 		ALBEDO = print.rgb * mix(vec3(0.075), light.rgb * 0.5, light.a) * shade;
 	}
 	EMISSION = print.rgb * print.a * light.rgb * light.a * energy + vec3(0.008, 0.011, 0.014) * gloss * light.a;
+	if (ivory_thrust_dials && id == 0 && (gauge == 1 || gauge == 2)) {
+		// Backlit ivory dial card with dark printed graduations. Orange ink
+		// in the shared atlas is the burner gate and keeps its own redline.
+		float ink = smoothstep(0.018, 0.70, max(print.r, print.g));
+		float gate = smoothstep(0.08, 0.40, print.r - print.b);
+		vec3 card = mix(vec3(0.75, 0.68, 0.52), mix(vec3(0.009,0.035,0.037), vec3(0.53,0.068,0.012), gate), ink);
+		ALBEDO = card * shade;
+		EMISSION = card * 0.19 * light.a;
+	}
 	ROUGHNESS = mix(0.84, 0.14, gloss);
 	SPECULAR = mix(0.3, 0.5, gloss);
 	AO = COLOR.r;

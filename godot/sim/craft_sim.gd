@@ -659,17 +659,18 @@ func _init(overrides: Dictionary = {}) -> void:
 	P = DEFAULTS.duplicate()
 	# the grand prix is a STARFIGHTER track unless a handling is asked for
 	var hname: String = overrides.get("handling", "starfighter" if COURSES.has(overrides.get("track", "")) and overrides.get("track", "") != "carving" else DEFAULTS.handling)
-	P.merge(HANDLING.get(hname, {}), true)
+	var starfighter := PilotCraft.starfighter_profile(vehicle, HANDLING.starfighter)
+	P.merge(starfighter if hname == "starfighter" else HANDLING.get(hname, {}), true)
 	P.merge(TRACKS.get(overrides.get("track", ""), {}), true)
 	P.merge(overrides, true)
 	P.handling = hname
 	hwant = hname
 	hblend = 1.0 if hname == "starfighter" else 0.0
-	for k in HANDLING.starfighter:
+	for k in starfighter:
 		if not overrides.has(k):
 			_hk.append(k)
 			_h0[k] = HANDLING.speed.get(k, DEFAULTS[k])
-			_h1[k] = HANDLING.starfighter[k]
+			_h1[k] = starfighter[k]
 	_rng = int(P.seed) & 0xFFFFFFFF
 	if _rng == 0:
 		_rng = 1
@@ -708,7 +709,10 @@ func _init(overrides: Dictionary = {}) -> void:
 func set_handling(name: String) -> void:
 	_overrides["handling"] = name
 	P = DEFAULTS.duplicate()
-	P.merge(HANDLING.get(name, {}), true)
+	var profile: Dictionary = HANDLING.get(name, {})
+	if name == "starfighter":
+		profile = PilotCraft.starfighter_profile(_overrides.vehicle, profile)
+	P.merge(profile, true)
 	P.merge(TRACKS.get(_overrides.get("track", ""), {}), true)
 	P.merge(_overrides, true)
 	hwant = name

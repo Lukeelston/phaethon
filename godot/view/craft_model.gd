@@ -158,10 +158,10 @@ var _prev_v := []                    # last frame's [vx, vy] per body
 
 
 func build(v) -> void:
-	var nacelle_scene := load("res://art/engine/nacelle.glb") as PackedScene
 	view = v
 	var sim = v.sim
 	var shrike: bool = sim.P.vehicle == PilotCraft.SHRIKE
+	var nacelle_scene: PackedScene = null if shrike else load("res://art/engine/nacelle.glb")
 	var finish := Finishes.machined()
 	var lit_mat := Kit.vertex_colors(true)
 	for k in 2:
@@ -171,18 +171,22 @@ func build(v) -> void:
 		engines.append(eng)
 		var body := MeshInstance3D.new()
 		body.name = "ShrikeFairing" if shrike else "PhaethonFairing"
-		body.mesh = Shrike.engine(out) if shrike else _engine_body(out)
-		body.material_override = Finishes.painted_metal()
+		body.mesh = Shrike.part(&"Port" if k == 0 else &"Starboard") if shrike else _engine_body(out)
+		if not shrike:
+			body.material_override = Finishes.painted_metal()
 		eng.add_child(body)
 		# One shared UV-mapped shell on each engine. The hot section, brakes and
 		# vectoring vanes still use their independent pivots and materials.
-		var shell := nacelle_scene.instantiate()
-		shell.name = "NacelleShell"
-		var aft_leaf := _take_brake_mesh(shell, "AftBrakeLeaf")
-		var front_leaf := _take_brake_mesh(shell, "FrontBrakeLeaf")
+		var aft_leaf: Mesh
+		var front_leaf: Mesh
 		if shrike:
-			shell.free()
+			aft_leaf = Shrike.part(&"AftBrake")
+			front_leaf = Shrike.part(&"ForwardBrake")
 		else:
+			var shell := nacelle_scene.instantiate()
+			shell.name = "NacelleShell"
+			aft_leaf = _take_brake_mesh(shell, "AftBrakeLeaf")
+			front_leaf = _take_brake_mesh(shell, "FrontBrakeLeaf")
 			eng.add_child(shell)
 		var lights := MeshInstance3D.new()   # nav, tail, landing lights and the repulsor underglow
 		lights.mesh = Shrike.lights(out) if shrike else _engine_lights(out)
@@ -193,6 +197,8 @@ func build(v) -> void:
 		var hot := MeshInstance3D.new()
 		hot.mesh = Kit.rounded_box(Vector3(ENG_W - 0.2, ENG_H - 0.16, 2.2), 5.0)
 		hot.position.z = 2.9
+		if shrike:
+			hot.scale = Vector3(0.87, 0.75, 0.88)   # hot core inside the open exhaust petals
 		var hm := StandardMaterial3D.new()
 		hm.albedo_color = STEEL
 		hm.metallic = 0.68
@@ -224,26 +230,31 @@ func build(v) -> void:
 			rotor.position.x = fx
 			fan.add_child(rotor)
 			rotors[k].append(rotor)
-			var parts := [[Kit.cyl(0.03, 0.15, 0.24, 12), Kit.at(Vector3(0, 0, -0.08), Vector3(-PI / 2.0, 0, 0)), Color(0.85, 0.85, 0.82)]]
-			for b in 12:
-				var a := TAU * b / 12.0
-				parts.append([Fairings.fan_blade(), Transform3D(Basis(Vector3.BACK, -a), Vector3.ZERO),
-					LIVERY if b == 0 else Color(0.43, 0.46, 0.50)])
 			var fm := MeshInstance3D.new()
-			fm.mesh = Kit.compound(parts)
-			fm.material_override = Kit.polished(0.88, 0.31)
+			if shrike:
+				fm.mesh = Shrike.part(&"Compressor")
+				# Opposing rotor shafts need opposite blade pitch to pull air aft.
+				if fx > 0.0:
+					fm.scale.x = -1.0
+			else:
+				var parts := [[Kit.cyl(0.03, 0.15, 0.24, 12), Kit.at(Vector3(0, 0, -0.08), Vector3(-PI / 2.0, 0, 0)), Color(0.85, 0.85, 0.82)]]
+				for b in 12:
+					var a := TAU * b / 12.0
+					parts.append([Fairings.fan_blade(), Transform3D(Basis(Vector3.BACK, -a), Vector3.ZERO),
+						LIVERY if b == 0 else Color(0.43, 0.46, 0.50)])
+				fm.mesh = Kit.compound(parts)
+				fm.material_override = Kit.polished(0.88, 0.31)
 			rotor.add_child(fm)
-		var legend := Label3D.new()
-		legend.text = ("SHRIKE  RS  /  " if shrike else "PHAETHON  /  ") + ("L" if k == 0 else "R")
-		legend.font_size = 48
-		legend.pixel_size = 0.0018
-		legend.outline_size = 0
-		legend.modulate = Color(0.12, 0.14, 0.17)
-		legend.rotation.x = -PI / 2.0
-		legend.position = Vector3(0, ENG_H / 2.0 + 0.036, -0.15)
-		if shrike:
-			legend.position = Vector3(0, 0.522, -0.55)
-		eng.add_child(legend)
+		if not shrike:
+			var legend := Label3D.new()
+			legend.text = "PHAETHON  /  " + ("L" if k == 0 else "R")
+			legend.font_size = 48
+			legend.pixel_size = 0.0018
+			legend.outline_size = 0
+			legend.modulate = Color(0.12, 0.14, 0.17)
+			legend.rotation.x = -PI / 2.0
+			legend.position = Vector3(0, ENG_H / 2.0 + 0.036, -0.15)
+			eng.add_child(legend)
 		# split air brakes, two on top and two underneath: hinged at the front edge, the trailing
 		# edge swings up (or down) into the airflow
 		for fa in FLAPS_AT:

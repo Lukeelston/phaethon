@@ -37,8 +37,31 @@ func trial(id: String) -> Vector2:
 	check(id + " remains intact in the split-lever turn", sim.mode == "normal" and not sim.binder_broken)
 	sim.set_handling("starfighter")
 	sim.respawn()
+	var idle := {"thrL":0.0, "thrR":0.0, "brkL":0.0, "brkR":0.0, "repair":false, "reignite":true}
+	var gp_preset := Sim.new({"vehicle":id, "track":"gp"})
+	check(id + " restores its GP yaw damping on respawn", is_equal_approx(sim.P.yawDamp, gp_preset.P.yawDamp))
+	for mode in ["speed", "starfighter"]:
+		idle.handling = mode
+		for i in 500:
+			sim.step(idle, DT)
+		var expected: float = gp_preset.P.yawDamp if mode == "starfighter" else Sim.DEFAULTS.yawDamp
+		check(id + " blends into its " + mode + " yaw damping", is_equal_approx(sim.P.yawDamp, expected))
 	check(id + " survives a handling change and respawn", sim.P.vehicle == id and sim.P.engineMass == sim.eL.m)
 	return Vector2(steps * DT, yaw)
+
+
+func check_airframe(craft) -> void:
+	var material: StandardMaterial3D = craft.engines[0].get_node("ShrikeFairing").get_active_material(0)
+	check("paint, surface finish and relief use the imported maps", material.albedo_texture != null and material.roughness_texture == material.metallic_texture and material.ao_texture == material.roughness_texture and material.normal_texture != null)
+	for k in 2:
+		var body: ArrayMesh = craft.engines[k].get_node("ShrikeFairing").mesh
+		check("engine %d batches its fixed surfaces into one paint material" % k, body.get_surface_count() == 1 and body.surface_get_material(0) == material and not craft.engines[k].has_node("NacelleShell"))
+		var fan_a: MeshInstance3D = craft.rotors[k][0].get_child(0)
+		var fan_b: MeshInstance3D = craft.rotors[k][1].get_child(0)
+		check("engine %d has a mirrored compressor pair on independent shafts" % k, fan_a.mesh == fan_b.mesh and fan_a.transform.basis.determinant() * fan_b.transform.basis.determinant() < 0)
+		var brake: Mesh = craft.front_flaps[k][0].get_child(0).mesh
+		var aft: Mesh = craft.flaps[k][0].get_child(0).mesh
+		check("engine %d has separate textured front and aft leaves" % k, brake != aft and brake.surface_get_material(0) == material and aft.surface_get_material(0) == material)
 
 
 func _run() -> void:
@@ -79,8 +102,16 @@ func _run() -> void:
 			check("selected and saved " + id, game.sim.P.vehicle == id and Settings.selected_craft() == id)
 			check("both engine fairings match the selection", game.craft.engines.all(func(e): return e.has_node("ShrikeFairing") == is_shrike))
 			check("visible pod trim matches the selection", game.craft.pod.has_node("ShrikeStrakes") == is_shrike)
+			if is_shrike:
+				check_airframe(game.craft)
 			if vr:
 				check("the pilot sees the selected cabin", (game.shell.find_child("ShrikePlate", true, false) != null) == is_shrike)
+				check("tow instrument matches the selection", (game.tow_meter != null) == is_shrike)
+				if is_shrike:
+					game.craft.cable_strain.assign([0.23, 0.97])
+					game._update_hud()
+					var loads: Vector2 = game.tow_meter.get_shader_parameter("loads")
+					check("port and starboard load indications respond independently", loads.is_equal_approx(Vector2(0.23, 0.97)))
 			var gap: float = game.craft.engines[0].position.distance_to(game.craft.engines[1].position)
 			check("rendered engine separation matches the chassis", absf(gap - game.sim.P.engineGap) < 0.1)
 	config.load(Settings.PREFS)
