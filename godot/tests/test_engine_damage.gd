@@ -20,6 +20,9 @@ var frames := 0
 
 func _initialize() -> void:
 	# 1. a sloppy pilot (runs wide) on the GP: who takes the hits?
+	# (It holds 0.8 of the lever. At the 0.6 it was written with, v0.2.9's yaw damping (1a5b21f) keeps its
+	# line clean: 6 wall contacts in 60 s where there had been 67, and a ratio of 3 scrapes to 3 hits says
+	# nothing about the walls. At 0.8 it runs as wide as it did then.)
 	var sim = S.new({"track": "gp", "damage": true})
 	var hits := {"L": 0, "R": 0, "pod": 0}
 	var scrapes := {"L": 0, "R": 0, "pod": 0}
@@ -28,7 +31,7 @@ func _initialize() -> void:
 		var ahead: int = (sim.pod.hint + int((60.0 + spd * 0.9) / 12.0)) % sim.N
 		var err: float = S.wrap_angle(atan2(sim.tpy[ahead] - (sim.eL.y + sim.eR.y) / 2.0, sim.tpx[ahead] - (sim.eL.x + sim.eR.x) / 2.0) - sim.pair_th)
 		var k := clampf(err * 4.0, -1.0, 1.0)
-		var base := 0.87 if spd < 200.0 else 0.6
+		var base := 0.87 if spd < 200.0 else 0.8
 		var inp := {"thrL": base * (1.0 - maxf(0.0, k)), "thrR": base * (1.0 + minf(0.0, k)), "brkL": 0.0, "brkR": 0.0, "repair": false, "reignite": true}
 		for s in 480 / 72:
 			sim.step(inp, DT)
@@ -42,7 +45,7 @@ func _initialize() -> void:
 	var n_scr: int = scrapes.L + scrapes.R + scrapes.pod
 	var km: float = sim.pod.hint * sim.track_length / sim.N / 1000.0
 	_check("a wild line on the GP mostly scrapes (%d scrapes, %d damaging hits), the outside (right) engine most, and keeps going: %.1f km, no wreck (pod %.2f), engines %.2f/%.2f" % [n_scr, n_hits, km, sim.pod.health, sim.eL.health, sim.eR.health],
-		n_scr > 3 * n_hits and scrapes.R > scrapes.L and km > 10.0 and sim.pod.health > 0.3)
+		n_scr + n_hits >= 20 and n_scr > 3 * n_hits and scrapes.R > scrapes.L and km > 10.0 and sim.pod.health > 0.3)   # (20 contacts: the pilot really is sloppy)
 	# a hard impact still costs: everything flung sideways into the right-hand wall at 120 m/s
 	var sim1 = S.new({"track": "gp", "damage": true})
 	for b in [sim1.eL, sim1.eR, sim1.pod]:   # 4 m off the right-hand wall, then thrown at it
@@ -89,6 +92,7 @@ func _initialize() -> void:
 		sim3.events.clear()
 	_check("holding X (repair) for 4 s heals it to %.2f" % sim3.eR.health, sim3.eR.health >= 0.45)
 	# 4. Y in the game (the view's restart): fresh engines, back on the grid, lap reset
+	ViewScript.track_override = "gp"   # its own course (it used to need --track=gp)
 	v = ViewScript.new()
 	root.add_child(v)
 

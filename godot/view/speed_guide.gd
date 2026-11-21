@@ -92,8 +92,17 @@ func brake_model(handling := "") -> Vector4:
 
 ## Maximum acceleration from the two fully deployed front flaps; zero means uncapped.
 func front_brake_cap() -> float:
+	return flap_model().z
+
+
+## The front flaps of the sim's live handling (or of `handling`'s preset): Vector3(the speeds they
+## deploy from and to, m/s; their acceleration ceiling, m/s^2, zero for none).
+func flap_model(handling := "") -> Vector3:
+	var P: Dictionary = sim.P
+	var H: Dictionary = sim.HANDLING[handling] if handling != "" else {}   # (read through, not merged: this is asked once a point)
 	var m: float = sim.eL.m + sim.eR.m + sim.pod.m
-	return (sim.eL.m + sim.eR.m) * sim.P.frontBrakeMaxG * G * sim.P.forceScale / m
+	return Vector3(H.get("frontBrakeV0", P.frontBrakeV0), H.get("frontBrakeV1", P.frontBrakeV1),
+		(sim.eL.m + sim.eR.m) * float(H.get("frontBrakeMaxG", P.frontBrakeMaxG)) * G * float(H.get("forceScale", P.forceScale)) / m)
 
 
 static func _seg(va: float, vb: float, c0: float, c2: float) -> float:
@@ -134,32 +143,43 @@ static func _ramp_seg(va: float, vb: float, b: Vector4, cap: float, v0: float, v
 	return sum * h / 3.0
 
 
+## One handling's full brakes from va down to vb, m: its flaps (`flaps`: from, to, ceiling) capped and
+## full above their upper speed, deploying smoothly between, shut below their lower.
+static func _profile(va: float, vb: float, b: Vector4, flaps: Vector3) -> float:
+	if va <= vb:
+		return 0.0
+	var d := 0.0
+	var a := va
+	if a > flaps.y:
+		var e := maxf(vb, flaps.y)
+		d += _front_seg(a, e, b, flaps.z)
+		a = e
+	if a > vb and a > flaps.x:
+		var e := maxf(vb, flaps.x)
+		d += _ramp_seg(a, e, b, flaps.z, flaps.x, flaps.y)
+		a = e
+	if a > vb:
+		d += _seg(a, vb, b.x, b.y)
+	return d
+
+
 ## Distance (m) full brakes take from v down to vt (0 if already slower): the integral of v / a(v),
-## in pieces: live handling `b` with capped full flaps above V1, smooth deployment between, shut below
-## V0, down to STARFIGHTER's engage speed; then STARFIGHTER's `bsf`.
+## in two pieces: live handling `b` and its flaps down to STARFIGHTER's engage speed, then
+## STARFIGHTER's `bsf` and its own flaps. (Those were left out: until v0.2.9 they never opened below
+## 1,500 mph. Since then they are full from 500 mph down to 200, and the guide, braking a STARFIGHTER
+## with them shut, read 958 m from 1,200 mph to 400 where the sim takes 386.)
 func stop_distance(v: float, vt: float, b: Vector4, bsf: Vector4) -> float:
 	if v <= vt:
 		return 0.0
-	var v0: float = sim.P.frontBrakeV0
-	var v1: float = sim.P.frontBrakeV1
 	var ve: float = sim.P.sfEngageV
-	var cap := front_brake_cap()
 	var d := 0.0
 	var a := v
-	if a > v1:
-		var e := maxf(maxf(vt, ve), v1)
-		d += _front_seg(a, e, b, cap)
-		a = e
-	if a > vt and a > v0:
-		var e := maxf(maxf(vt, ve), v0)
-		d += _ramp_seg(a, e, b, cap, v0, v1)
-		a = e
-	if a > vt and a > ve:
+	if a > ve:
 		var e := maxf(vt, ve)
-		d += _seg(a, e, b.x, b.y)
+		d += _profile(a, e, b, flap_model())
 		a = e
 	if a > vt:
-		d += _seg(a, vt, bsf.x, bsf.y)
+		d += _profile(a, vt, bsf, flap_model("starfighter"))
 	return d
 
 
@@ -214,5 +234,6 @@ func apply(mat: ShaderMaterial) -> void:
 	mat.set_shader_parameter("lap", float(s[sim.N]))
 	mat.set_shader_parameter("brake", brake_model())
 	mat.set_shader_parameter("brake_sf", brake_model("starfighter"))
+	mat.set_shader_parameter("flaps_sf", flap_model("starfighter"))
 	mat.set_shader_parameter("brake_front_cap", front_brake_cap())
 	mat.set_shader_parameter("speeds", Vector3(sim.P.frontBrakeV0, sim.P.frontBrakeV1, sim.P.sfEngageV))

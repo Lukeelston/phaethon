@@ -1,7 +1,9 @@
 ## Hard-braking gate, through the trigger scheme as flown (QuestControls) and CraftSim, starfighter
 ## at ~924 mph (Luke: "if i brake too hard, the pod flies forward and throws the engines off balance"):
 ##   one hand, full   the pod stays at its spot behind the engines (the stand-off), and the craft
-##                    turns hard but doesn't spin round (the grip difference fades at speed)
+##                    turns hard but doesn't spin round. (How hard is v0.2.9's: one grip "tightens the
+##                    turn while shedding speed", 40 to 140 degrees of it in 3 s by its own gate,
+##                    tests/test_starfighter_brakes.gd. Before that the bar here was under 60.)
 ##   both, uneven     a 0.15 mismatch between the grips brakes straight (the grips magnet)
 ##   slower           at ~400 mph a one-handed brake still pivots you hard (hairpins keep their tool)
 ##   proof            without the stand-off and the scaling, the old flung-pod spin comes back
@@ -19,7 +21,7 @@ func _initialize() -> void:
 	var one := _brake(0.8, [1.0, 0.0], true)
 	var old := _brake(0.8, [1.0, 0.0], false)
 	_check("one hand, full, from %.0f mph: the pod overruns its spot by %.2f m at most, heading %+.0f deg in 3 s, %.0f mph left (before: %.1f m, %+.0f deg)" % [
-		one[3], one[0], one[1], one[2], old[0], old[1]], one[0] < 1.0 and absf(one[1]) < 60.0 and old[0] > 10.0 and absf(old[1]) > 120.0)
+		one[3], one[0], one[1], one[2], old[0], old[1]], one[0] < 1.0 and absf(one[1]) > 40.0 and absf(one[1]) < 140.0 and old[0] > 10.0 and absf(old[1]) > 140.0)
 	var both := _brake(0.8, [1.0, 0.85], true)
 	_check("both hands, 0.15 apart, from %.0f mph: straight (%+.1f deg in 3 s), pod overrun %.2f m" % [both[3], both[1], both[0]],
 		absf(both[1]) < 10.0 and both[0] < 1.0)

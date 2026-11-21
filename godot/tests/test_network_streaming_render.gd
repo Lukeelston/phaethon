@@ -69,4 +69,5 @@ func _run() -> void:
 		root.get_texture().get_image().save_png(out.path_join("ramp-%d.png"%jump))
 		print("SHOT ramp ",jump)
 	v.free()
+	print("NETWORK STREAMING RENDER %s (%d failures)"%["PASS" if failures==0 else "FAIL",failures])
 	quit(int(failures>0))

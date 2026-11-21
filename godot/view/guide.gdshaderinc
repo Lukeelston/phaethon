@@ -9,6 +9,7 @@ uniform float lap = 1.0;                                // the lap, m
 uniform vec4 brake = vec4(0.0, 1e-4, 1e-4, 1e-4);       // live handling: c0, c2 flaps shut, half, full
 uniform vec4 brake_sf = vec4(0.0, 1e-3, 1e-3, 1e-3);    // STARFIGHTER's (below its engage speed)
 uniform float brake_front_cap = 0.0;                  // front flaps' acceleration ceiling; zero = uncapped
+uniform vec3 flaps_sf = vec3(89.408, 223.52, 0.0);      // STARFIGHTER's own front flaps: from, to; their ceiling
 uniform vec3 speeds = vec3(670.6, 1117.6, 558.8);       // front flaps from, to; STARFIGHTER engages below
 
 const float GUIDE_AMBER_AT = 0.6;
@@ -25,62 +26,74 @@ float guide_seg(float va, float vb, float c0, float c2) {
 	return va > vb ? log((c0 + c2 * va * va) / (c0 + c2 * vb * vb)) / (2.0 * c2) : 0.0;
 }
 
-float guide_front_seg(float va, float vb) {
+float guide_front_seg(float va, float vb, vec4 b, float cap) {
 	if (va <= vb) { return 0.0; }
 	float a = va;
 	float d = 0.0;
-	float front = brake.w - brake.y;
-	if (brake_front_cap > 0.0 && front > 0.0) {
-		float vc = sqrt(brake_front_cap / front);
+	float front = b.w - b.y;
+	if (cap > 0.0 && front > 0.0) {
+		float vc = sqrt(cap / front);
 		if (a > vc) {
 			float e = max(vb, vc);
-			d += guide_seg(a, e, brake.x + brake_front_cap, brake.y);
+			d += guide_seg(a, e, b.x + cap, b.y);
 			a = e;
 		}
 	}
-	return d + guide_seg(a, vb, brake.x, brake.w);
+	return d + guide_seg(a, vb, b.x, b.w);
 }
 
-float guide_ramp_seg(float va, float vb) {
+float guide_ramp_seg(float va, float vb, vec4 b, vec3 flaps) {
 	if (va <= vb) { return 0.0; }
 	float h = (va - vb) / 8.0;
 	float sum = 0.0;
 	for (int i = 0; i <= 8; i++) {
 		float v = vb + h * float(i);
-		float front = (brake.w - brake.y) * v * v;
-		if (brake_front_cap > 0.0) { front = min(front, brake_front_cap); }
-		float accel = brake.x + brake.y * v * v + front * smoothstep(speeds.x, speeds.y, v);
+		float front = (b.w - b.y) * v * v;
+		if (flaps.z > 0.0) { front = min(front, flaps.z); }
+		float accel = b.x + b.y * v * v + front * smoothstep(flaps.x, flaps.y, v);
 		float weight = (i == 0 || i == 8) ? 1.0 : ((i % 2 == 1) ? 4.0 : 2.0);
 		sum += weight * v / max(accel, 1e-6);
 	}
 	return sum * h / 3.0;
 }
 
-// Full brakes from v down to vt, m: live handling (capped full flaps, smooth deployment, shut) down to
-// STARFIGHTER's engage speed, then STARFIGHTER's.
+// One handling's full brakes from va down to vb, m: its flaps (from, to, ceiling) capped and full above
+// their upper speed, deploying smoothly between, shut below their lower.
+float guide_profile(float va, float vb, vec4 b, vec3 flaps) {
+	if (va <= vb) { return 0.0; }
+	float d = 0.0;
+	float a = va;
+	if (a > flaps.y) {
+		float e = max(vb, flaps.y);
+		d += guide_front_seg(a, e, b, flaps.z);
+		a = e;
+	}
+	if (a > vb && a > flaps.x) {
+		float e = max(vb, flaps.x);
+		d += guide_ramp_seg(a, e, b, flaps);
+		a = e;
+	}
+	if (a > vb) {
+		d += guide_seg(a, vb, b.x, b.y);
+	}
+	return d;
+}
+
+// Full brakes from v down to vt, m: live handling and its flaps down to STARFIGHTER's engage speed, then
+// STARFIGHTER's and its own flaps (view/speed_guide.gd stop_distance, the same sums).
 float guide_stop(float v, float vt) {
 	if (v <= vt) {
 		return 0.0;
 	}
 	float d = 0.0;
 	float a = v;
-	float lo = max(vt, speeds.z);
-	if (a > speeds.y) {
-		float e = max(lo, speeds.y);
-		d += guide_front_seg(a, e);
+	if (a > speeds.z) {
+		float e = max(vt, speeds.z);
+		d += guide_profile(a, e, brake, vec3(speeds.x, speeds.y, brake_front_cap));
 		a = e;
-	}
-	if (a > vt && a > speeds.x) {
-		float e = max(lo, speeds.x);
-		d += guide_ramp_seg(a, e);
-		a = e;
-	}
-	if (a > vt && a > speeds.z) {
-		d += guide_seg(a, lo, brake.x, brake.y);
-		a = lo;
 	}
 	if (a > vt) {
-		d += guide_seg(a, vt, brake_sf.x, brake_sf.y);
+		d += guide_profile(a, vt, brake_sf, flaps_sf);
 	}
 	return d;
 }
