@@ -21,7 +21,7 @@ uniform float lies_at = 0.02;       // the height the reflected cockpit is taken
 uniform float strength = 1.0;
 uniform float ceiling = 0.5;        // the most of the picture the glass ever gives back (a bare pane's own share at a low glance)
 uniform float lamps = 1.5;          // how much brighter than white the cockpit's own lights are
-uniform vec4 opening = vec4(0.79, 1.22, 0.15, 0.0);   // the cabin's opening in plan: half-width, half-length, its middle's z
+uniform vec4 opening = vec4(0.79, 1.22, 0.15, 0.89);   // the cabin's opening in plan: half-width, half-length aft of its widest point, that point's z, half-length ahead of it
 uniform vec2 reach = vec2(0.1, 0.32);                 // ... and how far aft of it is shown: all of it to the first z, none past the second
 varying vec3 local_pos;
 varying vec3 local_n;
@@ -42,7 +42,7 @@ void fragment() {
 	}
 	vec3 lands = local_pos + off * ((lies_at - local_pos.y) / off.y);
 	// only the cabin is under the glass: the hull's outside and the nose are not reflected in it
-	vec2 plan = vec2(lands.x / opening.x, (lands.z - opening.z) / opening.y);
+	vec2 plan = vec2(lands.x / opening.x, (lands.z - opening.z) / (lands.z < opening.z ? opening.w : opening.y));
 	float within = (1.0 - smoothstep(0.9, 1.0, dot(plan, plan))) * (1.0 - smoothstep(reach.x, reach.y, lands.z));
 	if (within <= 0.0) {
 		discard;

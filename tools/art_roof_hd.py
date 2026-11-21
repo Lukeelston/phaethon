@@ -33,7 +33,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import art_bezel_hd as kit  # noqa: E402  the atlas and its helpers
-from art_cockpit import hull_top  # noqa: E402  the game's own hull stations
+from art_cockpit import OPEN_AX, OPEN_ZC, hull_top, open_az  # noqa: E402  the game's own hull stations and opening
 from art_coaming_hd import ARGS, box, f32, fbm, png, smooth, vnoise  # noqa: E402
 from art_gauges_hd import LEATHER, THREAD, Part, bake, grain  # noqa: E402
 from art_grip_hd import pbr  # noqa: E402
@@ -51,7 +51,7 @@ SUEDE = np.array((76, 74, 77), f32)            # anthracite, not black: it faces
 def foot(deg):
     """On top of the coaming, round the opening: 0 degrees is the right side, -90 the nose."""
     ph = math.radians(deg)
-    x, z = .72 * math.cos(ph), .15 + 1.15 * math.sin(ph)
+    x, z = OPEN_AX * math.cos(ph), OPEN_ZC + open_az(math.sin(ph) < 0) * math.sin(ph)
     return np.array((x, hull_top(x, z) + .052, z))
 
 

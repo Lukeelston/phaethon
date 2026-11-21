@@ -38,8 +38,8 @@ func _process(_d: float) -> bool:
 		var best := INF
 		for j in 720:
 			var ph := TAU * j / 720.0
-			var x := CM.OPEN_AX * cos(ph)
-			var z := CM.OPEN_ZC + CM.OPEN_AZ * sin(ph)
+			var x: float = CM.open_edge(ph).x
+			var z: float = CM.open_edge(ph).y
 			best = minf(best, p.distance_to(Vector3(x, CM.hull_top(x, z), z)))
 		worst_foot = maxf(worst_foot, best)
 	_check("the screen's foot runs along the lip (within %.3f m of the lip line; lip radius %.3f)" % [worst_foot, CM.LIP_R], worst_foot < CM.LIP_R * 1.2)

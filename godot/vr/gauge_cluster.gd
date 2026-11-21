@@ -1,7 +1,8 @@
 ## The cockpit's instrument cluster (Luke: "illuminated physical analogue gauges and a digital
 ## Speedo readout ... cylindrical tubes with a convex glass cover, and racing inspired faces"):
 ## five tubes under a stitched cowl where the flat panel was. vr/dashboard.gd is still the
-## fallback, and this keeps its mount, its show_state() and its labels.
+## fallback, and this keeps its mount, its show_state() and its labels. The mount is up under the
+## cockpit's rim, and the binnacle stands on the dashboard's fascia (vr/cockpit_interior.gd HD_DASH).
 ##   centre    Mach on the dial; in its face the digital speed (mph) and the gear, ARMED,
 ##             RAMJET and TURBINES legends (TURBINES: green while the second stage runs), and
 ##             the battery as a lit arc round the foot
@@ -10,7 +11,10 @@
 ##             when it is sputtering)
 ##   outboard  heat over air brake per engine, two needles on one hub; a HOT legend
 ##   below     two LCD strips: the run line and the repair hint on the left, the Mach / mile
-##             line with the handling and controls on the right
+##             line with the handling and controls on the right; and between them the points
+##             counter, a row of drums that roll up as points are earned (Luke: "points on an
+##             odometer roller, with a digital readout next to it of the feat"). The feat is
+##             read on the right strip's lower line for a few seconds, in place of the handling
 ## The binnacle is authored (tools/art_gauges_hd.py). The dials are one textured mesh
 ## (tools/art_gauge_faces.py), the glass another, and the needles share a third. Nothing is
 ## rebuilt, and a frame only touches what changed: a needle's transform, a lamp, the speed.
@@ -41,6 +45,11 @@ const HOT := 0.95                   # engine heat at which HOT lights
 const MACH_FULL := 8.0
 const MPH_PER_MACH := 767.27        # 343 m/s (view/speed_cues.gd SOUND)
 const NO_GAUGE := 7                 # for fittings no needle casts a shadow on
+const DRUMS := "res://art/cockpit/odometer_digits.png"
+const ROLL_TIME := 0.7              # s for the counter to roll an award in ...
+const ROLL_SLOWEST := 20.0          # ... but never slower than this many points a second
+const FEAT_BRIGHT := 2.2            # s a feat is read at full brightness on the strip
+const FEAT_SHOWN := 6.0             # s before the strip goes back to the handling and controls
 
 static var enabled := true          # false before the cockpit is built: the flat panel instead
 
@@ -71,6 +80,12 @@ var _needles_changed := true
 var _speed := -1
 var _gear := -1
 var _gear_ink := Color(0, 0, 0, 0)
+var points := 0            # what the counter is rolling toward
+var rolled := 0.0          # what its drums show now
+var _drum_mat: ShaderMaterial
+var _roll_rate := 0.0      # points a second, set when an award lands (so it rolls evenly and arrives)
+var _rolled_sent := -1.0
+var _rolled_at := 0
 
 
 static func available() -> bool:
@@ -100,6 +115,7 @@ func build() -> void:
 	_build_needles()
 	_build_glass()
 	_build_text()
+	_build_odometer()
 	for name in ["speed", "units", "gear", "gear_lbl", "headL", "headR"]:
 		labels[name] = Readout.new()
 	show_state({"mph": 0.0, "kmh": 0.0, "mach_line": "", "progress": "", "footer": "", "thr": [0.0, 0.0], "brk": [0.0, 0.0],
@@ -305,6 +321,67 @@ func _build_text() -> void:
 	_text("warn", status, -status[4] + 0.008, 32, AMBER, VERTICAL_ALIGNMENT_BOTTOM)
 	_text("mach", systems, systems[4] - 0.006, 36, CYAN, VERTICAL_ALIGNMENT_TOP)
 	_text("footer", systems, -systems[4] + 0.008, 23, Color(0.6, 0.6, 0.57), VERTICAL_ALIGNMENT_BOTTOM)
+	_text("feat", systems, -systems[4] + 0.008, 27, GREEN, VERTICAL_ALIGNMENT_BOTTOM)   # (in the footer's place while a feat is fresh)
+	(labels.feat as Label3D).visible = false
+
+
+## The points counter: a small module standing just proud of the fascia between the two strips, its
+## drums behind a window, a frame round it and its legend under it.
+func _build_odometer() -> void:
+	var o: Array = Layout.ODOMETER
+	var xf := Kit.on_arc(o[0], o[1], 0.0, R)
+	var half := Vector2(o[2], o[3])
+	var out: float = o[4]
+	var turn := Vector3(PI / 2.0, 0, 0)
+	var plate := Vector3(half.x * 2.0 + 0.016, out, half.y * 2.0 + 0.026)       # (a plate lies flat: across, thick, tall)
+	var parts := [[Finish.beveled_plate(plate, 0.0015), Kit.at(Vector3(0, -0.005, out * 0.5), turn), Color(0.06, 0.066, 0.075)]]
+	var rail := 0.0022
+	for side in [-1.0, 1.0]:      # the window's frame, a little proud of the plate
+		parts.append([Kit.box(Vector3(half.x * 2.0 + rail * 2.0, rail, 0.0016)), Kit.at(Vector3(0, side * (half.y + rail * 0.5), out + 0.0008)), Color(0.5, 0.52, 0.55)])
+		parts.append([Kit.box(Vector3(rail, half.y * 2.0, 0.0016)), Kit.at(Vector3(side * (half.x + rail * 0.5), 0, out + 0.0008)), Color(0.5, 0.52, 0.55)])
+	var module := _add(Kit.compound(parts), Finish.powder_coat(), "odometer_module")
+	module.transform = xf
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var z := out + 0.0003                                                        # on the plate's face, back behind the frame (the plate has no hole: behind its face they were hidden)
+	var p := [Vector3(-half.x, -half.y, z), Vector3(half.x, -half.y, z), Vector3(half.x, half.y, z), Vector3(-half.x, half.y, z)]
+	var up := Vector3(0, 0, 1)
+	_quad(st, xf, p, [up, up, up, up], [Vector2(0, 1), Vector2(1, 1), Vector2(1, 0), Vector2(0, 0)], Color.WHITE)
+	_drum_mat = _unlit("res://vr/odometer.gdshader")
+	_drum_mat.set_shader_parameter("numerals", load(DRUMS))
+	_drum_mat.set_shader_parameter("drums", int(o[5]))
+	_add(st.commit(), _drum_mat, "odometer")
+	var legend := Label3D.new()
+	legend.name = "points_lbl"
+	legend.text = "POINTS"
+	legend.pixel_size = PX
+	legend.font_size = 15
+	legend.outline_size = 0
+	legend.modulate = Color(0.72, 0.72, 0.68)
+	legend.double_sided = false
+	legend.transform = xf * Transform3D(Basis(), Vector3(0, -half.y - 0.0095, out + 0.0006))
+	add_child(legend)
+	labels["points_lbl"] = legend
+	labels["points"] = Readout.new()
+
+
+## What the counter is to show: an award rolls in over ROLL_TIME at an even rate, a small one no
+## slower than ROLL_SLOWEST points a second, and a run's reset spins it back in half the time.
+func set_points(total: int) -> void:
+	if total == points:
+		return
+	points = total
+	var gap := float(points) - rolled
+	_roll_rate = maxf(absf(gap) / (ROLL_TIME if gap > 0.0 else ROLL_TIME * 0.5), ROLL_SLOWEST)
+
+
+## Roll the counter toward its points for `dt` seconds (a long frame counts as a tenth of a second).
+func roll(dt: float) -> void:
+	if rolled != float(points):
+		rolled = move_toward(rolled, float(points), _roll_rate * clampf(dt, 0.0, 0.1))
+	if rolled != _rolled_sent:
+		_rolled_sent = rolled
+		_drum_mat.set_shader_parameter("value", rolled)
 
 
 # ---- every frame ----
@@ -373,6 +450,21 @@ func show_state(d: Dictionary) -> void:
 	labels.mach.text = d.mach_line
 	labels.progress.text = d.progress
 	labels.footer.text = d.footer
+	# the points counter, and the feat beside it while it is fresh
+	set_points(int(d.get("points", 0)))
+	(labels.points as Readout).text = str(points)
+	var now := Time.get_ticks_usec()
+	roll(float(now - _rolled_at) / 1e6 if _rolled_at > 0 else 0.0)
+	_rolled_at = now
+	var feat: String = d.get("feat", "")
+	var age: float = d.get("feat_age", 1e9)
+	var fresh := feat != "" and age < FEAT_SHOWN
+	var feat_label: Label3D = labels.feat
+	feat_label.visible = fresh
+	(labels.footer as Label3D).visible = not fresh
+	if fresh:
+		feat_label.text = feat
+		feat_label.modulate = Color(GREEN, lerpf(1.0, 0.5, smoothstep(FEAT_BRIGHT, FEAT_BRIGHT + 0.8, age)))
 	var blink: bool = d.blink
 	var backlight: float = d.get("backlight", 1.0)
 	_set_needle("mach", float(d.get("mach", mph / MPH_PER_MACH)) / MACH_FULL, 0.02)
@@ -427,4 +519,5 @@ func show_state(d: Dictionary) -> void:
 	if not is_equal_approx(backlight, _backlight):
 		_backlight = backlight
 		_digit_mat.set_shader_parameter("level", backlight)
+		_drum_mat.set_shader_parameter("level", backlight)
 		_needle_mat.emission_energy_multiplier = 1.7 * backlight

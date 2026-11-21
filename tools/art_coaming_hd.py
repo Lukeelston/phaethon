@@ -19,7 +19,7 @@ import bpy
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from art_cockpit import GLYPHS, hull_top  # noqa: E402  the game's own hull stations
+from art_cockpit import GLYPHS, OPEN_AX, OPEN_AZ, OPEN_AZ_FRONT, OPEN_ZC, hull_top  # noqa: E402  the game's own hull stations and opening
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "godot/art/cockpit/coaming_hd.glb"
@@ -31,11 +31,12 @@ f32 = np.float32
 # ---- the path round the opening, and the section, both by arc length in metres ----
 A = np.linspace(-138, 138, 2761)
 _ar = np.radians(A)
-PX, PZ = .72 * np.sin(_ar), .15 - 1.15 * np.cos(_ar)
+_az = np.where(np.cos(_ar) > 0, OPEN_AZ_FRONT, OPEN_AZ)     # the opening is an egg: shorter ahead of its widest point
+PX, PZ = OPEN_AX * np.sin(_ar), OPEN_ZC - _az * np.cos(_ar)
 PY = np.array([hull_top(x, z) for x, z in zip(PX, PZ)])
 S = np.concatenate([[0], np.cumsum(np.sqrt(np.diff(PX)**2 + np.diff(PY)**2 + np.diff(PZ)**2))])
 LEN = float(S[-1])
-_n = np.stack([-np.sin(_ar) / .72, np.cos(_ar) / 1.15])
+_n = np.stack([-np.sin(_ar) / OPEN_AX, np.cos(_ar) / _az])
 NX, NZ = _n / np.linalg.norm(_n, axis=0)               # horizontal, toward the pilot
 ENVELOPE = [(-68, .054), (-62, .058), (-49, .065), (-29, .071), (24, .068), (31, .067),
             (77, .063), (92, .067), (112, .061), (130, .056), (136, .052)]

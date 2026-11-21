@@ -13,5 +13,5 @@ func update(score) -> Dictionary:
 	_total = score.total
 	_time = score.time
 	var emphasis := 1.0 - smoothstep(1.2, 1.9, score.time - _earned_at)
-	return {"emphasis":emphasis, "total":"%d PTS" % score.total,
+	return {"emphasis":emphasis, "total":"%d PTS" % score.total, "points":score.total, "age":score.time - _earned_at,
 		"award":score.award_text + ("   x%.1f" % score.multiplier if score.multiplier > 1.0 else "")}

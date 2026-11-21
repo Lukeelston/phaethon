@@ -2,8 +2,10 @@
 ## once in the rig's frame (the hull sits POD_FRAME_UP above the rig floor) and added to the
 ## cockpit's shell, so it shakes with the air-brake shudder like every other fitting. Everything
 ## stays inside the hull's inner trim or up in the cockpit opening (tests/test_cables.gd checks it):
-##   floor     a grated deck plate under the seat and feet, a footrest bar and pedals out over
-##             the open nose cage
+##   floor     a grated deck plate under the seat and feet (without the dashboard: a footrest bar and
+##             pedals out over the open nose cage)
+##   dash      the dashboard, from the underside of the rim down to the deck and round to the
+##             consoles; the instruments stand on its fascia (vr/gauge_cluster.gd)
 ##   frames    ribs round the inner walls every 0.4 m, hoses and conduits along the sides
 ##   consoles  a console down each side: toggle switches, backlit buttons, stencilled placards
 ##   quadrant  a gate plate round each throttle lever, the burner gate marked in orange
@@ -67,6 +69,7 @@ static var hd_parts := true
 static var instrument_rails := true   # the flat instrument panel's frame; false when the gauge cluster stands there
 const HD_CONSOLE := "res://art/cockpit/console_hd.glb"
 const HD_TUB := "res://art/cockpit/tub_hd.glb"     # the seat's tub (tools/art_tub_hd.py): the hip panels, the quarters behind the consoles, the side liners
+const HD_DASH := "res://art/cockpit/dash_hd.glb"   # the dashboard (tools/art_dash_hd.py): a padded top under the rim, the fascia behind the instruments, its wings back to the consoles
 
 static func _hd_mesh(path: String, node := "*") -> Mesh:
 	var source := (load(path) as PackedScene).instantiate()
@@ -107,6 +110,21 @@ func build() -> void:
 		tub.name = "SeatTub"
 		tub.mesh = _hd_mesh(HD_TUB, "Tub")
 		add_child(tub)
+	# Realism spike: the dashboard (Luke: "move it [the gauge cluster] up to the rail, and create a true
+	# dash board"). The instruments stood alone in the footwell with the open nose showing round them.
+	var dashed := hd_parts and ResourceLoader.exists(HD_DASH)
+	if dashed:
+		var dash := MeshInstance3D.new()
+		dash.name = "Dashboard"
+		dash.mesh = _hd_mesh(HD_DASH, "Dash")
+		add_child(dash)
+		# Its top's outer edge is turned up behind the rim light to the lip's underside (from a low head
+		# the open nose showed through the slot between them). That lies against the lip, as the light does.
+		var seal := MeshInstance3D.new()
+		seal.name = "DashboardSeal"
+		seal.mesh = _hd_mesh(HD_DASH, "DashSeal")
+		add_child(seal)
+		seal.add_to_group("under_the_lip")
 	var dark := Color(0.09, 0.09, 0.1)
 	var gunmetal := Color(0.28, 0.29, 0.31)
 	var steel := Color(0.62, 0.64, 0.68)
@@ -122,11 +140,13 @@ func build() -> void:
 	# Stop ahead of the cushion; the previous plate continued through its volume.
 	solid.append([Kit.box(Vector3(0.84, 0.025, 1.1)), Kit.at(Vector3(0, floor_y, 0.0)), dark])
 	# The two replaceable tread inserts on this backing are in the textured bezel mesh.
-	# footrest bar and pedals, out over the open cage
-	metal.append([Kit.cyl(0.022, 0.022, 0.86, 12), Kit.at(Vector3(0, UP - 0.4, -0.95), Vector3(0, 0, PI / 2.0)), steel])
-	for s in [-1.0, 1.0]:
-		metal.append([Finish.beveled_plate(Vector3(0.13, 0.03, 0.26), 0.005), Kit.at(Vector3(0.2 * s, UP - 0.36, -0.86), Vector3(-0.6, 0, 0)), gunmetal])
-		rubber.append([Kit.box(Vector3(0.11, 0.008, 0.2)), Kit.at(Vector3(0.2 * s, UP - 0.34, -0.865), Vector3(-0.6, 0, 0)), Color(0.15, 0.15, 0.16)])
+	# footrest bar and pedals, out over the open cage. (Not with the dashboard: it stands from the rim
+	# to the deck 0.5 m nearer than they are, and no leg reaches round it. The feet rest at its foot.)
+	if not dashed:
+		metal.append([Kit.cyl(0.022, 0.022, 0.86, 12), Kit.at(Vector3(0, UP - 0.4, -0.95), Vector3(0, 0, PI / 2.0)), steel])
+		for s in [-1.0, 1.0]:
+			metal.append([Finish.beveled_plate(Vector3(0.13, 0.03, 0.26), 0.005), Kit.at(Vector3(0.2 * s, UP - 0.36, -0.86), Vector3(-0.6, 0, 0)), gunmetal])
+			rubber.append([Kit.box(Vector3(0.11, 0.008, 0.2)), Kit.at(Vector3(0.2 * s, UP - 0.34, -0.865), Vector3(-0.6, 0, 0)), Color(0.15, 0.15, 0.16)])
 
 	# Narrow service consoles beside the working levers. The front of the right console is
 	# deliberately spare: the existing physical MODE switch lives above it at z = 0.08.
@@ -261,9 +281,10 @@ func _rim_bar() -> Array:
 	var frames := []      # [the bar's middle, toward the seat, up] or null where it is cut
 	for k in RIM_STATIONS + 1:
 		var ph := TAU * k / RIM_STATIONS
-		var x := CM.OPEN_AX * cos(ph)
-		var z := CM.OPEN_ZC + CM.OPEN_AZ * sin(ph)
-		var inward := Vector3(-cos(ph) / CM.OPEN_AX, 0.0, -sin(ph) / CM.OPEN_AZ).normalized()
+		var edge := CM.open_edge(ph)
+		var x := edge.x
+		var z := edge.y
+		var inward := Vector3(-cos(ph) / CM.OPEN_AX, 0.0, -sin(ph) / (CM.OPEN_AZ_FRONT if sin(ph) < 0.0 else CM.OPEN_AZ)).normalized()
 		var at := Vector3(x, CM.hull_top(x, z) + UP - RIM_DROP, z) + inward * RIM_INSET
 		var from_nose := absf(angle_difference(-PI / 2.0, ph))
 		frames.append(null if from_nose > RIM_REACH or _occupied(at, 0.012) else [at, inward, Vector3.UP])

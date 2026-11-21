@@ -39,9 +39,14 @@ var lamps := {}     # name -> [Label3D, on colour]
 
 
 ## Where the panel sits in the cockpit rig (floor origin, forward -Z): below the eye line,
-## tilted to face the seat, inside the front of the cockpit opening.
+## tilted to face the seat, inside the front of the cockpit opening, up under its rim (Luke:
+## "remove 12 inches of 'legroom' between the gauges and seat", and "move it up to the rail, and
+## create a true dash board"). It stood at (0, 0.27, -0.70), lying back 0.29: alone in the
+## footwell, 1.38 m from the eye. Now it is 1.07 m away, its cowl's crest against the coaming, and
+## lies back a little further to face an eye that is higher over it. The dashboard behind it is
+## built round this mount (tools/art_dash_hd.py MOUNT_Y, MOUNT_Z, TILT).
 static func mount() -> Transform3D:
-	return Transform3D(Basis(Vector3.RIGHT, -0.29), Vector3(0, 0.27, -0.70))   # down with the lower seat
+	return Transform3D(Basis(Vector3.RIGHT, -0.34), Vector3(0, 0.33, -0.395))
 
 
 func build() -> void:

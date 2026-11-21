@@ -37,7 +37,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import art_bezel_hd as kit  # noqa: E402  the atlas and its helpers
-from art_cockpit import hull_floor, hull_top  # noqa: E402  the game's own hull stations (rig frame)
+from art_cockpit import OPEN_AX, OPEN_ZC, hull_floor, hull_top, open_az  # noqa: E402  the game's own hull stations (rig frame) and opening
 from art_coaming_hd import ARGS, box, f32, fbm, png, smooth, vnoise  # noqa: E402
 from art_gauges_hd import LEATHER, THREAD, Part, bake, grain  # noqa: E402
 from art_grip_hd import pbr  # noqa: E402
@@ -64,7 +64,7 @@ APRON_AFT = .705                     # ... and on at that height under the bolst
 
 def rim(z):
     """The cockpit opening's edge at station z: (x, the hull's top there)."""
-    x = .72 * math.sqrt(max(0.0, 1 - ((z - .15) / 1.15)**2))
+    x = OPEN_AX * math.sqrt(max(0.0, 1 - ((z - OPEN_ZC) / open_az(z < OPEN_ZC))**2))
     return x, hull_top(x, z)
 
 
@@ -87,7 +87,7 @@ def ease(t):
 def rim_light(z):
     """The rim light's line at station z (cockpit_interior.gd: 0.05 m inside the opening, 0.16 m
     under the hull's top)."""
-    x = .67 * math.sqrt(max(0.0, 1 - ((z - .15) / 1.10)**2))
+    x = .67 * math.sqrt(max(0.0, 1 - ((z - OPEN_ZC) / (open_az(z < OPEN_ZC) - .05))**2))
     return np.array((x, hull_top(x, z) - .16))
 
 

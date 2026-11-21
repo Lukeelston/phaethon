@@ -99,7 +99,7 @@ func _run() -> void:
 		n = -n
 	var off := (middle - Mirror.EYE).normalized().bounce(n)
 	var lands: Vector3 = middle + off * ((Mirror.LIES_AT - middle.y) / off.y)
-	var inside := pow(lands.x / CM.OPEN_AX, 2.0) + pow((lands.z - CM.OPEN_ZC) / CM.OPEN_AZ, 2.0)
+	var inside := pow(lands.x / CM.OPEN_AX, 2.0) + pow((lands.z - CM.OPEN_ZC) / CM.open_az(lands.z), 2.0)
 	_check("a sight line to the screen turns down into the cabin: lands %.2f m ahead of the seat, inside the opening (%.2f)" % [Mirror.EYE.z - lands.z, inside],
 		off.y < -0.3 and inside < 1.0 and lands.z < Mirror.EYE.z)
 	var lens: Transform3D = mirror.looks_from

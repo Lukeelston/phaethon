@@ -81,6 +81,20 @@ const VIEWS := [
 	["s3-slide-switch-from-the-seat", 1.0, false, 0.0, ["pod", Vector3(0.0, 0.12, 0.6), Vector3(-0.585, -0.17, 0.08)]],
 	["s4-slide-switch-close", 1.0, false, 0.0, ["pod", Vector3(-0.3, 0.08, 0.42), Vector3(-0.585, -0.17, 0.08)]],
 	["s5-both-switches-from-the-seat", 1.0, false, 0.0, "seat", 96.0, -30.0],
+	# the points counter with a feat just earned: settled, part way through rolling it in, and from the seat
+	["o1-points-counter-close", 2.0, false, 0.0, ["pod", Vector3(0.0, -0.12, 0.12), Vector3(0.0, -0.39, -0.35)]],
+	["o2-points-counter-rolling", 2.0, false, 0.0, ["pod", Vector3(0.0, -0.12, 0.12), Vector3(0.0, -0.39, -0.35)]],
+	["o3-points-from-the-seat", 2.0, false, 0.0, "seat", 0.0, -16.0],
+	["o4-points-headset-field", 2.0, false, 0.0, "seat", 96.0, -12.0],
+	# the dashboard, with the instruments up under the rim: from the seat, each wing, the brow close to,
+	# leaning forward over it, and its back through the open nose
+	["d1-dash-from-the-seat", 2.0, false, 0.0, "seat", 0.0, -13.0],
+	["d2-dash-right-wing", 1.0, false, 0.0, ["pod", Vector3(0.0, 0.12, 0.6), Vector3(0.56, -0.2, -0.22)]],
+	["d3-dash-left-wing-and-map", 1.0, false, 0.0, ["pod", Vector3(0.0, 0.12, 0.6), Vector3(-0.56, -0.2, -0.22)]],
+	["d4-dash-brow-close", 1.0, false, 0.0, ["pod", Vector3(0.22, 0.02, 0.0), Vector3(0.5, -0.17, -0.34)]],
+	["d5-dash-leaning-forward", 1.0, false, 0.0, ["pod", Vector3(0.0, 0.2, 0.15), Vector3(0.0, -0.2, -0.5)]],
+	["d6-dash-through-the-nose", 1.0, false, 0.0, ["pod", Vector3(0.7, 0.25, -2.3), Vector3(0.0, -0.15, -0.4)]],
+	["d7-dash-foot-right", 1.0, false, 0.0, ["pod", Vector3(0.1, 0.0, 0.3), Vector3(0.5, -0.5, -0.25)]],
 ]
 const MESSAGE := "JUMP LIP  2 MI / 4.0 S
 ASCENT J0 > N2 UPPER
@@ -182,6 +196,11 @@ func _run() -> void:
 		if guided and seat.approach_display:
 			seat.approach_display.set_message(MESSAGE)
 			seat.approach_display._process(1.0)
+		if str(view[0]).begins_with("o") and seat.skill_score and seat.dashboard.has_method("roll"):    # a score on the counter
+			seat.skill_score._award("turn", "HIGH-SPEED PRECISION", 1225)
+			seat._update_hud()
+			seat.dashboard.rolled = float(seat.dashboard.points) - (5.45 if str(view[0]).contains("rolling") else 0.0)
+			seat.dashboard.roll(0.0)
 		if view[4] is String:
 			seat.cam.fov = float(view[5]) if float(view[5]) > 0.0 else wide
 			seat.cam.rotation_degrees = Vector3(-5.5 if float(view[5]) > 0.0 else -3.0, 0.0, 0.0)

@@ -47,8 +47,12 @@ const STRIPE := Color(0.11, 0.12, 0.14)   # the flanks' racing stripe: gunmetal
 const PIN := Color(0.96, 0.95, 0.9)       # the pinstripes where the paint meets the metal
 const PAINT_SY := 0.42                    # paint above this share of the section's half-height
 const UNDERGLOW := Color(0.2, 0.75, 1.0)  # the repulsor glow under the pod (the engines' colour)
-const OPEN_ZC := 0.15        # cockpit opening: an ellipse in plan around the seat
-const OPEN_AZ := 1.15
+const OPEN_ZC := 0.15        # cockpit opening: an egg in plan around the seat, widest at this station ...
+const OPEN_AZ := 1.15        # ... its half-length aft of there ...
+const OPEN_AZ_FRONT := 0.72  # ... and ahead of there: the rail is close in front of the pilot, over a true dashboard
+                             # (Luke: "remove 12 inches of 'legroom' between the gauges and seat. The idea is to have good
+                             # visibility through the smallest opening possible", and of the gauges, "move it up to the
+                             # rail"). It was 1.15 either way: the rail 1.6 m ahead of the eye, the gauges alone in the well.
 const OPEN_AX := 0.72
 const SKIN := 0.035          # hull thickness (outer skin to inner trim)
 const CAGE_Z0 := -0.6        # the nose is an open tube cage from here (the footwell) ...
@@ -485,8 +489,19 @@ static func hull_top(x: float, z: float) -> float:
 	return h[1] + h[2] * pow(1.0 - pow(u, HULL_N), 1.0 / HULL_N)
 
 
+## The opening's half-length on the side of its widest point that station z is on.
+static func open_az(z: float) -> float:
+	return OPEN_AZ_FRONT if z < OPEN_ZC else OPEN_AZ
+
+
+## The opening's edge at angle ph round it (the nose at -90 degrees, the right side at 0), in plan: (x, z).
+static func open_edge(ph: float) -> Vector2:
+	var s := sin(ph)
+	return Vector2(OPEN_AX * cos(ph), OPEN_ZC + (OPEN_AZ_FRONT if s < 0.0 else OPEN_AZ) * s)
+
+
 static func _in_opening(x: float, z: float) -> bool:
-	return pow(x / OPEN_AX, 2.0) + pow((z - OPEN_ZC) / OPEN_AZ, 2.0) < 1.0
+	return pow(x / OPEN_AX, 2.0) + pow((z - OPEN_ZC) / open_az(z), 2.0) < 1.0
 
 
 const LIP_R := 0.055
@@ -507,14 +522,12 @@ static func hull_clearance(p: Vector3, margin := 0.01) -> String:
 	var a: float = h[0] - SKIN - margin
 	var b: float = h[2] - SKIN - margin
 	var inside: bool = a > 0.0 and b > 0.0 and pow(absf(p.x) / a, HULL_N) + pow(absf(p.y - h[1]) / b, HULL_N) <= 1.0
-	var in_open: bool = p.y > h[1] and pow(p.x / (OPEN_AX - margin), 2.0) + pow((p.z - OPEN_ZC) / (OPEN_AZ - margin), 2.0) < 1.0
+	var in_open: bool = p.y > h[1] and pow(p.x / (OPEN_AX - margin), 2.0) + pow((p.z - OPEN_ZC) / (open_az(p.z) - margin), 2.0) < 1.0
 	if not inside and not in_open:
 		return "through the skin"
 	for k in 192:
-		var ph := TAU * k / 192.0
-		var x := OPEN_AX * cos(ph)
-		var z := OPEN_ZC + OPEN_AZ * sin(ph)
-		if p.distance_to(Vector3(x, hull_top(x, z), z)) < LIP_R + margin:
+		var edge := open_edge(TAU * k / 192.0)
+		if p.distance_to(Vector3(edge.x, hull_top(edge.x, edge.y), edge.y)) < LIP_R + margin:
 			return "into the lip"
 	return ""
 
@@ -624,10 +637,8 @@ static func pod_hull() -> ArrayMesh:
 	var r := LIP_R
 	var ring_pts := []
 	for k in nl + 1:
-		var ph := TAU * k / nl
-		var x := OPEN_AX * cos(ph)
-		var z := OPEN_ZC + OPEN_AZ * sin(ph)
-		ring_pts.append(Vector3(x, hull_top(x, z), z))
+		var edge := open_edge(TAU * k / nl)
+		ring_pts.append(Vector3(edge.x, hull_top(edge.x, edge.y), edge.y))
 	var lip_pts := []
 	var centres := []
 	for k in nl + 1:

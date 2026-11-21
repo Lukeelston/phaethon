@@ -49,7 +49,7 @@ func _run() -> void:
 					for col in arrays[Mesh.ARRAY_COLOR]:
 						if absf(col.r - World.JUMP_AMBER.r) + absf(col.g - World.JUMP_AMBER.g) + absf(col.b - World.JUMP_AMBER.b) < 0.01:
 							vertices += 1
-	_check("twenty highway and twenty ramp approaches", highway_routes == 20 and ramp_routes == 20)
+	_check("a highway and a ramp approach for every jump: twenty at the crossings and the Mesa gap", highway_routes == 21 and ramp_routes == 21)
 	_check("guidance is present in the committed glowing road mesh", vertices > 1000)
 	print("APPROACH PAINT ", "PASS" if failed == 0 else "FAIL", " highways=", highway_routes, " ramps=", ramp_routes, " amber vertices=", vertices)
 	quit(0 if failed == 0 else 1)

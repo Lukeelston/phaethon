@@ -64,8 +64,9 @@ static func available() -> bool:
 ## A point on the roof's windscreen: u across (left .. right), v from the rim up to the header.
 static func screen(u: float, v: float) -> Vector3:
 	var ph := deg_to_rad(-90.0 - A_DEG + 2.0 * A_DEG * u)
-	var x := CM.OPEN_AX * cos(ph)
-	var z := CM.OPEN_ZC + CM.OPEN_AZ * sin(ph)
+	var edge := CM.open_edge(ph)
+	var x := edge.x
+	var z := edge.y
 	var foot := Vector3(x, CM.hull_top(x, z) + 0.052, z)
 	var w := 2.0 * u - 1.0
 	var head := Vector3(0.41 * w, 0.47 - 0.035 * w * w, 0.30 + 0.14 * w * w)
@@ -100,7 +101,7 @@ static func lands(eye: Vector3, p: Vector3, n: Vector3) -> Vector3:
 
 ## A cabin point in plan: 0 at the opening's middle, 1 at the coaming's outer edge.
 static func plan(at: Vector3) -> float:
-	return pow(at.x / (CM.OPEN_AX + 0.17), 2.0) + pow((at.z - CM.OPEN_ZC) / (CM.OPEN_AZ + 0.17), 2.0)
+	return pow(at.x / (CM.OPEN_AX + 0.17), 2.0) + pow((at.z - CM.OPEN_ZC) / (CM.open_az(at.z) + 0.17), 2.0)
 
 
 func build(canopy: Node3D, cockpit: Node3D, show: Array = []) -> void:
@@ -139,7 +140,7 @@ func build(canopy: Node3D, cockpit: Node3D, show: Array = []) -> void:
 	surface.set_shader_parameter("lamps", LAMPS)
 	surface.set_shader_parameter("lies_at", LIES_AT)
 	surface.set_shader_parameter("reach", REACH)
-	surface.set_shader_parameter("opening", Vector4(CM.OPEN_AX + 0.17, CM.OPEN_AZ + 0.17, CM.OPEN_ZC, 0.0))   # the opening and the coaming round it
+	surface.set_shader_parameter("opening", Vector4(CM.OPEN_AX + 0.17, CM.OPEN_AZ + 0.17, CM.OPEN_ZC, CM.OPEN_AZ_FRONT + 0.17))   # the opening and the coaming round it
 	sheet.name = "sheet"
 	sheet.material_override = surface
 	sheet.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF

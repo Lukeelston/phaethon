@@ -57,6 +57,7 @@ const WINDOWS := [
 	["status", -0.25, -0.128, 0.19, 0.032, 0.016],
 	["systems", 0.25, -0.128, 0.19, 0.032, 0.016],
 ]
+const ODOMETER := [0.0, -0.1275, 0.0375, 0.012, 0.005, 6]   # the points counter: centre x, centre y, half width, half height, stand-off, drums
 const SPEED_WINDOW := [-0.5, -0.62, 0.5, -0.22]   # on the centre face: left, bottom, right, top
 const GEAR_WINDOW := [-0.115, 0.215, 0.115, 0.435]
 const LAMPS := ["backlight", "armed", "ramjet", "burner", "flameoutL", "flameoutR", "hotL", "hotR", "turbines", "bat0", "bat1", "bat2", "bat3", "bat4", "bat5", "bat6", "bat7", "bat8", "bat9", "bat10", "bat11", "hpL0", "hpL1", "hpL2", "hpL3", "hpL4", "hpL5", "hpL6", "hpL7", "hpR0", "hpR1", "hpR2", "hpR3", "hpR4", "hpR5", "hpR6", "hpR7", "lcd"]

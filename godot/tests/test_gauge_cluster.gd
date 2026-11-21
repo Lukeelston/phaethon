@@ -7,7 +7,7 @@ extends SceneTree
 const Cluster := preload("res://vr/gauge_cluster.gd")
 const Layout := preload("res://vr/gauge_layout.gd")
 const CraftModel := preload("res://view/craft_model.gd")
-const CHECKS := 20
+const CHECKS := 26
 var fails := 0
 var passed := 0
 var d
@@ -16,6 +16,12 @@ var frames := 0
 
 func _near(a: float, b: float) -> bool:
 	return absf(a - b) < 0.01
+
+
+## Roll the points counter for some seconds, a twentieth at a time.
+func _roll(seconds: float) -> void:
+	for i in roundi(seconds / 0.05):
+		d.roll(0.05)
 
 
 func _initialize() -> void:
@@ -61,6 +67,36 @@ func _initialize() -> void:
 		not EngineAudio.turbines_at(1999.0, false) and EngineAudio.turbines_at(2000.0, false)
 		and EngineAudio.turbines_at(1700.0, true) and not EngineAudio.turbines_at(1699.0, true))
 	_check("a low battery turns its arc red, and no gear blanks the digit", Color(d.lamps.bat0, 1.0) == d.RED and d.labels.gear.text == "" and not d.labels.gear_lbl.visible)
+	# the points counter between the strips, and the feat on the strip beside it
+	var run := {"mph": 2000.0, "kmh": 3218.0, "mach_line": "MACH 2.6", "progress": "", "footer": "SPEED   /   TRIGGER THROTTLES", "thr": [1.0, 1.0], "brk": [0.0, 0.0],
+		"heat": [0.2, 0.2], "health": [1.0, 1.0], "flameout": [false, false], "battery": 1.0, "burner": false, "armed": false, "ramjet": false, "blink": true}
+	d.show_state(run)
+	_check("with no score the counter stands at zero and the strip shows the handling", d.points == 0 and d.rolled == 0.0 and d.labels.footer.visible and not d.labels.feat.visible)
+	run.merge({"points": 1225, "feat": "HIGH-SPEED PRECISION  +1225", "feat_age": 0.4})
+	d.show_state(run)
+	_roll(0.35)
+	var half_way: float = d.rolled
+	_roll(0.4)
+	_check("an award rolls in evenly over 0.7 s (%.0f of 1,225 after 0.35 s, then %.0f), and the drums are sent it" % [half_way, d.rolled],
+		absf(half_way - 612.5) < 1.0 and d.rolled == 1225.0 and float(d._drum_mat.get_shader_parameter("value")) == 1225.0 and d.labels.points.text == "1225")
+	_check("the feat is read on the strip beside it, in the handling's place (%s)" % d.labels.feat.text,
+		d.labels.feat.visible and d.labels.feat.text == "HIGH-SPEED PRECISION  +1225" and not d.labels.footer.visible and d.labels.feat.modulate.a == 1.0)
+	run.merge({"points": 1240, "feat": "VELOCITY  +15", "feat_age": 3.5}, true)
+	d.show_state(run)
+	_roll(0.35)
+	var small: float = d.rolled
+	_roll(0.4)
+	_check("a small award still takes its time (%.1f after 0.35 s, then %.0f), and an older feat is dimmer (%.2f)" % [small, d.rolled, d.labels.feat.modulate.a],
+		small > 1231.0 and small < 1234.0 and d.rolled == 1240.0 and d.labels.feat.visible and d.labels.feat.modulate.a < 0.6)
+	run.merge({"feat_age": 7.0}, true)
+	d.show_state(run)
+	_check("after six seconds the strip goes back to the handling", d.labels.footer.visible and not d.labels.feat.visible)
+	run.merge({"points": 0, "feat": "", "feat_age": 1e9}, true)
+	d.show_state(run)
+	_roll(0.2)
+	var back: float = d.rolled
+	_roll(0.2)
+	_check("a new run spins it back to zero in half the time (%.0f after 0.2 s, then %.0f)" % [back, d.rolled], back > 400.0 and back < 660.0 and d.rolled == 0.0)
 	# the longest things the strips show, for the clearance pass (labels size to their text)
 	d.show_state({"mph": 5387.0, "kmh": 8669.0, "mach_line": "MACH 7.0   MILE / 0.67 s",
 		"progress": "STOPPED IN BOX  95.46s   6.9 ft off   braked 4.47 mi out\nBEST 95.46s   (Y: go again)",

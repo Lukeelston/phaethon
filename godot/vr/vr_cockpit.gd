@@ -109,6 +109,8 @@ var lever_tips: Array[StandardMaterial3D] = []
 var dashboard   # the instruments: the gauge cluster (vr/gauge_cluster.gd), or the flat panel (vr/dashboard.gd)
 var _skill_readout: Label3D
 var _skill_award: Label3D
+var _skill_shown := {}      # the score as it was last drawn (view/skill_display.gd): the cluster's counter and feat line read it too
+var _skill_on := true
 var wag = WagMeterScript.new()        # the nose wag since the last report (a WAG: line every 10 s)
 var wag_all = WagMeterScript.new()    # ... over the whole flight (on exit)
 var fade_mat: StandardMaterial3D
@@ -538,8 +540,9 @@ func _build_cockpit() -> void:
 		knob.add_child(indicator)
 		lever_pivots.append(pivot)
 		lever_tips.append(km)
-	# instrument panel: curved round the eye, inside the cockpit opening (clear of the hull),
-	# low enough that the nose and its cable hardpoints still show over the top
+	# instrument panel: curved round the eye, inside the cockpit opening (clear of the hull), up
+	# under its rim on the dashboard (the interior builds that), low enough that the nose and its
+	# cable hardpoints still show over the top
 	CockpitInteriorScript.instrument_rails = not GaugeClusterScript.available()
 	interior = CockpitInteriorScript.new()   # floor, frames, consoles, harness, rim light
 	shell.add_child(interior)
@@ -1174,6 +1177,7 @@ func _update_hud() -> void:
 	dashboard.show_state({
 		"mph": kmh / 1.609344, "kmh": kmh, "mach": cues.mach, "backlight": 0.5 if light_preset == "twilight" else 1.0, "mach_line": cues.readout(), "progress": progress,
 		"footer": "%s   /   %s" % [handling_text(), ctl],
+		"points": int(_skill_shown.get("points", 0)) if _skill_on else 0, "feat": String(_skill_shown.get("award", "")) if _skill_on else "", "feat_age": float(_skill_shown.get("age", 1e9)),
 		"thr": [inp.thrL, inp.thrR], "brk": [inp.brkL, inp.brkR], "heat": [sim.eL.heat, sim.eR.heat],
 		"health": [sim.eL.health, sim.eR.health],
 		"flameout": [sim.eL.flameout, sim.eR.flameout], "battery": sim.battery,
@@ -1217,6 +1221,7 @@ func _update_skill_readout() -> void:
 			cam.add_child(label)
 	if skill_score:
 		var display := _skill_display.update(skill_score)
+		_skill_shown = display
 		var weight: float = display.emphasis
 		# Leave the centre of the windscreen free while the projector is deployed.
 		var guidance_visible := approach_display != null and approach_display.panel.visible
@@ -1232,14 +1237,20 @@ func _update_skill_readout() -> void:
 		_skill_award.text = display.award
 		_skill_award.modulate = Color(0.65, 0.96, 0.9, weight)
 		_skill_award.outline_modulate.a = 0.95 * weight
+	# In the seat the gauge cluster's own counter and the strip beside it carry these (Luke: "points on
+	# an odometer roller, with a digital readout next to it of the feat"). They float by the view only
+	# outside, where the gauges are out of reading distance, and over the flat panel, which has neither.
+	var floating: bool = _skill_on and (camera != "cockpit" or not dashboard.has_method("roll"))
+	_skill_readout.visible = floating
+	_skill_award.visible = floating
 
 
 func _set_skill_visible(on: bool) -> void:
 	super(on)
-	if _skill_readout:
-		_skill_readout.visible = on
-	if _skill_award:
-		_skill_award.visible = on
+	_skill_on = on            # (_update_skill_readout shows them, or leaves them to the cluster)
+	if _skill_readout and not on:
+		_skill_readout.visible = false
+		_skill_award.visible = false
 
 
 func _exit_tree() -> void:

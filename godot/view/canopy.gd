@@ -29,7 +29,9 @@ static var probe := ""            # (timings only: "no-glass" leaves the roof's 
 const HEADLINER_GLOW := 0.5       # the roof's own light, as a share of its colour
 const PH0 := deg_to_rad(-152.0)    # the screen's arc round the front of the opening ...
 const PH1 := deg_to_rad(-28.0)
-const SCREEN_H := 0.5              # ... and its height at the middle (an ellipse in outline): you look through the glass, the frame well above the horizon
+const SCREEN_H := 0.43             # ... and its height at the middle (an ellipse in outline): you look through the glass, the frame well above the horizon.
+                                   # (0.5 while the opening's front was 0.43 m further off. Standing nearer, a screen that tall put its frame 16 degrees
+                                   # up, through the approach guidance's lines; at this height it is 11 degrees up, where it was.)
 const RAKE := deg_to_rad(48.0)     # leaning back toward the pilot from vertical
 const FIELD_C := Vector3(0.0, 0.1, -0.85)   # the field's centre and radii, pod-local
 const FIELD_R := Vector3(1.55, 0.95, 2.7)
@@ -122,8 +124,9 @@ static func roof_available() -> bool:
 ## A point on the screen: arc position u (0..1 across) and v (0 on the lip .. 1 at the top edge).
 static func screen_point(u: float, v: float) -> Vector3:
 	var ph := lerpf(PH0, PH1, u)
-	var x := CM.OPEN_AX * cos(ph)
-	var z := CM.OPEN_ZC + CM.OPEN_AZ * sin(ph)
+	var edge := CM.open_edge(ph)
+	var x := edge.x
+	var z := edge.y
 	var base := Vector3(x, CM.hull_top(x, z) + CM.LIP_R * 0.7, z)
 	var w := 2.0 * u - 1.0
 	var h := SCREEN_H * sqrt(maxf(0.0, 1.0 - w * w))       # an oblong: tallest in the middle

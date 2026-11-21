@@ -10,7 +10,7 @@
 ##              top with its up pointing down, the right way up again, the frame never jumps (no step
 ##              between frames over ~1.5x the speed), and it comes out on the same highway the other way
 ##   stall      no throttle at 300 mph: gravity stops it on the climb and it slides back
-##   sides      fourteen side roads (twelve off the straight highways, the coast road and the drop), every one with corners a board names (a speed and a gear), at least
+##   sides      twenty S roads; the first fourteen (twelve off the straight highways, the coast road and the drop; the backroads and stunt roads came later and sweep), every one with corners a board names (a speed and a gear), at least
 ##              two gears' worth on each, none slower than second
 ##   partner    on E2 at 4,000 mph: it passes within 400 m while staying on the road;
 ##              braking matches speed without cancelling a safe pass; shafts retain close formation
@@ -235,12 +235,17 @@ func _sides(sim) -> void:
 			n_side += 1
 			var gs: Dictionary = gears.get(r.name, {})
 			shifts = shifts and not gs.is_empty() and not gs.has("GEAR 1")
+	# (Codex's four backroads and two stunt roads are S roads too: long sweeps, one gear's worth of
+	# corners each. The twelve side roads, the coast road and the drop still want two.)
 	var two := 0
-	for nm in gears:
-		if gears[nm].size() >= 2:
+	var twisty := 0
+	for nm: String in gears:
+		var first_built: bool = nm in ["SCoast", "SDrop"] or nm.trim_prefix("S").is_valid_int()
+		twisty += int(first_built)
+		if first_built and gears[nm].size() >= 2:
 			two += 1
-	_check("sides: %d side roads, all with corner boards (%d); %d with two gears' worth of corners; none in first (%s); e.g. %s" % [n_side, roads.size(), two, shifts, gears.get("S0", {}).keys()],
-		n_side == 14 and roads.size() == 14 and two == 14 and shifts and W.gear_for(2100.0) == 2 and W.gear_for(3000.0) == 3)
+	_check("sides: %d S roads, all with corner boards (%d); the %d side and scenic roads each with two gears' worth of corners (%d); none in first (%s); e.g. %s" % [n_side, roads.size(), twisty, two, shifts, gears.get("S0", {}).keys()],
+		n_side == 20 and roads.size() == 20 and twisty == 14 and two == 14 and shifts and W.gear_for(2100.0) == 2 and W.gear_for(3000.0) == 3)
 
 
 func _partner(sim) -> void:

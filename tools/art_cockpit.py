@@ -178,10 +178,20 @@ def hull_floor(x,z,inside=.035):
     return .6+(hi+lo)*.5-((hi-lo)*.5-inside)*(1-min(abs(x)/(w-inside),1.0)**2.6)**(1/2.6)
 
 
+# The cockpit opening, as craft_model.gd has it: an egg in plan, widest at OPEN_ZC, running OPEN_AZ
+# aft of there and OPEN_AZ_FRONT ahead of it.
+OPEN_AX, OPEN_ZC, OPEN_AZ, OPEN_AZ_FRONT = .72, .15, 1.15, .72
+
+
+def open_az(front):
+    return OPEN_AZ_FRONT if front else OPEN_AZ
+
+
 def coaming_point(degrees, angle, radius):
     a, p = map(math.radians,(degrees,angle))
-    x,z = .72*math.sin(a), .15-1.15*math.cos(a)
-    rx,rz = -math.sin(a)/.72, math.cos(a)/1.15
+    az = open_az(math.cos(a) > 0)
+    x,z = OPEN_AX*math.sin(a), OPEN_ZC-az*math.cos(a)
+    rx,rz = -math.sin(a)/OPEN_AX, math.cos(a)/az
     length = math.hypot(rx,rz)
     return x+rx/length*radius*math.cos(p), hull_top(x,z)+radius*math.sin(p), z+rz/length*radius*math.cos(p)
 

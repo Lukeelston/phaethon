@@ -24,6 +24,7 @@ import gauge_layout as L  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 ATLAS, LAYOUT = ROOT / "godot/art/cockpit/gauge_faces.png", ROOT / "godot/vr/gauge_layout.gd"
+DRUMS = ROOT / "godot/art/cockpit/odometer_digits.png"
 FONT = sys.argv[sys.argv.index("--font") + 1] if "--font" in sys.argv else r"C:\Program Files\Blender Foundation\Blender 5.1\5.1\datafiles\fonts\Inter.woff2"
 RES, S, FILL = 2048, 3, .97               # atlas size, supersampling, and how much of its cell a dial fills
 BLACK, WHITE, ORANGE, RED, AMBER = (9, 9, 10), (238, 238, 232), (255, 98, 20), (232, 32, 26), (255, 172, 48)
@@ -257,6 +258,7 @@ def main():
     lines.append("const ARCS := [\n\t%s,\n]" % ",\n\t".join(gd(list(a)) for a in L.ARCS))
     lines.append("# key, centre x, centre y, half width, half height, stand-off")
     lines.append("const WINDOWS := [\n\t%s,\n]" % ",\n\t".join(gd(list(w)) for w in L.WINDOWS))
+    lines.append("const ODOMETER := %s   # the points counter: centre x, centre y, half width, half height, stand-off, drums" % gd(list(L.ODOMETER)))
     lines.append("const SPEED_WINDOW := %s   # on the centre face: left, bottom, right, top" % gd(list(L.SPEED_WINDOW)))
     lines.append("const GEAR_WINDOW := %s" % gd(list(L.GEAR_WINDOW)))
     lines.append("const LAMPS := %s" % gd(L.LAMPS))
@@ -266,5 +268,20 @@ def main():
     print("Wrote", ATLAS, ATLAS.stat().st_size, "bytes;", LAYOUT.name, len(L.LAMPS), "lamps,", len(telltales), "legends")
 
 
+def drum_numerals():
+    """The points counter's drums (vr/odometer.gdshader): the ten figures stacked in one strip, 0 at
+    the top, each in a square cell, as how much of each texel is print."""
+    cell = 128
+    strip = Image.new("L", (cell * S, cell * 10 * S), 0)
+    draw = ImageDraw.Draw(strip)
+    cap = cell * S * .60
+    face = font(cap, 640)
+    for n in range(10):
+        draw.text((cell * S / 2, (n + .5) * cell * S + cap / 2), str(n), font=face, fill=255, anchor="ms")
+    strip.resize((cell, cell * 10), Image.LANCZOS).save(DRUMS)
+    print("Wrote", DRUMS, DRUMS.stat().st_size, "bytes")
+
+
 if __name__ == "__main__":
     main()
+    drum_numerals()

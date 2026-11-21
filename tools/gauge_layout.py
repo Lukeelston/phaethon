@@ -70,6 +70,12 @@ def frame(x, y):
 # and how far the flat module's face stands off the curved fascia at its middle.
 WINDOWS = [("status", -.250, -.128, .190, .032, .016), ("systems", .250, -.128, .190, .032, .016)]
 
+# The points counter (Luke: "points on an odometer roller, with a digital readout next to it of the
+# feat"): a small drum counter in the fascia between the two strips, under the centre dial. Its
+# window's centre x and y, half width and half height, how far its face stands off the fascia, and
+# how many drums. The feat is read on the strip beside it (the systems strip's lower line).
+ODOMETER = (.0, -.1275, .0375, .0120, .0050, 6)
+
 # ---- what each face shows (radii as fractions of the face radius) ----
 # needle: key, gauge, a0 (value 0), a1 (value 1), length, shown full scale
 NEEDLES = [
