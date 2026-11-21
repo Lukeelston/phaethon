@@ -137,6 +137,15 @@ func _run() -> void:
 			only = arg.trim_prefix("--views=").split(",")
 		if arg.begins_with("--pose="):
 			pose = int(arg.trim_prefix("--pose="))
+	var outlook := preload("res://view/outlook.gd")      # (--time=night --weather=clear: the panel after dark)
+	outlook.pinned = true
+	outlook.time = "afternoon"
+	outlook.weather = "fair"
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--time="):
+			outlook.time = arg.trim_prefix("--time=")
+		if arg.begins_with("--weather="):
+			outlook.weather = arg.trim_prefix("--weather=")
 	root.msaa_3d = Viewport.MSAA_4X
 	DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
 	Seat._nose_loaded = true        # (the pilot's saved choices stay out of the pictures)
