@@ -66,13 +66,21 @@ func _run() -> void:
 			traffic.cars.append(c)
 			traffic._render()
 			traffic._feed()
-			var mm: MultiMesh = traffic._mm[Traffic.TRANSPORT].multimesh
+			var tractor = traffic._mm[Traffic.TRACTOR]
+			var trailer = traffic._mm[Traffic.TRANSPORT]
+			var heads: int = tractor.multimesh.visible_instance_count + tractor.distant.visible_instance_count
+			var trailers: int = trailer.multimesh.visible_instance_count + trailer.distant.visible_instance_count
+			var next_index := {}
 			var obstacles: Array = sim.obstacles.filter(func(o): return int(o.id) >= 7 * 32 and int(o.id) < 8 * 32)
-			_check("shaft train renders and collides all cars", mm.visible_instance_count == Traffic.TRAIN and obstacles.size() == Traffic.TRAIN * 2)
+			_check("shaft train renders and collides all cars", heads == 1 and trailers == Traffic.TRAIN - 1 and obstacles.size() == Traffic.TRAIN * 2)
 			for k in Traffic.TRAIN:
 				var f: float = c.f - direction * k * Traffic.TRAIN_GAP / 24.0
-				var actual: Transform3D = mm.get_instance_transform(k)
 				var expected: Vector3 = world.shaft.point(r, f, c.lat, 1.0, c.x, c.y)
+				var batch = tractor if k == 0 else trailer
+				var buffer: MultiMesh = batch.multimesh if expected.length_squared() <= 500.0 * 500.0 else batch.distant
+				var index: int = next_index.get(buffer, 0)
+				var actual: Transform3D = buffer.get_instance_transform(index)
+				next_index[buffer] = index + 1
 				var up: Vector3 = world.shaft.at(r, f)[5]
 				_check("shaft traffic bounds contain visible car", traffic._mm[Traffic.TRANSPORT].custom_aabb.has_point(expected))
 				_check("shaft light bounds contain visible car", traffic._beams.custom_aabb.has_point(expected))

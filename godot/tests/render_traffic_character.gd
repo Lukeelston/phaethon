@@ -11,8 +11,8 @@ var out_dir := ""
 var frames := 0
 var shot := 0
 var pictures: Array[Image] = []
-var names := ["commuter", "shuttle", "hotrod", "freight", "racer", "driver_distance"]
-var colors := [Color(0.2, 0.48, 0.72), Color(0.82, 0.75, 0.53), Color(0.85, 0.12, 0.43), Color(0.95, 0.53, 0.12), Color(0.36, 0.8, 0.98)]
+var names := ["commuter", "shuttle", "hotrod", "freight", "racer", "tractor", "driver_distance"]
+var colors := [Color(0.2, 0.48, 0.72), Color(0.82, 0.75, 0.53), Color(0.85, 0.12, 0.43), Color(0.95, 0.53, 0.12), Color(0.36, 0.8, 0.98), Color(0.92, 0.58, 0.28)]
 
 
 func _initialize() -> void:
@@ -65,13 +65,13 @@ func _place() -> void:
 	for kind in traffic._mm:
 		var mm: MultiMesh = traffic._mm[kind].multimesh
 		mm.visible_instance_count = 0
-		if shot == kind or shot == 5:
-			var p := Vector3.ZERO if shot < 5 else Vector3((kind - 2) * 24.0, 0.0, -100.0 - kind * 14.0)
+		if shot == kind or shot == names.size() - 1:
+			var p := Vector3.ZERO if shot < names.size() - 1 else Vector3((kind - 2) * 24.0, 0.0, -100.0 - kind * 14.0)
 			mm.set_instance_transform(0, Transform3D(Basis().scaled(Vector3.ONE * 2.0), p))
 			mm.set_instance_color(0, colors[kind])
 			mm.visible_instance_count = 1
 	traffic._beams.multimesh.visible_instance_count = 0
-	if shot < 5:
+	if shot < names.size() - 1:
 		camera.position = Vector3(28, 17, -37)
 		camera.look_at(Vector3(0, 3, 0))
 	else:
@@ -89,7 +89,7 @@ func _process(_delta: float) -> bool:
 	pictures.append(img)
 	shot += 1
 	if shot == names.size():
-		var sheet := Image.create(1600, 1350, false, Image.FORMAT_RGB8)
+		var sheet := Image.create(1600, 450 * ceili(float(pictures.size()) / 2.0), false, Image.FORMAT_RGB8)
 		for i in pictures.size():
 			var tile := pictures[i].duplicate() as Image
 			tile.resize(800, 450, Image.INTERPOLATE_LANCZOS)

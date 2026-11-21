@@ -1,0 +1,11 @@
+[gd_resource type="ShaderMaterial" format=3]
+
+[ext_resource type="Shader" path="res://art/traffic/fleet.gdshader" id="1"]
+[ext_resource type="Texture2D" path="res://art/traffic/fleet_color.png" id="2"]
+[ext_resource type="Texture2D" path="res://art/traffic/fleet_finish.png" id="3"]
+
+[resource]
+shader = ExtResource("1")
+shader_parameter/fleet_color = ExtResource("2")
+shader_parameter/fleet_finish = ExtResource("3")
+

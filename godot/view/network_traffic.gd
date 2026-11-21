@@ -10,7 +10,7 @@
 ##              the right: slow pods and trains keep right, demons left
 ##   kinds      cars (2,000-3,000 mph, 30% faster on express decks), slow pods (1,000-1,500),
 ##              speed demons (4,000-4,800, 10% faster on express decks, weaving), transport pods
-##              (road trains of 8 freight cars, ~1,600 mph, the outside lane). Higher roads have
+##              (a tractor hauling seven freight cars, ~1,600 mph, the outside lane). Higher roads have
 ##              more hot rods and racers; lower roads have more shuttles and freight.
 ##   driving    each keeps a headway to the one ahead in its lane (the craft counts) or changes lane
 ##              when it can; slows for curves (its own grip) and the cities' STARFIGHTER zones; at a
@@ -28,8 +28,9 @@
 ##   t.update(delta)     every frame, after the sim's steps (sets sim.obstacles for the next ones)
 extends Node3D
 
-const Kit := preload("res://view/mesh_kit.gd")
-const TrafficModels := preload("res://view/traffic_models.gd")
+const Simulation := preload("res://sim/craft_sim.gd")
+const RoadWorld := preload("res://view/network_world.gd")
+const Batch := preload("res://view/traffic_batch.gd")
 const MPH := 2.236936
 const G := 9.81
 const LANES_HWY := [-157.5, -112.5, -67.5, -22.5, 22.5, 67.5, 112.5, 157.5]   # m left of the centreline
@@ -54,6 +55,13 @@ const BRAKE_BY := [0.0, 250.0, 500.0, 1000.0, 2000.0, 3000.0, 4500.0, 6000.0, 80
 	# before it (a limit read at 500 m may start at 251: braked for at 500 they crossed a zone's edge 70 mph over)
 const AFTER := [0.0, 1000.0, 2000.0, 3500.0, 5000.0, 7000.0, 9000.0, 11000.0, 13000.0, 15000.0, 20000.0, 28000.0, 38000.0, 50000.0]   # m along a road it'll take: where its limits are read
 enum { CAR, SLOW, DEMON, TRANSPORT, RACER }
+const TRACTOR := 5 # Render slot for the lead unit of a transport.
+const FLEET := [
+	preload("res://art/traffic/commuter.glb"), preload("res://art/traffic/shuttle.glb"),
+	preload("res://art/traffic/demon.glb"), preload("res://art/traffic/cargo.glb"),
+	preload("res://art/traffic/racer.glb"), preload("res://art/traffic/tractor.glb"),
+]
+const NUMBER_BOARDS := {"VEGA": 0.0, "KESTREL": 1.0/3.0, "MARROW": 2.0/3.0, "TALLOW": 1.0}
 # [top mph, lateral grip g, headway s, colour]: a racer's style
 const RACERS := {
 	"VEGA": [6300.0, 7.0, 0.5, Color(1.0, 0.25, 0.65)],      # a straight-line monster, soft in the bends
@@ -69,6 +77,7 @@ const RACE_WIN := 1609.344       # a mile
 
 class Car:
 	var id := 0
+	var sort_entry := [0.0, 0]
 	var kind := 0
 	var road := 0
 	var f := 0.0          # fractional sample along its road
@@ -107,9 +116,9 @@ class Car:
 	var owed := 0.0       # s since it was last driven (a far one is driven every other frame)
 
 
-var sim
+var sim: Simulation
 var view
-var world
+var world: RoadWorld
 var cars: Array[Car] = []
 var _next_id := 1
 var _rng := RandomNumberGenerator.new()
@@ -154,7 +163,7 @@ func build(s, v, w) -> void:
 		_brake_at_s.append(float(BRAKE_AT[k]) / 24.0)
 		_brake_by.append(float(BRAKE_BY[k]))
 	for r in sim.roads.size():
-		var R = sim.roads[r]
+		var R := sim.roads[r]
 		var lim := PackedFloat32Array()
 		lim.resize(R.N)
 		var kap := PackedFloat32Array()   # each sample's turn per metre (the cross product of its tangents)
@@ -174,7 +183,7 @@ func build(s, v, w) -> void:
 		_lanes.append(LANES_HWY if R.w[0] >= 300.0 else LANES_RAMP)
 		_switch.append([])
 	for J in sim.junctions:
-		var C = sim.roads[int(J[3])]
+		var C := sim.roads[int(J[3])]
 		if C.role != "":
 			continue   # the jumps and the on-ramps from the open ground: not traffic's
 		var cb: int = 0 if int(J[4]) == 0 else C.N - 1
@@ -192,10 +201,10 @@ func build(s, v, w) -> void:
 					continue
 				if qz1 == sim.roads[q].N - 1 and dq > 0:
 					continue
-				var R = sim.roads[r]
+				var R := sim.roads[r]
 				var to_end: int = (R.N - 1 - at) if d > 0 else at
 				var after := []   # the road beyond: [m on, its limit there (the vlim code)]
-				var Q = sim.roads[q]
+				var Q := sim.roads[q]
 				for dd in AFTER:
 					var qi := clampi(iq + dq * int(dd / 24.0), 0, Q.N - 1)
 					after.append([dd, _vlim[q][qi]])
@@ -214,7 +223,7 @@ func update(delta: float) -> void:
 	# drop the far ones, spawn round the edge
 	for k in range(cars.size() - 1, -1, -1):
 		var c := cars[k]
-		if c != racer and Vector2(c.x - px, c.y - py).length() > R_KEEP:
+		if c != racer and Vector2(c.x - px, c.y - py).length_squared() > R_KEEP * R_KEEP:
 			cars.remove_at(k)
 	var tries := 0
 	var want := _target(px, py)
@@ -237,7 +246,7 @@ func update(delta: float) -> void:
 			var c := cars[k]
 			if c.road != proad or c.dir == pdir or c == racer:
 				continue
-			if Vector2(c.x - px, c.y - py).length() > FLIP_FAR:
+			if Vector2(c.x - px, c.y - py).length_squared() > FLIP_FAR * FLIP_FAR:
 				c.lane = _lanes[c.road].size() - 1 - c.lane   # the same place across, the other way
 				c.dir = pdir
 				_place(c)
@@ -249,7 +258,28 @@ func update(delta: float) -> void:
 			buckets[key] = []
 		buckets[key].append(pod_car)
 	for key in buckets:
-		(buckets[key] as Array).sort_custom(func(a, b): return a.f * a.dir < b.f * b.dir)
+		var group: Array = buckets[key]
+		if group.size() < 2:
+			continue
+		# Native sort compares exact double positions. The original index breaks
+		# ties on eight-lane grids and retrieves the original car after sorting.
+		var order: Array = []
+		order.resize(group.size())
+		var previous := -INF
+		var sorted := true
+		for i in group.size():
+			var car: Car = group[i]
+			var along := car.f * car.dir
+			sorted = sorted and along >= previous
+			previous = along
+			car.sort_entry[0] = along
+			car.sort_entry[1] = i
+			order[i] = car.sort_entry
+		if not sorted:
+			order.sort()
+			var input := group.duplicate()
+			for i in order.size():
+				group[i] = input[order[i][1]]
 	for key in buckets:
 		var arr: Array = buckets[key]
 		for idx in arr.size():
@@ -284,8 +314,8 @@ func _lane_lat(c: Car, lane: int) -> float:
 
 ## The craft as a vehicle (for the others' headways): its road, its way, its place across.
 func _pod_as_car() -> Car:
-	var P = sim.pod
-	var R = sim.roads[P.path]
+	var P := sim.pod
+	var R := sim.roads[P.path]
 	var i: int = clampi(P.hint, 0, R.N - 1)
 	var along: float = P.vx * R.tx[i] + P.vy * R.ty[i]
 	var c := Car.new()
@@ -319,7 +349,7 @@ func _spawn(px: float, py: float, first: bool) -> void:
 		return
 	var e: Array = entries[_rng.randi() % entries.size()]
 	var r: int = e[0]
-	var R = sim.roads[r]
+	var R := sim.roads[r]
 	if R.role != "":
 		return   # (nor spawns on them)
 	var i: int = clampi(e[1] * world.CH + _rng.randi_range(0, world.CH - 1), 1, R.N - 2)
@@ -445,7 +475,7 @@ func _cruise_for(c: Car, express: float) -> float:
 
 
 func _drive(c: Car, arr: Array, idx: int, delta: float) -> void:
-	var R = sim.roads[c.road]
+	var R := sim.roads[c.road]
 	var nl: int = _lanes[c.road].size()
 	c.lc_cool = maxf(0.0, c.lc_cool - delta)
 	c.flow_clock = maxf(0.0, c.flow_clock - delta)
@@ -548,7 +578,7 @@ func _drive(c: Car, arr: Array, idx: int, delta: float) -> void:
 ## The fastest it can go here and still brake (at BRAKE) for every limit on its road up to 50 km on
 ## (down to each by the reading before it), each `margin` m nearer than it is.
 func _brake_for(c: Car, margin := 0.0) -> float:
-	var R = sim.roads[c.road]
+	var R := sim.roads[c.road]
 	var vl: PackedFloat32Array = _vlim[c.road]   # (as an Array it would be converted: a copy every call)
 	var vt := minf(c.vdes, _limit(c))
 	var gs := sqrt(c.a_lat / G)   # (the same sums as before, with the constants out of the loop: ~200
@@ -581,21 +611,25 @@ func _speed_cap(c: Car, margin: float) -> float:
 ## Full road bucket: eight cars in other lanes must not hide a fast ninth follower.
 func _clear(arr: Array, idx: int, c: Car, lat_n: float) -> bool:
 	var duration := absf(lat_n - c.lat) / (60.0 if c.kind == DEMON or c.kind == RACER else 30.0) + 0.6
-	for k in arr.size():
-		if k == idx:
-			continue
+	var swept_lo := minf(c.lat, lat_n) - c.right_width
+	var swept_hi := maxf(c.lat, lat_n) + c.left_width
+	var front_gap := c.v * c.headway * 1.3 + c.front
+	var rear_gap := c.rear + 12.0
+	var n := arr.size()
+	for step in range(1, n):
+		var offset := (step + 1) >> 1
+		var k := idx + (offset if step % 2 == 1 else -offset)
+		k = posmod(k, n)
 		var o: Car = arr[k]
 		if o.road != c.road or o.dir != c.dir:
 			continue # a road switch or a direction normalization can leave a stale bucket entry
 		var g: float = (o.f - c.f) * c.dir * 24.0
 		var future := g + (o.v - c.v) * duration
 		var tail := (TRAIN - 1) * TRAIN_GAP if o.kind == TRANSPORT else 0.0
-		var unsafe_gap := minf(g, future) < c.v * c.headway * 1.3 + c.front + o.rear + tail if g > 0.0 else maxf(g, future) > -(c.rear + o.front + 12.0)
+		var unsafe_gap := minf(g, future) < front_gap + o.rear + tail if g > 0.0 else maxf(g, future) > -(rear_gap + o.front)
 		if not unsafe_gap:
 			continue
 		var committed := o.lat if o.id == 0 else _lane_lat(o, o.lane)
-		var swept_lo := minf(c.lat, lat_n) - c.right_width
-		var swept_hi := maxf(c.lat, lat_n) + c.left_width
 		if swept_hi >= minf(o.lat, committed) - o.right_width - 10.0 and swept_lo <= maxf(o.lat, committed) + o.left_width + 10.0:
 			return false
 	return true
@@ -716,7 +750,7 @@ func _switch_to(c: Car, sp: Array) -> void:
 	c.road = sp[2]
 	c.dir = sp[4]
 	c.f = float(sp[3]) + over * c.dir
-	var R = sim.roads[c.road]
+	var R := sim.roads[c.road]
 	var i := clampi(int(c.f), 0, R.N - 1)
 	c.lat = (c.x - R.px[i]) * R.nx[i] + (c.y - R.py[i]) * R.ny[i]   # where it is across the new road
 	c.lane = mini(c.lane, _lanes[c.road].size() - 1)
@@ -730,7 +764,7 @@ func _switch_to(c: Car, sp: Array) -> void:
 
 
 func _place(c: Car) -> void:
-	var R = sim.roads[c.road]
+	var R := sim.roads[c.road]
 	var i := clampi(int(c.f), 0, R.N - 2)
 	var t := clampf(c.f - i, 0.0, 1.0)
 	var tx: float = lerpf(R.tx[i], R.tx[i + 1], t)
@@ -750,7 +784,7 @@ func _place(c: Car) -> void:
 func _track_pod() -> void:
 	var cur := Vector2i(sim.pod.path, sim.pod.hint)
 	if _pod_prev.x >= 0 and cur.x != _pod_prev.x:
-		var R = sim.roads[cur.x]
+		var R := sim.roads[cur.x]
 		var along: float = sim.pod.vx * R.tx[cur.y] + sim.pod.vy * R.ty[cur.y]
 		_p_switches.append([_pod_prev.x, _pod_prev.y, cur.x, cur.y, 1 if along >= 0.0 else -1])
 		if _p_switches.size() > 12:
@@ -766,7 +800,7 @@ func _racer_takes(c: Car, sp: Array) -> bool:
 
 
 func _tail_speed(c: Car) -> float:
-	var P = sim.pod
+	var P := sim.pod
 	var pv := Vector2(P.vx, P.vy).length()
 	var behind := _gap_to_pod(c)   # m the craft is ahead
 	return clampf(pv + (behind - 160.0) * 0.6, 0.0, 6500.0 / MPH)
@@ -778,7 +812,7 @@ func _gap_to_pod(c: Car) -> float:
 
 
 func _race(delta: float, pod_car: Car) -> void:
-	var P = sim.pod
+	var P := sim.pod
 	var pv := Vector2(P.vx, P.vy).length()
 	var on_hwy: bool = sim.roads[P.path].w[0] >= 300.0
 	if race_state == "":
@@ -829,7 +863,7 @@ func _spawn_racer(pc: Car) -> void:
 	c.dir = pc.dir
 	c.f = pc.f - pc.dir * 2500.0 / 24.0
 	c.nsp_road = -1
-	var R = sim.roads[c.road]
+	var R := sim.roads[c.road]
 	if c.f < 2.0 or c.f > R.N - 3.0:
 		return
 	c.v = pc.v + 300.0 / MPH
@@ -887,93 +921,14 @@ func race_text() -> String:
 # --- rendering and the sims' obstacles ---------------------------------------------------------
 
 func _build_meshes() -> void:
-	var body := Kit.vertex_colors()
-	var lights := Kit.vertex_colors(true)
-	lights.albedo_color = Color(2.2, 2.2, 2.2)
-	# Five manufactured silhouettes. Small faceted curves, painted fairings, dark glazing,
-	# and exposed machinery are baked once into the same two surfaces per kind.
-	var dark := Color(0.07, 0.09, 0.12)
-	var glass := Color(0.11, 0.22, 0.31)
-	var metal := Color(0.38, 0.42, 0.46)
-	var shapes := {
-		CAR: [
-			[Kit.rounded_box(Vector3(4.0, 1.5, 11.8), 7.0, 7), Kit.at(Vector3(0, 1.0, 0)), Color.WHITE],
-			[Kit.rounded_box(Vector3(2.75, 1.1, 5.1), 5.0, 6), Kit.at(Vector3(0, 2.05, -0.4)), glass],
-			[Kit.box(Vector3(0.15, 0.12, 4.7)), Kit.at(Vector3(0, 2.62, -0.4)), metal],
-			[Kit.box(Vector3(3.2, 0.2, 2.3)), Kit.at(Vector3(0, 1.75, 4.0)), metal],
-			[Kit.box(Vector3(3.65, 0.4, 10.8)), Kit.at(Vector3(0, 0.34, 0)), dark]],
-		SLOW: [
-			[Kit.rounded_box(Vector3(5.0, 3.0, 13.8), 6.0, 7), Kit.at(Vector3(0, 1.75, 0)), Color.WHITE],
-			[Kit.rounded_box(Vector3(4.4, 1.6, 0.32), 7.0, 6), Kit.at(Vector3(0, 2.15, -6.8)), glass],
-			[Kit.box(Vector3(4.5, 0.65, 12.8)), Kit.at(Vector3(0, 0.5, 0)), dark],
-			[Kit.rounded_box(Vector3(2.8, 0.3, 5.6), 8.0, 5), Kit.at(Vector3(0, 3.22, 1.3)), metal],
-			[Kit.box(Vector3(0.14, 1.6, 0.35)), Kit.at(Vector3(0, 2.15, -6.9)), metal]],
-		DEMON: [
-			[Kit.rounded_box(Vector3(2.0, 0.95, 12.8), 5.0, 7), Kit.at(Vector3(0, 0.8, -0.1)), Color.WHITE],
-			[Kit.rounded_box(Vector3(1.7, 0.7, 3.8), 4.0, 6), Kit.at(Vector3(0, 1.3, -1.0)), glass],
-			[Kit.box(Vector3(5.4, 0.24, 1.8)), Kit.at(Vector3(0, 0.55, 1.5)), dark],
-			[Kit.box(Vector3(4.8, 0.22, 1.3)), Kit.at(Vector3(0, 1.2, 5.55)), dark]],
-		TRANSPORT: [
-			[Kit.box(Vector3(5.5, 0.9, 16.8)), Kit.at(Vector3(0, 0.6, 0)), dark],
-			[Kit.box(Vector3(5.15, 3.55, 16.5)), Kit.at(Vector3(0, 2.65, 0)), Color.WHITE],
-			[Kit.box(Vector3(5.6, 0.4, 17.2)), Kit.at(Vector3(0, 4.65, 0)), metal],
-			[Kit.box(Vector3(1.0, 0.55, 17.2)), Kit.at(Vector3(0, 0.5, 0)), metal],
-			[Kit.box(Vector3(0.18, 3.2, 0.2)), Kit.at(Vector3(0, 2.65, 8.3)), dark]],
-		RACER: [
-			[Kit.rounded_box(Vector3(2.0, 0.9, 14.0), 4.0, 8), Kit.at(Vector3(0, 0.8, 0)), Color.WHITE],
-			[Kit.rounded_box(Vector3(1.5, 0.65, 4.7), 4.0, 6), Kit.at(Vector3(0, 1.28, -1.0)), glass],
-			[Kit.box(Vector3(5.9, 0.25, 1.8)), Kit.at(Vector3(0, 1.5, 5.8)), dark],
-			[Kit.box(Vector3(3.5, 0.18, 2.0)), Kit.at(Vector3(0, 0.4, -4.5)), dark],
-			[Kit.box(Vector3(4.8, 0.2, 1.3)), Kit.at(Vector3(0, 0.6, 1.5)), metal]],
-	}
-	var glows := {}
-	for kind in shapes:
-		glows[kind] = []
-		var half := 6.0 if kind == CAR else (6.9 if kind == SLOW else (8.55 if kind == TRANSPORT else (6.5 if kind == DEMON else 7.0)))
-		var tail_color := Color(1.0, 0.6, 0.1) if kind == TRANSPORT or kind == SLOW else (Color(1.0, 0.25, 0.8) if kind == RACER else Color(1.0, 0.16, 0.07))
-		for side in [-1.0, 1.0]:
-			if kind == CAR:
-				shapes[kind].append([Kit.rounded_box(Vector3(0.9, 0.9, 4.7), 7.0, 5), Kit.at(Vector3(side * 1.65, 0.8, 3.2)), dark])
-				shapes[kind].append([Kit.box(Vector3(0.12, 0.3, 5.5)), Kit.at(Vector3(side * 2.0, 0.8, -0.7)), metal])
-			elif kind == SLOW:
-				for window in 4:
-					shapes[kind].append([Kit.box(Vector3(0.12, 1.0, 1.7)), Kit.at(Vector3(side * 2.48, 2.3, -3.7 + window * 2.3)), glass])
-				shapes[kind].append([Kit.box(Vector3(0.16, 0.23, 10.5)), Kit.at(Vector3(side * 2.48, 1.3, 0)), metal])
-			elif kind == TRANSPORT:
-				for rib in 6:
-					shapes[kind].append([Kit.box(Vector3(0.24, 3.5, 0.28)), Kit.at(Vector3(side * 2.65, 2.7, -7.6 + rib * 3.04)), metal])
-				glows[kind].append([Kit.box(Vector3(0.14, 0.18, 16.5)), Kit.at(Vector3(side * 2.76, 4.15, 0)), Color(1.0, 0.6, 0.12)])
-			else:
-				var pod_x := 1.92 if kind == DEMON else 1.4
-				shapes[kind].append([Kit.rounded_box(Vector3(1.05, 1.0, 8.8), 6.0, 6), Kit.at(Vector3(side * pod_x, 0.72, 1.7)), Color.WHITE])
-				shapes[kind].append([Kit.box(Vector3(0.2, 0.8, 2.4)), Kit.at(Vector3(side * (2.5 if kind == DEMON else 2.85), 1.0, 5.3)), Color.WHITE])
-				shapes[kind].append([Kit.cyl(0.46, 0.46, 0.4, 8), Kit.at(Vector3(side * pod_x, 0.75, 6.2), Vector3(PI / 2, 0, 0)), dark])
-				glows[kind].append([Kit.cyl(0.32, 0.32, 0.05, 8), Kit.at(Vector3(side * pod_x, 0.75, 6.44), Vector3(PI / 2, 0, 0)), Color(0.25, 0.8, 1.0)])
-			var lamp_x := 1.45 if kind == CAR else (2.1 if kind == SLOW or kind == TRANSPORT else 0.55)
-			glows[kind].append([Kit.box(Vector3(0.7, 0.22, 0.16)), Kit.at(Vector3(side * lamp_x, 1.12, -half)), Color(0.82, 0.95, 1.0)])
-			glows[kind].append([Kit.box(Vector3(0.8 if kind != TRANSPORT else 1.7, 0.24, 0.16)), Kit.at(Vector3(side * lamp_x, 1.0, half)), tail_color])
-		if kind == DEMON or kind == RACER:
-			glows[kind].append([Kit.box(Vector3(0.28, 0.1, 10.0)), Kit.at(Vector3(0, 0.35, -0.5)), Color.WHITE])
-	for kind in shapes:
-		if TrafficModels.hd:   # realism spike: formed hulls, canopies and pods; same one mesh per kind
-			TrafficModels.upgrade(kind, shapes[kind], dark, glass, metal)
-		var mesh := Kit.compound(shapes[kind])
-		Kit.compound(glows[kind], mesh)
-		mesh.surface_set_material(0, TrafficModels.material(kind) if TrafficModels.hd else body)
-		mesh.surface_set_material(1, lights)
-		var mm := MultiMesh.new()
-		mm.transform_format = MultiMesh.TRANSFORM_3D
-		mm.use_colors = true
-		mm.mesh = mesh
-		mm.instance_count = TARGET * TRAIN if kind == TRANSPORT else TARGET + 8
-		mm.visible_instance_count = 0
-		var mi := MultiMeshInstance3D.new()
-		mi.name = "traffic_%d" % kind
-		mi.multimesh = mm
-		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		mi.custom_aabb = AABB(Vector3(-40000, -100, -40000), Vector3(80000, 20000, 80000))
-		add_child(mi)
-		_mm[kind] = mi
+	var bounds := AABB(Vector3(-40000, -100, -40000), Vector3(80000, 20000, 80000))
+	for kind in FLEET.size():
+		var batch := Batch.new()
+		batch.name = "traffic_tractor" if kind == TRACTOR else "traffic_%d" % kind
+		var slots := TARGET * (TRAIN - 1) if kind == TRANSPORT else TARGET + 8
+		batch.configure(FLEET[kind], slots, 500.0, bounds, true, kind == RACER)
+		add_child(batch)
+		_mm[kind] = batch
 	# a beacon per vehicle: its tail (or head) light, a few pixels from miles away
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
@@ -1007,16 +962,15 @@ func _build_meshes() -> void:
 func _render() -> void:
 	var ox: float = view.org_x
 	var oy: float = view.org_y
-	var n := {}
-	for kind in _mm:
-		n[kind] = 0
+	var camera := get_viewport().get_camera_3d()
+	var eye := camera.global_position if camera else Vector3.ZERO
 	var nb := 0
 	var bmm: MultiMesh = _beams.multimesh
 	var pod_v := Vector2(sim.pod.vx, sim.pod.vy)
 	for c in cars:
-		var mm: MultiMesh = (_mm[c.kind] as MultiMeshInstance3D).multimesh
-		var h: float = sim.net_height(c.road, c.f) + 1.0
-		var shaft_on: bool = world.shaft.on(c.road, c.f)
+		var batch: Batch = _mm[c.kind]
+		var h := 1.0 + sim.net_height(c.road, c.f) if sim._net_h.has(c.road) else 1.0
+		var shaft_on: bool = sim.roads[c.road].shaft and world.shaft.on(c.road, c.f)
 		# A road with a height profile (a hill, a ramp, a deck's approach): every body sits at its
 		# own height and noses up or down with the grade. They used to stay level at the lead's
 		# height, so a transport's train floated off a climb or sank into it (Luke: "busses look
@@ -1035,9 +989,8 @@ func _render() -> void:
 		if shaft_on:
 			b = world.shaft.carry(c.road, c.f) * b
 		var cnt := TRAIN if c.kind == TRANSPORT else 1
+		var board: float = NUMBER_BOARDS.get(c.name, 0.0) if c.kind == RACER else 0.0
 		for k in cnt:
-			if n[c.kind] >= mm.instance_count:
-				break
 			var back := k * TRAIN_GAP
 			var p := Vector3(cx - c.hx * back - ox, h, -(cy - c.hy * back - oy))
 			var body_basis := b
@@ -1053,9 +1006,8 @@ func _render() -> void:
 				p = world.shaft.point(c.road, f, c.lat, 1.0, ox, oy)
 				body_basis = world.shaft.frame(c.road, f) * Basis(Vector3.UP, PI if c.dir < 0 else 0.0)
 				body_basis = body_basis.scaled(Vector3.ONE * SCALE)
-			mm.set_instance_transform(n[c.kind], Transform3D(body_basis, p))
-			mm.set_instance_color(n[c.kind], c.col)
-			n[c.kind] += 1
+			var unit: Batch = _mm[TRACTOR] if c.kind == TRANSPORT and k == 0 else batch
+			unit.put(Transform3D(body_basis, p), eye, c.col, board)
 		if nb < bmm.instance_count:
 			# the light you see: its tail if it's going your way, its head lamps if it's coming at you
 			var coming: bool = c.hx * pod_v.x + c.hy * pod_v.y < 0.0
@@ -1069,18 +1021,13 @@ func _render() -> void:
 			var lc := Color(1.0, 0.95, 0.85) if coming else (Color(1.0, 0.3, 0.9) if c.kind == RACER else Color(1.0, 0.15, 0.08))
 			bmm.set_instance_color(nb, lc)
 			nb += 1
+	for kind in _mm:
+		(_mm[kind] as Batch).finish_frame(_warm > 0)
 	if _warm > 0:
 		_warm -= 1
-		for kind in _mm:
-			var wm: MultiMesh = (_mm[kind] as MultiMeshInstance3D).multimesh
-			if n[kind] == 0:
-				wm.set_instance_transform(0, Transform3D(Basis(), Vector3(0.0, -60.0, -40.0)))
-				n[kind] = 1
 		if nb == 0:
 			bmm.set_instance_transform(0, Transform3D(Basis(), Vector3(0.0, -60.0, -40.0)))
 			nb = 1
-	for kind in _mm:
-		(_mm[kind] as MultiMeshInstance3D).multimesh.visible_instance_count = n[kind]
 	bmm.visible_instance_count = nb
 
 
@@ -1094,7 +1041,7 @@ func _feed() -> void:
 	var py: float = sim.pod.y
 	var obs: Array = world.obstacles_near(px, py)
 	for c in cars:
-		if Vector2(c.x - px, c.y - py).length() > R_FIELD:
+		if Vector2(c.x - px, c.y - py).length_squared() > R_FIELD * R_FIELD:
 			continue
 		var vx := c.hx * c.v
 		var vy := c.hy * c.v
@@ -1119,7 +1066,7 @@ func _feed() -> void:
 			if world.shaft.on(c.road, c.f):
 				var center_back := floorf(float(q) / 2.0) * TRAIN_GAP if c.kind == TRANSPORT else 0.0
 				var f: float = c.f - c.dir * center_back / 24.0
-				var R = sim.roads[c.road]
+				var R := sim.roads[c.road]
 				var i := clampi(int(f), 0, R.N - 2)
 				var t := clampf(f - i, 0.0, 1.0)
 				var tangent := Vector2(lerpf(R.tx[i], R.tx[i + 1], t), lerpf(R.ty[i], R.ty[i + 1], t)).normalized()
