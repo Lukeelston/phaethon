@@ -29,7 +29,10 @@ func _initialize() -> void:
 			# degrees (24m behind the engines). Release should settle along the
 			# visible nose heading, not preserve that pre-release sideslip.
 			var settle_error := absf(wrapf(deg_to_rad(r.marks[3].path_deg-r.marks[2].pod_nose_deg),-PI,PI))
-			check("%.0fmph %s: stable craft; release settles within2deg of nose (%.3fdeg)"%[mph,r.case,rad_to_deg(settle_error)],not r.broken and r.sway<2.0 and r.overrun<0.7 and absf(r.marks[3].yaw_dps)<0.5 and settle_error<deg_to_rad(2.0))
+			# Since 0.3.6 (32e7924) the tow bar sets the pod just outside a loaded turn on purpose (tow_swing, up
+			# to 3 degrees; tests/test_tow_swing.gd allows the pod 4.5 out). The sway that must stay under 2
+			# degrees is the pod's about that rest pose: the full-grip turn at 400 mph reads 2.04 in all.
+			check("%.0fmph %s: stable craft (the pod %.2fdeg out, %.2f about its rest pose); release settles within2deg of nose (%.3fdeg)"%[mph,r.case,r.sway,r.sway_free,rad_to_deg(settle_error)],not r.broken and r.sway<4.5 and r.sway_free<2.0 and r.overrun<0.7 and absf(r.marks[3].yaw_dps)<0.5 and settle_error<deg_to_rad(2.0))
 		print("MEASURE ",JSON.stringify({"mph":mph,"end_mph":m.mph,"turn_degrees":m.path_deg,"radius":m.radius_m}))
 	_alternating()
 	print("STARFIGHTER BRAKES %s (%d checks)"%["PASS" if failures==0 else "FAIL",checks])

@@ -10,9 +10,12 @@ const MPH := 2.2369362920544
 var config := {}
 
 func _initialize() -> void:
-	var args := OS.get_cmdline_user_args()
-	if not args.is_empty():
-		config = JSON.parse_string(FileAccess.get_file_as_string(args[0]))
+	# (A tuning file is a path. A flag such as the suite's --mute is not: taken for one, it parsed as nothing,
+	# the assignment failed, and the run never reached its quit.)
+	for a in OS.get_cmdline_user_args():
+		if not a.begins_with("--"):
+			config = JSON.parse_string(FileAccess.get_file_as_string(a))
+			break
 	var records := []
 	for mph in [2000.0, 3000.0, 4000.0, 6000.0]:
 		for controls in [["single", 0.0, 0.0, 1.0, 0.0], ["dual", 0.0, 0.0, 1.0, 1.0], ["uneven", 0.0, 0.0, 1.0, 0.85], ["steer", 1.0, 0.0, 0.0, 0.0], ["steer_brake", 1.0, 0.0, 1.0, 0.0], ["held_single", 1.0, 1.0, 1.0, 0.0], ["held_dual", 1.0, 1.0, 1.0, 1.0], ["right", 0.0, 0.0, 0.0, 1.0], ["half", 0.0, 0.0, 0.5, 0.0], ["feather", 0.0, 0.0, 0.2, 0.0], ["coast", 0.0, 0.0, 0.0, 0.0]]:
@@ -91,7 +94,7 @@ func trial(mph: float, gear: int, controls: Array, overrides := {}) -> Dictionar
 		q.update({"lt": controls[1], "rt": controls[2], "lg": 0.0, "rg": 0.0,
 			"ls": Vector2.ZERO, "rs": Vector2.ZERO, "lz": 0.0, "rz": 0.0,
 			"speed": mph / MPH, "yaw": 0.0, "sf": sim.hblend}, 1.0 / 60.0)
-	var r := {"mph": mph, "gear": gear, "case": controls[0], "marks": [], "sway": 0.0, "overrun": 0.0, "binder": 0.0, "release_yaw": 0.0, "broken": false, "energy_rises": 0}
+	var r := {"mph": mph, "gear": gear, "case": controls[0], "marks": [], "sway": 0.0, "sway_free": 0.0, "swing": 0.0, "overrun": 0.0, "binder": 0.0, "release_yaw": 0.0, "broken": false, "energy_rises": 0}
 	var last_energy := energy(sim)
 	var h0 := atan2(sim.pod.vy, sim.pod.vx)
 	var n0: float = sim.pair_th
@@ -125,6 +128,10 @@ func trial(mph: float, gear: int, controls: Array, overrides := {}) -> Dictionar
 		var back: float = sim.P.engineLen / 2.0 + sim.P.cableLen + sim.P.podLen / 2.0
 		r.overrun = maxf(r.overrun, (sim.pod.x - (mx - pf * back)) * pf + (sim.pod.y - (my - ps * back)) * ps)
 		r.sway = maxf(r.sway, absf(rad_to_deg(wrapf(atan2(my - sim.pod.y, mx - sim.pod.x) - sim.pair_th, -PI, PI))))
+		# The tow bar's own articulation (CraftSim.tow_swing, since 0.3.6: the pod set just outside a loaded
+		# turn, up to 3 degrees), and what is left of the sway about that rest pose.
+		r.swing = maxf(r.swing, absf(rad_to_deg(sim.tow_swing)))
+		r.sway_free = maxf(r.sway_free, absf(rad_to_deg(wrapf(atan2(my - sim.pod.y, mx - sim.pod.x) - sim.pair_th - sim.tow_swing, -PI, PI))))
 		r.binder = maxf(r.binder, absf(sim.binder_stretch))
 		r.broken = r.broken or sim.binder_broken
 		if i >= 3 * 480:

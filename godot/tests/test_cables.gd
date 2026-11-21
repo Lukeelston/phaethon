@@ -25,8 +25,10 @@ func _start(script) -> void:
 	t = 0.0
 
 
-func _process(delta: float) -> bool:
-	t += delta
+func _process(_delta: float) -> bool:
+	# The craft's own clock, not the wall's. (On a busy machine building the VR cockpit takes seconds; by the
+	# wall clock its turn was then measured before it had been flown: "banked -1 deg", once, beside another Godot.)
+	t = v.sim.time
 	# straight for 2 s, then a hard left (right engine on, left off, left brake) for 1.5 s
 	var turning := t > 2.0
 	v.inp = {"thrL": 0.0 if turning else 0.5, "thrR": 0.5, "brkL": 1.0 if turning else 0.0, "brkR": 0.0, "repair": false, "reignite": true}

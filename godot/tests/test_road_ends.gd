@@ -5,7 +5,9 @@
 ## to the side there: 210 m of "wall penetration" and a 1.3e9 N kick in one 1/480 s step (375 ->
 ## 7,833 km/h, the binder torn: Luke's breaks at mile ~340-346 and 0-5, speeds jumping to 10,000-
 ## 63,000 km/h).
-##   Every highway, both ends, from ~2 s short of the end: full brakes from 2,500 km/h and a coast
+##   Every highway, both ends, from ~2 s short of the end (the braking run from 1 s: since v0.2.9 a
+##   STARFIGHTER's full brakes stop it from 2,500 km/h in about 800 m, 600 m short of the end from 2 s
+##   out, and a run that never arrives tests nothing): full brakes from 2,500 km/h and a coast
 ##   from 8,000 km/h (no thrust: the craft's energy, speed + climb + spin, may never rise above its
 ##   start), and the ramjet at ~8,000 km/h (no body may go past 1.25x its start). The binder must
 ##   hold, and every run must reach the end (and be stopped by it).
@@ -33,7 +35,7 @@ func _run(road: int, end: int, mode: String) -> Array:
 	var handling := "speed" if mode == "coast" else "starfighter"
 	var sim = S.new({"track": "network", "handling": handling})
 	var R = sim.roads[road]
-	var back := int(round(kmh / 3.6 * 2.0 / 24.0))
+	var back := int(round(kmh / 3.6 * (1.0 if mode == "brakes" else 2.0) / 24.0))
 	var i: int = R.N - 1 - back if end == 1 else back
 	var dir := 1 if end == 1 else -1
 	sim.respawn_on(road, i, dir)

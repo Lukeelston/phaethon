@@ -31,6 +31,7 @@ var frames := 0
 
 
 func _initialize() -> void:
+	ViewScript.track_override = "range"   # its own course: it used to need --track=range, and found no range without it
 	v = ViewScript.new()
 	root.add_child(v)
 

@@ -14,6 +14,7 @@ var v
 
 
 func _initialize() -> void:
+	ViewScript.track_override = "gp"   # its own course: it used to need --track=gp, and found no GP world without it
 	v = ViewScript.new()
 	root.add_child(v)
 

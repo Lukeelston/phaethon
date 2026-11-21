@@ -108,7 +108,7 @@ func _initialize() -> void:
 	# corners
 	var tr := _turn(4)
 	var gp := _gp(0)
-	_check("corners: Speedcraft fourth at 4,000 mph, a held drop turns the path %.2f deg/s (the highways' tightest bend: 2.28); the ideal pilot on the GP in Starfighter first: %d wall hits, %.1f km in 60 s" % [tr, gp[0], gp[1]],
+	_check("corners: Speedcraft fourth at 4,000 mph, a held drop turns the path %.2f deg/s (the highways' tightest bend: 2.28); the ideal pilot on the GP in Starfighter first, on triggers and grips: %d wall hits, %.1f km in 60 s" % [tr, gp[0], gp[1]],
 		tr > 2.8 and gp[0] == 0 and gp[1] > 12.0)
 	var sf_speed := _starfighter_speed()
 	_check("Starfighter first reaches its ordinary full range without unlimited drag: %.2f m/s after 30 s" % sf_speed,
@@ -262,9 +262,13 @@ func _gp(g: int) -> Array:
 		var err: float = S.wrap_angle(atan2(sim.tpy[ahead] - my, sim.tpx[ahead] - mx) - sim.pair_th)
 		var d := clampf(-err * 2.0, -1.0, 1.0)
 		var c := 0.62 if v < 300.0 else 0.45   # (the flyability test's pilot)
-		var o: Dictionary = q.update(_c(c - d / 2.0, c + d / 2.0, Vector2.ZERO, v, (sim.eL.w + sim.eR.w) / 2.0, sim.hblend), DT)
+		# ... which since v0.2.9 squeezes the grip inside the turn too, by the same law (see that test's header)
+		var ctl := _c(c - d / 2.0, c + d / 2.0, Vector2.ZERO, v, (sim.eL.w + sim.eR.w) / 2.0, sim.hblend)
+		ctl.lg = clampf(err * 2.0, 0.0, 1.0)
+		ctl.rg = clampf(-err * 2.0, 0.0, 1.0)
+		var o: Dictionary = q.update(ctl, DT)
 		for k in 480 / 72:
-			sim.step({"thrL": o.thrL, "thrR": o.thrR, "brkL": 0.0, "brkR": 0.0, "repair": false, "reignite": true, "thrMul": o.get("mul", 1.0), "gearOverdrive": o.get("overdrive", false)}, 1.0 / 480.0)
+			sim.step({"thrL": o.thrL, "thrR": o.thrR, "brkL": o.brkL, "brkR": o.brkR, "repair": false, "reignite": true, "thrMul": o.get("mul", 1.0), "gearOverdrive": o.get("overdrive", false)}, 1.0 / 480.0)
 			for e in sim.events:
 				if e.type == "hit":
 					hits += 1

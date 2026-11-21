@@ -78,6 +78,8 @@ func _initialize() -> void:
 	_check("landmarks keep off every lane, corridor, sign and each other %s" % ["" if clash.is_empty() else str(clash)], clash.is_empty())
 
 	# the real chunks: their rocks and spires stay out of every footprint
+	# its own course: it used to need --track=range, and without it found no range, failed every frame and never quit
+	ViewScript.track_override = "range"
 	v = ViewScript.new()
 	root.add_child(v)
 
