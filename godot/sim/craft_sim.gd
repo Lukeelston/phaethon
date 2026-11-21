@@ -269,6 +269,7 @@ const NET_ROADS := [
 	["K20", 501189.4506238592, 102214.26396088972, 85.5, 400.0, [["S", 16989.628434620266, 0.0, "sp"], ["L", 45000.0, 18.201565103326033, "sp"], ["R", 45000.0, 13.701565103326033, "sp"]]],
 	["SNeedle", 173989.83287513995, 300100.0, 0.0, 200.0, [["L", 8500.0, 25.0, "sp"], ["R", 8500.0, 25.0, "sp"], ["S", 13000.0, 0.0, "sp"], ["R", 8500.0, 25.0, "sp"], ["L", 8500.0, 25.0, "sp"]]],
 	["SHammer", 300100.0, 351995.2437054928, 90.0, 200.0, [["R", 7000.0, 35.0, "sp"], ["L", 7000.0, 35.0, "sp"], ["S", 9000.0, 0.0, "sp"], ["L", 7000.0, 35.0, "sp"], ["R", 7000.0, 35.0, "sp"]]],
+	["SAurora", 43000.0, 99900.0, -180.0, 200.0, [["L", 8000.0, 70.47214256874965, "sp"], ["S", 61797.81269915339, 0.0, "sp"], ["L", 8000.0, 154.5278574312503, "sp"], ["S", 769332.1779309637, 0.0, "sp"], ["R", 8000.0, 154.52762865268855, "sp"], ["S", 61797.72518423367, 0.0, "sp"], ["R", 8000.0, 70.47237134731147, "sp"]]],
 ]
 # [parent road, a0, a1, child road, b0, b1, sense]: the two roads are one through these samples
 const NET_JUNCTIONS := [
@@ -304,11 +305,12 @@ const NET_JUNCTIONS := [
 	[0, 19036, 19156, 115, 479, 580, 1], [0, 917, 1052, 116, 0, 115, -1], [1, 589, 723, 116, 10313, 10428, 1], [2, 21782, 21916, 117, 0, 115, 1], [1, 21949, 22084, 117, 10293, 10408, -1], [2, 4490, 4604, 118, 0, 95, 1],
 	[3, 15635, 15740, 118, 6621, 6708, -1], [2, 17802, 17927, 119, 0, 106, -1], [4, 15990, 16115, 119, 7949, 8055, -1], [0, 9453, 9575, 120, 0, 102, 1], [4, 7775, 7885, 120, 8088, 8179, 1], [0, 18616, 18734, 121, 0, 99, -1],
 	[5, 7779, 7897, 121, 7706, 7805, 1], [32, 637, 757, 122, 0, 101, -1], [5, 4723, 4968, 123, 1527, 1753, 1], [1, 6198, 6304, 124, 0, 87, 1], [1, 7253, 7358, 124, 1075, 1162, 1], [4, 13615, 13714, 125, 0, 80, 1],
-	[4, 14581, 14679, 125, 1011, 1091, 1],
+	[4, 14581, 14679, 125, 1011, 1091, 1], [0, 657, 760, 126, 0, 84, -1], [2, 22157, 22260, 126, 39742, 39826, -1],
 ]
 # Physical pavement unions only; route choices remain in NET_JUNCTIONS.
 const NET_OVERLAPS := [[1, 10984, 11099, 59, 0, 96, 1], [1, 11818, 11933, 61, 0, 96, -1], [4, 10984, 11099, 63, 0, 96, 1], [4, 11818, 11933, 65, 0, 96, -1], [0, 11114, 11230, 67, 0, 96, 1], [0, 11948, 12064, 69, 0, 96, -1], [4, 2650, 2766, 71, 0, 96, 1], [4, 3484, 3600, 73, 0, 96, -1], [2, 10984, 11099, 75, 0, 96, 1], [2, 11818, 11933, 77, 0, 96, -1], [4, 19317, 19433, 79, 0, 96, 1], [4, 20151, 20267, 81, 0, 96, -1], [1, 2650, 2766, 83, 0, 96, 1], [1, 3484, 3600, 85, 0, 96, -1], [3, 11127, 11243, 87, 0, 96, 1], [3, 11961, 12077, 89, 0, 96, -1], [1, 19317, 19433, 91, 0, 96, 1], [1, 20151, 20267, 93, 0, 96, -1], [5, 11077, 11193, 95, 0, 96, 1], [5, 11911, 12027, 97, 0, 96, -1], [5, 2650, 2766, 122, 0, 96, 1]]
 const NET_TWISTS := [[68, 250, 708, 1], [76, 250, 708, -1], [84, 250, 708, 1], [92, 250, 708, -1], [124, 372, 790, 1]]
+const NET_PRESSURE := [126, 3920, 35920]
 const NET_JUMP_PROFILES := ["ARC", "HIGH ARC", "SKY ARC", "ARC", "HIGH ARC", "SKY ARC", "ARC", "HIGH ARC", "SKY ARC", "ARC", "HIGH ARC", "SKY ARC", "ARC", "HIGH ARC", "SKY ARC", "ARC", "HIGH ARC", "SKY ARC", "ARC", "HIGH ARC", "SKY ARC"]
 # [name, biome, centre x, centre y, road, terminal sample]
 const NET_CITIES := [
@@ -433,6 +435,7 @@ const NET_HEIGHTS := [
 	[123, [[0, 2803.0719858773027, 0.23632698070846497], [208, 3392.9441297256312, 0.0], [866, 3392.9441297256312, 0.0], [1095, 1996.4720648628156, -0.3811332054756593], [1324, 600.0, 0.0], [1753, 600.0, 0.0]]],
 	[124, [[0, 0.0, 0.0], [105, 0.0, 0.0], [320, 510.0, 0.0], [842, 510.0, 0.0], [1057, 0.0, 0.0], [1162, 0.0, 0.0]]],
 	[125, [[0, 600.0, 0.0], [98, 600.0, 0.0], [393, 1950.0, 0.0], [458, 1950.0, 0.0], [731, 400.0, 0.0], [884, 820.0, 0.0], [1004, 600.0, 0.0], [1091, 600.0, 0.0]]],
+	[126, [[0, 0.0, 0.0], [150, 0.0, 0.0], [3885, 2400.0, 0.0], [35941, 2400.0, 0.0], [39676, 0.0, 0.0], [39826, 0.0, 0.0]]],
 ]
 # [launch road (its end is a lip), catch deck, the slowest that lands (mph)]
 const NET_JUMPS := [[59, 60, 3000.0], [61, 62, 3500.0], [63, 64, 2500.0], [65, 66, 4000.0], [67, 68, 2000.0], [69, 70, 3250.0], [71, 72, 2500.0], [73, 74, 3750.0], [75, 76, 2250.0], [77, 78, 3500.0], [79, 80, 4000.0], [81, 82, 2750.0], [83, 84, 2500.0], [85, 86, 3250.0], [87, 88, 2000.0], [89, 90, 2750.0], [91, 92, 3500.0], [93, 94, 2250.0], [95, 96, 3000.0], [97, 98, 3750.0], [122, 123, 3250.0]]
@@ -586,6 +589,60 @@ var _net_h := {}   # road -> its height keys [[sample, m, slope], ...] (flyovers
 var jumps: Array = []      # the Network's jumps: [launch road, catch deck, the slowest that lands (mph)] (NET_JUMPS)
 var onramps: Array = []    # ... its on-ramps from the open ground: [city, road] (NET_ONRAMPS)
 var shafts: Array = []     # ... its shafts: [road, pull-up sample, landing sample, R, V] (NET_SHAFTS)
+const Pressure := preload("res://sim/pressure_surface.gd")
+var pressure_arc := 0.0   # developed metres around the shell at the chart's origin
+var _pressure_weight := 0.0
+
+
+static func in_pressure(road: int, f: float) -> bool:
+	return road == NET_PRESSURE[0] and f >= NET_PRESSURE[1] and f <= NET_PRESSURE[2]
+
+
+func pressure_depth(f: float) -> float:
+	var road: TrackPath = roads[NET_PRESSURE[0]]
+	return minf(f - NET_PRESSURE[1], NET_PRESSURE[2] - f) * road.len[NET_PRESSURE[1]]
+
+
+## The open approach is at 2.4 km altitude. The two lock galleries bring the
+## ambient pressure up to the bore's regulated one-atmosphere set point.
+func pressure_fill() -> float:
+	if pod.off_road or pod.path != NET_PRESSURE[0]:
+		return 0.0
+	return smoothstep(0.0, Pressure.APRON, pressure_depth(_road_f(pod)))
+
+
+## Translate the whole tow rig together in its developed tangent plane. Its
+## lateral travel becomes real arc length; forces, cable stretch and velocity
+## are invariant under the translation. Only outbound airlocks unwind a roll.
+func _step_pressure() -> void:
+	if pod.off_road or pod.path != NET_PRESSURE[0]:
+		pressure_arc = 0.0
+		_pressure_weight = 0.0
+		return
+	var f := _road_f(pod)
+	if not in_pressure(pod.path, f):
+		pressure_arc = 0.0
+		_pressure_weight = 0.0
+		return
+	var road: TrackPath = roads[pod.path]
+	var i: int = NET_PRESSURE[1]
+	var nx := road.nx[i]
+	var ny := road.ny[i]
+	var lat := (pod.x - road.px[i]) * nx + (pod.y - road.py[i]) * ny
+	var depth := pressure_depth(f)
+	var weight := smoothstep(70.0, Pressure.RECOVERY, depth)
+	var shift := lat * smoothstep(70.0, 300.0, depth)
+	var half_turn := PI * Pressure.RADIUS
+	pressure_arc = wrapf(pressure_arc + shift, -half_turn, half_turn)
+	if weight < _pressure_weight:
+		pressure_arc *= weight / _pressure_weight
+	# The throat becomes a flat receiving lane, even if the pilot stops in
+	# the lock and keeps steering across it before choosing to leave.
+	pressure_arc = clampf(pressure_arc, -half_turn * weight, half_turn * weight)
+	_pressure_weight = weight
+	for body: Body in bodies:
+		body.x -= nx * shift
+		body.y -= ny * shift
 var twists: Array = []     # visual full-roll recoveries: [road, start sample, end sample, turns]
 var surface_junctions: Array = [] # route junctions plus physical-only overlapping pavement
 var _net_cells := {}   # the Network's grid: a NET_CELL square's key -> [[road, first, last sample], ...] (sample runs in it)
@@ -1727,6 +1784,8 @@ func respawn_on(road: int, i: int, dir := 1) -> void:
 
 
 func _place(ax: float, ay: float, atx: float, aty: float, anx: float, any: float, idx: int, path: int) -> void:
+	pressure_arc = 0.0
+	_pressure_weight = 0.0
 	# engines placed so each cable is exactly at length: a stretched spawn makes the stiff
 	# cables yank the pod forward on the first step
 	var lat: float = P.engineGap / 2.0 - P.podAnchorW * P.podWidth / 2.0
@@ -2412,6 +2471,8 @@ func step(inp: Dictionary, dt: float) -> void:
 		crash_t = 1.6
 		Pd.health = 0.0
 	if kind == "network":
+		if Pd.path == NET_PRESSURE[0] or _pressure_weight > 0.0:
+			_step_pressure()
 		_net_step(inp)
 		return
 

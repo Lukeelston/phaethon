@@ -10,8 +10,11 @@ func build(world) -> void:
 	material.shader = preload("res://view/network_far_roads.gdshader")
 	for r in world.sim.roads.size():
 		var road = world.sim.roads[r]
+		var pressure_route: bool = r == world.sim.NET_PRESSURE[0]
 		for first in range(0,road.N-1,BLOCK):
 			var end := mini(first+BLOCK,road.N-1)
+			if pressure_route and world.sim.in_pressure(r, first) and world.sim.in_pressure(r, end):
+				continue
 			var origin: Vector2 = world._wxy(r,first)
 			var vertices := PackedVector3Array()
 			var indices := PackedInt32Array()
@@ -24,8 +27,12 @@ func build(world) -> void:
 					var h: float = world._h(r,i)-UNDER_DECK
 					vertices.append(world._p(road,origin.x,origin.y,i,off,h))
 			for row in samples.size()-1:
+				if pressure_route and world.sim.in_pressure(r, samples[row]) and world.sim.in_pressure(r, samples[row + 1]):
+					continue
 				var a := row*2
 				indices.append_array(PackedInt32Array([a,a+2,a+1,a+1,a+2,a+3]))
+			if indices.is_empty():
+				continue
 			var arrays := []
 			arrays.resize(Mesh.ARRAY_MAX)
 			arrays[Mesh.ARRAY_VERTEX]=vertices

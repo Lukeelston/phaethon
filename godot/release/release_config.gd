@@ -19,9 +19,10 @@ const COURSES := [
 	{"id": "carving", "name": "S5 Carving Circuit", "detail": "S5's sweeping rhythm, built for racing.\nSpeedcraft, ramjet, and your cleanest lap."},
 	{"id": "coast", "name": "Coast Road", "detail": "The Network's west edge: 250 km.\nThe sea on your left, a mountain on your right."},
 	{"id": "drop", "name": "The Drop", "detail": "The Network's east edge: up a mountainside,\nthen 2 km down off its rim into the valley."},
+	{"id": "aurora", "name": "Aurora Pressure Line", "detail": "A glass crossing from corner to corner.\nSteer up either wall and across the ceiling."},
 ]
 # A course that is a place on the Network: its road there (the flight starts at the foot of it).
-const SPOTS := {"coast": "SCoast", "drop": "SDrop"}
+const SPOTS := {"coast": "SCoast", "drop": "SDrop", "aurora": "SAurora"}
 
 static func course_index(id: String) -> int:
 	for i in COURSES.size():

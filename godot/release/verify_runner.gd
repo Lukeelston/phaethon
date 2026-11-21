@@ -5,7 +5,7 @@ extends Node
 const View := preload("res://view/craft_view.gd")
 const Settings := preload("res://release/game_settings.gd")
 const MENU_SCENE := "res://release/menu.tscn"
-const COURSES := ["range", "gp", "eridanus", "emergency", "network", "carving", "network"]
+const COURSES := ["range", "gp", "eridanus", "emergency", "network", "carving", "network", "aurora"]
 
 var failures := 0
 var checks := 0
@@ -86,6 +86,7 @@ func _run() -> void:
 	AudioServer.add_bus_effect(0, capture)
 	var case_index := 0
 	for course in COURSES:
+		var track: String = "network" if course == "aurora" else course
 		var menu = get_tree().current_scene
 		var collisions := case_index % 2 == 1
 		var partner_enabled := case_index % 2 == 0
@@ -110,7 +111,10 @@ func _run() -> void:
 		if not check(course + " opens CraftView", view is View):
 			_finish()
 			return
-		check(course + " scene loaded", view.sim.kind == course if course in ["range", "network"] else view.sim.track_name == ("eridanus" if course == "emergency" else course))
+		check(course + " scene loaded", view.sim.kind == track if track in ["range", "network"] else view.sim.track_name == ("eridanus" if course == "emergency" else course))
+		if course == "aurora":
+			check("Aurora starts on the southwest pressure-lock approach", view.sim.pod.path == View.CraftSimScript.NET_PRESSURE[0]
+				and view.sim.pod.hint < View.CraftSimScript.NET_PRESSURE[1] and view.network_world.pressure_line.is_visible_in_tree())
 		check(course + " opens its selected mission", not view.sim.job.is_empty() if course == "emergency" else view.sim.job.is_empty())
 		check(course + " launch respects obstacle collisions", view.sim.P.obstacleCollisions == collisions)
 		check(course + " launches " + pilot_craft, view.sim.P.vehicle == pilot_craft and view.craft.engines[0].has_node("ShrikeFairing") == (pilot_craft == "shrike"))
@@ -166,7 +170,7 @@ func _run() -> void:
 		await get_tree().scene_changed
 		view = get_tree().current_scene
 		check(course + " restart restores playable scene", not get_tree().paused and view is View and view.get_instance_id() != old_id)
-		check(course + " restart keeps selected course", view.sim.kind == course if course in ["range", "network"] else view.sim.track_name == ("eridanus" if course == "emergency" else course))
+		check(course + " restart keeps selected course", view.sim.kind == track if track in ["range", "network"] else view.sim.track_name == ("eridanus" if course == "emergency" else course))
 		check(course + " restart clears throttle", view.inp.thrL == 0.0 and view.inp.thrR == 0.0)
 		check(course + " restart retains obstacle collisions", view.sim.P.obstacleCollisions == collisions)
 		check(course + " restart retains pilot craft", view.sim.P.vehicle == pilot_craft)

@@ -33,7 +33,7 @@ function check(msg, cond) { console.log(`${cond ? 'ok  ' : 'FAIL'} ${msg}`); ok 
 const sim = PS.makeSim({ track: 'network', handling: 'speed' });
 const { S, T } = sim;
 check(`build: kind ${T.kind}, ${T.roads ? T.roads.length : 0} roads, ${T.roads ? T.roads.reduce((a, R) => a + R.N, 0) : 0} samples, ${T.junctions ? T.junctions.length : 0} junctions, ${T.cities ? T.cities.length : 0} cities`,
-  T.kind === 'network' && T.roads.length === 126 && T.junctions.length === 193 && T.cities.length === 5 && T.jumps.length === 21 && T.shafts.length === 12);
+  T.kind === 'network' && T.roads.length === 127 && T.junctions.length === 195 && T.cities.length === 5 && T.jumps.length === 21 && T.shafts.length === 12);
 if (T.kind !== 'network') { console.log('NETWORK FAIL'); process.exit(1); }
 
 // zones: the child's centreline inside the parent's corridor (plus its own half width) through the zone
@@ -343,7 +343,7 @@ for (const [mph, deg] of [[4000, 2], [2500, 3], [1500, 3], [800, 3]]) {
 }
 
 // Drive the interior links and stunt bypasses through both highway junctions, in both directions.
-for (const name of ['SWash', 'SFrost', 'SReed', 'SRed', 'SNeedle', 'SHammer']) {
+for (const name of ['SWash', 'SFrost', 'SReed', 'SRed', 'SNeedle', 'SHammer', 'SAurora']) {
   const id = road(name), R = T.roads[id];
   const ends = R.jx.map(k => T.junctions[k]).sort((a, b) => a.b0 - b.b0);
   for (const dir of [1, -1]) {
@@ -353,7 +353,7 @@ for (const name of ['SWash', 'SFrost', 'SReed', 'SRed', 'SNeedle', 'SHammer']) {
     const start = NR.across(entry, false, begin) - depart * 270;
     const finish = NR.across(exit, false, end) + arrive * 270;
     const trip = fly({ road: entry.a, i: start, dir: depart, mph: 1500 },
-      [{ road: id, i: Math.floor(R.N / 2) }, { road: exit.a, i: finish }], 420);
+      [{ road: id, i: Math.floor(R.N / 2) }, { road: exit.a, i: finish }], name === 'SAurora' ? 1000 : 420);
     const changes = trip.changes.filter(c => c.bi === 2).map(c => c.to[0]);
     const pod = trip.s.S.pod;
     check(`signed road: ${T.roads[entry.a].name} > ${name} > ${T.roads[exit.a].name}, ${(trip.frames / 60).toFixed(1)} s, ${trip.scrapes} wall contacts`,

@@ -16,6 +16,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 roads, J, cities, H, ok, jumps, onramps, shafts, overlaps, twists = dn.main()
 assert ok, "the design isn't OK: fix it before syncing"
 scenic = dn.scenic_table(roads)
+tube = next((i, *r.tube_span) for i, r in enumerate(roads) if r.kind == "tube")
 
 
 def scenic_rows(indent):
@@ -44,6 +45,7 @@ def js_block():
     out.append("  // Physical pavement unions only; route choices remain in NET_JUNCTIONS.")
     out.append("  const NET_OVERLAPS = [" + ", ".join(str(j) for j in overlaps) + "];")
     out.append("  const NET_TWISTS = [" + ", ".join(str(j) for j in twists) + "];")
+    out.append(f"  const NET_PRESSURE = [{tube[0]}, {tube[1]}, {tube[2]}];")
     out.append("  const NET_JUMP_PROFILES = [" + ", ".join(repr(roads[j[0]].profile) for j in jumps) + "];")
     out.append("  // [name, biome, centre x, centre y, road, terminal sample]")
     out.append("  const NET_CITIES = [")
@@ -86,6 +88,7 @@ def gd_block():
     out.append("# Physical pavement unions only; route choices remain in NET_JUNCTIONS.")
     out.append("const NET_OVERLAPS := [" + ", ".join(str(j) for j in overlaps) + "]")
     out.append("const NET_TWISTS := [" + ", ".join(str(j) for j in twists) + "]")
+    out.append(f"const NET_PRESSURE := [{tube[0]}, {tube[1]}, {tube[2]}]")
     out.append("const NET_JUMP_PROFILES := [" + ", ".join('"' + roads[j[0]].profile + '"' for j in jumps) + "]")
     out.append("# [name, biome, centre x, centre y, road, terminal sample]")
     out.append("const NET_CITIES := [")

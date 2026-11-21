@@ -5,7 +5,7 @@ const View := preload("res://view/craft_view.gd")
 const Cockpit := preload("res://vr/vr_cockpit.gd")
 const Boot := preload("res://release/vr_boot.gd")
 const Settings := preload("res://release/game_settings.gd")
-const Stops := ["range", "gp", "eridanus", "emergency", "network", "carving", "network", "range"]
+const Stops := ["range", "gp", "eridanus", "emergency", "network", "carving", "network", "aurora", "range"]
 
 var checks := 0
 var failures := 0
@@ -144,7 +144,10 @@ func _run() -> void:
 		if not check(stop + " opens the real VR cockpit scene", view is Cockpit and view.scene_file_path == "res://vr.tscn"):
 			_finish()
 			return
-		check(stop + " native track selection is correct", view._track() == stop)
+		check(stop + " native track selection is correct", view._track() == ("network" if stop == "aurora" else stop))
+		if stop == "aurora":
+			check("VR Aurora starts at the southwest lock", view.sim.pod.path == view.sim.NET_PRESSURE[0]
+				and view.sim.pod.hint < view.sim.NET_PRESSURE[1] and view.network_world.pressure_line.is_visible_in_tree())
 		check(stop + " job selection is correct", not view.sim.job.is_empty() if stop == "emergency" else view.sim.job.is_empty())
 		if stop == "carving":
 			check("Carving starts in Speedcraft with visible corner guidance",view.sim.P.handling=="speed" and view.gp_world!=null and view.gp_world.corners.size()>10 and view.gp_world.chevrons>0)
@@ -229,7 +232,7 @@ func _run() -> void:
 		await frames(2)
 		check(stop + " desktop pause cannot reroute VR", get_tree().current_scene == view and not get_tree().paused and not overlay.is_paused)
 		var road_world: Node = view.range_world if stop == "range" else view.gp_world
-		if stop == "network":
+		if stop in ["network", "aurora"]:
 			road_world = view.network_world
 		elif stop in ["eridanus", "emergency"]:
 			road_world = view.course_world
