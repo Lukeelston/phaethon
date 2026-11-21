@@ -174,6 +174,7 @@ func start_selected() -> void:
 	View.spot_override = overrides[2]
 	var cockpit = load("res://vr/vr_cockpit.gd")
 	cockpit.require_neutral_on_entry = true
+	cockpit.cold_on_entry = true      # a flight chosen here begins parked, cold and dark (unless the pilot has COLD START off)
 	start_button.text = "Loading " + title.text + "…"
 	print("VR MENU: starting ", selected_course)
 	get_tree().call_deferred("change_scene_to_file", "res://vr.tscn")

@@ -86,6 +86,9 @@ var _drum_mat: ShaderMaterial
 var _roll_rate := 0.0      # points a second, set when an award lands (so it rolls evenly and arrives)
 var _rolled_sent := -1.0
 var _rolled_at := 0
+var _power := 1.0          # the battery bus (the start-up): every lamp's level is times this
+var _testing := false      # the self-test: every lamp lit ...
+var _sweep := -1.0         # ... and every needle here, 0..1 of its scale (-1: where it belongs)
 
 
 static func available() -> bool:
@@ -387,6 +390,10 @@ func roll(dt: float) -> void:
 # ---- every frame ----
 
 func _set_needle(name: String, v: float, over := 0.0) -> void:
+	if _sweep >= 0.0:
+		v = _sweep
+	elif _power <= 0.0:
+		v = 0.0            # a dead instrument's needle lies on its stop
 	v = clampf(v, 0.0, 1.0 + over)
 	if is_equal_approx(v, values[name]):
 		return
@@ -404,7 +411,11 @@ func needle_angle(name: String) -> float:
 	return lerpf(info[2], info[3], values[name])
 
 
-func _lamp(name: String, colour: Color, level: float) -> void:
+func _lamp(name: String, colour: Color, level: float, as_given := false) -> void:
+	if not as_given:
+		if _testing and name != "backlight" and name != "lcd":
+			level = 1.0
+		level *= _power
 	var now := Color(colour, level)
 	if now == lamps[name]:
 		return
@@ -418,6 +429,10 @@ func _lamp(name: String, colour: Color, level: float) -> void:
 func _arc(key: String, v: float, colour: Color, level: float) -> void:
 	var arc: Array = _arcs[key]
 	var names: Array = arc[0]
+	if _testing:
+		v = 1.0
+		level = 1.0
+	level *= _power
 	var lit := clampi(ceili(v * names.size() - 0.001), 0, names.size())
 	if lit == arc[1] and colour == arc[2] and level == arc[3]:
 		return
@@ -425,7 +440,7 @@ func _arc(key: String, v: float, colour: Color, level: float) -> void:
 	arc[2] = colour
 	arc[3] = level
 	for i in names.size():
-		_lamp(names[i], colour, level if i < lit else 0.0)
+		_lamp(names[i], colour, level if i < lit else 0.0, true)
 
 
 ## How many of an arc's segments are lit (for the gates).
@@ -437,11 +452,17 @@ func arc_lit(key: String, count: int) -> int:
 
 
 ## d: dashboard.gd's keys, and optionally mach (float; else from mph at sea level), backlight
-## (0..1: the instrument lighting, turned down in the dark) and turbines (bool: the second
-## stage is running).
+## (0..1: the instrument lighting, turned down in the dark), turbines (bool: the second
+## stage is running), and the start-up's two: power (0..1: the battery bus; at 0 nothing is lit
+## and nothing reads) and sweep (0..1 through the self-test, -1 when it is not running: every
+## lamp lit, every needle up its scale and back, eights in the digits).
 func show_state(d: Dictionary) -> void:
+	_power = clampf(float(d.get("power", 1.0)), 0.0, 1.0)
+	var sweep: float = d.get("sweep", -1.0)
+	_testing = sweep >= 0.0 and _power > 0.0
+	_sweep = (1.0 - absf(2.0 * clampf(sweep, 0.0, 1.0) - 1.0)) if _testing else -1.0
 	var mph: float = d.mph
-	var shown := int(round(mph))
+	var shown := 8888 if _testing else int(round(mph))
 	if shown != _speed:
 		_speed = shown
 		labels.speed.text = Classic._grouped(shown)
@@ -466,7 +487,10 @@ func show_state(d: Dictionary) -> void:
 		feat_label.text = feat
 		feat_label.modulate = Color(GREEN, lerpf(1.0, 0.5, smoothstep(FEAT_BRIGHT, FEAT_BRIGHT + 0.8, age)))
 	var blink: bool = d.blink
-	var backlight: float = d.get("backlight", 1.0)
+	var backlight: float = float(d.get("backlight", 1.0)) * _power
+	for strip in ["progress", "warn", "mach", "footer"]:
+		(labels[strip] as Label3D).visible = _power >= 0.5 and (strip != "footer" or not fresh)
+	feat_label.visible = fresh and _power >= 0.5
 	_set_needle("mach", float(d.get("mach", mph / MPH_PER_MACH)) / MACH_FULL, 0.02)
 	var hurt := []
 	for k in 2:
@@ -500,7 +524,7 @@ func show_state(d: Dictionary) -> void:
 	_lamp("turbines", GREEN, 1.0 if d.get("turbines", false) else 0.0)
 	_lamp("backlight", BACKLIGHT, backlight)
 	_lamp("lcd", BACKLIGHT, backlight)
-	var g: int = d.get("gear", 0)
+	var g: int = 8 if _testing else int(d.get("gear", 0))
 	var gear: Readout = labels.gear
 	gear.text = str(g) if g > 0 else ""
 	gear.modulate = ORANGE if d.get("overdrive", false) else Color(0.95, 0.95, 0.9)

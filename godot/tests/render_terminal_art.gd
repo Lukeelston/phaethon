@@ -56,6 +56,8 @@ func _run() -> void:
 		if arg.begins_with("--camera="):   # timings: the quick menu's chase views
 			Seat.camera = arg.trim_prefix("--camera=")
 			Seat._camera_loaded = true
+	if "--no-start-panel" in OS.get_cmdline_user_args():   # timings: the cockpit without its start panel
+		preload("res://vr/overhead_panel.gd").fitted = false
 	if "--no-reflection" in OS.get_cmdline_user_args():   # timings: the windscreen without its reflection of the cockpit
 		preload("res://view/screen_reflection.gd").enabled = false
 	if "--reflection-every-frame" in OS.get_cmdline_user_args():   # timings: a picture every frame, to weigh one

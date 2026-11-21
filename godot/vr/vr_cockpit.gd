@@ -11,6 +11,9 @@
 ##   mid-lap; STARFIGHTER takes below 1,250 mph). Y hold 1 s flips it too. Y tap: restart
 ##   menu tap: quick menu (driving partner, controls, camera: the seat or a chase view) · menu hold
 ##   1.5 s: main menu / map selection
+##   the start panel across the windscreen's header (vr/overhead_panel.gd): 1 BATT, 2 ENGINE under its
+##   red guard, 3 START, 4 PARK. A flight chosen from the menu begins parked, cold and dark, and is
+##   started by hand (vr/startup_sequence.gd); COLD START in the quick menu turns that off.
 ## Haptics: a kick on the sonic boom; a tick in that hand when a lever crosses the burner gate (the
 ## stick schemes); a thump in the left hand as the burner lights, a softer one as it goes out, a
 ## double tap when it can't (below top gear).
@@ -39,6 +42,9 @@ const MinimapPanelScript := preload("res://vr/minimap_panel.gd")
 const ScreenReflectionScript := preload("res://view/screen_reflection.gd")
 const Kit := preload("res://view/mesh_kit.gd")
 const BrakeDiagnosticsScript := preload("res://vr/brake_diagnostics.gd")
+const StartupScript := preload("res://vr/startup_sequence.gd")
+const OverheadPanelScript := preload("res://vr/overhead_panel.gd")
+const StartupAudioScript := preload("res://audio/startup_audio.gd")
 var _brake_trace: RefCounted
 static var require_neutral_on_entry := false
 var _await_neutral_controls := false
@@ -133,6 +139,20 @@ var _y_fired := false
 var _scheme_flash := 0.0
 var _turbines := false   # the second stage is running (EngineAudio.turbines_at): the cluster's TURBINES lamp
 var hands_live := true   # false while the OpenXR session isn't focused (_on_xr_event); never in a flat run
+# The start-up (Luke: "design a 'startup' sequence for the vehicle, similar to a jet startup sequence
+# ... a kind of tutorial i can walk people through"): vr/startup_sequence.gd is its logic, the panel
+# under the roof's header its controls. A flight chosen from the menu begins cold; a restart, a
+# track switched in flight, a replay and every test begin running, as they always did. What the
+# pilot's hands ask stays in `inp` (the levers, the dials and the engines' sound follow it); the sim
+# is given what the sequence lets through (_sim_step).
+static var cold_start := true        # the pilot's choice (the quick menu's COLD START, saved): menu flights begin cold
+static var _startup_loaded := false  # (its saved setting is read once a run, as the camera's)
+static var cold_on_entry := false    # set by the menu as it launches a flight: this one begins cold, if the pilot's choice allows
+var startup = StartupScript.new()    # (running, until _ready says otherwise)
+var overhead                         # vr/overhead_panel.gd; null without the roof (there is no header to hang it from: no cold start then)
+var startup_audio                    # audio/startup_audio.gd; null when muted
+var _turbine_lamp := false           # the run-up's turbine test has the TURBINES lamp lit
+var _run_shake := 0.0                # the cockpit's tremble while an engine starts or strains against the brake
 
 
 func _ready() -> void:
@@ -153,6 +173,27 @@ func _ready() -> void:
 	if not _slide_loaded and prefs.has("slide"):
 		slide_feel = prefs.slide != "off"
 	_slide_loaded = true
+	if not _startup_loaded and prefs.has("startup"):
+		cold_start = prefs.startup != "hot"
+	_startup_loaded = true
+	var cold := cold_on_entry and cold_start
+	cold_on_entry = false
+	for a in OS.get_cmdline_user_args():
+		if a == "--cold-start":
+			cold = true
+		elif a == "--hot-start":
+			cold = false
+	if engine_audio:
+		startup_audio = StartupAudioScript.new()
+		add_child(startup_audio)
+		startup_audio.setup()
+	if cold and overhead != null and replay.is_empty() and cruise < 0.0:
+		startup.cold()
+		for k in 2:                       # parked: her air brakes were left out
+			craft.flap_open[k] = 1.0
+		craft.pod_flap_open = 1.0
+		print("STARTUP: parked, cold and dark")
+	_apply_startup(0.0)
 	var forced := false
 	for a in OS.get_cmdline_user_args():
 		forced = forced or a.begins_with("--handling=")
@@ -175,7 +216,14 @@ func _ready() -> void:
 
 
 func _sim_step() -> void:
-	super()
+	if startup.is_hot():
+		super()
+	else:
+		# the sim is given what the start-up lets through; the cockpit keeps what the hands ask
+		var asked := inp
+		inp = startup.gate(asked)
+		super()
+		inp = asked
 	if _brake_trace:
 		_brake_trace.observe_step(sim)
 
@@ -192,7 +240,8 @@ func _save_prefs() -> void:
 	var f := FileAccess.open(PREFS, FileAccess.WRITE)
 	if f:
 		f.store_string(JSON.stringify({"scheme": quest.scheme, "handling": handling_ask if handling_ask != "" else sim.P.handling, "camera": camera,
-			"nose": "closed" if CraftModelScript.nose_closed else "open", "slide": "on" if slide_feel else "off"}))
+			"nose": "closed" if CraftModelScript.nose_closed else "open", "slide": "on" if slide_feel else "off",
+			"startup": "cold" if cold_start else "hot"}))
 
 
 ## Thumbstick click (either stick): sit where you are. Recentres the view AND the height, so
@@ -238,19 +287,21 @@ static func brake_haptic_strength(shudder: float) -> float:
 func _apply_shudder(delta: float) -> void:
 	for c in _buzz_hold.keys():
 		_buzz_hold[c] = maxf(0.0, _buzz_hold[c] - delta)
+	var tremble := _startup_shake(delta)
 	if not wind_audio:
-		shell.position = _grab_jolt(delta)
+		shell.position = _grab_jolt(delta) + tremble
 		return
 	var s: Array = wind_audio.shudder
 	var w: Array = wind_audio.shake
 	for k in 2:
 		var hand: XRController3D = hands.left if k == 0 else hands.right
 		var strength := maxf(brake_haptic_strength(s[k]), SLIDE_SCRUB * slide_scrub(k == 1))   # the brake's shudder, or the slide's scrub
+		strength = maxf(strength, startup_rumble(_hand_engine(k)))                            # ... or that hand's engine starting, or straining against the brake
 		if strength > 0.0 and _buzz_hold.get(hand, 0.0) <= 0.0:
 			hand.trigger_haptic_pulse("haptic", 0.0, strength, 0.05, 0.0)
 	var up: float = s[0] * w[0] + s[1] * w[1]
 	var side: float = s[0] * w[0] - s[1] * w[1]
-	shell.position = Vector3(0.6 * side, up, 0.0) * SHAKE_M + _grab_jolt(delta)
+	shell.position = Vector3(0.6 * side, up, 0.0) * SHAKE_M + _grab_jolt(delta) + tremble
 
 
 ## The gear's grab: the cockpit jolts fore and aft (a little up), GRAB_HZ, dying over GRAB_DECAY.
@@ -564,8 +615,12 @@ func _build_cockpit() -> void:
 	canopy = CanopyScript.build()
 	canopy.position = Vector3(0, CraftModelScript.POD_FRAME_UP, 0)
 	shell.add_child(canopy)
-	if sim.kind == "network":
+	if sim.kind == "network" or CanopyScript.roof_available():   # (under the roof on every course: it throws the start-up's checklist on the glass too)
 		_mount_approach_projector(canopy)
+	if CanopyScript.roof_available() and OverheadPanelScript.fitted:      # the start panel: a pod either side of the projector, on the header rail
+		overhead = OverheadPanelScript.new()
+		canopy.add_child(overhead)
+		overhead.build()
 	dashboard = GaugeClusterScript.new() if GaugeClusterScript.available() else DashboardScript.new()
 	shell.add_child(dashboard)
 	dashboard.transform = DashboardScript.mount()
@@ -790,6 +845,14 @@ func _read_input(delta: float) -> void:
 				_buzz(hand, 0.9, 0.06)
 	if _pressed_once("recenter", _button(l, "primary_click") or _button(r, "primary_click")):
 		recenter()
+	# the start panel: either hand can work it
+	if overhead and hands_live and not _await_neutral_controls:
+		for hand in [l, r]:
+			for hit: Array in overhead.poke(hand, delta):
+				startup_work(String(hit[0]), int(hit[1]), hand)
+	startup.gears = quest.scheme == "triggers" and quest.gear >= 1      # (a gearbox to try in the run-up)
+	startup.step(delta, [inp.thrL, inp.thrR], quest.display_gear())
+	_apply_startup(delta)
 	_diag(delta, l, r, p)
 
 
@@ -881,6 +944,7 @@ func _menu_items() -> Array:
 		{"key": "scheme", "label": "CONTROLS", "value": String(quest.scheme).to_upper()},
 		{"key": "camera", "label": "CAMERA", "value": String(CAMERA_NAMES[camera])},
 		{"key": "nose", "label": "NOSE", "value": "CLOSED" if CraftModelScript.nose_closed else "OPEN"},
+		{"key": "startup", "label": "COLD START", "value": "ON" if cold_start else "OFF"},
 		{"key": "maps", "label": "CHOOSE MAP"},
 		{"key": "resume", "label": "RESUME"}]
 
@@ -912,10 +976,196 @@ func menu_choose() -> bool:
 			menu.at = at
 			_menu_show()
 			return true
+		"startup":      # whether a flight chosen from the menu begins cold and dark (this one carries on as it is)
+			cold_start = not cold_start
+			_save_prefs()
+			print("STARTUP: cold start ", "on" if cold_start else "off")
+			var at: int = menu.at
+			menu.items = _menu_items()
+			menu.at = at
+			_menu_show()
+			return true
 		"maps":
 			return_to_menu()
 			return false
 	return super()
+
+
+# --- the start-up ---
+
+## A control on the start panel worked: `control` "batt", "engine" or "park" flicked up (+1) or down
+## (-1), or "start" pressed. -> what the sequence made of it ("" nothing, "refused", or what it did).
+## The hand that did it feels a click, or the double tap of a refusal.
+func startup_work(control: String, dir: int, hand: XRController3D = null) -> String:
+	var mph := _kmh() / 1.609344
+	var did: String = startup.press_start(mph) if control == "start" else startup.flick(control, dir, mph)
+	if hand:
+		if did == "refused":
+			_buzz(hand, 0.4, 0.03)
+			_buzz(hand, 0.4, 0.03, 0.08)
+		elif did != "":
+			_buzz(hand, 0.9, 0.06)
+	if did != "":
+		print("STARTUP: %s%s" % [did, (" (%s)" % startup.refusal) if did == "refused" else ""])
+	return did
+
+
+## The hand that works an engine (with crossed trigger throttles the left engine is the right hand's).
+func _engine_hand(k: int) -> XRController3D:
+	return hands.right if (k == 0) == (quest.scheme == "triggers") else hands.left
+
+
+## ... and the engine a hand works (0 the left hand, 1 the right).
+func _hand_engine(k: int) -> int:
+	return 1 - k if quest.scheme == "triggers" else k
+
+
+## What the sequence has to say, said: its sounds and haptics, the engines' model and voice told
+## which of them are dark, turning over or straining against the brake, the panel drawn.
+func _apply_startup(delta: float) -> void:
+	for e: String in startup.events:
+		_startup_event(e)
+	startup.events.clear()
+	var held: bool = startup.held()
+	for k in 2:
+		var stage: String = startup.stage[k]
+		craft.held[k] = stage != "catch" and stage != "run"
+		craft.shown_thrust[k] = -1.0
+		if stage == "catch":          # the light-off: a burst of flame, settling to a pilot light
+			craft.shown_thrust[k] = 0.06 + 0.5 * startup.catch_flare(k)
+		elif held:                    # the run-up: the fire follows the lever, the brake holds the craft
+			craft.shown_thrust[k] = 0.05 + 0.95 * float(inp.thrL if k == 0 else inp.thrR)
+		if engine_audio:
+			engine_audio.off[k] = craft.held[k]
+			engine_audio.crank[k] = stage == "crank"
+	craft.energised = startup.charge
+	craft.lights_on = startup.power > 0.5
+	if engine_audio:
+		engine_audio.test_stage = startup.turbine if held else 0.0
+	var headlight: Light3D = null       # the lamp that lights the road's signs: the battery's too
+	if rig:
+		headlight = rig.get_node_or_null("GuideSignHeadlight") as Light3D
+	if headlight:
+		headlight.visible = startup.power > 0.5
+	if overhead:
+		overhead.show_state(startup, delta)
+
+
+func _sound(sound: String, side := 0) -> void:
+	if startup_audio:
+		startup_audio.play(sound, side)
+
+
+func _startup_event(e: String) -> void:
+	match e:
+		"batt_on":
+			_sound("click")
+			_sound("power")
+		"batt_off":
+			_sound("click")
+			_sound("down")
+		"guard_open", "guard_close":
+			_sound("clack")
+		"master_on":
+			_sound("click")
+			_sound("arc")
+		"master_off":
+			_sound("click")
+		"shutdown":
+			if startup_audio:
+				startup_audio.stop("starter")
+		"start", "dead":
+			_sound("button")
+		"refused":
+			_sound("refuse")
+		"park_set":
+			_sound("click")
+			_sound("clamp")
+		"park_release":
+			_sound("click")
+			_sound("release")
+			for side in ["left", "right"]:
+				_buzz(hands[side], 0.7, 0.1)
+		"selftest_done", "turbines_ok":
+			_sound("chime")
+		"crank0", "crank1":
+			_sound("starter", int(e.right(1)))
+		"light0", "light1":          # it catches: a kick in the hand that works it
+			_buzz(_engine_hand(int(e.right(1))), 1.0, 0.18)
+		"check":
+			for side in ["left", "right"]:
+				_buzz(hands[side], 0.3, 0.03)
+		"cleared":
+			print("STARTUP: cleared, %.1f s into the flight" % sim.time)
+
+
+## The start-up in the hand that works engine k: it turning over, the kick as it lights, and its
+## strain against the brake in the run-up.
+func startup_rumble(k: int) -> float:
+	match startup.stage[k]:
+		"crank":
+			return 0.16
+		"catch":
+			return 0.2 + 0.5 * startup.catch_flare(k)
+	if startup.held():
+		return 0.45 * smoothstep(0.1, 1.0, float(inp.thrL if k == 0 else inp.thrR))
+	return 0.0
+
+
+## ... and in the cockpit: a tremble of a millimetre or two (the fittings', never the view's).
+func _startup_shake(delta: float) -> Vector3:
+	var strain := 0.0
+	if startup.held():
+		strain = 0.5 * (float(inp.thrL) + float(inp.thrR))
+	for k in 2:
+		if startup.stage[k] == "crank":
+			strain = maxf(strain, 0.14)
+		elif startup.stage[k] == "catch":
+			strain = maxf(strain, 0.2 + 0.5 * startup.catch_flare(k))
+	_run_shake = lerpf(_run_shake, strain, 1.0 - exp(-clampf(delta, 0.0, 0.05) * 9.0))
+	if _run_shake < 0.004:
+		return Vector3.ZERO
+	var t := Time.get_ticks_msec() * 0.001
+	return Vector3(0.5 * sin(t * 61.0), sin(t * 47.0 + 1.0), 0.3 * sin(t * 53.0)) * 0.0016 * _run_shake
+
+
+## The parking brake holds the air brakes out to their full extent: the flaps show it (Luke: "the
+## 'park' lever should also engage the airbrakes to full extents").
+func _sync_craft(delta: float) -> void:
+	if not startup.park:
+		super(delta)
+		return
+	var shown := inp.duplicate()
+	shown.brkL = 1.0
+	shown.brkR = 1.0
+	craft.sync(sim, shown, delta)
+
+
+## In the run-up the engines rev to the levers: a gearbox would hold a craft that is standing still
+## near idle whatever they asked.
+func _engine_inp() -> Dictionary:
+	if startup.held():
+		return {"thrL": inp.thrL, "thrR": inp.thrR, "repair": inp.get("repair", false)}
+	return super()
+
+
+## The glass and the instrument strip carry the start-up's checklist while there is one; with the
+## battery dead they carry nothing.
+func _hud_progress(in_cockpit: bool) -> String:
+	if startup.power < 0.5:
+		if approach_display:
+			approach_display.set_message("")
+		return ""
+	var page: String = startup.message()
+	if page != "":
+		if approach_display:
+			approach_display.set_message(page)
+		return startup.line()
+	if sim.kind != "network":      # (the projector is under the roof on every course; only the Network has guidance for it)
+		if approach_display:
+			approach_display.set_message("")
+		return _progress_text()
+	return super(in_cockpit)
 
 
 ## Skin the pod's nose over, or open it to its cage again: a spike option, to fly both (Luke: "I'm
@@ -1067,6 +1317,7 @@ func _process(delta: float) -> void:
 	if _brake_trace:
 		_brake_trace.capture(self, delta)
 	_apply_shudder(delta)
+	interior.set_power(startup.power)
 	interior.set_mode(sim.mode, sim.hblend)
 	# An untracked hand (flat runs, before the first pose) sits at the origin, i.e. on the eye: its
 	# box's far face, 5 cm out on the near plane, z-fought into a dark rectangle mid-view.
@@ -1074,8 +1325,10 @@ func _process(delta: float) -> void:
 		hands[side].get_child(0).visible = hands[side].get_has_tracking_data()
 	CanopyScript.update(canopy, sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy), sim.hblend, sim.mode, delta)
 	if mode_switch:
+		mode_switch.power = startup.power
 		mode_switch.show_state(handling_ask == "starfighter", sim.hblend, handling_ask == "starfighter" and sim.hblend == 0.0)
 	if slide_switch:
+		slide_switch.power = startup.power
 		slide_switch.show_state(not slide_feel, 0.0 if slide_feel else 1.0, false)
 	# Crash: fade to black, respawn happens in the dark, fade back up.
 	var target := 1.0 if sim.crash_t > 0.0 else 0.0
@@ -1170,6 +1423,11 @@ func _update_hud() -> void:
 	_update_skill_readout()
 	var kmh := _kmh()
 	_turbines = EngineAudio.turbines_at(kmh / 1.609344, _turbines)
+	# the run-up's turbine test lights the same lamp once they are at their test speed
+	_turbine_lamp = startup.held() and (startup.turbine >= 0.97 or (_turbine_lamp and startup.turbine > 0.6))
+	var map_live: bool = (sim.kind == "circuit" or sim.kind == "network") and startup.power > 0.5
+	if minimap_panel.live != map_live:
+		minimap_panel.set_live(map_live)
 	_scheme_flash = maxf(0.0, _scheme_flash - get_process_delta_time())
 	var ctl: String = QuestControlsScript.HINTS[quest.scheme] if _scheme_flash > 0.0 else QuestControlsScript.NAMES[quest.scheme]
 	if minimap_panel.live:
@@ -1178,10 +1436,12 @@ func _update_hud() -> void:
 		"mph": kmh / 1.609344, "kmh": kmh, "mach": cues.mach, "backlight": 0.5 if light_preset == "twilight" else 1.0, "mach_line": cues.readout(), "progress": progress,
 		"footer": "%s   /   %s" % [handling_text(), ctl],
 		"points": int(_skill_shown.get("points", 0)) if _skill_on else 0, "feat": String(_skill_shown.get("award", "")) if _skill_on else "", "feat_age": float(_skill_shown.get("age", 1e9)),
-		"thr": [inp.thrL, inp.thrR], "brk": [inp.brkL, inp.brkR], "heat": [sim.eL.heat, sim.eR.heat],
+		"thr": [inp.thrL * startup.engine_k(0), inp.thrR * startup.engine_k(1)],
+		"brk": [1.0, 1.0] if startup.park else [inp.brkL, inp.brkR], "heat": [sim.eL.heat, sim.eR.heat],
 		"health": [sim.eL.health, sim.eR.health],
 		"flameout": [sim.eL.flameout, sim.eR.flameout], "battery": sim.battery,
-		"burner": sim.mode == "burner", "armed": sim.armed, "ramjet": sim.mode == "ramjet", "turbines": _turbines,
+		"burner": sim.mode == "burner", "armed": sim.armed, "ramjet": sim.mode == "ramjet", "turbines": _turbines or _turbine_lamp,
+		"power": startup.power, "sweep": startup.selftest / StartupScript.SELFTEST_S if startup.selftest >= 0.0 else -1.0,
 		"gear": quest.display_gear(), "overdrive": bool(inp.get("gearOverdrive", false)),
 		"blink": (Time.get_ticks_msec() / 250) % 2 == 0,
 	})
