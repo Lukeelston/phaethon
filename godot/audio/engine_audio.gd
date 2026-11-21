@@ -143,6 +143,13 @@ var stage := 0.0   # how far the turbines are in, 0..1
 var anger := 1.0   # the V8's temper: what is left of the stage
 var _wind := 0.0   # the whine's wind-up, 0..1
 var second_on := false   # craft fast enough for the second engine (with hysteresis)
+# The start-up (vr/startup_sequence.gd), told by the cockpit. An engine that is `off` is silent
+# and winds down as a flamed-out one does; one that is on its starter (`crank`) turns over at
+# cranking speed and fires in fits; taken out of `off` it catches as a reignite does. `test_stage`
+# is the run-up's turbine test: that much of the second stage is in, whatever the airspeed.
+var off: Array[bool] = [false, false]
+var crank: Array[bool] = [false, false]
+var test_stage := 0.0
 
 
 func setup(craft_sim) -> void:
@@ -220,7 +227,7 @@ func setup(craft_sim) -> void:
 			"was_out": false, "cough_t": 0.0, "cough_k": 1.0, "cough_next": 0.0, "players": {}, "at": {},
 			"bang": bang, "sec": {"state": "off", "t": 0.0, "spool": -0.33, "vel": 0.0, "fire": 0.0, "cough_k": 0.0, "cough_next": 0.0},
 			"rotor_mph": 0.0, "rotor_p": 1.0, "sec_run": 0.0,
-			"spool_v": 0.0, "lever_prev": 0.0, "bark": 0.0,
+			"spool_v": 0.0, "lever_prev": 0.0, "bark": 0.0, "alive": 1.0,
 			"pops": pops, "pops2": pops2, "pop_t": 0.0, "pop_k": 0.0, "pop2_t": 0.0, "pop2_k": 0.0, "pops_n": 0}
 		for layer in LAYERS:
 			var ps: Array[AudioStreamPlayer] = []
@@ -347,8 +354,10 @@ func update(inp: Dictionary, delta: float) -> void:
 	var want := 0.0
 	if turbines_on:
 		want = lerpf(TUNE.turbine_light, 1.0, smoothstep(TUNE.turbine_mph[0], TUNE.turbine_mph[1], mph))
+	want = maxf(want, clampf(test_stage, 0.0, 1.0))   # the run-up's turbine test, on the brake
+	var spinning := turbines_on or test_stage > 0.02
 	stage = _follow(stage, want, TUNE.turbine_tau[0] if want > stage else TUNE.turbine_tau[1], dt)
-	_wind = _follow(_wind, 1.0 if turbines_on else 0.0, TUNE.turbine_wind[0] if turbines_on else TUNE.turbine_wind[1], dt)
+	_wind = _follow(_wind, 1.0 if spinning else 0.0, TUNE.turbine_wind[0] if spinning else TUNE.turbine_wind[1], dt)
 	# flat holds everything open (turbines in, temper full): only the crossfader may move anything there
 	var turbines := 1.0 if flat else stage
 	anger = 1.0 if flat else 1.0 - stage
@@ -361,10 +370,13 @@ func update(inp: Dictionary, delta: float) -> void:
 			lever = minf(lever, 0.6)
 			rev_target = minf(rev_target, 0.6)
 		var running_target: float = rev_target * ceiling + boost
-		var target: float = -0.33 if e.flameout else running_target
-		if e.flameout or v.spool < 0.0:
-			# winding down from a flameout, or relighting from below idle: no flare
-			v.spool = _follow(v.spool, target, TUNE.windmill if e.flameout else TUNE.relight, dt)
+		var held: bool = off[k]                      # the start-up: this engine is not running
+		var cranking: bool = held and crank[k]       # ... and is on its starter
+		var out: bool = e.flameout or held
+		var target: float = (-0.15 if cranking else -0.33) if out else running_target
+		if out or v.spool < 0.0:
+			# winding down from a flameout, turning over on the starter, or relighting from below idle: no flare
+			v.spool = _follow(v.spool, target, (0.3 if cranking else TUNE.windmill) if out else TUNE.relight, dt)
 			v.spool_v = 0.0
 		else:
 			_rev(v, "spool", "spool_v", target, dt, rise_rate)
@@ -375,10 +387,15 @@ func update(inp: Dictionary, delta: float) -> void:
 
 		# Combustion: off at a flameout, in fits for a moment after a reignite, and the sim's
 		# own sputter (a damaged engine misfiring) chops it on top.
-		if v.was_out and not e.flameout:
+		if v.was_out and not out:
 			v.cough_t = TUNE.cough_s
-		v.was_out = e.flameout
-		if v.cough_t > 0.0:
+		v.was_out = out
+		if cranking:                 # on the starter: it fires now and then, and does not catch
+			v.cough_next -= dt
+			if v.cough_next <= 0.0:
+				v.cough_next = randf_range(0.05, 0.14)
+				v.cough_k = 0.55 if randf() < 0.45 else 0.0
+		elif v.cough_t > 0.0:
 			v.cough_t -= dt
 			v.cough_next -= dt
 			if v.cough_next <= 0.0:
@@ -386,7 +403,8 @@ func update(inp: Dictionary, delta: float) -> void:
 				v.cough_k = 0.15 if randf() < 0.5 else 1.0
 		else:
 			v.cough_k = 1.0
-		var fire: float = 0.0 if e.flameout else v.cough_k
+		var fire: float = v.cough_k if cranking else (0.0 if out else v.cough_k)
+		v.alive = _follow(v.alive, 0.0 if held else 1.0, 0.25 if held else 0.5, dt)   # everything of it that is not combustion
 		v.fire = _follow(v.fire, fire, 0.05 if fire < v.fire else 0.12, dt)
 		v.comb = _follow(v.comb, e.sputter, 0.02, dt)
 		var burning: float = v.fire * v.comb
@@ -402,11 +420,11 @@ func update(inp: Dictionary, delta: float) -> void:
 		var bark := 1.0 if flat else db_to_linear(TUNE.bark_db * v.bark)
 		# Overrun: lifting off at high revs spits pops and crackle for a moment.
 		var over: float = v.spool - target
-		if not flat and not e.flameout and v.spool > TUNE.pop_rpm and over > TUNE.pop_lift and v.pop_t <= 0.0:
+		if not flat and not out and v.spool > TUNE.pop_rpm and over > TUNE.pop_lift and v.pop_t <= 0.0:
 			v.pop_t = TUNE.pop_s
 			v.pop_k = clampf(over / 0.5, 0.3, 1.0)
 		_pop(v, "pops", "pop_t", "pop_k", dt, duck)
-		v.burn = _follow(v.burn, 1.0 if boost > 0.0 and not e.flameout else 0.0, TUNE.burner_fade, dt)
+		v.burn = _follow(v.burn, 1.0 if boost > 0.0 and not out else 0.0, TUNE.burner_fade, dt)
 		var n_spool := clampf(layer_at("turbine", s), 0.0, 1.0)
 		var turb := _curve(TUNE.mix_turbine, s)
 		var snarl := 1.0 if flat else db_to_linear(TUNE.snarl_db * anger * v.bark)
@@ -415,14 +433,14 @@ func update(inp: Dictionary, delta: float) -> void:
 		var gains := {
 			"v8": _curve(TUNE.mix_v8, s) * lerpf(TUNE.calm_v8, 1.0, anger) * burning * bark * snarl,
 			"v12": _curve(TUNE.mix_v12, s) * lerpf(1.0, TUNE.angry_v12, anger) * burning * bark,
-			"turbine": turb * turbines * lerpf(1.0, TUNE.turbine_full, turbines) * (0.55 + 0.45 * burning),
+			"turbine": turb * turbines * lerpf(1.0, TUNE.turbine_full, turbines) * (0.55 + 0.45 * burning) * v.alive,
 			"roar": turb * lerpf(TUNE.roar_piston, 1.0, turbines) * lerpf(TUNE.roar_gain[0], TUNE.roar_gain[1], n_spool)
-				* (0.4 + 0.6 * burning),
+				* (0.4 + 0.6 * burning) * v.alive,
 			"burner": TUNE.burner_gain * v.burn * burning,
 		}
 		var sec_gain := _second(v, k, running_target, dt, duck, rise_rate)
-		gains["second"] = sec_gain * bark
-		gains["rotor"] = _rotor(v, lever, mph, dt, duck)
+		gains["second"] = sec_gain * bark * v.alive
+		gains["rotor"] = _rotor(v, lever, mph, dt, duck) * v.alive
 		if flat:
 			gains = {"v8": burning, "v12": burning, "turbine": 1.0, "roar": 1.0, "burner": v.burn * burning,
 				"second": v.sec.fire, "rotor": 1.0}

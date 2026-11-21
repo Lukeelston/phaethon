@@ -149,6 +149,16 @@ var _prev_f := [0.0, 0.0]
 const BinderArc := preload("res://view/binder_arc.gd")
 var arc: Mesh   # (the binder arc's mesh: an ArrayMesh rebuilt each frame)
 var binder_arc: MeshInstance3D
+# The start-up (vr/startup_sequence.gd), told by the cockpit. An engine that is `held` is dark, as a
+# flamed-out one is: no fire, its fan run down, its cable dead. `shown_thrust` is the thrust to draw
+# when it is not the sim's (-1: the sim's): the burst as an engine lights, and the run-up's, while the
+# parking brake holds the sim's own at nothing. `energised` is the binder's charge, 0 dead .. 1: the
+# arc between the engines and the glow in the cables. `lights_on` is the battery: the lamps and strobes.
+var held := [false, false]
+var shown_thrust := [-1.0, -1.0]
+var energised := 1.0
+var lights_on := true
+var light_meshes: Array[MeshInstance3D] = []
 var pod_frame: Node3D = null          # VR: the cockpit rig stands in for the hidden pod
 const POD_FRAME_UP := 0.6             # pod mesh centre above the rig floor
 const POD_LIFT := 1.3                 # the pod rides this much higher than the sim's body (looks only:
@@ -199,6 +209,7 @@ func build(v) -> void:
 		lights.material_override = lit_mat
 		lights.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		eng.add_child(lights)
+		light_meshes.append(lights)
 		# hot section: its own material, coloured by heat
 		var hot := MeshInstance3D.new()
 		hot.mesh = hot_mesh      # (its tail is open: the tailpipe runs up inside it)
@@ -1029,6 +1040,8 @@ func sync(sim, inp: Dictionary, delta: float) -> void:
 	var turn_g: float = -0.5 * (float(_lat[0]) + float(_lat[1]))
 	if delta > 0.0:
 		vane_angle = Jets.slew(vane_angle, Jets.command(steer, turn_g, 0.5 * (sim.eL.thrust + sim.eR.thrust)), delta)
+	for lights in light_meshes:
+		lights.visible = lights_on
 	for k in 2:
 		var e = bodies[k]
 		var eng := engines[k]
@@ -1047,12 +1060,14 @@ func sync(sim, inp: Dictionary, delta: float) -> void:
 		else:
 			eng.rotation = Vector3(pitch + climb, e.th - PI / 2.0, lean)
 		var h: float = e.heat
-		var col := Color(0.25, 0.25, 0.25) if e.flameout else heat_color(h)
+		var out: bool = e.flameout or held[k]                                           # dark: flamed out, or not started
+		var thrust: float = shown_thrust[k] if shown_thrust[k] >= 0.0 else e.thrust     # (the start-up's, while the sim's own is held at nothing)
+		var col := Color(0.25, 0.25, 0.25) if out else heat_color(h)
 		hot_mats[k].albedo_color = col
-		hot_mats[k].emission = Color.BLACK if e.flameout else col * smoothstep(0.35, 1.0, h) * 1.4
-		var t: float = 0.0 if e.flameout else minf(e.thrust, 1.0)
+		hot_mats[k].emission = Color.BLACK if out else col * smoothstep(0.35, 1.0, h) * 1.4
+		var t: float = 0.0 if out else minf(thrust, 1.0)
 		# fan: spins up with thrust, winds down on a flameout; capped below where it would strobe
-		var w_target := 0.0 if e.flameout else 3.0 + 16.0 * t
+		var w_target := 0.0 if out else 3.0 + 16.0 * t
 		_fan_w[k] = lerpf(_fan_w[k], w_target, 1.0 - exp(-delta * 2.0))
 		for r in 2:   # the twin rotors counter-rotate
 			var rotor: Node3D = rotors[k][r]
@@ -1074,19 +1089,19 @@ func sync(sim, inp: Dictionary, delta: float) -> void:
 			(vp as Node3D).rotation.y = vane_angle
 		# the fin strobe: a double flash every 1.2 s, the two engines a beat apart
 		var ph := fposmod(Time.get_ticks_msec() / 1000.0 + 0.6 * k, 1.2)
-		strobes[k].visible = ph < 0.05 or (ph > 0.14 and ph < 0.19)
+		strobes[k].visible = lights_on and (ph < 0.05 or (ph > 0.14 and ph < 0.19))
 		# binder emitters: a living glow, hotter and toward violet as the binder strains
 		var strain := clampf(absf(sim.binder_stretch) / maxf(sim.P.binderBreak, 0.01), 0.0, 1.0)
 		var pulse := 0.75 + 0.25 * sin(Time.get_ticks_msec() * 0.012 + k)
-		binder_mats[k].albedo_color = BINDER_COL.lerp(Color(0.8, 0.45, 1.0), strain) * (0.7 + 0.5 * pulse)
+		binder_mats[k].albedo_color = BINDER_COL.lerp(Color(0.8, 0.45, 1.0), strain) * (0.7 + 0.5 * pulse) * energised
 		# The nozzle and the gas (view/jet_exhaust.gd): the flaps open and shut with the power and lead
 		# the burner's light, which comes zone by zone; the metal the gas washes heats, and cools slowly.
 		var flame := flames[k]
-		var burning: bool = not e.flameout and e.thrust > 0.02
+		var burning: bool = not out and thrust > 0.02
 		flame.visible = burning
 		var jet = jets[k]
 		if delta > 0.0:
-			jet.step(delta, burning, sim.mode, e.thrust, h, vh)
+			jet.step(delta, burning, sim.mode, thrust, h, vh)
 		_burn[k] = jet.lit
 		_ram[k] = jet.ram
 		Jets.set_metal(metal_mats[k], jet.metal)
@@ -1097,7 +1112,7 @@ func sync(sim, inp: Dictionary, delta: float) -> void:
 		glow_mats[k].albedo_color = DARK if not burning else behind.lerp(Color(2.4, 1.7, 1.0), _burn[k]).lerp(Color(1.7, 1.9, 2.5), _ram[k])
 		var lamp: OmniLight3D = nozzle_lights[k]
 		lamp.light_color = Color(1.0,0.48,0.19).lerp(Color(0.34,0.61,1.0),_ram[k])
-		lamp.light_energy = _burn[k] * (2.2 + 0.14 * sin(Time.get_ticks_msec() * 0.19 + k * 2.0) + 1.6 * jet.flash) * minf(e.thrust, 1.2) if burning else 0.0
+		lamp.light_energy = _burn[k] * (2.2 + 0.14 * sin(Time.get_ticks_msec() * 0.19 + k * 2.0) + 1.6 * jet.flash) * minf(thrust, 1.2) if burning else 0.0
 		if burning:
 			# (the pod's nose is 12.6 m behind the nozzles: the flame stops short of it)
 			var reach: float = maxf(jet.reach, 0.3)
@@ -1108,7 +1123,7 @@ func sync(sim, inp: Dictionary, delta: float) -> void:
 			var fmat: ShaderMaterial = flame_mats[k][0]
 			fmat.set_shader_parameter("centre", plume_line[k])
 			fmat.set_shader_parameter("reach", reach)
-			fmat.set_shader_parameter("thrust", e.thrust)
+			fmat.set_shader_parameter("thrust", thrust)
 			fmat.set_shader_parameter("burner", _burn[k])
 			fmat.set_shader_parameter("ramjet", _ram[k])
 			fmat.set_shader_parameter("slot", Vector2(PLUME_SLOT.x, jet.exit))
@@ -1117,7 +1132,7 @@ func sync(sim, inp: Dictionary, delta: float) -> void:
 			fmat.set_shader_parameter("flash", jet.flash)
 			fmat.set_shader_parameter("teb", jet.teb)
 			(flame.get_node("plume") as MeshInstance3D).custom_aabb = AABB(Vector3(swing.x - across, -across, -0.2), Vector3(swing.y - swing.x + across * 2.0, across * 2.0, reach + 0.4))
-			nozzle_mats[k].set_shader_parameter("thrust", e.thrust)
+			nozzle_mats[k].set_shader_parameter("thrust", thrust)
 			nozzle_mats[k].set_shader_parameter("burner", _burn[k])
 			nozzle_mats[k].set_shader_parameter("ramjet", _ram[k])
 			nozzle_mats[k].set_shader_parameter("flash", jet.flash)
@@ -1448,10 +1463,11 @@ func sync_cables(sim, delta := 1.0 / 72.0) -> void:
 		cable_mats[k].albedo_color = Color(0.4, 0.4, 0.42) if c.slack else Color(0.15, 0.16, 0.18)
 		# colour: its engine's thrust glow, turning amber then red as the tension nears its limit
 		var eng = sim.eL if k == 0 else sim.eR
-		var glow := cable_glow(eng.thrust, sim.hblend)
+		var thrust: float = 0.0 if held[k] else (shown_thrust[k] if shown_thrust[k] >= 0.0 else eng.thrust)
+		var glow := cable_glow(thrust, sim.hblend)
 		cable_strain[k] = f / CABLE_F_MAX
-		var crackle := 1.0 if eng.thrust < 0.8 else randf_range(0.8, 1.15)
-		var energy: float = glow[0] * crackle
+		var crackle := 1.0 if thrust < 0.8 else randf_range(0.8, 1.15)
+		var energy: float = glow[0] * crackle * energised      # (the start-up: dead until the binder is charged)
 		if cable_strain[k] > 0.5:   # strain lights it even off the throttle; past the limit it pulses
 			energy = maxf(energy, 1.5 + 2.5 * minf(cable_strain[k], 1.2))
 			if cable_strain[k] > 1.0:
@@ -1463,4 +1479,4 @@ func sync_cables(sim, delta := 1.0 / 72.0) -> void:
 	var p0: Vector3 = engines[0].transform * Vector3(ENG_W / 2.0 + 0.1, 0.0, -2.9)
 	var p1: Vector3 = engines[1].transform * Vector3(-ENG_W / 2.0 - 0.1, 0.0, -2.9)
 	var strain := clampf(absf(sim.binder_stretch) / maxf(sim.P.binderBreak, 0.01), 0.0, 1.0)
-	binder_arc.update_arc(p0, p1, strain, sim.binder_broken, delta)
+	binder_arc.update_arc(p0, p1, strain, sim.binder_broken or energised < 0.35, delta)   # (it strikes a third of the way into its charge)

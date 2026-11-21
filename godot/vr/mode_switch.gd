@@ -33,6 +33,7 @@ var lever: Node3D
 var lamp_sp: StandardMaterial3D
 var lamp_sf: StandardMaterial3D
 var swing := 0.0           # the lever's shown angle, eased toward its position
+var power := 1.0           # the battery bus (the start-up): the lamps' level
 var _prev := {}            # controller -> its tip's previous panel-local position
 var _cool := 0.0
 
@@ -150,5 +151,5 @@ func show_state(is_down: bool, blend: float, pending: bool) -> void:
 		lever.rotation.x = swing
 	var blink := 0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.012)
 	if lamp_sp:
-		lamp_sp.albedo_color = (colours[0] as Color) * (0.25 + 2.0 * (1.0 - blend))
-		lamp_sf.albedo_color = (colours[1] as Color) * (0.25 + 2.0 * blend) if not pending else (colours[1] as Color) * (0.25 + 1.8 * blink)
+		lamp_sp.albedo_color = (colours[0] as Color) * (0.25 + 2.0 * (1.0 - blend)) * power
+		lamp_sf.albedo_color = ((colours[1] as Color) * (0.25 + 2.0 * blend) if not pending else (colours[1] as Color) * (0.25 + 1.8 * blink)) * power

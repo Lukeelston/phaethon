@@ -105,6 +105,10 @@ func _run() -> void:
 		var prefs = JSON.parse_string(FileAccess.get_file_as_string(Cockpit.PREFS))
 		if prefs is Dictionary and Cockpit.QuestControlsScript.SCHEMES.has(prefs.get("scheme", "")):
 			expected_scheme = prefs.scheme
+	# This is a check of a craft that is running: instruments lit, levers live. The start-up from cold
+	# has its own (tests/test_startup.gd); here the pilot's COLD START is taken as off.
+	Cockpit.cold_start = false
+	Cockpit._startup_loaded = true
 	get_tree().change_scene_to_file("res://release/vr_menu.tscn")
 	await get_tree().scene_changed
 	await frames(3)
@@ -151,6 +155,7 @@ func _run() -> void:
 		check(stop + " has both controller nodes", view.hands.get("left") is XRController3D and view.hands.get("right") is XRController3D)
 		check(stop + " controller trackers are assigned", view.hands.left.tracker == &"left_hand" and view.hands.right.tracker == &"right_hand")
 		check(stop + " cockpit instruments are constructed", view.interior != null and view.dashboard != null and view.mode_switch != null and view.canopy != null and view.minimap_panel != null)
+		check(stop + " start panel hangs from the roof's header, and the craft is running", (view.overhead != null) == Canopy.roof_available() and view.startup.is_hot())
 		if index == 0:
 			for fitting in ["SegmentedCoaming", "InstrumentBezel"]:
 				var panel := view.interior.get_node_or_null(fitting) as MeshInstance3D

@@ -112,7 +112,7 @@ func _quick_menu(c) -> void:
 	var keys := []
 	for item in c.menu.items:
 		keys.append(item.key)
-	check("quick menu has partner, controls, camera, nose, time, weather, maps, resume", keys == ["partner", "scheme", "camera", "nose", "time", "weather", "maps", "resume"])
+	check("quick menu has partner, controls, camera, nose, time, weather, cold start, maps, resume", keys == ["partner", "scheme", "camera", "nose", "time", "weather", "startup", "maps", "resume"])
 	var time_before: float = c.sim.time
 	var partner_before := Vector3(c.partner.x, c.partner.y, c.partner.z)
 	var traffic_before: Array = c.traffic_net.cars.duplicate(true)

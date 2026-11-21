@@ -85,6 +85,12 @@ func build(canopy: Node3D) -> void:
 	route = _label("Route", -0.323, -0.004, 0.00054)
 	advice = _label("Advisory", -0.323, -0.069, 0.00050)
 	status = _label("Status", 0.435, -0.069, 0.00050, true)
+	if port:
+		# The readout's picture is drawn in a room of its own, not in the cockpit: it is no fitting of the
+		# hull's. (The projector is under the roof on every course now, for the start-up's checklist, and
+		# the cockpit-clearance gate would measure the picture's panel as if it hung in the pod.)
+		for node in port.find_children("*", "GeometryInstance3D", true, false):
+			node.add_to_group("exterior")
 	panel.hide()
 	set_process(false)
 

@@ -31,6 +31,7 @@ const MODE_LIGHT := {"normal": Color(0.25, 0.6, 1.0), "burner": Color(1.0, 0.55,
 var rim_mat: StandardMaterial3D
 var _mode := ""
 var _sf := -1.0
+var _power := 1.0     # the battery bus (the start-up): the rim light's level
 const SF_LIGHT := Color(1.0, 0.3, 0.75)   # STARFIGHTER's resting colour (ModeSwitch.SF_COL)
 var parts_built := 0   # tests read this
 
@@ -413,7 +414,16 @@ func set_mode(mode: String, sf := 0.0) -> void:
 	_mode = mode
 	_sf = sf
 	var rest: Color = MODE_LIGHT.normal.lerp(SF_LIGHT, clampf(sf, 0.0, 1.0))
-	rim_mat.albedo_color = rest if mode == "normal" else MODE_LIGHT.get(mode, rest)
+	rim_mat.albedo_color = (rest if mode == "normal" else MODE_LIGHT.get(mode, rest)) * _power
+	rim_mat.albedo_color.a = 1.0
+
+
+## The battery bus, 0 dead .. 1 (vr/startup_sequence.gd): no power, no rim light.
+func set_power(level: float) -> void:
+	if is_equal_approx(level, _power):
+		return
+	_power = level
+	_mode = ""      # (so the next set_mode draws it again)
 
 
 func _placard(pos: Vector3, text: String, side: float) -> void:
