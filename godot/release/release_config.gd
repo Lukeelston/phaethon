@@ -39,8 +39,8 @@ const INSERTIONS := [
 	["reed", "Reedwater Causeway", "SReed@135"], ["red", "Red Table Cut", "SRed@130"],
 	["needle", "Needle Roll", "SNeedle@96"], ["hammer", "Hammerfall", "SHammer@92"],
 	["gap", "Mesa Gap run-up", "N3@300"],     # N3 northbound, 55 km short of the ramp the launch forks from
-	["helios", "Mount Helios, the foot", "SHelios@1540"],     # 2 km short of where the road meets the mountain
-	["summit", "Mount Helios, the summit", "SHelios@8220"],   # on the top, 10.4 km up, facing down the far side
+	["helios", "Helios, the foot", "SHelios@1540"],     # 2 km short of where the road meets the mountain
+	["summit", "Helios summit", "SHelios@8220"],   # on the top, 10.4 km up, facing down the far side
 ]
 
 static func course_index(id: String) -> int:
@@ -167,7 +167,7 @@ static func option_button(title: String, key: String, choices: Array, font_size:
 
 
 static func insertion_button(font_size: int = 18) -> Button:
-	return option_button("Network start", "network_start", INSERTIONS, font_size)
+	return option_button("Start", "network_start", INSERTIONS, font_size)
 
 
 static func paint_button(font_size: int = 18) -> Button:
@@ -175,15 +175,15 @@ static func paint_button(font_size: int = 18) -> Button:
 
 
 static func craft_button(font_size: int = 18) -> Button:
-	return option_button("Craft", "craft", Chase.CRAFTS, font_size)
+	return option_button("Role", "craft", Chase.CRAFTS, font_size)
 
 
 static func chase_button(font_size: int = 18) -> Button:
-	return option_button("Network chase", "chase", Chase.MODES, font_size)
+	return option_button("Chase", "chase", Chase.MODES, font_size)
 
 
 static func time_button(font_size: int = 18) -> Button:
-	return option_button("Network time", "time", Outlook.TIMES, font_size)
+	return option_button("Time", "time", Outlook.TIMES, font_size)
 
 
 static func weather_button(font_size: int = 18) -> Button:

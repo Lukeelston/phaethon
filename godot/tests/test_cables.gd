@@ -106,14 +106,15 @@ func _measure(label: String) -> void:
 ## sits in: real mesh vertices and label corners, checked in the pod's frame.
 func _fittings_clear(rig: Node3D) -> void:
 	var CM := preload("res://view/craft_model.gd")
-	var to_rig := rig.global_transform.affine_inverse()
+	var hull := rig.get_node("shell/PodHull") as MeshInstance3D
+	var to_hull := hull.global_transform.affine_inverse()
 	var n := 0
 	var parts := {}
 	var example := ""
 	# Lights also inherit VisualInstance3D. Their influence volumes are not fittings.
 	for node in rig.find_children("*", "GeometryInstance3D", true, false):
 		var vi := node as GeometryInstance3D
-		if vi is MeshInstance3D and (vi as MeshInstance3D).mesh == CM.pod_hull():
+		if vi == hull:
 			continue   # the hull itself
 		if vi.find_parent("*") is XROrigin3D or _under(vi, "XROrigin3D"):
 			continue   # hands and the fade sphere ride the player, not the pod
@@ -133,8 +134,10 @@ func _fittings_clear(rig: Node3D) -> void:
 		# (the rim light is fastened against the lip's underside, under the coaming's hem: it may lie
 		# against the lip, and must not be in it. Everything else keeps a centimetre clear.)
 		var margin := 0.0 if vi.is_in_group("under_the_lip") else 0.01
+		# The fittings and the hull shudder together. Compare them in the hull frame.
+		var local: Transform3D = to_hull * vi.global_transform
 		for q in pts:
-			var pod: Vector3 = to_rig * (vi.global_transform * q) - Vector3(0, CM.POD_FRAME_UP, 0)
+			var pod: Vector3 = local * q
 			var why: String = CM.hull_clearance(pod, margin)
 			n += 1
 			if why != "":

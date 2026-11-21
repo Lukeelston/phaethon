@@ -2,6 +2,21 @@
 extends RefCounted
 
 const PREFS := "user://game_settings.cfg"
+const Craft := preload("res://sim/pilot_craft.gd")
+
+static func selected_craft() -> String:
+	var config := ConfigFile.new()
+	if config.load(PREFS) != OK:
+		return Craft.STANDARD
+	return Craft.known(config.get_value("flight", "vehicle", Craft.STANDARD))
+
+static func set_selected_craft(id: String) -> void:
+	var config := ConfigFile.new()
+	config.load(PREFS)
+	config.set_value("flight", "vehicle", Craft.known(id))
+	var error := config.save(PREFS)
+	if error != OK:
+		push_warning("Could not save pilot craft: %s" % error_string(error))
 
 static func driving_partner_enabled() -> bool:
 	var config := ConfigFile.new()

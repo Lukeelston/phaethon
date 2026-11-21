@@ -67,6 +67,7 @@ var needles := {}      # name -> MeshInstance3D
 var values := {}       # name -> what that needle shows, 0..1 of its scale
 var lamps := {}        # name -> Color: its colour, and how lit it is in alpha
 var _face_mat: ShaderMaterial
+var ivory_thrust_dials := false
 var _digit_mat: ShaderMaterial
 var _needle_mat: StandardMaterial3D
 var _lamp_index := {}
@@ -213,6 +214,7 @@ func _build_faces() -> void:
 		_tile(st, Kit.on_arc(w[1], w[2], 0.0, R), Vector2.ZERO, Vector2(w[3], w[4]), w[5] + 0.0006, Layout.LCD_UV, NO_GAUGE, _lamp_index.lcd, 1.0)
 	_face_mat = _unlit("res://vr/gauge_face.gdshader")
 	_face_mat.set_shader_parameter("atlas", load(FACES))
+	_face_mat.set_shader_parameter("ivory_thrust_dials", ivory_thrust_dials)
 	var shadows := PackedVector4Array()
 	shadows.resize(8)
 	_needle_angles.resize(8)

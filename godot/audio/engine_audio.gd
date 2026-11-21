@@ -128,6 +128,7 @@ const TUNE := {
 }
 
 var sim
+var short_intakes := false
 var solo := ""   # "v8", "v12", "turbine" or "burner": hear one layer alone (tests, tuning)
 var flat := false   # tests: every gain held at 1 and the low-pass open, so only crossfades move the level
 var voices: Array = []
@@ -154,6 +155,7 @@ var test_stage := 0.0
 
 func setup(craft_sim) -> void:
 	sim = craft_sim
+	short_intakes = sim.P.get("vehicle", "") == "shrike"
 	_load_streams()
 	# Engines and Wind each limit their own bus to -1 dB, but their sum lands on Master unlimited:
 	# with both peaking together it could clip (engines + wind measured -0.05 dBFS on Master).
@@ -441,6 +443,13 @@ func update(inp: Dictionary, delta: float) -> void:
 		var sec_gain := _second(v, k, running_target, dt, duck, rise_rate)
 		gains["second"] = sec_gain * bark * v.alive
 		gains["rotor"] = _rotor(v, lever, mph, dt, duck) * v.alive
+		if short_intakes:
+			# The smaller compressor comes through as the lever opens. Keeping the
+			# low bank under it leaves the relight, brake and overrun cues audible.
+			gains.v8 *= 0.64
+			gains.v12 *= 1.10
+			gains.rotor *= lerpf(0.94, 1.22, lever)
+			gains.roar *= 0.86
 		if flat:
 			gains = {"v8": burning, "v12": burning, "turbine": 1.0, "roar": 1.0, "burner": v.burn * burning,
 				"second": v.sec.fire, "rotor": 1.0}
@@ -461,10 +470,14 @@ func update(inp: Dictionary, delta: float) -> void:
 					at = layer_at("second", v.sec.spool) * lift * twin
 				"rotor":
 					at = v.rotor_p * twin
+					if short_intakes:
+						at *= lerpf(1.08, 1.20, lever)
 				"burner":
 					at = 1.0 + 0.1 * maxf(0.0, s - 1.0)
 				"v8", "v12":
 					at = layer_at(layer, s) * twin
+					if short_intakes and layer == "v12":
+						at *= 1.145
 				"turbine":
 					at = layer_at(layer, s) * (1.0 if flat else lerpf(TUNE.turbine_start, 1.0, _wind))
 				_:

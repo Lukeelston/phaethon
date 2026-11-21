@@ -95,7 +95,7 @@ func _initialize() -> void:
 			prof = a.get_slice("=", 1)
 	if prof == "second":
 		end_t = END_SECOND
-	sim = CraftSimScript.new({"track": "range"})
+	sim = CraftSimScript.new({"track": "range", "vehicle": CraftSimScript.PilotCraft.resolve(OS.get_cmdline_user_args(), "")})
 	rec = AudioEffectRecord.new()
 	AudioServer.add_bus_effect(0, rec)
 

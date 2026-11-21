@@ -5,6 +5,7 @@ const UI := preload("res://release/release_config.gd")
 
 var collision_checkbox: CheckBox
 var partner_checkbox: CheckBox
+var craft_selector := preload("res://release/craft_selector.gd").new()
 
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
@@ -49,6 +50,7 @@ func _ready() -> void:
 		left.add_child(course_list)
 	for course in UI.COURSES:
 		var button := UI.button(course.name, start_course.bind(course.id), 42)
+		button.name = "Course_" + course.id
 		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		course_list.add_child(button)
 		if course.id == "range":
@@ -61,9 +63,16 @@ func _ready() -> void:
 	flight_options.add_child(partner_checkbox)
 	left.add_child(flight_options)
 	left.add_child(UI.label("Collisions: pillars and traffic. Guardrails stay on.", 14, UI.MUTED))
-	# Rows that step through choices (after the courses: the release check counts buttons from the top).
-	# Three abreast, the first widest (the start's names are long); a third row would push Quit out of a 720-line window.
-	for row: Array in [[UI.insertion_button(15), UI.paint_button(15), UI.craft_button(15)], [UI.time_button(15), UI.weather_button(15), UI.chase_button(15)]]:
+	# Rows that step through choices (after the courses: the release check counts buttons from the top). Four
+	# and three abreast, the first of each widest; a third row would push Quit out of a 720-line window.
+	# Codex's pilot-craft selector gives its button to the second row (its own two lines do not fit either).
+	left.add_child(craft_selector)
+	craft_selector.build(false)
+	craft_selector.remove_child(craft_selector.button)
+	craft_selector.visible = false
+	craft_selector.button.add_theme_font_size_override("font_size", 15)
+	craft_selector.button.clip_text = true
+	for row: Array in [[UI.insertion_button(15), UI.paint_button(15), UI.time_button(15), UI.weather_button(15)], [craft_selector.button, UI.craft_button(15), UI.chase_button(15)]]:
 		var options := HBoxContainer.new()
 		options.add_theme_constant_override("separation", 8)
 		left.add_child(options)
@@ -87,6 +96,7 @@ func start_course(course: String) -> void:
 	if UI.course_index(course) < 0:
 		return
 	var overrides := UI.course_overrides(course)
+	View.vehicle_override = craft_selector.selected
 	View.track_override = overrides[0]
 	View.job_override = overrides[1]
 	View.spot_override = overrides[2]

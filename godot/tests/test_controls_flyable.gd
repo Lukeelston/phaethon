@@ -22,11 +22,13 @@ const DT := 1.0 / 72.0
 const SECONDS := 40.0
 const LAUNCHES := [[0.06, 0.92, 1.0], [-0.06, 0.92, 1.0], [0.06, 1.0, 0.92], [-0.06, 1.0, 0.92], [0.03, 1.0, 1.0], [0.1, 0.85, 0.95]]
 
+var vehicle := S.PilotCraft.resolve(OS.get_cmdline_user_args(), "")
+
 
 func _initialize() -> void:
 	var fails := 0
 	var q = _qc(true)
-	var sim = S.new({"track": "gp"})
+	var sim = S.new({"vehicle": vehicle, "track": "gp"})
 	var hits := 0
 	var sq := 0.0
 	var n := 0
@@ -111,7 +113,7 @@ func _stroke(shipped: bool) -> Array:
 	var out := [0.0, 0.0, 0.0]
 	for seed in [3, 4, 5, 6]:
 		var q = _qc(shipped)
-		var sim = S.new({"track": "range", "handling": "starfighter"})
+		var sim = S.new({"vehicle": vehicle, "track": "range", "handling": "starfighter"})
 		var rng := RandomNumberGenerator.new()
 		rng.seed = seed
 		var x0: float = sim.pod.x
@@ -157,7 +159,7 @@ func _straight(shipped: bool) -> Array:
 	var head := 0.0
 	for seed in [5, 6, 7, 8]:
 		var q = _qc(shipped)
-		var sim = S.new({"track": "range", "handling": "starfighter"})
+		var sim = S.new({"vehicle": vehicle, "track": "range", "handling": "starfighter"})
 		for f in int(10.0 / DT):   # up to speed, fingers perfect
 			_step(sim, q, 0.8, 0.8)
 		var rng := RandomNumberGenerator.new()
@@ -184,7 +186,7 @@ func _launches(shipped: bool, pats: Array = LAUNCHES) -> Array:
 	var v3 := 0.0
 	for pat in pats:
 		var q = _qc(shipped)
-		var sim = S.new({"track": "gp"})
+		var sim = S.new({"vehicle": vehicle, "track": "gp"})
 		var th0: float = sim.pair_th
 		for f in int(3.0 / DT):
 			var t := f * DT
