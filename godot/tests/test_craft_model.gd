@@ -193,24 +193,33 @@ func _check_loaded_engines() -> int:
 	var high := -INF
 	var other := 0.0
 	var front_motion := 0.0
-	var wake := 0.0
+	var slew := 0.0
 	for frame in 160:
+		var vane_was: float = c.vane_angle
 		c.sync(sim,input,1.0/120.0)
-		wake = maxf(wake, absf(c.vane_angle - c._wake_yaw) * c.plume_len[0])   # how far the far gas trails the vanes while they swing
+		slew = maxf(slew, absf(c.vane_angle - vane_was) * 120.0)   # the vanes swing at their actuators' rate, no faster
 		if frame < 25: continue
 		var angle := rad_to_deg(c.flaps[0][0].rotation.x + c.FLAP_OPEN)
 		low = minf(low,angle)
 		high = maxf(high,angle)
 		other = maxf(other, absf(c.flaps[1][0].rotation.x))
 		front_motion = maxf(front_motion,absf(rad_to_deg(absf(c.front_flaps[0][0].rotation.y)-c.FRONT_OPEN)))
-	# The jet at speed: out of the nozzle the way the vanes point (here left: the left brake is out),
-	# then swept round into the slipstream.
+	# The jet at speed: out of the nozzle turned by the vanes (here left: the left brake is out),
+	# though by less than the vanes themselves (the jet takes 70 % of their angle on dry thrust),
+	# then carried round into the slipstream.
+	var Jets = c.Jets
 	var line: PackedFloat32Array = c.plume_line[0]
 	var dz: float = c.plume_len[0] / float(c.PLUME_STATIONS - 1)
 	var leaves: float = (line[1] - line[0]) / dz
 	var trails: float = (line[c.PLUME_STATIONS - 1] - line[c.PLUME_STATIONS - 2]) / dz
 	var vane: float = tan(c.vane_angle)
-	var swept: bool = vane < -0.2 and leaves < 0.8 * vane and absf(trails) < 0.35 * absf(vane) and line[c.PLUME_STATIONS - 1] < -0.2
+	var turned: float = tan(Jets.turning(c.jets[0].lit) * c.vane_angle)
+	var swept: bool = vane < -0.2 and absf(c.vane_angle) <= Jets.VANE_MAX + 1e-6 and leaves < 0.85 * turned and leaves > 1.01 * turned \
+		and absf(trails) < 0.8 * absf(leaves) and line[c.PLUME_STATIONS - 1] < -0.2 and slew <= Jets.VANE_SLEW + 1e-3 and slew > 0.5 * Jets.VANE_SLEW
+	# the nozzle on dry thrust: its two flaps pinched in toward the jet, its hot parts warm but not glowing
+	var pinched: float = (c.nozzle_flaps[0][0] as Node3D).rotation.x
+	var nozzle: bool = c.nozzle_flaps[0].size() == 2 and c.nozzle_flaps[1].size() == 2 and c.jets.size() == 2 and c.metal_mats.size() == 2 \
+		and pinched > 0.02 and c.jets[0].exit < 0.5 * (Jets.EXIT_MIL + Jets.EXIT_MAX) and c.jets[0].metal > 500.0 and c.jets[0].metal < 1000.0
 	var leaf: MeshInstance3D = c.flaps[0][0].get_child(0)
 	var mat := leaf.mesh.surface_get_material(0) as StandardMaterial3D
 	var textured := mat != null and mat.albedo_texture != null and mat.normal_texture != null and mat.roughness_texture != null
@@ -218,12 +227,19 @@ func _check_loaded_engines() -> int:
 	for frame in 120:
 		c.sync(sim,input,1.0/60.0)
 	var settled := is_equal_approx(absf(c.flaps[0][0].rotation.x),c.FLAP_OPEN)
-	# Standing still there is no slipstream: the jet is a straight line at the vanes' angle.
+	# Standing still there is no slipstream: the jet is a straight line, the way it left.
 	line = c.plume_line[0]
 	var straight: float = (line[c.PLUME_STATIONS - 1] - line[0]) / c.plume_len[0]
-	var still: bool = absf(straight - tan(c.vane_angle)) < 0.02
-	return _check("textured leaves flutter %.2f..%.2f degrees; forward leaf %.2f, opposite %.2f; jet leaves at %.2f (vanes %.2f), trails at %.2f, the far gas lags %.2f m; standing still it runs straight at %.2f" %
-		[low,high,front_motion,other,leaves,vane,trails,wake,straight], textured and low < -1.0 and high > 1.0 and low >= -1.86 and high <= 1.86 and front_motion > 0.7 and other < 0.001 and settled and swept and still and wake > 0.1)
+	var still: bool = absf(straight - tan(Jets.turning(c.jets[0].lit) * c.vane_angle)) < 0.02
+	# ... and on the burner the flaps stand wide
+	sim.mode = "burner"
+	for frame in 120:
+		c.sync(sim,input,1.0/60.0)
+	var wide: float = (c.nozzle_flaps[0][0] as Node3D).rotation.x
+	sim.mode = "normal"
+	nozzle = nozzle and wide < -0.02 and is_equal_approx(c.jets[0].exit, Jets.EXIT_MAX)
+	return _check("textured leaves flutter %.2f..%.2f degrees; forward leaf %.2f, opposite %.2f; vanes swing at %.0f deg/s to %.2f, the jet leaves at %.2f (%.2f is its share), trails at %.2f; standing still it runs straight at %.2f; nozzle flaps %.1f deg in on dry thrust, %.1f out on the burner" %
+		[low,high,front_motion,other,rad_to_deg(slew),vane,leaves,turned,trails,straight,rad_to_deg(pinched),rad_to_deg(-wide)], textured and low < -1.0 and high > 1.0 and low >= -1.86 and high <= 1.86 and front_motion > 0.7 and other < 0.001 and settled and swept and still and nozzle)
 
 
 ## The lean into turns (CraftModel.ease_bank), at 72 Hz with a hard 15 g turn held 3 s, then
