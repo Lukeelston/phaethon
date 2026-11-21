@@ -184,8 +184,8 @@ func build(s, v, w) -> void:
 		_switch.append([])
 	for J in sim.junctions:
 		var C := sim.roads[int(J[3])]
-		if C.role != "":
-			continue   # the jumps and the on-ramps from the open ground: not traffic's
+		if not _public_road(C):
+			continue
 		var cb: int = 0 if int(J[4]) == 0 else C.N - 1
 		var ca: int = world._map(J, cb)
 		for side in 2:   # from the parent onto the joining road, and back
@@ -339,6 +339,10 @@ func _pod_as_car() -> Car:
 	return c
 
 
+static func _public_road(road: Simulation.TrackPath) -> bool:
+	return road.role == "" and not RoadWorld.STUNT_ROADS.has(road.name)
+
+
 func _spawn(px: float, py: float, first: bool) -> void:
 	# a random chunk round the craft, a random sample in it
 	var gc := Vector2i(int(floor(px / world.CELL)), int(floor(py / world.CELL)))
@@ -350,8 +354,8 @@ func _spawn(px: float, py: float, first: bool) -> void:
 	var e: Array = entries[_rng.randi() % entries.size()]
 	var r: int = e[0]
 	var R := sim.roads[r]
-	if R.role != "":
-		return   # (nor spawns on them)
+	if not _public_road(R):
+		return
 	var i: int = clampi(e[1] * world.CH + _rng.randi_range(0, world.CH - 1), 1, R.N - 2)
 	var d := Vector2(R.px[i] - px, R.py[i] - py).length()
 	if d > R_SPAWN.y or d < (2000.0 if first else R_SPAWN.x):
@@ -814,7 +818,7 @@ func _gap_to_pod(c: Car) -> float:
 func _race(delta: float, pod_car: Car) -> void:
 	var P := sim.pod
 	var pv := Vector2(P.vx, P.vy).length()
-	var on_hwy: bool = sim.roads[P.path].w[0] >= 300.0
+	var on_hwy: bool = sim.roads[P.path].w[0] >= 300.0 and _public_road(sim.roads[P.path])
 	if race_state == "":
 		if on_hwy and pv > 2000.0 / MPH:
 			_hw_time += delta * lerpf(0.85, 1.30, _traffic_tier(P.path, float(P.hint)))

@@ -56,8 +56,8 @@ class NetworkProfiles(unittest.TestCase):
     def test_explicit_highway_overlap_for_every_launch(self):
         self.assertTrue(hasattr(dn, "surface_overlaps"), "shared pavement needs an explicit physical relation")
         overlaps = dn.surface_overlaps(self.roads, self.joins, self.jumps)
-        self.assertEqual(len(overlaps), 20)
-        self.assertEqual(len(self.joins), 179, "physical overlap must not add route shortcuts")   # (175, and the two scenic roads' two ends each)
+        self.assertEqual(len(overlaps), len(self.jumps))
+        self.assertEqual(len(self.joins), 193, "physical overlap must not add route shortcuts")
         self.assertEqual({j[3] for j in overlaps}, {j[0] for j in self.jumps})
         for j in overlaps:
             self.assertEqual(self.roads[j[0]].kind, "highway")
@@ -88,8 +88,11 @@ class NetworkProfiles(unittest.TestCase):
             self.assertNotEqual(self.roads[source].name[0], self.roads[target].name[0])
         for road, first, last, turns in dn.twists(self.roads, self.jumps):
             r = self.roads[road]
-            self.assertEqual(r.segs[0][0], 'S')
-            self.assertGreater(r.segs[0][1], last * dn.STEP)
+            # Recovery rolls start on the landing straight; Needle Roll has two entry bends first.
+            if r.role == 'catch':
+                self.assertEqual(r.segs[0][0], 'S')
+                self.assertGreater(r.segs[0][1], last * dn.STEP)
+            np.testing.assert_allclose(r.t[first:last + 1], np.broadcast_to(r.t[first], (last - first + 1, 2)), atol=1e-8)
             self.assertAlmostEqual(r.h(first), r.h(last), places=6)
             self.assertGreater(r.h(first), r.width / 2.0 + 100.0)
 

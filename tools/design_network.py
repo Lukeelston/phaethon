@@ -17,7 +17,7 @@ docs/superpowers/specs/2026-10-19-network-design.md. Phase 1, the mesh:
   and rolling descent, returning onto the same highway in the opposite direction.
 Phase 3, jumps and the ground (Luke: "taking a massive interchange and using it as a ramp to jump 2
 miles and 1500' up to the entrance of the next ramp"):
-- twenty jump sets: all four approaches at the five non-corner crossings. A launch spur forks
+- twenty jump sets at the five non-corner crossings, plus J20 northbound at Mesa. A launch spur forks
   from its right-hand exit ramp, rises to a lip 3 km before the crossing, and flies to a catch
   deck. The release's nine minimum speeds (2,000-4,000 mph) and lip angles (5-14 degrees)
   remain varied. Three ascent profiles add terraces, crests and saddles, with 400-1,000 m of
@@ -216,6 +216,16 @@ BACKROADS = [
     ("SRed", ("E1", 469, 1, -1), ("N3", 213, 1, 1), 12,
      [(446, 113, 139), (423, 140, 123), (413, 162, 73), (438, 181, 23), (474, 188, 21)],
      [(0.18, 0), (0.36, 0), (0.50, 0), (0.69, 0), (0.81, 150)]),
+]
+
+
+# Grade-separated stunt bypasses leave a straight highway on one shoulder, run parallel,
+# and merge back downstream. Horizontal distances in km, relief in metres above the parent.
+STUNT_ROADS = [
+    ("SNeedle", "E2", 174, 1, 8.5, 25, 13,
+     [(0, 0), (.09, 0), (.275, 510), (.725, 510), (.91, 0), (1, 0)]),
+    ("SHammer", "N2", 352, -1, 7, 35, 9,
+     [(0, 0), (.09, 0), (.36, 1350), (.42, 1350), (.67, -200), (.81, 220), (.92, 0), (1, 0)]),
 ]
 
 
@@ -468,6 +478,123 @@ def shaft_keys(r, i_up, i_dn, radius, V):
 join_off = {}   # (child road, end) -> its lateral off the parent, where that isn't OFF
 
 
+def add_jump(roads, joins, jumps, ew, ns, ci, cj, axis, d, ref):
+    """Fork from the right-hand interchange ramp, fly the gap, then rejoin the highway."""
+    X, Y = LINES[ci], LINES[cj]
+    jump_id = len(jumps)
+    profile = jump_id % len(JUMP_PROFILES)
+    profile_name, extra_rise, gap_scale = JUMP_PROFILES[profile]
+    angle = JUMP_ANGLES[ref]
+    gap = JUMP_GAP * ref / 3000.0 * gap_scale
+    baseline = EXPRESS_H if axis == "N" else 0.0
+    fx, fy = ((1.0, 0.0) if axis == "E" else (0.0, 1.0))
+    fx, fy = fx * d, fy * d                  # the way it's taken
+    rx, ry = fy, -fx                         # its right
+    H = roads[(ew[cj] if axis == "E" else ns[ci])]
+    qx, qy = int(round(-fx + rx)), int(round(-fy + ry))   # the exit's quadrant: behind and to the right
+    ramp = next(k for k, R in enumerate(roads) if R.name == f"R{ci}{cj}{'E' if qx > 0 else 'W'}{'N' if qy > 0 else 'S'}")
+    hdg = heading_deg(fx, fy) - JL_FORK
+    a = math.radians(JL_FORK)
+    ux, uy = math.cos(math.radians(hdg)), math.sin(math.radians(hdg))
+    # the fork: JL_FORK round the ramp from its mouth on this highway
+    u0 = -(R_RAMP + OFF) + R_RAMP * math.sin(a)   # along the way it's taken, from the crossing
+    r0 = OFF + R_RAMP * (1 - math.cos(a))         # to its right
+    x0, y0 = X + fx * u0 + rx * r0, Y + fy * u0 + ry * r0
+    st = (-JL_LIP - u0) / math.cos(a)
+    L = Road(f"J{len(jumps)}", "jump", x0, y0, hdg, W_RAMP, [("S", st, 0, "sp")])
+    L.role = "launch"
+    m_lip = math.tan(math.radians(angle))
+    k0 = L.N - 1 - round(JL_KICK / STEP)
+    h_lip = baseline + extra_rise + (L.N - 1 - k0) * STEP * m_lip / 2.0
+    L.keys = launch_keys(L, baseline, h_lip - baseline, m_lip, profile)
+    L.profile = profile_name
+    join_off[(len(roads), 0)] = 0.0              # on the ramp's own centreline
+    joins.append((len(roads), 0, ramp))
+    roads.append(L)
+    # The front engines reach the lip before the trailing pod. Their vertical
+    # ties put the shallow, longer flights a few metres below a point-mass
+    # trajectory, so those entries have 7 m of clearance instead of 3 m.
+    v = ref * MPH
+    c2 = 1.0 / (1.0 + m_lip * m_lip)        # cos^2 of the lip's angle
+    # Extended flights need this margin at every speed: smoothing the
+    # launch changes finite-step vertical velocity by ~0.09 m/s, enough
+    # for J5 at its posted minimum to miss the old 3 m entry tolerance.
+    entry_margin = 7.0 if gap_scale > 1.0 else 3.0
+    hc = h_lip + gap * m_lip - G * gap ** 2 / (2 * v * v * c2) - entry_margin
+    # Longer flights spread fast arrivals vertically. A steeper initial catch
+    # intercepts them along the landing straight without enlarging the 40 m capture reach.
+    mc = m_lip - G * gap / (v * v * c2) if gap_scale == 1.0 else m_lip + 0.06
+    lx, ly = L.p[-1]
+    cx0, cy0 = lx + ux * gap, ly + uy * gap
+    uc = (cx0 - X) * fx + (cy0 - Y) * fy      # the deck's start, along the way, from the crossing
+    rc = (cx0 - X) * rx + (cy0 - Y) * ry      # ... and to the right of the highway
+    # straight on, a long left and a long right back onto the highway's right edge at JC_MERGE:
+    # A from the along, the angle beta from the right (bisection)
+    Rs = S_R
+    def miss(bt):
+        A = (JC_MERGE - uc - Rs * (math.sin(a) + 2 * math.sin(bt))) / math.cos(a)
+        return rc + A * math.sin(a) + Rs * (2 * math.cos(bt) - math.cos(a) - 1) - OFF, A
+    lo, hi = 0.0, math.radians(45.0)
+    for _ in range(60):
+        m = (lo + hi) / 2
+        if miss(m)[0] > 0:
+            lo = m
+        else:
+            hi = m
+    bt = (lo + hi) / 2
+    A = miss(bt)[1]
+    assert A > 0 and abs(miss(bt)[0]) < 0.01, f"K{len(jumps)}: no way back ({A:.0f} m straight)"
+    C = Road(f"K{len(jumps)}", "jump", cx0, cy0, hdg, JC_W,
+             [("S", A, 0, "sp"), ("L", Rs, JL_FORK + math.degrees(bt), "sp"), ("R", Rs, math.degrees(bt), "sp")])
+    destination = roads.index(H)
+    destination_h = baseline
+    if jump_id in TRANSFER_JUMPS:
+        # These land on a dedicated elevated interchange, then transfer to
+        # the perpendicular highway. A distant merge permits open bends;
+        # the old 40-50 km endpoints forced 300+ degree clover loops.
+        # Keep the first six kilometres straight for ballistic capture.
+        turn_dir = -d if axis == "E" else d
+        dx, dy = (0.0, float(turn_dir)) if axis == "E" else (float(turn_dir), 0.0)
+        destination = ns[ci] if axis == "E" else ew[cj]
+        destination_h = EXPRESS_H if axis == "E" else 0.0
+        gx = X + dx * TRANSFER_MERGE + dy * OFF
+        gy = Y + dy * TRANSFER_MERGE - dx * OFF
+        # Overfly the highway while high, then finish outside its correct
+        # lane. This small S enters from the shoulder, without crossing
+        # opposing traffic at grade or needing altitude-aware junctions.
+        merge_angle = math.acos(1.0 - TRANSFER_OUT / (2 * Rs))
+        merge_lead = 2 * Rs * math.sin(merge_angle) + TRANSFER_FINAL
+        segs = [("S", 6000.0, 0, "sp")]
+        segs += dubins((cx0 + ux * 6000.0, cy0 + uy * 6000.0, hdg),
+                       (gx - dx * merge_lead + dy * TRANSFER_OUT,
+                        gy - dy * merge_lead - dx * TRANSFER_OUT, heading_deg(dx, dy)), Rs)
+        segs += [("L", Rs, math.degrees(merge_angle), "sp"),
+                 ("R", Rs, math.degrees(merge_angle), "sp"), ("S", TRANSFER_FINAL, 0, "sp")]
+        C = Road(f"K{jump_id}", "jump", cx0, cy0, hdg, JC_W, transfer_rhythm(segs, ref))
+    C.role = "catch"
+    C.profile = profile_name
+    ip = round(JC_PULL / STEP)
+    top = hc + ip * STEP * mc / 2.0          # the pull-out: a parabola to level
+    i_flat = round((JC_FLAT - uc) / STEP)
+    i_down = round((JC_DOWN - uc) / STEP)
+    if jump_id in TRANSFER_JUMPS:
+        i_flat = C.N - 1 - round(35000.0 / STEP)
+        # Remain above the highway and nearby side-road mouths until the
+        # outside approach, then level before the shared merge pavement.
+        i_down = C.N - 1 - round(12000.0 / STEP)
+    middle = round((i_flat + i_down) / 2)
+    C.keys = [[0, hc, mc], [ip, top, 0.0], [i_flat, top, 0.0],
+              [middle, 0.0, 0.0],
+              [i_down, destination_h, 0.0], [C.N - 1, destination_h, 0.0]]
+    # One smooth descent; the middle key carries the real derivative.
+    u = (middle-i_flat)/(i_down-i_flat)
+    C.keys[3][1] = top+(destination_h-top)*u*u*(3-2*u)
+    C.keys[3][2] = (destination_h-top)*6*u*(1-u)/((i_down-i_flat)*STEP)
+    joins.append((len(roads), 1, destination))
+    roads.append(C)
+    jumps.append((len(roads) - 2, len(roads) - 1, ref, h_lip, top))
+
+
 def build():
     roads = []
     ew, ns = [], []
@@ -540,124 +667,11 @@ def build():
             shafts.append((len(roads), i_up, i_dn, radius, V))
             joins += [(len(roads), 0, hi), (len(roads), 1, hi)]
             roads.append(r)
-    # the jump sets: one each way through each crossing in JUMP_AT, off the exit ramp on that way's right
     jumps = []
     for crossing, (ci, cj) in enumerate(JUMP_AT):
-        X, Y = LINES[ci], LINES[cj]
-        for way, (axis, d) in enumerate(JUMP_WAYS):
-            jump_id = len(jumps)
-            profile = jump_id % len(JUMP_PROFILES)
-            profile_name, extra_rise, gap_scale = JUMP_PROFILES[profile]
-            ref = JUMP_SPEEDS[crossing][way]
-            angle = JUMP_ANGLES[ref]
-            gap = JUMP_GAP * ref / 3000.0 * gap_scale
-            baseline = EXPRESS_H if axis == "N" else 0.0
-            fx, fy = ((1.0, 0.0) if axis == "E" else (0.0, 1.0))
-            fx, fy = fx * d, fy * d                  # the way it's taken
-            rx, ry = fy, -fx                         # its right
-            H = roads[(ew[cj] if axis == "E" else ns[ci])]
-            qx, qy = int(round(-fx + rx)), int(round(-fy + ry))   # the exit's quadrant: behind and to the right
-            ramp = next(k for k, R in enumerate(roads) if R.name == f"R{ci}{cj}{'E' if qx > 0 else 'W'}{'N' if qy > 0 else 'S'}")
-            hdg = heading_deg(fx, fy) - JL_FORK
-            a = math.radians(JL_FORK)
-            ux, uy = math.cos(math.radians(hdg)), math.sin(math.radians(hdg))
-            # the fork: JL_FORK round the ramp from its mouth on this highway
-            u0 = -(R_RAMP + OFF) + R_RAMP * math.sin(a)   # along the way it's taken, from the crossing
-            r0 = OFF + R_RAMP * (1 - math.cos(a))         # to its right
-            x0, y0 = X + fx * u0 + rx * r0, Y + fy * u0 + ry * r0
-            st = (-JL_LIP - u0) / math.cos(a)
-            L = Road(f"J{len(jumps)}", "jump", x0, y0, hdg, W_RAMP, [("S", st, 0, "sp")])
-            L.role = "launch"
-            m_lip = math.tan(math.radians(angle))
-            k0 = L.N - 1 - round(JL_KICK / STEP)
-            h_lip = baseline + extra_rise + (L.N - 1 - k0) * STEP * m_lip / 2.0
-            L.keys = launch_keys(L, baseline, h_lip - baseline, m_lip, profile)
-            L.profile = profile_name
-            join_off[(len(roads), 0)] = 0.0              # on the ramp's own centreline
-            joins.append((len(roads), 0, ramp))
-            roads.append(L)
-            # The front engines reach the lip before the trailing pod. Their vertical
-            # ties put the shallow, longer flights a few metres below a point-mass
-            # trajectory, so those entries have 7 m of clearance instead of 3 m.
-            v = ref * MPH
-            c2 = 1.0 / (1.0 + m_lip * m_lip)        # cos^2 of the lip's angle
-            # Extended flights need this margin at every speed: smoothing the
-            # launch changes finite-step vertical velocity by ~0.09 m/s, enough
-            # for J5 at its posted minimum to miss the old 3 m entry tolerance.
-            entry_margin = 7.0 if gap_scale > 1.0 else 3.0
-            hc = h_lip + gap * m_lip - G * gap ** 2 / (2 * v * v * c2) - entry_margin
-            # Longer flights spread fast arrivals vertically. A steeper initial catch
-            # intercepts them along the landing straight without enlarging the 40 m capture reach.
-            mc = m_lip - G * gap / (v * v * c2) if gap_scale == 1.0 else m_lip + 0.06
-            lx, ly = L.p[-1]
-            cx0, cy0 = lx + ux * gap, ly + uy * gap
-            uc = (cx0 - X) * fx + (cy0 - Y) * fy      # the deck's start, along the way, from the crossing
-            rc = (cx0 - X) * rx + (cy0 - Y) * ry      # ... and to the right of the highway
-            # straight on, a long left and a long right back onto the highway's right edge at JC_MERGE:
-            # A from the along, the angle beta from the right (bisection)
-            Rs = S_R
-            def miss(bt):
-                A = (JC_MERGE - uc - Rs * (math.sin(a) + 2 * math.sin(bt))) / math.cos(a)
-                return rc + A * math.sin(a) + Rs * (2 * math.cos(bt) - math.cos(a) - 1) - OFF, A
-            lo, hi = 0.0, math.radians(45.0)
-            for _ in range(60):
-                m = (lo + hi) / 2
-                if miss(m)[0] > 0:
-                    lo = m
-                else:
-                    hi = m
-            bt = (lo + hi) / 2
-            A = miss(bt)[1]
-            assert A > 0 and abs(miss(bt)[0]) < 0.01, f"K{len(jumps)}: no way back ({A:.0f} m straight)"
-            C = Road(f"K{len(jumps)}", "jump", cx0, cy0, hdg, JC_W,
-                     [("S", A, 0, "sp"), ("L", Rs, JL_FORK + math.degrees(bt), "sp"), ("R", Rs, math.degrees(bt), "sp")])
-            destination = roads.index(H)
-            destination_h = baseline
-            if jump_id in TRANSFER_JUMPS:
-                # These land on a dedicated elevated interchange, then transfer to
-                # the perpendicular highway. A distant merge permits open bends;
-                # the old 40-50 km endpoints forced 300+ degree clover loops.
-                # Keep the first six kilometres straight for ballistic capture.
-                turn_dir = -d if axis == "E" else d
-                dx, dy = (0.0, float(turn_dir)) if axis == "E" else (float(turn_dir), 0.0)
-                destination = ns[ci] if axis == "E" else ew[cj]
-                destination_h = EXPRESS_H if axis == "E" else 0.0
-                gx = X + dx * TRANSFER_MERGE + dy * OFF
-                gy = Y + dy * TRANSFER_MERGE - dx * OFF
-                # Overfly the highway while high, then finish outside its correct
-                # lane. This small S enters from the shoulder, without crossing
-                # opposing traffic at grade or needing altitude-aware junctions.
-                merge_angle = math.acos(1.0 - TRANSFER_OUT / (2 * Rs))
-                merge_lead = 2 * Rs * math.sin(merge_angle) + TRANSFER_FINAL
-                segs = [("S", 6000.0, 0, "sp")]
-                segs += dubins((cx0 + ux * 6000.0, cy0 + uy * 6000.0, hdg),
-                               (gx - dx * merge_lead + dy * TRANSFER_OUT,
-                                gy - dy * merge_lead - dx * TRANSFER_OUT, heading_deg(dx, dy)), Rs)
-                segs += [("L", Rs, math.degrees(merge_angle), "sp"),
-                         ("R", Rs, math.degrees(merge_angle), "sp"), ("S", TRANSFER_FINAL, 0, "sp")]
-                C = Road(f"K{jump_id}", "jump", cx0, cy0, hdg, JC_W, transfer_rhythm(segs, ref))
-            C.role = "catch"
-            C.profile = profile_name
-            ip = round(JC_PULL / STEP)
-            top = hc + ip * STEP * mc / 2.0          # the pull-out: a parabola to level
-            i_flat = round((JC_FLAT - uc) / STEP)
-            i_down = round((JC_DOWN - uc) / STEP)
-            if jump_id in TRANSFER_JUMPS:
-                i_flat = C.N - 1 - round(35000.0 / STEP)
-                # Remain above the highway and nearby side-road mouths until the
-                # outside approach, then level before the shared merge pavement.
-                i_down = C.N - 1 - round(12000.0 / STEP)
-            middle = round((i_flat + i_down) / 2)
-            C.keys = [[0, hc, mc], [ip, top, 0.0], [i_flat, top, 0.0],
-                      [middle, 0.0, 0.0],
-                      [i_down, destination_h, 0.0], [C.N - 1, destination_h, 0.0]]
-            # One smooth descent; the middle key carries the real derivative.
-            u = (middle-i_flat)/(i_down-i_flat)
-            C.keys[3][1] = top+(destination_h-top)*u*u*(3-2*u)
-            C.keys[3][2] = (destination_h-top)*6*u*(1-u)/((i_down-i_flat)*STEP)
-            joins.append((len(roads), 1, destination))
-            roads.append(C)
-            jumps.append((len(roads) - 2, len(roads) - 1, ref, h_lip, top))
+        for way, (axis, direction) in enumerate(JUMP_WAYS):
+            add_jump(roads, joins, jumps, ew, ns, ci, cj, axis, direction, JUMP_SPEEDS[crossing][way])
+
     # the side roads
     for k, (hname, mid, sd, shape) in enumerate(SIDES):
         hi = next(q for q, R in enumerate(roads) if R.name == hname)
@@ -755,6 +769,18 @@ def build():
         profile = [(0, level), (.035, level), *relief, (.965, end_level), (1, end_level)]
         road.keys = [[round(f * (road.N - 1)), h, 0.0] for f, h in profile]
         joins.extend([(len(roads), 0, parent), (len(roads), 1, receiver)])
+        roads.append(road)
+    # Append new roads after the backroads so prior routes, jump IDs and saved positions stay valid.
+    add_jump(roads, joins, jumps, ew, ns, 2, 0, "N", 1, 3250.0)  # J20, Mesa northbound
+    for name, parent_name, station, side, radius, angle, middle, height_keys in STUNT_ROADS:
+        parent = by_name[parent_name]
+        start = backroad_mouth(roads[parent], station, side, 1)
+        outward, inward = ("L", "R") if side > 0 else ("R", "L")
+        a, b = (outward, radius * KM, angle, "sp"), (inward, radius * KM, angle, "sp")
+        road = Road(name, "stunt", *start, W_RAMP, [a, b, ("S", middle * KM, 0, "sp"), b, a])
+        tier = EXPRESS_H if parent_name.startswith("N") else 0.0
+        road.keys = [[round(f * (road.N - 1)), tier + dz, 0.0] for f, dz in height_keys]
+        joins.extend([(len(roads), 0, parent), (len(roads), 1, parent)])
         roads.append(road)
     return roads, joins, cities, ew, ns, jumps, onramps, shafts
 
@@ -870,8 +896,12 @@ def surface_overlaps(roads, joins, jumps):
 
 
 def twists(roads, jumps):
-    return [[jumps[k][1], round(6000.0 / STEP), round(17000.0 / STEP), 1 if n % 2 == 0 else -1]
+    out = [[jumps[k][1], round(6000.0 / STEP), round(17000.0 / STEP), 1 if n % 2 == 0 else -1]
             for n, k in enumerate(TWIST_JUMPS)]
+    r = next(i for i, road in enumerate(roads) if road.name == "SNeedle")
+    # Keep the entire inverted stretch on the level central straight, with upright runouts.
+    out.append([r, round(.32 * (roads[r].N - 1)), round(.68 * (roads[r].N - 1)), 1])
+    return out
 
 
 def check(roads, joins, J, cities, ew, ns, jumps=(), onramps=(), overlaps=()):
@@ -1062,7 +1092,8 @@ def main():
     for name, biome, cx, cy, r, i in cities:
         print(f"  {name:<9} {biome:<8} at {cx / KM:.0f},{cy / KM:.0f} km: {roads[r].name} sample {i} of {roads[r].N}")
     ok = check(roads, joins, J, cities, ew, ns, jumps, onramps, overlaps)
-    if km > 9000 or N > 380000:
+    # The additional stunt mileage fits the existing sample/memory ceiling at the same resolution.
+    if km > 9100 or N > 380000:
         ok = False
         print(f"  BAD  too big: {km:.0f} km, {N} samples")
     print("NETWORK DESIGN OK" if ok else "NETWORK DESIGN NOT OK")
@@ -1076,7 +1107,7 @@ def plot(roads, cities, out):
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     fig, ax = plt.subplots(figsize=(10, 10))
-    col = {"highway": "#2a6fdb", "ramp": "#6a8", "city": "#d33", "turn": "#999", "jump": "#f80", "on": "#a0a", "side": "#0a7", "scenic": "#c0f", "backroad": "#a65b28"}
+    col = {"highway": "#2a6fdb", "ramp": "#6a8", "city": "#d33", "turn": "#999", "jump": "#f80", "on": "#a0a", "side": "#0a7", "scenic": "#c0f", "backroad": "#a65b28", "stunt": "#d04470"}
     for R in roads:
         ax.plot(R.p[:, 0] / KM, R.p[:, 1] / KM, color=col[R.kind], lw=1.6 if R.kind == "highway" else 0.9)
     for name, biome, cx, cy, r, i in cities:

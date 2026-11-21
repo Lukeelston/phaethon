@@ -107,7 +107,7 @@ func face(parent: Node3D, pose: Transform3D, size: Vector2, kind: String, lines:
 		return
 	var direction := 0 if rear else int(info.get("side",1))
 	var arrow := direction if jump or (not rear and info.get("decision",false)) else 0
-	var warning := kind in ["corner","brake","end"]
+	var warning := kind in ["corner","brake","end","stunt"]
 	var field := YELLOW if warning else (SERVICE if kind == "terminal" else (SCENIC_BROWN if info.get("scenic", false) else GREEN))
 	var angle := PI/2.0 if kind == "fork" else PI/4.0
 	var board := panel(root,"LegendPanel",size,Vector3.ZERO,sheet(size,field,arrow,angle,jump and not rear,0.245 if jump else 0.0))

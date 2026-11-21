@@ -88,7 +88,7 @@ function finishTransfer(r) {
 
 function main() {
   const T = PS.makeSim({ track: 'network', handling: 'speed' }).T;
-  assert.strictEqual(T.jumps.length, 20, 'four ascents at each of five non-corner interchanges');
+  assert.strictEqual(T.jumps.length, 21, 'twenty interchange ascents plus the Mesa stunt jump');
   assert(new Set(T.jumps.map(j => j[2])).size >= 6, 'minimum speeds are meaningfully varied');
   const peaks = [];
   for (let k = 0; k < T.jumps.length; k++) {

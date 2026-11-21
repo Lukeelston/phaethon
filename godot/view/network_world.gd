@@ -79,11 +79,18 @@ const FIN_COL := Color(0.5, 0.51, 0.5)
 const SCENIC_NAMES := {
 	"SCoast": "COAST ROAD", "SDrop": "THE DROP", "SWash": "SIROCCO WASH",
 	"SFrost": "FROSTLINE PASS", "SReed": "REEDWATER CAUSEWAY", "SRed": "RED TABLE CUT",
+	"SNeedle": "NEEDLE ROLL", "SHammer": "HAMMERFALL",
 }
 const SCENIC_ROUTES := {
 	"SCoast": "S12", "SDrop": "S13", "SWash": "S14", "SFrost": "S15", "SReed": "S16", "SRed": "S17",
+	"SNeedle": "S18", "SHammer": "S19",
 }
 enum { PAVED, SAND, RED_GRAVEL, CAUSEWAY }
+# Dedicated stunt roads and their approach boards (deck fraction, direction, legend).
+const STUNT_ROADS := {
+	"SNeedle": [[0.20, 1, "FULL ROLL", "360 DEGREES"], [0.80, -1, "FULL ROLL", "360 DEGREES"]],
+	"SHammer": [[0.36, 1, "STEEP DROP", "5,100 FT DESCENT"], [0.76, -1, "STEEP CLIMB", "5,100 FT ASCENT"]],
+}
 const FLANK_ROCK := Color(0.46, 0.44, 0.41, 0.0)   # a scenic road's cut and cliff faces: basalt grey, lighter than the forest over them
 const LINE_W := 0.6
 const EDGE_SEGS := 6              # identical shoulder topology on both sides of every chunk boundary
@@ -2013,6 +2020,8 @@ func _plan_signs() -> void:
 	for r in sim.roads.size():
 		if sim.roads[r].name.begins_with("S"):
 			_plan_corners(r)
+			for cue in STUNT_ROADS.get(sim.roads[r].name, []):
+				_add_sign(r, roundi(cue[0] * (sim.roads[r].N - 1)), cue[1], "stunt", [cue[2], cue[3]])
 
 
 ## Use the branch endpoint within its real junction overlap. Opposing ramps at

@@ -80,7 +80,7 @@ func _initialize() -> void:
 	maximum = actual.max_gap
 	if not actual.caught.all(func(x): return x) or not actual.settled.all(func(x): return x) or actual.max_gap > 45.0 or actual.min_gap < -1e-5:
 		failures.append(actual)
-	for jump in 20:
+	for jump in sim.jumps.size():
 		for mph in [float(sim.jumps[jump][2]), 5000.0, 7000.0, 9000.0]:
 			var r := trial(sim, jump, mph)
 			count += 1

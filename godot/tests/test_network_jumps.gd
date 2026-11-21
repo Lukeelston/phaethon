@@ -21,7 +21,7 @@ extends SceneTree
 const ViewScript := preload("res://view/craft_view.gd")
 const CraftModelScript := preload("res://view/craft_model.gd")
 const MPH := 2.236936
-const CHECKS := 10
+const CHECKS := 11
 var fails := 0
 var passed := 0
 var v
@@ -139,12 +139,21 @@ func _process(_d: float) -> bool:
 	# traffic
 	var T = v.traffic_net
 	var onto := 0
+	var stunt_boards := []
+	for key in v.network_world._signs:
+		for spec in v.network_world._signs[key]:
+			if spec[2] == "stunt":
+				stunt_boards.append([sim.roads[key.x].name, spec[1], spec[3][0]])
+	_check("stunt approaches warn in each direction", stunt_boards.size() == 4
+		and ["SNeedle", 1, "FULL ROLL"] in stunt_boards and ["SNeedle", -1, "FULL ROLL"] in stunt_boards
+		and ["SHammer", 1, "STEEP DROP"] in stunt_boards and ["SHammer", -1, "STEEP CLIMB"] in stunt_boards)
 	if T:
 		for r in T._switch.size():
 			for sp in T._switch[r]:
-				if sim.roads[int(sp[2])].role != "":
+				var road = sim.roads[int(sp[2])]
+				if road.role != "" or road.name in ["SNeedle", "SHammer"]:
 					onto += 1
-	_check("traffic: %d of its switches onto a jump or an on-ramp (traffic %s)" % [onto, T != null], T != null and onto == 0)
+	_check("traffic: %d switches onto a stunt deck, jump or ground on-ramp" % onto, T != null and onto == 0)
 	var good: bool = fails == 0 and passed == CHECKS
 	print("NETWORK JUMPS ", "PASS" if good else "FAIL (%d failed, %d of %d passed)" % [fails, passed, CHECKS])
 	quit(0 if good else 1)

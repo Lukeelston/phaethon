@@ -33,7 +33,7 @@ func _run() -> void:
 	world = World.new()
 	root.add_child(world)
 	world.build(sim, null)
-	_check("the full twenty-launch country is present", sim.jumps.size() == 20)
+	_check("all interchange and Mesa launches are present", sim.jumps.size() == 21)
 	for jump in sim.jumps:
 		var launch := int(jump[0])
 		var L = sim.roads[launch]
