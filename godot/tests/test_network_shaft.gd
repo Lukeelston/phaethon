@@ -10,7 +10,7 @@
 ##              top with its up pointing down, the right way up again, the frame never jumps (no step
 ##              between frames over ~1.5x the speed), and it comes out on the same highway the other way
 ##   stall      no throttle at 300 mph: gravity stops it on the climb and it slides back
-##   sides      twenty-one S roads; the first fourteen (twelve off the straight highways, the coast road and the drop; the backroads and stunt roads came later and sweep, the Helios road after them), every one with corners a board names (a speed and a gear), at least
+##   sides      twenty-two S roads (the Aurora's tube and the Helios road the last of them); the first fourteen (twelve off the straight highways, the coast road and the drop; the backroads and stunt roads came later and sweep, the Helios road after them), every one with corners a board names (a speed and a gear), at least
 ##              two gears' worth on each, none slower than second
 ##   partner    on E2 at 4,000 mph: it passes within 400 m while staying on the road;
 ##              braking matches speed without cancelling a safe pass; shafts retain close formation
@@ -246,7 +246,7 @@ func _sides(sim) -> void:
 		if first_built and gears[nm].size() >= 2:
 			two += 1
 	_check("sides: %d S roads, all with corner boards (%d); the %d side and scenic roads each with two gears' worth of corners (%d); none in first (%s); e.g. %s" % [n_side, roads.size(), twisty, two, shifts, gears.get("S0", {}).keys()],
-		n_side == 21 and roads.size() == 21 and twisty == 14 and two == 14 and shifts and W.gear_for(2100.0) == 2 and W.gear_for(3000.0) == 3)
+		n_side == 22 and roads.size() == 22 and twisty == 14 and two == 14 and shifts and W.gear_for(2100.0) == 2 and W.gear_for(3000.0) == 3)
 
 
 func _partner(sim) -> void:

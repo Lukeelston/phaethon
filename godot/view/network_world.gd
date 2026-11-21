@@ -79,11 +79,11 @@ const FIN_COL := Color(0.5, 0.51, 0.5)
 const SCENIC_NAMES := {
 	"SCoast": "COAST ROAD", "SDrop": "THE DROP", "SWash": "SIROCCO WASH",
 	"SFrost": "FROSTLINE PASS", "SReed": "REEDWATER CAUSEWAY", "SRed": "RED TABLE CUT",
-	"SNeedle": "NEEDLE ROLL", "SHammer": "HAMMERFALL", "SHelios": "MOUNT HELIOS",
+	"SNeedle": "NEEDLE ROLL", "SHammer": "HAMMERFALL", "SAurora": "AURORA LINE", "SHelios": "MOUNT HELIOS",
 }
 const SCENIC_ROUTES := {
 	"SCoast": "S12", "SDrop": "S13", "SWash": "S14", "SFrost": "S15", "SReed": "S16", "SRed": "S17",
-	"SNeedle": "S18", "SHammer": "S19", "SHelios": "S20",
+	"SNeedle": "S18", "SHammer": "S19", "SAurora": "S20", "SHelios": "S21",
 }
 enum { PAVED, SAND, RED_GRAVEL, CAUSEWAY }
 # Dedicated stunt roads and their approach boards (deck fraction, direction, legend).
@@ -135,6 +135,7 @@ const PALETTE := {
 var sim: CraftSim
 var view
 var shaft                 # the shafts' shapes (view/network_shaft.gd)
+var pressure_line
 var _up := Vector3.UP     # the road's up at the sample being built (a shaft's goes round with it)
 var landscape = null      # the NetworkLandscape, when the land is there: its colours and its material dress the banks
 var scenic = null         # the scenic roads' land (view/network_scenic.gd): the coast road, the drop
@@ -303,6 +304,9 @@ func build(s, v) -> void:
 		while k * CH < R.N - 1:
 			var c0 := k * CH
 			var c1 := mini((k + 1) * CH, R.N - 1)
+			if r == CraftSim.NET_PRESSURE[0] and sim.in_pressure(r, c0) and sim.in_pressure(r, c1):
+				k += 1
+				continue
 			var m0 := _wxy(r, c0)
 			var m1 := _wxy(r, c1)
 			var cx: float = (m0.x + m1.x) / 2.0
@@ -346,6 +350,9 @@ func build(s, v) -> void:
 	shelter_models.free()
 	_build_skylines()
 	_build_far_shafts()
+	pressure_line = preload("res://view/aurora_line.gd").new()
+	add_child(pressure_line)
+	pressure_line.build(sim)
 	far_roads = preload("res://view/network_far_roads.gd").new()
 	add_child(far_roads)
 	far_roads.build(self)
@@ -546,6 +553,7 @@ func sync(org_x: float, org_y: float) -> void:
 			var c: Array = chunks[key]
 			(c[0] as Node3D).position = Vector3(c[1] - _anchor_x, 0.0, -(c[2] - _anchor_y))
 	_chunk_root.position = Vector3(_anchor_x - org_x, 0.0, org_y - _anchor_y)
+	pressure_line.sync(org_x, org_y)
 	var t_place := Time.get_ticks_usec()
 	for sk in skylines:
 		(sk[0] as Node3D).position = Vector3(sk[1] - org_x, scenery_ground_height, -(sk[2] - org_y))
@@ -839,6 +847,8 @@ func _work(end: int) -> bool:
 
 ## One source for the rendered support boxes and their optional collision footprints.
 func pillar_specs(r: int, i: int) -> Array:
+	if CraftSim.in_pressure(r, i):
+		return []
 	var key := Vector2i(r,i)
 	if _pillar_specs_cache.has(key):
 		return _pillar_specs_cache[key]
@@ -2022,6 +2032,10 @@ func _plan_signs() -> void:
 	for r in sim.roads.size():
 		if sim.roads[r].name.begins_with("S"):
 			_plan_corners(r)
+			if r == CraftSim.NET_PRESSURE[0]:
+				for end in [1, 2]:
+					var way := 1 if end == 1 else -1
+					_add_sign(r, CraftSim.NET_PRESSURE[end] - way * 66, way, "stunt", ["PRESSURE LOCK", "360 WALL RIDE"])
 			for cue in STUNT_ROADS.get(sim.roads[r].name, []):
 				_add_sign(r, roundi(cue[0] * (sim.roads[r].N - 1)), cue[1], "stunt", [cue[2], cue[3]])
 

@@ -216,7 +216,7 @@ func _run() -> void:
 			var spot: Array = View.start_spot(entry[2])
 			starts.append("%s: sample %d, %.0f m up" % [entry[1], int(spot[1]) if spot.size() == 3 else -1, sim.net_height(r, float(spot[1])) if spot.size() == 3 else -1.0])
 	_check("its signs say %s, route %s; it has %d start points (%s)" % [world.SCENIC_NAMES.get("SHelios", "?"), world.SCENIC_ROUTES.get("SHelios", "?"), starts.size(), starts],
-		world.SCENIC_NAMES.get("SHelios", "") == "MOUNT HELIOS" and world.SCENIC_ROUTES.get("SHelios", "") == "S20" and starts.size() == 2)
+		world.SCENIC_NAMES.get("SHelios", "") == "MOUNT HELIOS" and world.SCENIC_ROUTES.get("SHelios", "") == "S21" and starts.size() == 2)
 	v.free()
 	print("HELIOS %s (%d failures)" % ["PASS" if failures == 0 else "FAIL", failures])
 	quit(0 if failures == 0 else 1)

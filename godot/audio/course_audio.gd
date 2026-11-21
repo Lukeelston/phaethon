@@ -32,6 +32,8 @@ var _wind_rev: AudioEffectReverb
 var _wind_bus := -1
 var _rumble: AudioStreamPlayer
 var _hiss: AudioStreamPlayer
+var _lock_air: AudioStreamPlayer
+var _previous_fill := 0.0
 var _shots: Array[AudioStreamPlayer] = []
 var _cue_streams := {}
 var _stage := ""
@@ -61,6 +63,9 @@ func setup(craft_sim) -> void:
 				at = k
 				break
 		AudioServer.add_bus_effect(_wind_bus, _wind_rev, at)
+	if sim.kind == "network":
+		_lock_air = _player(make_hiss(), "Course")
+		_lock_air.pitch_scale = 0.66
 	if not sim.job.is_empty():
 		_rumble = _player(make_rumble(), "Dawn")
 		_hiss = _player(make_hiss(), "Dawn")
@@ -108,6 +113,8 @@ static func _bus(name: String, send: String) -> int:
 func enclosed() -> bool:
 	var Pd = sim.pod
 	if sim.kind == "network":   # in a city's hall
+		if not Pd.off_road and sim.in_pressure(Pd.path, Pd.hint):
+			return true
 		var span = net_halls.get(Pd.path)
 		return not Pd.off_road and span != null and Pd.hint >= int(span[0]) and Pd.hint < int(span[1])
 	if Pd.path > 0:
@@ -118,7 +125,18 @@ func enclosed() -> bool:
 func update(delta: float, dawn_dist: float) -> void:
 	var Pd = sim.pod
 	var enc := enclosed()
-	wet = _follow(wet, 1.0 if enc else 0.0, ENCLOSE_TAU, delta)
+	var target := 1.0 if enc else 0.0
+	if _lock_air:
+		var fill: float = sim.pressure_fill()
+		if sim.in_pressure(Pd.path, Pd.hint):
+			target = fill
+		# The transients follow changing pressure. A parked pilot hears quiet
+		# glass, and increasing speed shortens and strengthens the air rush.
+		var flow := clampf(absf(fill - _previous_fill) / maxf(delta, 0.001), 0.0, 2.0) * 0.5
+		_previous_fill = fill
+		var air_db := -80.0 if flow < 0.001 else -15.0 + linear_to_db(flow)
+		_level(_lock_air, _follow(_lock_air.volume_db, air_db, 0.09, delta))
+	wet = _follow(wet, target, ENCLOSE_TAU, delta)
 	if _wind_rev:
 		_wind_rev.wet = 0.42 * wet
 		_wind_rev.dry = 1.0 - 0.2 * wet

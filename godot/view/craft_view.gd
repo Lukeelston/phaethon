@@ -717,6 +717,13 @@ func _net_text() -> String:
 		return "OFF THE ROAD   RESTART FOR THE LAST CITY"
 	if not minimap.waypoint.is_empty():
 		minimap.waypoint = {}
+	if sim.in_pressure(sim.pod.path, sim.pod.hint):
+		var road = sim.roads[sim.pod.path]
+		var forward: bool = sim.pod.vx * road.tx[sim.pod.hint] + sim.pod.vy * road.ty[sim.pod.hint] >= 0
+		var target: int = CraftSimScript.NET_PRESSURE[2 if forward else 1]
+		var km: float = absf(target - sim.pod.hint) * road.len[sim.pod.hint] / 1000.0
+		var kpa := lerpf(75.6, 101.3, sim.pressure_fill())
+		return "AURORA LINE   •   %.1f kPa   |   %s LOCK   %.1f km" % [kpa, "NE" if forward else "SW", km]
 	if traffic_net and traffic_net.race_text() != "":
 		return traffic_net.race_text()
 	var line := ""
@@ -915,7 +922,7 @@ func _process(delta: float) -> void:
 	cues.sync(sim, delta)
 	dust.sync(sim, delta)
 	if network_world:   # no road spray up a shaft
-		dust.visible = _shaft_f(sim.pod.x, sim.pod.y) < 0.0
+		dust.visible = not sim.in_pressure(sim.pod.path, sim.pod.hint) and _shaft_f(sim.pod.x, sim.pod.y) < 0.0
 	_place_camera(1.0 - exp(-delta * 6.0))
 	craft.update_jet_clearance()
 	craft.sync_cables(sim, delta)   # after the camera: in VR the cables' pod end rides the cockpit
@@ -957,6 +964,8 @@ func _track_braking() -> void:
 ## Where a scenic road's flight starts: Vector2i(road, sample), a little way into its scenic
 ## stretch (still on the open ground: the coast, or the climb, comes to you); (-1, -1) for no such road.
 static func scenic_spot(road_name: String) -> Vector2i:
+	if road_name == "SAurora":
+		return Vector2i(CraftSimScript.NET_PRESSURE[0], CraftSimScript.NET_PRESSURE[1] - 85)
 	if road_name == "":
 		return Vector2i(-1, -1)
 	for entry in CraftSimScript.NET_SCENIC:
@@ -1045,14 +1054,60 @@ func _shaft_f(x: float, y: float) -> float:
 ## The rotation from an attitude worked out flat (the sims' plane) to the world's at plan point (x, y):
 ## identity but up a shaft.
 func shaft_carry_at(x: float, y: float) -> Basis:
+	if sim.kind == "network" and sim.pod.path == CraftSimScript.NET_PRESSURE[0]:
+		var station := _pressure_station(x, y)
+		if station >= 0.0:
+			var road = sim.roads[sim.pod.path]
+			var angle := _pressure_angle(road, x, y)
+			var fold := smoothstep(0.0, sim.Pressure.APRON, sim.pressure_depth(station))
+			var n: Vector2 = sim.Pressure.normal(angle, fold)
+			var i: int = CraftSimScript.NET_PRESSURE[1]
+			return Basis(Vector3(road.tx[i], 0, -road.ty[i]), atan2(-n.x, n.y))
 	var f := _shaft_f(x, y)
 	return Basis.IDENTITY if f < 0.0 else network_world.shaft.carry(sim.pod.path, f)
+
+
+## Project on the sealed straight in double precision before moving into the
+## floating-origin world. The same chart carries the engines, cables and eyes.
+func _pressure_station(x: float, y: float) -> float:
+	if sim.pod.off_road:
+		return -1.0
+	var road = sim.roads[sim.pod.path]
+	var i: int = CraftSimScript.NET_PRESSURE[1]
+	var along: float = (x - road.px[i]) * road.tx[i] + (y - road.py[i]) * road.ty[i]
+	var station: float = i + along / road.len[i]
+	# An open feeder curls past the end plane too. It belongs to its own road frame.
+	if absf(station - sim.pod.hint) > 64.0 or not sim.in_pressure(sim.pod.path, station):
+		return -1.0
+	return station
+
+
+func _pressure_angle(road, x: float, y: float) -> float:
+	var i: int = CraftSimScript.NET_PRESSURE[1]
+	var lat: float = (x - road.px[i]) * road.nx[i] + (y - road.py[i]) * road.ny[i]
+	return (sim.pressure_arc + lat) / sim.Pressure.RADIUS
+
+
+func _pressure_point(x: float, y: float, clearance: float, station: float) -> Vector3:
+	var road = sim.roads[sim.pod.path]
+	var i: int = CraftSimScript.NET_PRESSURE[1]
+	var along: float = (station - i) * road.len[i]
+	var angle := _pressure_angle(road, x, y)
+	var fold := smoothstep(0.0, sim.Pressure.APRON, sim.pressure_depth(station))
+	var p: Vector2 = sim.Pressure.section(angle, fold) + sim.Pressure.normal(angle, fold) * clearance
+	return Vector3(road.px[i] - org_x + road.tx[i] * along + road.nx[i] * p.x,
+		sim.net_height(sim.pod.path, station) + p.y,
+		org_y - road.py[i] - road.ty[i] * along - road.ny[i] * p.x)
 
 
 ## A sim body's point -> render position: on the Network a body's height is its own (the roads'
 ## heights are real in the sims: the deck lock, the jumps), elsewhere it's over the surface (w3).
 func wz(x: float, y: float, z: float) -> Vector3:
 	if sim and sim.kind == "network":
+		if sim.pod.path == CraftSimScript.NET_PRESSURE[0]:
+			var station := _pressure_station(x, y)
+			if station >= 0.0:
+				return _pressure_point(x, y, z - sim.net_height(sim.pod.path, station), station)
 		var f := _shaft_f(x, y)
 		if f >= 0.0:
 			return network_world.shaft.point(sim.pod.path, f, sim._n_lat, z - sim.net_height(sim.pod.path, f), org_x, org_y)
@@ -1066,6 +1121,10 @@ func w3(x: float, y: float, h := 0.0) -> Vector3:
 	if sim and sim.pod.path > 0 and sim.kind != "network":
 		return road_xf(x, y) * Vector3(x - org_x, h, -(y - org_y))
 	if sim and sim.kind == "network":
+		if sim.pod.path == CraftSimScript.NET_PRESSURE[0]:
+			var station := _pressure_station(x, y)
+			if station >= 0.0:
+				return _pressure_point(x, y, h, station)
 		var f := _shaft_f(x, y)
 		if f >= 0.0:
 			return network_world.shaft.point(sim.pod.path, f, sim._n_lat, h, org_x, org_y)

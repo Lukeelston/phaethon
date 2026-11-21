@@ -928,6 +928,27 @@ def build():
         road.keys = [[round(f * (road.N - 1)), tier + dz, 0.0] for f, dz in height_keys]
         joins.extend([(len(roads), 0, parent), (len(roads), 1, parent)])
         roads.append(road)
+    # The long straight is the sealed section. The sweeping open feeders reach
+    # highway exits while the pressure galleries occupy opposite map corners.
+    southwest = (28 * KM, 28 * KM, 45.0)
+    northeast = (572 * KM, 572 * KM, 45.0)
+    parent, receiver = by_name["E1"], by_name["E3"]
+    entry = backroad_mouth(roads[parent], 43, -1, -1)
+    exit_pose = backroad_mouth(roads[receiver], 557, 1, -1)
+    inlet = dubins(entry, southwest, 8 * KM)
+    outlet = dubins(northeast, exit_pose, 8 * KM)
+    diagonal = math.dist(southwest[:2], northeast[:2])
+    tube = Road("SAurora", "tube", *entry, W_RAMP,
+                inlet + [("S", diagonal, 0, "sp")] + outlet)
+    first = len(walk(inlet, *entry[:2], math.radians(entry[2]))[0]) - 1
+    last = first + math.ceil(diagonal / STEP)
+    # Align both airlocks with the streamed pavement chunks (40 samples).
+    tube.tube_span = (math.ceil(first / 40) * 40, last // 40 * 40)
+    end = tube.N - 1
+    tube.keys = [[i, h, 0.0] for i, h in [(0, 0), (150, 0),
+                 (first, 2400), (last, 2400), (end - 150, 0), (end, 0)]]
+    joins.extend([(len(roads), 0, parent), (len(roads), 1, receiver)])
+    roads.append(tube)
     # Helios last of all: every road and junction before it keeps its index.
     add_helios(roads, joins)
     return roads, joins, cities, ew, ns, jumps, onramps, shafts
@@ -1252,9 +1273,11 @@ def main():
     for name, biome, cx, cy, r, i in cities:
         print(f"  {name:<9} {biome:<8} at {cx / KM:.0f},{cy / KM:.0f} km: {roads[r].name} sample {i} of {roads[r].N}")
     ok = check(roads, joins, J, cities, ew, ns, jumps, onramps, overlaps)
-    # The additional stunt mileage fits the existing sample/memory ceiling at the same resolution.
-    # Raised from 9,100 km and 380,000 samples for SHelios (about 370 km, 15,400 samples).
-    if km > 9600 or N > 400000:
+    # Budget the new diagonal separately to preserve the existing roads' limit
+    # (raised from 9,100 km and 380,000 samples for SHelios: about 370 km, 15,400 samples).
+    tube_km = kinds["tube"][1]
+    tube_samples = sum(r.N for r in roads if r.kind == "tube")
+    if km - tube_km > 9600 or N - tube_samples > 400000 or tube_km > 980 or tube_samples > 41000:
         ok = False
         print(f"  BAD  too big: {km:.0f} km, {N} samples")
     print("NETWORK DESIGN OK" if ok else "NETWORK DESIGN NOT OK")
@@ -1269,6 +1292,7 @@ def plot(roads, cities, out):
     import matplotlib.pyplot as plt
     fig, ax = plt.subplots(figsize=(10, 10))
     col = {"highway": "#2a6fdb", "ramp": "#6a8", "city": "#d33", "turn": "#999", "jump": "#f80", "on": "#a0a", "side": "#0a7", "scenic": "#c0f", "backroad": "#a65b28", "stunt": "#d04470"}
+    col["tube"] = "#23b7bd"
     for R in roads:
         ax.plot(R.p[:, 0] / KM, R.p[:, 1] / KM, color=col[R.kind], lw=1.6 if R.kind == "highway" else 0.9)
     for name, biome, cx, cy, r, i in cities:
