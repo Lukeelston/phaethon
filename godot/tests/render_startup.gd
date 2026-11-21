@@ -42,6 +42,13 @@ const VIEWS := [
 	["a13-cleared-held", Vector3.ZERO, Vector3(19, 0, 0), "cleared-1.5", 38.0],
 	["a14-cranking-headset-field", Vector3.ZERO, Vector3(8, 0, 0), "crank", 96.0],
 	["a15-cleared-headset-field", Vector3.ZERO, Vector3(8, 0, 0), "cleared-0.4", 96.0],
+	# the status strip under the gauges through the start-up (push 26: its rail of five steps under the words)
+	["t1-strip-battery-on", Vector3(0.0, -0.02, -0.12), Vector3(-30, 16, 0), "power", 16.0],
+	["t2-strip-refused", Vector3(0.0, -0.02, -0.12), Vector3(-30, 16, 0), "refused", 16.0],
+	["t3-strip-cranking", Vector3(0.0, -0.02, -0.12), Vector3(-30, 16, 0), "crank", 16.0],
+	["t4-strip-turbines", Vector3(0.0, -0.02, -0.12), Vector3(-30, 16, 0), "spooling", 16.0],
+	["t5-strip-ready", Vector3(0.0, -0.02, -0.12), Vector3(-30, 16, 0), "ready", 16.0],
+	["t6-strip-cleared", Vector3(0.0, -0.02, -0.12), Vector3(-30, 16, 0), "cleared-0.4", 16.0],
 ]
 var levers := [0.0, 0.0]
 

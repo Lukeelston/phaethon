@@ -1580,6 +1580,7 @@ func _update_hud() -> void:
 		"power": startup.power, "sweep": startup.selftest / StartupScript.SELFTEST_S if startup.selftest >= 0.0 else -1.0,
 		"gear": quest.display_gear(), "overdrive": bool(inp.get("gearOverdrive", false)),
 		"g": g_load(), "g_side": g_turn,
+		"steps": startup.display(),      # the checklist's rail on the status strip, as the glass has it
 		"blink": (Time.get_ticks_msec() / 250) % 2 == 0,
 	})
 	if screen_reflection:      # in the terminal's hall and before dawn the glass needs less to show
