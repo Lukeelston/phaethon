@@ -83,6 +83,7 @@ func build() -> void:
 		var pod := MeshInstance3D.new()
 		pod.name = "pod"
 		pod.mesh = Interior._hd_mesh(POD, "MapPod")
+		Interior.Accent.dress(pod)
 		add_child(pod)
 		_arm()
 	else:

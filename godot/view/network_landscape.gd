@@ -1,6 +1,8 @@
 ## Fixed geographic terrain. Only render transforms depend on the floating origin.
 ## Shared 512 m vertices, with whole road-adjacent triangles held below the decks.
 extends Node3D
+const Outlook := preload("res://view/outlook.gd")      # the hour and weather: they thicken and colour the fog set here every frame
+const Helios := preload("res://view/helios.gd")        # the one giant mountain: it stands over whatever the regions make there
 const TILE := 8192.0
 const STEP := 512.0
 const GRID := 16
@@ -52,6 +54,7 @@ var profiling := false       # (a harness's: this frame's parts into `profile`, 
 var profile := {}
 var _decor_job := {}
 var scenic = null            # the scenic roads' land (view/network_scenic.gd), when the world has any
+var far_helios: MeshInstance3D   # the mountain whole, for beyond the tiles (view/helios.gd far_mesh)
 var _scenic_tiles := {}   # coarse lookup for authored land, including interior mountain passes
 const PROP_CELL := 256.0
 
@@ -133,12 +136,21 @@ func build(sim, world) -> void:
 	var cloud_material := ShaderMaterial.new()
 	cloud_material.shader = preload("res://view/network_clouds.gdshader")
 	cloud_material.set_shader_parameter("cloud_cover", load("res://art/sky/cloud_cover.png"))
+	cloud_material.set_shader_parameter("clearing", Helios.CLEARING)
 	clouds.material_override = cloud_material
 	add_child(clouds)
 	if world.view != null:
 		for child in world.view.get_children():
 			if child is WorldEnvironment:
 				_environment = child.environment
+	far_helios = MeshInstance3D.new()
+	far_helios.name = "helios_far"
+	far_helios.mesh = Helios.far_mesh(self)
+	var far_material := ShaderMaterial.new()
+	far_material.shader = preload("res://view/helios_far.gdshader")
+	far_helios.material_override = far_material
+	far_helios.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(far_helios)
 
 func setup_ground(ground_material: ShaderMaterial) -> void:
 	var centers := PackedVector3Array()
@@ -186,9 +198,15 @@ func height_at(p: Vector2) -> float:
 		if mine.x >= 1.0:
 			return mine.y
 		if mine.x > 0.0:
-			return lerpf(-4.0 if factor == 0.0 else _open_height(p, factor), mine.y, mine.x)
+			return lerpf(_country(p, factor), mine.y, mine.x)
+	return _country(p, factor)
+
+
+## The land with no scenic road's say: level by a road, the open country away from one; the mountain
+## over either (no road but its own goes near it).
+func _country(p: Vector2, factor: float) -> float:
 	if factor == 0.0:
-		return -4.0
+		return maxf(-4.0, Helios.land(p)) if Helios.on(p) else -4.0
 	return _open_height(p, factor)
 
 
@@ -210,7 +228,12 @@ func _open_height(p: Vector2, factor: float) -> float:
 		h += w[i] * float(REGIONS[i][4]) * shape
 	# Wetlands alternate low grassy hummocks and shallow open water.
 	h -= w[5] * 9.0
-	return lerpf(-4.0, h, factor)
+	if h > 0.0:
+		h *= Helios.country(p)      # (the regions' relief gives way to the mountain round it)
+	h = lerpf(-4.0, h, factor)
+	if Helios.on(p):
+		h = maxf(h, Helios.land(p) + Helios.rough(p))
+	return h
 
 func color_at(p: Vector2, known_height := NAN) -> Color:
 	var w := weights(p)
@@ -230,6 +253,8 @@ func color_at(p: Vector2, known_height := NAN) -> Color:
 		col += c * w[i]
 	col *= 0.90 + n * 0.15
 	col.a = w[0] # grassland fraction for fixed geographic field patterns in the shader
+	if Helios.on(p):
+		col = Helios.colour(col, h, n)
 	# the coast: sand on the beach and the seabed, the sea's own colour under the water's edge
 	if scenic != null and h < 7.0 and p.x < scenic.coast_hi + 700.0 and p.x < scenic.coast_x(p.y) + 700.0:
 		col = (scenic.SAND as Color).lerp(col, smoothstep(4.0, 7.0, h))
@@ -323,6 +348,7 @@ func prop_records(key: Vector2i, first := 0, count := GROUPS) -> Array:
 			var radius := (185.0 if kind == "urban" else (180.0 if kind in ["service","solar","wind"] else (90.0 if kind in ["farm","industrial","outpost","basalt"] else 35.0)))*scale
 			if not clear_at(p,radius): continue
 			var h := surface_at(p)
+			if h > Helios.TREE_LINE and Helios.on(p) and (kind != "rock" or h > 5200.0): continue   # up the mountain: rock over the trees, then nothing
 			var slope := maxf(absf(surface_at(p+Vector2(radius,0))-h),absf(surface_at(p+Vector2(0,radius))-h)) / radius
 			if slope > (0.045 if building else 0.5): continue
 			if h < -2.0 and region == "swamp" and kind not in ["mangrove","reeds","stilt"]: continue
@@ -551,10 +577,18 @@ func sync(ox: float, oy: float) -> void:
 	if profiling:
 		profile = {"rows_us": t_rows - start, "place_us": t_place - t_rows, "deco_loop_us": t_deco - t_place, "decor_slice_us": Time.get_ticks_usec() - t_deco}
 	clouds.material_override.set_shader_parameter("world_offset",Vector2(fposmod(ox,2304000.0),fposmod(-oy,2304000.0)))
+	far_helios.position = Vector3(Helios.CENTRE.x - ox, 0.0, oy - Helios.CENTRE.y)
+	clouds.material_override.set_shader_parameter("clearing_at", Vector2(far_helios.position.x, far_helios.position.z))
+	far_helios.visible = Vector2(ox, oy).distance_to(Helios.CENTRE) < 160000.0
+	# The air thins with height: from up the mountain the country below is seen through less of it.
+	var eye := get_viewport().get_camera_3d() if is_inside_tree() else null
+	var thin := Outlook.air_between(eye.global_position.y if eye != null else 0.0, 0.0)
+	Outlook.thin_air(thin)
 	if _environment != null:
 		var w := weights(Vector2(ox,oy))
-		_environment.fog_density = 0.00011 + w[5]*0.00009 + w[6]*0.00005 + w[3]*0.00002
-		_environment.fog_light_color = Color(0.58,0.68,0.80).lerp(Color(0.63,0.69,0.65),w[5]*0.25+w[6]*0.15).lerp(Color(0.76,0.69,0.58),w[3]*0.3)
+		# (the place's own afternoon air, then what the hour and the weather make of it: view/outlook.gd)
+		_environment.fog_density = (0.00011 + w[5]*0.00009 + w[6]*0.00005 + w[3]*0.00002) * Outlook.fog_scale() * thin
+		_environment.fog_light_color = Outlook.haze(Color(0.58,0.68,0.80).lerp(Color(0.63,0.69,0.65),w[5]*0.25+w[6]*0.15).lerp(Color(0.76,0.69,0.58),w[3]*0.3))
 	max_slice_ms = maxf(max_slice_ms, float(Time.get_ticks_usec()-start)/1000.0)
 
 

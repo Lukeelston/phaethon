@@ -79,11 +79,11 @@ const FIN_COL := Color(0.5, 0.51, 0.5)
 const SCENIC_NAMES := {
 	"SCoast": "COAST ROAD", "SDrop": "THE DROP", "SWash": "SIROCCO WASH",
 	"SFrost": "FROSTLINE PASS", "SReed": "REEDWATER CAUSEWAY", "SRed": "RED TABLE CUT",
-	"SNeedle": "NEEDLE ROLL", "SHammer": "HAMMERFALL",
+	"SNeedle": "NEEDLE ROLL", "SHammer": "HAMMERFALL", "SHelios": "MOUNT HELIOS",
 }
 const SCENIC_ROUTES := {
 	"SCoast": "S12", "SDrop": "S13", "SWash": "S14", "SFrost": "S15", "SReed": "S16", "SRed": "S17",
-	"SNeedle": "S18", "SHammer": "S19",
+	"SNeedle": "S18", "SHammer": "S19", "SHelios": "S20",
 }
 enum { PAVED, SAND, RED_GRAVEL, CAUSEWAY }
 # Dedicated stunt roads and their approach boards (deck fraction, direction, legend).
@@ -1583,8 +1583,10 @@ func _flank_row(J: Dictionary, R: CraftSim.TrackPath, i: int, left: bool) -> Dic
 	var key := "tone%d" % int(left)
 	if i % 8 == 0 or not J.has(key):
 		var way := -sgn if sea else sgn
-		J[key] = [landscape.color_at(Vector2(R.px[i] + R.nx[i] * way * 500.0, R.py[i] + R.ny[i] * way * 500.0)),
-			landscape.color_at(Vector2(R.px[i] + R.nx[i] * way * 1500.0, R.py[i] + R.ny[i] * way * 1500.0))]
+		var near_at := Vector2(R.px[i] + R.nx[i] * way * 500.0, R.py[i] + R.ny[i] * way * 500.0)
+		var far_at := Vector2(R.px[i] + R.nx[i] * way * 1500.0, R.py[i] + R.ny[i] * way * 1500.0)
+		# (the mountain's road: its land's colour goes by the mountain's own height there, not the terrain sunk under it)
+		J[key] = [landscape.color_at(near_at, scenic.known_height(r, near_at)), landscape.color_at(far_at, scenic.known_height(r, far_at))]
 	var near: Color = J[key][0]
 	var far: Color = J[key][1]
 	var p := PackedVector3Array()
@@ -1656,7 +1658,7 @@ func _flank_crops(B: Dictionary, a: Dictionary, b: Dictionary, r: int, j: int, s
 			var tone: Color = tones[m]
 			var green: bool = tone.g > tone.r * 1.04 and tone.g > tone.b * 1.04
 			var snowy: bool = minf(tone.r, minf(tone.g, tone.b)) > 0.5
-			if at.y < 5.0:
+			if at.y < 5.0 or (at.y > 4500.0 and seed % 3 != 0):      # (up on the snow: a rock here and there, not a field of them)
 				continue
 			if (green or (snowy and at.y < 1500.0)) and at.y < 1900.0 and seed % 4 != 0:
 				_crop_conifer(B, at, seed, size, snowy, ox, oy)

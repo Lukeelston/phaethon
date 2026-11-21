@@ -95,6 +95,20 @@ const VIEWS := [
 	["d5-dash-leaning-forward", 1.0, false, 0.0, ["pod", Vector3(0.0, 0.2, 0.15), Vector3(0.0, -0.2, -0.5)]],
 	["d6-dash-through-the-nose", 1.0, false, 0.0, ["pod", Vector3(0.7, 0.25, -2.3), Vector3(0.0, -0.15, -0.4)]],
 	["d7-dash-foot-right", 1.0, false, 0.0, ["pod", Vector3(0.1, 0.0, 0.3), Vector3(0.5, -0.5, -0.25)]],
+	# the paint (--paint=cobalt and the rest): the craft from outside, its engines, and what the pilot sees of it
+	["p1-paint-pod-from-outside", 1.0, false, 0.0, ["pod", Vector3(2.6, 1.3, -3.2), Vector3(0.0, 0.0, 0.2)]],
+	["p2-paint-engines-from-the-side", 2.5, false, 0.0, [9.0, 1.6, -1.5]],
+	["p3-paint-from-the-seat", 2.0, false, 0.0, "seat", 96.0, -12.0],
+	# the hour and the weather (--time=night, --weather=rain and the rest): from the seat, looking up, and the craft from outside
+	["w1-sky-from-the-seat", 2.0, false, 0.0, "seat", 96.0, -6.0],
+	["w2-sky-looking-up", 2.0, false, 0.0, "seat", 0.0, 22.0],
+	["w3-sky-pod-from-outside", 2.0, false, 0.0, ["pod", Vector3(3.2, 1.6, 6.5), Vector3(0.0, 0.4, -4.0)]],
+	# the patrol craft and a chase (--craft=patrol, --chase): its light bar (both lamps lit for the picture,
+	# which a flight never shows at once), a patrol on your tail, a runner from the seat
+	["x1-patrol-pod-from-outside", 1.0, false, 0.0, ["pod", Vector3(2.4, 1.7, -2.6), Vector3(0.0, 0.35, 0.7)]],
+	["x2-patrol-from-behind", 1.0, false, 0.0, ["pod", Vector3(1.4, 1.5, 5.0), Vector3(0.0, 0.45, 0.0)]],
+	["x3-patrol-on-your-tail", 2.0, false, 0.0, ["pod", Vector3(3.0, 2.2, -7.0), Vector3(0.0, 0.5, 40.0)]],
+	["x4-runner-from-the-seat", 2.0, false, 0.0, "seat", 96.0, -6.0],
 ]
 const MESSAGE := "JUMP LIP  2 MI / 4.0 S
 ASCENT J0 > N2 UPPER
@@ -119,6 +133,26 @@ func _run() -> void:
 	Seat.slide_feel = "--grip" not in OS.get_cmdline_user_args()
 	if "--closed-nose" in OS.get_cmdline_user_args():
 		preload("res://view/craft_model.gd").nose_closed = true
+	preload("res://view/livery.gd").pinned = true      # (nor the saved paint: Ember unless --paint= names another)
+	var outlook := preload("res://view/outlook.gd")     # (nor the saved hour and weather: a fair afternoon unless --time= or --weather=)
+	outlook.pinned = true
+	outlook.time = "afternoon"
+	outlook.weather = "fair"
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--time="):
+			outlook.time = arg.trim_prefix("--time=")
+		if arg.begins_with("--weather="):
+			outlook.weather = arg.trim_prefix("--weather=")
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--paint="):
+			preload("res://view/livery.gd").current = arg.trim_prefix("--paint=")
+	var chase_script := preload("res://view/network_chase.gd")     # (nor the saved craft and chase mode)
+	chase_script.pinned = true
+	chase_script.craft = "racer"
+	chase_script.enabled = "--chase" in OS.get_cmdline_user_args()
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--craft="):
+			chase_script.craft = arg.trim_prefix("--craft=")
 	if "--no-reflection" in OS.get_cmdline_user_args():
 		preload("res://view/screen_reflection.gd").enabled = false
 	if "--reflection-every-frame" in OS.get_cmdline_user_args():   # timings: a picture every frame, to weigh one
@@ -185,6 +219,30 @@ func _run() -> void:
 			seat.sim.mode = "ramjet"
 			for frame in 60:
 				seat.craft.sync(seat.sim, seat.inp, 1.0 / 120.0)
+		if str(view[0]).begins_with("x") and (str(view[0]).contains("tail") or str(view[0]).contains("runner")) and seat.chase:
+			# the other craft, put where the picture wants it: 45 m behind, or 70 m ahead
+			if seat.chase.car == null:
+				seat.chase._begin()
+			var other = seat.chase.car
+			var mine = seat.traffic_net._pod_as_car()
+			if other != null and mine != null:
+				other.road = mine.road
+				other.dir = mine.dir
+				other.f = mine.f + mine.dir * (70.0 if seat.chase.role == "pursuit" else -45.0) / 24.0
+				other.lat = mine.lat + (0.0 if seat.chase.role == "pursuit" else 6.0)
+				other.v = mine.v
+				other.owed = 0.0
+				seat.traffic_net._place(other)
+				seat.chase._pose()
+				if seat.chase.bar:
+					seat.chase.bar.flash(true, 0.05)
+			print("CHASE_SHOT %s  role %s  the other craft %s, %.0f m off" % [view[0], seat.chase.role, "there" if other != null else "NOT THERE",
+				Vector2(other.x - seat.sim.pod.x, other.y - seat.sim.pod.y).length() if other != null else -1.0])
+		elif str(view[0]).begins_with("x"):
+			for bar in seat.light_bars:
+				for lamp: MeshInstance3D in bar.lamps:
+					lamp.visible = true
+			print("CHASE_SHOT %s  light bars on this craft: %d" % [view[0], seat.light_bars.size()])
 		var guided: bool = str(view[0]).begins_with("h")
 		if str(view[0]).begins_with("r") and seat.approach_display:     # (nothing over the glass but the glass)
 			seat.approach_display.set_message("")

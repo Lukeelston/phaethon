@@ -114,6 +114,8 @@ class Car:
 	var vcap := 0.0       # the most it may go for what's ahead (its road's limits and its exit's), read every CAP_EVERY frames
 	var vcap_road := -1   # ... read on this road (-1: read it now)
 	var owed := 0.0       # s since it was last driven (a far one is driven every other frame)
+	var chase := ""       # chase mode's craft (view/network_chase.gd): "fugitive" picks its own exits, "pursuer" follows the pilot's
+	var craft := false    # ... drawn there as a pod and its engines, not here as one of the fleet
 
 
 var sim: Simulation
@@ -136,6 +138,7 @@ var _brake_at_s := PackedFloat64Array()   # BRAKE_AT in samples (m / 24), BRAKE_
 var _brake_by := PackedFloat64Array()
 # the racer
 var racer: Car = null
+var chase = null          # chase mode, when it is on (view/network_chase.gd): its craft has the racer's slot while one runs
 var race_state := ""      # "" | "tail" | "race" | "done"
 var race_t := 0.0         # s in this state
 var race_gap := 0.0       # m: + the craft ahead
@@ -488,7 +491,7 @@ func _drive(c: Car, arr: Array, idx: int, delta: float) -> void:
 	# the speed it wants: its own, the curve's, and slow enough to brake (at BRAKE) for every limit up
 	# to 50 km ahead (demons can reach full speed on the straight highways), and for the road
 	# beyond the exit it's taking. Read every CAP_EVERY frames, as if from where it'll be by the next.
-	if c.kind != RACER:
+	if c.kind != RACER or c.chase == "fugitive":      # (a runner picks its exits as traffic does)
 		_decide(c)
 		if c.cruise > 0.0:
 			if c.vcap_road != c.road or (_tick + c.id) % CAP_EVERY == 0:
@@ -508,6 +511,8 @@ func _drive(c: Car, arr: Array, idx: int, delta: float) -> void:
 		var o: Car = arr[k]
 		if o.road != c.road or o.dir != c.dir or (o.f - c.f) * c.dir <= 0.0:
 			continue
+		if o.id == 0 and c.chase == "pursuer":
+			continue      # (a patrol keeps no headway from the craft it is after: it comes onto its tail)
 		if absf(o.lat - c.lat) < 22.0:
 			lead = o
 			gap = (o.f - c.f) * c.dir * 24.0 - 20.0 * SCALE
@@ -556,7 +561,7 @@ func _drive(c: Car, arr: Array, idx: int, delta: float) -> void:
 			var at := float(sp[0])
 			if (at - f0) * c.dir > 0.0 and (at - c.f) * c.dir <= 0.0:
 				var take: bool = sp[5] or (c.plan != null and c.plan == sp)
-				if c.kind == RACER:
+				if c.kind == RACER and c.chase != "fugitive":
 					take = _racer_takes(c, sp)
 				if take and int(sp[2]) == proad and int(sp[4]) != pdir and c != racer:
 					if sp[5]:
@@ -907,6 +912,8 @@ func _end_race(result: String) -> void:
 
 ## The dash's line while a racer is about ("" when none).
 func race_text() -> String:
+	if chase != null and chase.state == "on":
+		return chase.text()
 	if racer == null or race_state == "" or race_state == "done":
 		return ""
 	if race_state == "tail":
@@ -994,7 +1001,7 @@ func _render() -> void:
 			b = world.shaft.carry(c.road, c.f) * b
 		var cnt := TRAIN if c.kind == TRANSPORT else 1
 		var board: float = NUMBER_BOARDS.get(c.name, 0.0) if c.kind == RACER else 0.0
-		for k in cnt:
+		for k in (0 if c.craft else cnt):
 			var back := k * TRAIN_GAP
 			var p := Vector3(cx - c.hx * back - ox, h, -(cy - c.hy * back - oy))
 			var body_basis := b
@@ -1023,6 +1030,8 @@ func _render() -> void:
 				lp = world.shaft.point(c.road, c.f - c.dir * off / 24.0, c.lat, 1.0 + 1.2 * SCALE, ox, oy)
 			bmm.set_instance_transform(nb, Transform3D(Basis(), lp))
 			var lc := Color(1.0, 0.95, 0.85) if coming else (Color(1.0, 0.3, 0.9) if c.kind == RACER else Color(1.0, 0.15, 0.08))
+			if c.chase == "pursuer":      # a patrol's lights, seen from any distance: red, blue, red, blue
+				lc = Color(1.0, 0.1, 0.08) if int(Time.get_ticks_msec() / 200) % 2 == 0 else Color(0.15, 0.35, 1.0)
 			bmm.set_instance_color(nb, lc)
 			nb += 1
 	for kind in _mm:

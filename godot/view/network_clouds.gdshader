@@ -8,6 +8,9 @@
 // is already marked in it. Low in a dense heap is in its own shade; its top and its suns' side
 // are white; thin cloud between the eye and a sun glows. Far off, everything fades into the air
 // the sky is made of (atmosphere.gdshaderinc).
+// From over the deck (up a mountain) the same walk is made the other way: from the heaps' tops, on
+// the eye's side of this plane, down to it, so the eye looks on lit tops and not on bases; and the
+// cirrus, which is found by looking up through this plane, is not drawn.
 shader_type spatial;
 render_mode unshaded, cull_disabled, depth_draw_never, fog_disabled, shadows_disabled;
 
@@ -22,6 +25,12 @@ uniform vec3 shade_col = vec3(0.27, 0.33, 0.46);   // deep in a thick cloud: lit
 uniform float cover = 0.62;                        // 0 clear, 1 overcast
 uniform float depth = 1900.0;                      // m: the cumulus, base to the highest tops
 uniform float cirrus_above = 6000.0;               // m over this plane
+uniform float cirrus = 0.42;                       // how much of the high wisps shows (none under an overcast)
+// Round the great mountain the deck thins to a few small heaps (it stands in its own clearing): from
+// the highway its whole height shows, and from its road the country below does, not a floor of
+// cloud. Under an overcast the cover is past what this takes off: the road climbs out through it.
+uniform vec2 clearing_at = vec2(0.0);              // the mountain's place in this plane's own space (m)
+uniform float clearing = 0.0;                      // how much cover it takes off at its middle
 
 const int STEPS = 20;
 const float TEXEL = 23.4;                          // m: one texel of the map at the heaps' scale
@@ -36,14 +45,22 @@ void fragment() {
 	vec3 ray = normalize(world - CAMERA_POSITION_WORLD);
 	vec2 q = world.xz + world_offset;
 	float weather = texture(cloud_cover, q / 384000.0).r;
-	float threshold = mix(0.84, 0.24, clamp(cover + (weather - 0.5) * 1.3, 0.0, 1.0));
+	float thinned = cover - clearing * (1.0 - smoothstep(46000.0, 92000.0, length(world.xz - clearing_at)));
+	float threshold = mix(0.84, 0.24, clamp(thinned + (weather - 0.5) * 1.3, 0.0, 1.0));
 	float through = pow(max(dot(ray, TO_SUN), 0.0), 5.0);
 	// the cumulus: up through the slab. Each reading of the map is smoothed to the distance one
 	// step slides across it, so neighbouring readings overlap. (Read sharper than its own
 	// spacing, as it was, the walk showed every level as a separate sheet, each a cut-out of the
 	// one below slid along the view: Luke, in the headset, "like stacks of napkins".) Straight
 	// up nothing slides and the map is read sharp; toward the horizon the heaps go soft.
-	float path = min(depth / max(ray.y, 0.02), 15000.0);
+	bool above = ray.y < 0.0;                           // the eye is over the deck, looking down on it
+	float climb = abs(ray.y);
+	float range = length(world - CAMERA_POSITION_WORLD);
+	float path = min(depth / max(climb, 0.02), 15000.0);
+	if (above) {
+		path = min(path, range);                        // (no further back than the eye)
+	}
+	float way = above ? -1.0 : 1.0;                     // along the ray from this plane: on, or back toward the eye
 	float pace = path / float(STEPS);
 	float blur = max(log2(pace * length(ray.xz) / TEXEL) - 0.5, 0.0);
 	// ... and never sharper than the screen can show. Toward the horizon one pixel row spans a
@@ -51,7 +68,7 @@ void fragment() {
 	// sky, the other half of the stacked look (and the headset's pixels are that coarse).
 	blur = max(blur, textureQueryLod(cloud_cover, q / 48000.0).y);
 	// the frayed edge is read once, half way up the slab: fine detail that cannot stack
-	float fray = texture(cloud_cover, (q + ray.xz * path * 0.5) / 9600.0).g;
+	float fray = texture(cloud_cover, (q + ray.xz * way * path * 0.5) / 9600.0).g;
 	float clear = 1.0;
 	vec3 lit = vec3(0.0);
 	// The map is read at the ends of each step. A cloud's edge is taken to lie where a straight line
@@ -62,9 +79,9 @@ void fragment() {
 	float h0 = 0.0;
 	float side0 = 0.5;
 	for (int i = 0; i <= STEPS; i++) {
-		float along = float(i) * pace;
-		float h = min(along * ray.y / depth, 1.0);          // 0 at the base, 1 at the tops
-		vec4 heap = textureLod(cloud_cover, (q + ray.xz * along) / 48000.0, blur);
+		float along = above ? path - float(i) * pace : float(i) * pace;   // nearest the eye first, either way
+		float h = min(along * climb / depth, 1.0);          // 0 at the base, 1 at the tops
+		vec4 heap = textureLod(cloud_cover, (q + ray.xz * way * along) / 48000.0, blur);
 		// a heap narrows as it rises, so its top is a dome over a flat base
 		float e1 = heap.g * 0.82 + fray * 0.18 - threshold - h * h * 0.30;
 		if (i > 0 && (e0 > 0.0 || e1 > 0.0)) {
@@ -96,11 +113,11 @@ void fragment() {
 	// the cirrus, where this line of sight meets the higher layer
 	vec2 q2 = q + ray.xz / max(ray.y, 0.03) * cirrus_above;
 	float wisps = smoothstep(0.50, 0.98, texture(cloud_cover, q2 / 128000.0).a + (texture(cloud_cover, q2 / 384000.0).r - 0.5) * 0.5);
-	float a_cirrus = wisps * 0.42;
+	// (from under the deck only, and thinning out as the eye climbs to it: there is no plane up there to draw it on from above)
+	float a_cirrus = above ? 0.0 : wisps * cirrus * (1.0 - smoothstep(-1500.0, -150.0, CAMERA_POSITION_WORLD.y - world.y));
 	// near over far, then the air between here and there
 	float alpha = a_cumulus + a_cirrus * clear;
 	vec3 col = (lit + lit_col * (0.92 + 0.45 * through) * a_cirrus * clear) / max(alpha, 1e-4);
-	float range = length(world - CAMERA_POSITION_WORLD);
 	col = mix(col, atmosphere(ray, zenith, horizon, 1.0), 1.0 - exp(-range / 52000.0));
 	ALBEDO = col;
 	ALPHA = alpha * (1.0 - smoothstep(110000.0, 172000.0, range));

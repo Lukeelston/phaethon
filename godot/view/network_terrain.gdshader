@@ -1,6 +1,7 @@
 shader_type spatial;
 render_mode fog_disabled;
 #include "res://view/noise.gdshaderinc"
+#include "res://view/air.gdshaderinc"
 varying vec3 tint;
 varying vec2 local;
 varying float grass;
@@ -9,6 +10,8 @@ varying float slope;
 instance uniform float stream_reveal = 1.0;
 // Realism spike (tools/art_terrain_hd.py): slope east and north in red and green, shelter in blue.
 uniform sampler2D terrain_detail : repeat_enable, filter_linear_mipmap_anisotropic;
+global uniform vec3 sky_haze;          // the haze's colour (display values): the afternoon's (0.58, 0.68, 0.80) unless view/outlook.gd says otherwise
+global uniform float sky_haze_scale;   // ... and how thick it is: 1 as it was; fog and rain thicken it
 void vertex() {
 	tint = pow(COLOR.rgb, vec3(2.2));
 	local = UV*256.0;
@@ -18,7 +21,7 @@ void vertex() {
 }
 void fragment() {
 	float reveal=stream_reveal*(1.0-smoothstep(54000.0,64000.0,length(VERTEX)));
-	if(reveal<fract(dot(floor(FRAGCOORD.xy),vec2(0.75487766,0.56984029)))) discard;
+	if(reveal<=fract(dot(floor(FRAGCOORD.xy),vec2(0.75487766,0.56984029)))) discard;   // (<=: nothing of a tile faded right out)
 	float fw = length(fwidth(local));
 	float mottling = pfbm(local/128.0,8192.0);
 	float fine = pnoise(local/3.0,1048576.0);
@@ -60,9 +63,12 @@ void fragment() {
 	base *= 0.80 + 0.42 * shelter;
 	// Bare rock on the steep faces is its own grey-brown, not just a darker field colour.
 	base = mix(base, vec3(0.19, 0.175, 0.16) * (0.75 + 0.6 * shelter), rock * (1.0 - snow) * 0.45);
-	float haze = 1.0-exp(-length(VERTEX)*0.000045);
+	// (the haze scale is already thinned for the eye's height over the ground: here for this land's own height)
+	float eye = CAMERA_POSITION_WORLD.y;
+	float thin = air_between(eye, elevation) / air_between(eye, 0.0);
+	float haze = 1.0-exp(-length(VERTEX)*0.000045*sky_haze_scale*thin);
 	ALBEDO = base*(1.0-haze);
-	EMISSION = pow(vec3(0.58,0.68,0.80),vec3(2.2))*haze*0.85;
+	EMISSION = pow(sky_haze,vec3(2.2))*haze*0.85;
 	ROUGHNESS = mix(0.96, 0.82, rock);
 	SPECULAR = mix(0.18, 0.3, rock);
 }

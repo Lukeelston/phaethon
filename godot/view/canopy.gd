@@ -23,6 +23,7 @@ extends RefCounted
 const CM := preload("res://view/craft_model.gd")
 const Kit := preload("res://view/mesh_kit.gd")
 const Finish := preload("res://view/craft_materials.gd")
+const Accent := preload("res://view/accent.gd")
 const ROOF := "res://art/cockpit/roof_hd.glb"
 static var roofed := true         # the closed canopy; false before build(): the open cockpit and its oblong screen
 static var probe := ""            # (timings only: "no-glass" leaves the roof's glass out)
@@ -109,6 +110,9 @@ static func build() -> Node3D:
 				skin.emission_operator = BaseMaterial3D.EMISSION_OP_MULTIPLY
 				skin.emission_energy_multiplier = HEADLINER_GLOW
 				mi.material_override = skin
+				var accented := Accent.of(mi.mesh.surface_get_material(0), Color(1.0, 0.94, 0.86) * HEADLINER_GLOW)   # (another livery: its thread in the accent, the same glow)
+				if accented != mi.mesh.surface_get_material(0):
+					mi.material_override = accented
 			root.add_child(mi)
 			mi.add_to_group("exterior")
 			if part == "RoofGlass" and probe == "no-glass":

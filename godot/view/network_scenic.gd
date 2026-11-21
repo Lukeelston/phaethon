@@ -29,6 +29,11 @@ const END := 120.0           # samples at each end over which the road's doing f
 const OFFS := [0.0, 14.0, 40.0, 110.0, 260.0, 520.0, 900.0, 1300.0, 1600.0, 1900.0]
 const SAND := Color(0.74, 0.68, 0.52, 0.0)
 const STEP := 512.0          # the terrain's grid (NetworkLandscape.STEP)
+const Helios := preload("res://view/helios.gd")
+const MOUNTAIN := "SHelios"  # this road's land is the mountain's own surface (view/helios.gd), with the road a bench in it
+const EASE := 220.0          # m from the deck's edge over which that bench's cut and fill meet the slope
+const SPAN := 512            # samples in each stretch a hint is looked for in (a multiple of 32, the samples a hint looks at)
+const LAP_SURE := 2800.0     # m: nearer the mountain's road than this, the lap found is the nearest there is (its laps lie 6 km apart)
 
 var sim
 var roads := {}              # road -> {first, last, sea, hw, e, h, tl, rl, tr, rr, gap} (arrays from `first`)
@@ -57,6 +62,8 @@ func setup(s, heights := []) -> void:   # heights: the world's own per-sample he
 		var last := int(st[st.size() - 1][0])
 		var n := last - first + 1
 		var D := {"first": first, "last": last, "sea": int(entry[1]), "hw": float(R.w[first]) / 2.0, "e": s.net_edge_span(float(R.w[first]))}
+		if String(R.name) == MOUNTAIN:
+			D["mountain"] = true
 		for key in ["h", "tl", "rl", "tr", "rr", "gap"]:
 			var a := PackedFloat32Array()
 			a.resize(n)
@@ -82,6 +89,17 @@ func setup(s, heights := []) -> void:   # heights: the world's own per-sample he
 			box = box.expand(Vector2i(cx - REACH, cy - REACH)).expand(Vector2i(cx + REACH + 1, cy + REACH + 1))
 		boxes.append(box)
 		D["box"] = box
+		# its samples in stretches of SPAN, each with the ground a hint could be asked for from (_hint looks only at
+		# the stretches near a cell: the mountain's road is 15,500 samples, and every new cell walked all of them)
+		var reach := (REACH + 0.75) * CELL
+		var spans := []
+		for i0 in range(first, last + 1, SPAN):
+			var i1 := mini(i0 + SPAN - 32, last)
+			var ground := Rect2(R.px[i0], R.py[i0], 0.0, 0.0)
+			for i in range(i0, i1 + 1, 32):
+				ground = ground.expand(Vector2(R.px[i], R.py[i]))
+			spans.append([i0, i1, ground.grow(reach)])
+		D["spans"] = spans
 		if int(D.sea) != 0:
 			_trace_coast(r)
 			for x in coast:
@@ -164,11 +182,14 @@ func _hint(cell: Vector2i) -> Array:
 		var R = sim.roads[r]
 		var bd := limit * limit
 		var bi := -1
-		for i in range(int(D.first), int(D.last) + 1, 32):
-			var d := Vector2(R.px[i] - centre.x, R.py[i] - centre.y).length_squared()
-			if d < bd:
-				bd = d
-				bi = i
+		for span in D.spans:
+			if not (span[2] as Rect2).has_point(centre):
+				continue
+			for i in range(int(span[0]), int(span[1]) + 1, 32):
+				var d := Vector2(R.px[i] - centre.x, R.py[i] - centre.y).length_squared()
+				if d < bd:
+					bd = d
+					bi = i
 		if bi >= 0 and (best.is_empty() or bd < float(best[2])):
 			best = [r, bi, bd]
 	hints[cell] = best
@@ -185,6 +206,8 @@ func covered(p: Vector2) -> bool:
 	var D: Dictionary = roads[r]
 	var R = sim.roads[r]
 	var i := _nearest(R, D, p, int(hint[1]))
+	if D.has("mountain"):
+		i = _nearest_lap(r, p, Vector2i(int(floor(p.x / CELL)), int(floor(p.y / CELL))), i)
 	return absf((p.x - R.px[i]) * R.nx[i] + (p.y - R.py[i]) * R.ny[i]) < float(D.hw) + FLANK + 120.0 and Vector2(R.px[i] - p.x, R.py[i] - p.y).length() < float(D.hw) + FLANK + 200.0
 
 
@@ -273,6 +296,56 @@ func _nearest(R, D: Dictionary, p: Vector2, start: int) -> int:
 	return best
 
 
+## The mountain's road passes near the same place more than once (a spiral's laps, 6 km apart), and
+## the sample nearest p may be on another lap than the one p's own cell knows of: the cells round it
+## are asked too, and the nearest of what they find is p's.
+func _nearest_lap(r: int, p: Vector2, cell: Vector2i, best: int) -> int:
+	var D: Dictionary = roads[r]
+	var R = sim.roads[r]
+	var bd := Vector2(R.px[best] - p.x, R.py[best] - p.y).length_squared()
+	if bd < LAP_SURE * LAP_SURE:
+		return best      # (no other lap can be nearer: they are 6 km apart)
+	var tried := [best]
+	for dx in [-1, 0, 1]:
+		for dy in [-1, 0, 1]:
+			var other := _hint(cell + Vector2i(dx, dy))
+			if other.is_empty() or int(other[0]) != r:
+				continue
+			var fresh := true
+			for t in tried:
+				fresh = fresh and absi(int(other[1]) - int(t)) >= 160
+			if not fresh:
+				continue
+			var j := _nearest(R, D, p, int(other[1]))
+			tried.append(int(other[1]))
+			tried.append(j)
+			var d := Vector2(R.px[j] - p.x, R.py[j] - p.y).length_squared()
+			if d < bd:
+				bd = d
+				best = j
+	return best
+
+
+## The terrain's grid beside and under the mountain's road. The road is a bench in the slope: cut into
+## it on the uphill side, on fill on the downhill. The grid lies under the deck and under the road's
+## own land (row): at the hill's own height where that is the lower (under the fill), held under the
+## deck for as far as one of its triangles could reach across it, and the mountain itself past FLANK.
+func _mountain_ground(h: float, hw: float, lat: float, d: float, p: Vector2) -> Vector2:
+	var hill := Helios.land(p)
+	if d < 0.0:
+		return Vector2(1.0, minf(h - 1.0, hill) - SINK)
+	var y := minf(lerpf(h - 1.0, hill, smoothstep(0.0, EASE, d)), hill) - SINK * (1.0 - smoothstep(FLANK - 300.0, FLANK, d))
+	if absf(lat) < hw + UNDER:
+		y = minf(y, h - 1.0 - SINK)
+	return Vector2(1.0 - smoothstep(FLANK, FLANK + BLEND, d), y)      # (its ridges come back as slowly as the country does elsewhere)
+
+
+## The height a point beside road r is known to stand at without asking the terrain (the mountain's
+## road: the mountain's), or NAN.
+func known_height(r: int, p: Vector2) -> float:
+	return Helios.land(p) if roads.has(r) and roads[r].has("mountain") else NAN
+
+
 ## What the terrain's vertex c (at p) stands at: Vector2(weight, height); weight 0 where no scenic
 ## road has a say. The terrain lies SINK under the road's own land out to FLANK, and under the deck
 ## itself wherever one of its triangles could reach it.
@@ -296,6 +369,8 @@ func land(c: Vector2i, _p: Vector2) -> Vector2:
 	var D: Dictionary = roads[r]
 	var R = sim.roads[r]
 	var i := _nearest(R, D, p, int(hint[1]))
+	if D.has("mountain"):
+		i = _nearest_lap(r, p, cell, i)
 	var along: float = ((p.x - R.px[i]) * R.tx[i] + (p.y - R.py[i]) * R.ty[i]) / R.len[i]
 	var out := Vector2.ZERO
 	if not ((i == int(D.first) and along < 0.0) or (i == int(D.last) and along > 0.0)):
@@ -305,7 +380,9 @@ func land(c: Vector2i, _p: Vector2) -> Vector2:
 		var is_open := open(r, i, left)
 		var edge: float = float(D.hw) - (float(D.e) if is_open else -3.2)
 		var d := absf(lat) - edge
-		if d < 0.0:   # under the deck: as low as the lower of its two sides, so no triangle from here stands out through a cliff
+		if D.has("mountain"):
+			out = _mountain_ground(D.h[q], float(D.hw), lat, d, p)
+		elif d < 0.0:   # under the deck: as low as the lower of its two sides, so no triangle from here stands out through a cliff
 			out = Vector2(1.0, minf(D.h[q] - 10.0, minf(_ground(D, q, true, 0.0).y, _ground(D, q, false, 0.0).y)))
 		else:
 			out = _ground(D, q, left, d)
@@ -313,7 +390,8 @@ func land(c: Vector2i, _p: Vector2) -> Vector2:
 				# (a triangle from here can reach across the deck to the other side: no higher than that side's land at its edge,
 				# or it stood out through a sea cliff from the mountain's side of the road)
 				out.y = minf(out.y, minf(D.h[q] - 10.0, _ground(D, q, not left, 0.0).y))
-		out.x *= smoothstep(0.0, END, float(i - int(D.first))) * smoothstep(0.0, END, float(int(D.last) - i))
+		if not D.has("mountain"):   # (the mountain's road begins and ends on level ground already: nothing to ease in)
+			out.x *= smoothstep(0.0, END, float(i - int(D.first))) * smoothstep(0.0, END, float(int(D.last) - i))
 	_cache[c] = out
 	return out
 
@@ -333,6 +411,22 @@ func row(r: int, i: int, left: bool) -> PackedFloat32Array:
 	var run: float = (D.rl if left else D.rr)[q]
 	var sgn := 1.0 if left else -1.0
 	var out := PackedFloat32Array()
+	if D.has("mountain"):
+		# the mountain itself, from the deck's edge: a cut over the road on the uphill side, a bank under it on the
+		# downhill, each meeting the slope within EASE; roughened a little (upward only: the terrain lies SINK under it)
+		for m in OFFS.size():
+			var out_m: float = OFFS[m]
+			var at := Vector2(R.px[i] + R.nx[i] * sgn * (edge + out_m), R.py[i] + R.ny[i] * sgn * (edge + out_m))
+			var hill := lerpf(h - 1.0, Helios.land(at), smoothstep(0.0, EASE, out_m))
+			if m == OFFS.size() - 1:
+				hill -= 45.0
+			elif m > 1:
+				hill += 26.0 * smoothstep(14.0, 260.0, out_m) * (1.0 - smoothstep(1100.0, FLANK, out_m)) * (0.5 + 0.5 * _noise.get_noise_2d(at.x, at.y))
+			out.append(edge + out_m)
+			out.append(hill)
+		if not is_open and target > h:
+			out[1] = h + sim.net_edge(float(R.w[i]), float(D.hw)).x + 0.5
+		return out
 	var ds := OFFS
 	if sea:
 		var top := _shore_top(h, run)

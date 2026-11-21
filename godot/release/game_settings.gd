@@ -38,3 +38,22 @@ static func set_obstacle_collisions(enabled: bool) -> void:
 	var error := config.save(PREFS)
 	if error != OK:
 		push_warning("Could not save obstacle collision preference: %s" % error_string(error))
+
+
+## A named choice from one of the menus' option rows ("flight" section, like the two switches above):
+## where a Network flight begins, the time of day, the weather, the craft's paint. `allowed` guards
+## against a stale or hand-edited value; the first entry is the default.
+static func choice(key: String, allowed: Array) -> String:
+	var config := ConfigFile.new()
+	if config.load(PREFS) != OK:
+		return allowed[0]
+	var saved = config.get_value("flight", key, allowed[0])
+	return saved if saved is String and allowed.has(saved) else allowed[0]
+
+static func set_choice(key: String, value: String) -> void:
+	var config := ConfigFile.new()
+	config.load(PREFS)
+	config.set_value("flight", key, value)
+	var error := config.save(PREFS)
+	if error != OK:
+		push_warning("Could not save the %s preference: %s" % [key, error_string(error)])

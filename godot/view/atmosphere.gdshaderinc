@@ -5,10 +5,17 @@
 //   a little lighter on the suns' side of the sky and deeper away from it;
 //   a wide warm glow round each sun, tighter and brighter close in, and stronger low down where
 //   there is more air to scatter it.
-const vec3 TO_SUN = vec3(0.6824, 0.5, 0.5332);        // the white primary (CraftView.SUN_ROT)
-const vec3 TO_SUN2 = vec3(0.7911, 0.4067, 0.4568);    // its orange companion
-const vec3 SUN_GLOW = vec3(1.0, 0.93, 0.80);
-const vec3 SUN2_GLOW = vec3(1.0, 0.60, 0.28);
+// The suns' directions and glow are the project's (project.godot [shader_globals]): their defaults
+// are the afternoon's, the white primary at CraftView.SUN_ROT and its orange companion, as these
+// constants were. Another time of day or weather sets them (view/outlook.gd).
+global uniform vec3 sky_sun;
+global uniform vec3 sky_sun2;
+global uniform vec3 sky_sun_glow;
+global uniform vec3 sky_sun2_glow;
+#define TO_SUN sky_sun
+#define TO_SUN2 sky_sun2
+#define SUN_GLOW sky_sun_glow
+#define SUN2_GLOW sky_sun2_glow
 
 vec3 atmosphere(vec3 dir, vec3 zenith, vec3 horizon, float suns) {
 	float up = max(dir.y, 0.0);

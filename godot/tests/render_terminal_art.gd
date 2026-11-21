@@ -67,6 +67,19 @@ func _run() -> void:
 			preload("res://view/screen_reflection.gd").strength = float(arg.trim_prefix("--reflection="))
 	if "--no-scenic" in OS.get_cmdline_user_args():   # the scenic roads' land and edges left out
 		preload("res://view/network_world.gd").scenic_on = false
+	# The pilot's saved hour, weather, paint and chase stay out of pictures and timings: a fair afternoon
+	# in Ember, no chase, unless --time= or --weather= says otherwise.
+	var outlook := preload("res://view/outlook.gd")
+	outlook.pinned = true
+	outlook.time = "afternoon"
+	outlook.weather = "fair"
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--time="):
+			outlook.time = arg.trim_prefix("--time=")
+		if arg.begins_with("--weather="):
+			outlook.weather = arg.trim_prefix("--weather=")
+	preload("res://view/livery.gd").pinned = true
+	preload("res://view/network_chase.gd").pinned = true
 	root.msaa_3d = Viewport.MSAA_4X
 	if "--headset" in OS.get_cmdline_user_args():   # twice the window each way: with --resolution 2064x1104, a Quest 3's two eyes' worth of pixels in one flat view
 		root.scaling_3d_scale = 2.0

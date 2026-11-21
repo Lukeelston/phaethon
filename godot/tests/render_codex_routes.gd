@@ -37,6 +37,17 @@ const VIEWS := [
 	["g1-wash-board-on-e3", "E3", 4380, -60.0, [0.0, 4.0], Vector3.ZERO, 0.0, 1],
 	["g2-needle-board-on-e2", "E2", 6090, -60.0, [0.0, 4.0], Vector3.ZERO, 0.0, 1],
 	["g3-hammer-board-on-n2", "N2", 13510, -60.0, [0.0, 4.0], Vector3.ZERO, 0.0, 1],
+	# Helios (--time= and --weather= as the engine harness has them): from the highway, up its road, over the clouds, on top
+	["m1-helios-from-e3-abeam", "E3", 15650, 0.0, [80.0, 7.0], Vector3.ZERO],
+	["m2-helios-from-its-turning", "E3", 13200, 0.0, [28.0, 5.0], Vector3.ZERO],
+	["m3-helios-the-foot", "SHelios", 1560, 0.0, [0.0, 4.0], Vector3.ZERO],
+	["m4-helios-lower-slopes", "SHelios", 2600, 0.0, [0.0, 2.0], Vector3.ZERO],
+	["m5-helios-over-the-edge", "SHelios", 4300, 40.0, [72.0, -9.0], Vector3.ZERO],
+	["m6-helios-over-the-clouds", "SHelios", 6400, 40.0, [72.0, -9.0], Vector3.ZERO],
+	["m7-helios-the-summit", "SHelios", 8220, 0.0, [0.0, -5.0], Vector3.ZERO],
+	["m8-helios-summit-all-round", "SHelios", 8220, 0.0, [120.0, -12.0], Vector3(0.0, 40.0, 0.0)],
+	["m9-helios-the-bench-from-above", "SHelios", 5200, 0.0, [0.0, -32.0], Vector3(0.0, 900.0, 1300.0)],
+	["m10-helios-coming-down", "SHelios", 10400, 0.0, [0.0, -4.0], Vector3.ZERO],
 ]
 
 
@@ -53,6 +64,17 @@ func _run() -> void:
 		return
 	if "--open" in OS.get_cmdline_user_args():
 		preload("res://view/canopy.gd").roofed = false
+	var outlook := preload("res://view/outlook.gd")     # (the saved hour and weather stay out of the pictures: a fair afternoon unless asked)
+	outlook.pinned = true
+	outlook.time = "afternoon"
+	outlook.weather = "fair"
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--time="):
+			outlook.time = arg.trim_prefix("--time=")
+		if arg.begins_with("--weather="):
+			outlook.weather = arg.trim_prefix("--weather=")
+	preload("res://view/livery.gd").pinned = true
+	preload("res://view/network_chase.gd").pinned = true
 	root.msaa_3d = Viewport.MSAA_4X
 	DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
 	Seat.track_override = "network"

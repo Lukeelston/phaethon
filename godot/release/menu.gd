@@ -61,6 +61,17 @@ func _ready() -> void:
 	flight_options.add_child(partner_checkbox)
 	left.add_child(flight_options)
 	left.add_child(UI.label("Collisions: pillars and traffic. Guardrails stay on.", 14, UI.MUTED))
+	# Rows that step through choices (after the courses: the release check counts buttons from the top).
+	# Three abreast, the first widest (the start's names are long); a third row would push Quit out of a 720-line window.
+	for row: Array in [[UI.insertion_button(15), UI.paint_button(15), UI.craft_button(15)], [UI.time_button(15), UI.weather_button(15), UI.chase_button(15)]]:
+		var options := HBoxContainer.new()
+		options.add_theme_constant_override("separation", 8)
+		left.add_child(options)
+		for k in row.size():
+			var option: Button = row[k]
+			option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			option.size_flags_stretch_ratio = 1.5 if k == 0 else 1.0
+			options.add_child(option)
 	var spacer := Control.new()
 	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	left.add_child(spacer)

@@ -19,6 +19,7 @@ var description: Label
 var start_button: Button
 var collision_checkbox: CheckBox
 var partner_checkbox: CheckBox
+var option_buttons: Array[Button] = []   # the rows that step through choices: where the Network begins, ...
 var start_index := 0
 var _confirm_down := true
 var _stick_down := true
@@ -113,19 +114,37 @@ func _build_screen() -> void:
 	description = UI.label("", 24)
 	description.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	details.add_child(description)
-	collision_checkbox = UI.collision_checkbox(28)
-	collision_checkbox.custom_minimum_size.y = 56
-	details.add_child(collision_checkbox)
+	# The two switches side by side, then the rows that step through choices (they need the room the
+	# switches' own lines took: with a row each the column ran off the board).
+	var switches := HBoxContainer.new()
+	switches.add_theme_constant_override("separation", 20)
+	details.add_child(switches)
+	collision_checkbox = UI.collision_checkbox(26)
+	collision_checkbox.custom_minimum_size.y = 52
+	collision_checkbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	switches.add_child(collision_checkbox)
 	buttons.append(collision_checkbox)
-	details.add_child(UI.label("Pillars and traffic. Guardrails stay on.", 22, UI.MUTED))
-	partner_checkbox = UI.partner_checkbox(28)
-	partner_checkbox.custom_minimum_size.y = 56
-	details.add_child(partner_checkbox)
+	partner_checkbox = UI.partner_checkbox(26)
+	partner_checkbox.custom_minimum_size.y = 52
+	partner_checkbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	switches.add_child(partner_checkbox)
 	buttons.append(partner_checkbox)
+	details.add_child(UI.label("Collisions: pillars and traffic. Guardrails stay on.", 20, UI.MUTED))
+	var rows: Array = [[UI.insertion_button(22), UI.paint_button(22)], [UI.time_button(22), UI.weather_button(22)], [UI.craft_button(22), UI.chase_button(22)]]     # each a row of one or two; A or the trigger takes the next choice
+	for row: Array in rows:
+		var line := HBoxContainer.new()
+		line.add_theme_constant_override("separation", 12)
+		details.add_child(line)
+		for option: Button in row:
+			option.custom_minimum_size.y = 46
+			option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			line.add_child(option)
+			buttons.append(option)
+			option_buttons.append(option)
 	var spacer := Control.new()
 	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	details.add_child(spacer)
-	details.add_child(UI.label("Release controls after Start.\nTap Menu: partner / controls.\nHold Menu: choose a map; ends run.", 22, UI.MUTED))
+	details.add_child(UI.label("Release controls after Start.  In flight, tap Menu: options.\nHold Menu: back to this board; ends the run.", 20, UI.MUTED))
 	start_button = UI.button("Start flight", start_selected, 72)
 	start_button.add_theme_font_size_override("font_size", 30)
 	layout.add_child(start_button)

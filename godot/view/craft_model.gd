@@ -42,6 +42,8 @@ const HULL := [[-2.22, 0.06, -0.19, -0.11], [-2.12, 0.30, -0.28, -0.05], [-1.90,
 	[0.40, 1.15, -0.58, -0.06], [1.05, 1.11, -0.56, 0.04], [1.45, 0.98, -0.51, 0.17],
 	[1.80, 0.68, -0.42, 0.12], [2.02, 0.42, -0.31, 0.03], [2.15, 0.18, -0.18, -0.04]]
 const HULL_N := 2.6
+const Livery := preload("res://view/livery.gd")   # the paint a craft is built in: these four are Ember's, the craft's own
+const Accent := preload("res://view/accent.gd")
 const PAINT := Color(0.95, 0.42, 0.08)    # the top decks' and nose's candy orange (clear-coated)
 const STRIPE := Color(0.11, 0.12, 0.14)   # the flanks' racing stripe: gunmetal
 const PIN := Color(0.96, 0.95, 0.9)       # the pinstripes where the paint meets the metal
@@ -68,8 +70,7 @@ const RIB_R := 0.014         # ... and are this thick: proud of the trim inside,
 ## pinstripes run on to the painted nose, and the cage's hoops and longerons stay as frames and
 ## stringers inside. Set it with set_nose_closed(): each hull is built once and kept.
 static var nose_closed := false
-static var _hull_cache: ArrayMesh
-static var _hull_closed_cache: ArrayMesh
+static var _hulls := {}      # "livery:open" or "livery:closed" -> that hull, built once
 const FLAP_OPEN := deg_to_rad(68.0)   # full brake
 const FLAP_RATE := 9.0                # flap travel, full range per second (~0.11 s open or shut)
 # The engines are flat rounded slabs (Luke: "horizontally flat, rounded rectangular prisms"),
@@ -181,6 +182,7 @@ func build(v) -> void:
 		eng.add_child(shell)
 		var aft_leaf := _take_brake_mesh(shell, "AftBrakeLeaf")
 		var front_leaf := _take_brake_mesh(shell, "FrontBrakeLeaf")
+		Accent.dress_all(shell)      # its armour plates and fairing band are the livery's (Ember: as made)
 		var lights := MeshInstance3D.new()   # nav, tail, landing lights and the repulsor underglow
 		lights.mesh = _engine_lights(out)
 		lights.material_override = lit_mat
@@ -225,7 +227,7 @@ func build(v) -> void:
 			for b in 12:
 				var a := TAU * b / 12.0
 				parts.append([Fairings.fan_blade(), Transform3D(Basis(Vector3.BACK, -a), Vector3.ZERO),
-					LIVERY if b == 0 else Color(0.43, 0.46, 0.50)])
+					Livery.coat("engine") if b == 0 else Color(0.43, 0.46, 0.50)])
 			var fm := MeshInstance3D.new()
 			fm.mesh = Kit.compound(parts)
 			fm.material_override = Kit.polished(0.88, 0.31)
@@ -251,6 +253,7 @@ func build(v) -> void:
 			ring.add_child(hinge)
 			var fl := MeshInstance3D.new()
 			fl.mesh = aft_leaf
+			Accent.dress(fl)
 			hinge.add_child(fl)
 			flaps[k].append(hinge)
 		# front speed brakes (Luke: "front speed brake flaps for braking done at high speed"): a
@@ -263,6 +266,7 @@ func build(v) -> void:
 			eng.add_child(fh)
 			var fp := MeshInstance3D.new()
 			fp.mesh = front_leaf
+			Accent.dress(fp)
 			fp.rotation.z = -side * PI / 2.0
 			fp.scale = Vector3(0.73, 1.0, 0.88)
 			fh.add_child(fp)
@@ -294,7 +298,7 @@ func build(v) -> void:
 		var ring_m := MeshInstance3D.new()
 		ring_m.mesh = Kit.compound([
 			[Kit.cyl(0.34, 0.34, 0.08, 24), Kit.at(Vector3.ZERO), DARK.lightened(0.35)],
-			[Kit.cyl(0.38, 0.38, 0.03, 24), Kit.at(Vector3(0, -out * 0.03, 0)), LIVERY],
+			[Kit.cyl(0.38, 0.38, 0.03, 24), Kit.at(Vector3(0, -out * 0.03, 0)), Livery.coat("engine")],
 		])
 		ring_m.material_override = finish
 		em.add_child(ring_m)
@@ -414,10 +418,10 @@ static func _engine_body(out: float) -> ArrayMesh:
 		[Kit.rounded_box(Vector3(ENG_W + 0.1, ENG_H + 0.1, 0.45), 6.0), Kit.at(Vector3(0, 0, -3.6)), DARK.lightened(0.15)],   # intake lip
 		[Kit.box(Vector3(ENG_W - 0.3, ENG_H - 0.22, 0.04)), Kit.at(Vector3(0, 0, -3.84)), Color(0.05, 0.05, 0.06)],   # intake throat
 		[Kit.box(Vector3(0.08, ENG_H - 0.22, 0.06)), Kit.at(Vector3(0, 0, -3.85)), DARK.lightened(0.3)],         # splitter between the twin intakes
-		[Kit.rounded_box(Vector3(ENG_W + 0.06, ENG_H + 0.06, 0.6), 6.0), Kit.at(Vector3(0, 0, -2.5)), LIVERY],    # band
-		[Kit.rounded_box(Vector3(ENG_W + 0.04, ENG_H + 0.04, 0.25), 6.0), Kit.at(Vector3(0, 0, 0.6)), LIVERY],    # pinstripe
+		[Kit.rounded_box(Vector3(ENG_W + 0.06, ENG_H + 0.06, 0.6), 6.0), Kit.at(Vector3(0, 0, -2.5)), Livery.coat("engine")],    # band
+		[Kit.rounded_box(Vector3(ENG_W + 0.04, ENG_H + 0.04, 0.25), 6.0), Kit.at(Vector3(0, 0, 0.6)), Livery.coat("engine")],    # pinstripe
 		[Fairings.fin(PackedVector2Array([Vector2(0,-0.65), Vector2(0.64,0.95), Vector2(0.59,1.45), Vector2(0,1.15)]), 0.07), Kit.at(Vector3(0, top, 0)), STEEL],
-		[Fairings.fin(PackedVector2Array([Vector2(0.49,0.65), Vector2(0.64,0.95), Vector2(0.59,1.45), Vector2(0.49,1.35)]), 0.075), Kit.at(Vector3(0, top, 0)), LIVERY],
+		[Fairings.fin(PackedVector2Array([Vector2(0.49,0.65), Vector2(0.64,0.95), Vector2(0.59,1.45), Vector2(0.49,1.35)]), 0.075), Kit.at(Vector3(0, top, 0)), Livery.coat("engine")],
 		[Fairings.fin(PackedVector2Array([Vector2(0,-0.3),Vector2(1.05,0.95),Vector2(0.99,1.38),Vector2(0,1.05)]), 0.065), Kit.at(Vector3(out*side,-0.1,0), Vector3(0,0,-out*PI/2)), STEEL],
 		[Kit.rounded_box(Vector3(0.18, 0.72, 1.1), 5.0), Kit.at(Vector3(-out * (side - 0.02), 0.0, -2.9)), DARK.lightened(0.25)],   # binder housing
 		[Kit.box(Vector3(0.3, 0.5, 0.7)), Kit.at(Vector3(0, -0.66, 3.0)), DARK.lightened(0.25)],                  # cable lug pylon
@@ -548,10 +552,9 @@ static func _tri(st: SurfaceTool, i0: int, i1: int, i2: int, p0: Vector3, p1: Ve
 ## the cockpit (2), fittings (3), the nose cage (4), the paint (5: _outer_skin), the pinstripes and
 ## the lip's piping (6), lamps (7). Built once and shared (the flat view's pod and the VR cockpit).
 static func pod_hull() -> ArrayMesh:
-	if nose_closed and _hull_closed_cache:
-		return _hull_closed_cache
-	if not nose_closed and _hull_cache:
-		return _hull_cache
+	var which := "%s:%s" % [Livery.current, "closed" if nose_closed else "open"]
+	if _hulls.has(which):
+		return _hulls[which]
 	var nz := 76
 	var na := 96
 	var z0: float = HULL[0][0]
@@ -669,15 +672,15 @@ static func pod_hull() -> ArrayMesh:
 		var tan: Vector3 = (ring_pts[(k + 1) % nl] - ring_pts[(k - 1 + nl) % nl]).normalized()
 		var up := tan.cross(Vector3.UP).normalized().cross(tan).normalized()
 		crest.append(pk + up * (r + 0.002))
-	_tube(pins, crest, 0.007, PAINT, 6)
+	_tube(pins, crest, 0.007, Livery.coat("paint"), 6)
 	var rubber := Finishes.rubber()
 	mesh.surface_set_material(2, rubber)
 
 	# fittings
 	Kit.compound([
-		[Kit.rounded_box(Vector3(0.07, 0.62, 0.85), 4.0), Kit.at(Vector3(0, 0.42, 1.6), Vector3(-0.35, 0, 0)), PAINT],   # raked fin, painted
+		[Kit.rounded_box(Vector3(0.07, 0.62, 0.85), 4.0), Kit.at(Vector3(0, 0.42, 1.6), Vector3(-0.35, 0, 0)), Livery.coat("paint")],   # raked fin, painted
 		[Kit.rounded_box(Vector3(0.076, 0.6, 0.09), 4.0), _fin_xf() * Transform3D(Basis(), Vector3(0, 0, -0.39)), DARK.lightened(0.15)],   # its leading edge
-		[Kit.rounded_box(Vector3(0.078, 0.035, 0.66), 4.0), _fin_xf() * Transform3D(Basis(), Vector3(0, 0.2, 0.03)), PIN],   # a pinstripe along its top
+		[Kit.rounded_box(Vector3(0.078, 0.035, 0.66), 4.0), _fin_xf() * Transform3D(Basis(), Vector3(0, 0.2, 0.03)), Livery.coat("pin")],   # a pinstripe along its top
 		[Kit.rounded_box(Vector3(0.1, 0.2, 0.72), 4.0), Kit.at(Vector3(-1.1, -0.26, -0.15)), DARK],   # side intakes, behind the cage
 		[Kit.rounded_box(Vector3(0.1, 0.2, 0.72), 4.0), Kit.at(Vector3(1.1, -0.26, -0.15)), DARK],
 		[Kit.cyl(0.15, 0.19, 0.36, 28), Kit.at(Vector3(-0.5, -0.24, 2.1), Vector3(PI / 2.0, 0, 0)), DARK],   # trim thrusters
@@ -767,10 +770,16 @@ static func pod_hull() -> ArrayMesh:
 		[Kit.box(Vector3(0.035, 0.01, 1.5)), Kit.at(Vector3(0.5, -0.59, 0.3)), UNDERGLOW],
 	], mesh)
 	mesh.surface_set_material(7, Kit.vertex_colors(true))
-	if nose_closed:
-		_hull_closed_cache = mesh
-	else:
-		_hull_cache = mesh
+	_hulls[which] = mesh
+	return mesh
+
+
+## The pod's hull in another livery than the craft's own (a patrol's black and white, say).
+static func pod_hull_in(which: String) -> ArrayMesh:
+	var own := Livery.current
+	Livery.current = which
+	var mesh := pod_hull()
+	Livery.current = own
 	return mesh
 
 
@@ -823,7 +832,7 @@ static func _outer_skin(grid: Array, nz: int, na: int, mesh: ArrayMesh, paint: S
 		pts.append(Vector3(0.0, grid[ri][0][1], z0 - 0.02 if e == 0 else z1 + 0.02))
 		var axis := Vector3(0, 0, -1.0 if e == 0 else 1.0)
 		for j in na:
-			faces.append([ri * na + j, ri * na + (j + 1) % na, ti, axis, PAINT if e == 0 else null])
+			faces.append([ri * na + j, ri * na + (j + 1) % na, ti, axis, Livery.coat("paint") if e == 0 else null])
 	var nrm: Array[Vector3] = []
 	nrm.resize(pts.size())
 	nrm.fill(Vector3.ZERO)
@@ -838,7 +847,7 @@ static func _outer_skin(grid: Array, nz: int, na: int, mesh: ArrayMesh, paint: S
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	for k in pts.size():
-		st.set_color(SILVER)
+		st.set_color(Livery.coat("skin"))
 		st.set_normal(nrm[k])
 		st.add_vertex(pts[k])
 	for f in faces:
@@ -871,16 +880,16 @@ static func _outer_skin(grid: Array, nz: int, na: int, mesh: ArrayMesh, paint: S
 				continue
 			run.append(p + nrm[i * na + jj] * 0.005)
 		if run.size() > 1:
-			_tube(pins, run, 0.008, PIN, 6)
+			_tube(pins, run, 0.008, Livery.coat("pin"), 6)
 
 
 ## The paint at a skin quad: |x| over the half-width, height over the half-height (from the
 ## section's centre), station z. Null where it's bare metal.
 static func _paint_at(ax: float, sy: float, z: float):
 	if z < -1.98 or sy > PAINT_SY:
-		return PAINT
+		return Livery.coat("paint")
 	if ax > 0.7 and sy > -0.2 and sy < 0.22:
-		return STRIPE
+		return Livery.coat("stripe")
 	return null
 
 

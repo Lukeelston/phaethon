@@ -73,7 +73,8 @@ func _run() -> void:
 	check("terrain extends at least 65km before eviction",land.RANGE*land.TILE>=65000)
 	check("detailed roads stream beyond 25km",v.network_world.VIS>=25000)
 	var far = v.network_world.far_roads
-	check("distant roads cover every road without unbounded vertices",far!=null and far.vertex_count<100000 and far.pieces.size()>v.sim.roads.size())
+	# (110,000, from 100,000: the Helios road added about 370 km of far ribbon)
+	check("distant roads cover every road without unbounded vertices",far!=null and far.vertex_count<110000 and far.pieces.size()>v.sim.roads.size())
 	far.sync(pos.x,pos.y)
 	var endpoint_error := 0.0
 	var chord_intrusion := -INF

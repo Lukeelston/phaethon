@@ -42,6 +42,10 @@ Their plans and heights are ordinary roads' (the sims know nothing else about th
 carries the land beside each ([sample, the height the land reaches on the left, over how far, the
 same on the right, how far the land's edge lies under the deck]: view/network_scenic.gd shapes the
 terrain from it), which the sims only pass along.
+Helios (Luke, 2026-11-20): one mountain 10.4 km high north of E3 (helios_z, which the views mirror),
+and SHelios, a scenic road off E3's north shoulder that spirals up it clockwise, crosses the exact
+summit in an S, spirals down counter-clockwise and rejoins E3 (add_helios). Its heights are the
+mountain's surface (keys with the surface's own slopes); its land is the surface either side.
 Roads are sampled exactly as the sims sample them (NET_STEP: straights in equal steps, arcs in
 exact chords, a last point at the end). Junction zones are found by walking: a road's end samples
 whose corridor overlaps its parent's (plus a margin), against the parent's nearest samples.
@@ -227,6 +231,29 @@ STUNT_ROADS = [
     ("SHammer", "N2", 352, -1, 7, 35, 9,
      [(0, 0), (.09, 0), (.36, 1350), (.42, 1350), (.67, -200), (.81, 220), (.92, 0), (1, 0)]),
 ]
+
+
+# Helios (Luke, 2026-11-20): one giant mountain north of E3, between N2 and N3, and a road that winds up
+# it on a double spiral: in clockwise, an S over the exact summit, out counter-clockwise. The mountain
+# is helios_z and nothing else (the views mirror that function exactly), and the road lies on it.
+HELIOS = (400000.0, 549000.0, 10400.0, 36000.0)   # centre x, centre y (m), summit height (m), foot radius (m)
+HELIOS_RHO, HELIOS_D = 12 * KM, 6 * KM   # the spiral's inner radius, and how far each half turn steps in or out
+HELIOS_MOUTHS = ("E3", 345, 456)         # both on E3's north shoulder, travelling east: in at km 345, out at km 456
+HELIOS_TURN = 9 * KM                     # the two connectors' Dubins radius
+HELIOS_LEAD = 24 * KM                    # the way in: straight up the spiral's tangent to its start (Dubins all the way: 26 %)
+HELIOS_UNWIND = (60 * KM, 25.0)          # the way out: one last, wider left arc to the foot (Dubins all the way: 33 %; a straight: 24 %)
+HELIOS_KEY = 25                          # a height key every so many samples: the surface's own height and slope
+HELIOS_FLAT = 40                         # each mouth's samples at exactly 0 m
+HELIOS_GRADE = 0.22                      # its steepest
+HELIOS_LAND = (60, 30.0, 600.0)          # its land: a row every 60 samples while it's over 30 m up, each side's run (m)
+
+
+def helios_z(x, y):
+    """The mountain: 10,400 m at its centre, 0 at and beyond its foot (steepest, 44 %, about 21 km out)."""
+    cx, cy, H, R = HELIOS
+    r = math.hypot(x - cx, y - cy)
+    u = min(r / R, 1.0)
+    return H * (1 - u * u) ** 2
 
 
 def backroad_mouth(parent, station, side, direction):
@@ -595,6 +622,125 @@ def add_jump(roads, joins, jumps, ew, ns, ci, cj, axis, d, ref):
     jumps.append((len(roads) - 2, len(roads) - 1, ref, h_lip, top))
 
 
+def hermite_all(keys, N):
+    """hermite() at every whole sample 0..N-1 in one pass (a road with hundreds of keys)."""
+    out = np.zeros(N)
+    for a, b in zip(keys, keys[1:]):
+        n = max(1, b[0] - a[0])
+        u = (np.arange(a[0], b[0] + 1) - a[0]) / n
+        d = n * STEP
+        u2, u3 = u * u, u * u * u
+        out[a[0]:b[0] + 1] = ((2 * u3 - 3 * u2 + 1) * a[1] + (u3 - 2 * u2 + u) * d * a[2]
+                              + (-2 * u3 + 3 * u2) * b[1] + (u3 - u2) * d * b[2])
+    return out
+
+
+def add_helios(roads, joins):
+    """SHelios: off E3's north shoulder, up the mountain's west side to the spiral's start, round it clockwise
+    (two half turns, each HELIOS_D further in), an S of two half turns over the exact summit, round it
+    counter-clockwise (a half turn and a quarter, each further out), and back onto E3. Its plan's
+    spiral is explicit arcs; Dubins only joins it to E3. Its heights are the mountain's own."""
+    cx, cy, H, foot = HELIOS
+    rho, d = HELIOS_RHO, HELIOS_D
+    parent = next(i for i, R in enumerate(roads) if R.name == HELIOS_MOUTHS[0])
+    start = backroad_mouth(roads[parent], HELIOS_MOUTHS[1], 1, 1)
+    finish = backroad_mouth(roads[parent], HELIOS_MOUTHS[2], 1, 1)
+    spiral = [("R", rho + 1.5 * d, 180.0, "sp"), ("R", rho + 0.5 * d, 180.0, "sp"),   # in: W24, over the north, E18, round the south, W12
+              ("R", rho / 2, 180.0, "sp"), ("L", rho / 2, 180.0, "sp"),               # the summit's S: W12, the centre (heading south), E12
+              ("L", rho + 0.5 * d, 180.0, "sp"), ("L", rho + 1.5 * d, 90.0, "sp")]    # out: E12, over the north, W18, the south point (heading east)
+    way = [("W24", cx - rho - 2 * d, cy, 90.0), ("E18", cx + rho + d, cy, -90.0), ("W12", cx - rho, cy, 90.0),
+           ("summit", cx, cy, -90.0), ("E12", cx + rho, cy, 90.0), ("W18", cx - rho - d, cy, -90.0),
+           ("south", cx + d / 2, cy - rho - 1.5 * d, 0.0)]
+
+    def connector(a, b):
+        segs = dubins(a, b, HELIOS_TURN)
+        assert segs[1][1] > KM and all(1.0 < q[2] < 180.0 for q in (segs[0], segs[2])), f"SHelios: Dubins looped or collapsed ({segs})"
+        return segs
+    # In: Dubins to a pose on the spiral's tangent, HELIOS_LEAD short of its start, and straight up it
+    # (the mountain's steepest ring is where a direct Dubins would cut across the slope).
+    segs = connector(start, (way[0][1], way[0][2] - HELIOS_LEAD, 90.0)) + [("S", HELIOS_LEAD, 0, "sp")]
+    first = len(segs)
+    # Out: the last quarter turn unwinds on one wider arc to the foot, and Dubins from there.
+    segs += spiral + [("L", HELIOS_UNWIND[0], HELIOS_UNWIND[1], "sp")]
+    _, end = walk(segs, start[0], start[1], math.radians(start[2]))
+    segs += connector((end[0], end[1], math.degrees(end[2])), finish)
+    road = Road("SHelios", "scenic", *start, SC_W, segs)
+    seg0 = [0]   # where each segment starts, in samples
+    for q in segs:
+        seg0.append(seg0[-1] + max(1, math.ceil((q[1] if q[0] == "S" else q[1] * math.radians(q[2])) / STEP)))
+    assert seg0[-1] == road.N - 1
+    road.way = []
+    for n, (name, x, y, hdeg) in enumerate(way):
+        i = seg0[first + n]
+        miss = math.hypot(road.p[i, 0] - x, road.p[i, 1] - y)
+        turn = math.degrees(math.acos(min(1.0, road.t[i, 0] * math.cos(math.radians(hdeg)) + road.t[i, 1] * math.sin(math.radians(hdeg)))))
+        assert miss < 30.0 and turn < 0.5, f"SHelios misses {name} by {miss:.1f} m, {turn:.2f} deg"
+        road.way.append((name, i))
+    r = np.hypot(road.p[:, 0] - cx, road.p[:, 1] - cy)
+    assert r.min() < 30.0, f"SHelios passes {r.min():.1f} m from the summit"
+    # the connectors' Dubins stretches keep off the mountain's steep ring
+    assert r[:seg0[3] + 1].min() > 30 * KM and r[seg0[-4]:].min() > 30 * KM, "SHelios: a connector cuts in under 30 km"
+    # Heights: the surface's own, and its own slope along the road, so the sims' Hermite cubics lie on
+    # the mountain between keys; both mouths exactly level on the open ground. A slope is the central
+    # difference of the surface over the samples either side, per STEP: the sims' Hermite counts every
+    # sample as STEP long (a segment's are a shade shorter: slopes per real metre strayed 11 mm).
+    z = [helios_z(x, y) for x, y in road.p]
+    last, flat = road.N - 1, HELIOS_FLAT
+    assert max(z[:flat + 1]) == 0.0 and max(z[last - flat:]) == 0.0, "SHelios: a mouth is on the mountain"
+    # A cubic can't span a jump in curvature (it strays 0.2-0.3 m): the road's own where a new segment
+    # starts, the surface's at the foot. A key either side of each, a sample apart, each one's slope a
+    # one-sided (second order) difference over its own, smooth side: `side` is which way that is.
+    assert min(b - a for a, b in zip(seg0, seg0[1:])) > 8
+    side = {}
+    for i in seg0[1:-1]:
+        side.update({i - 1: -1, i: 1})
+    for i in range(last):
+        if (z[i] == 0.0) != (z[i + 1] == 0.0):
+            assert min(abs(i - b) for b in seg0) > 4, f"SHelios: the foot within four samples of a new segment ({i})"
+            side.update({i: -1, i + 1: 1})
+    for i in sorted(set(range(0, last, HELIOS_KEY)) | {flat, last - flat, last} | set(side)):
+        w = side.get(i, 0)
+        if z[i] == 0.0:        # off the mountain (both mouths' HELIOS_FLAT samples too): level
+            road.keys.append([i, 0.0, 0.0])
+        elif w == 0:
+            road.keys.append([i, z[i], (z[i + 1] - z[i - 1]) / (2 * STEP)])
+        else:
+            road.keys.append([i, z[i], w * (-3 * z[i] + 4 * z[i + w] - z[i + 2 * w]) / (2 * STEP)])
+    # Off the mountain every key is level at 0: only each such run's two ends are kept (the same heights
+    # exactly, and the sims look a height up by walking the keys from the first).
+    level = [k[1] == 0.0 and k[2] == 0.0 for k in road.keys]
+    road.keys = [k for n, k in enumerate(road.keys) if not (0 < n < len(level) - 1 and level[n - 1] and level[n] and level[n + 1])]
+    hs = hermite_all(road.keys, road.N)
+    assert all(abs(hs[i] - road.h(i)) < 1e-9 for i in range(0, road.N, 997))
+    grade = np.abs(np.diff(hs)) / road.len[:-1]
+    off = float(np.abs(hs - np.array(z)).max())
+    assert grade.max() <= HELIOS_GRADE, f"SHelios is {grade.max() * 100:.1f}% at sample {int(np.argmax(grade))}"
+    # (within 20 mm of the surface at every sample: 0.6 mm with a key every 25, 5 mm every 50, 27 mm every 75)
+    assert abs(hs.max() - H) < 2.0 and hs.min() >= 0.0 and off < 0.02, f"SHelios: {hs.min():.2f}-{hs.max():.2f} m, {off:.3f} m off the surface"
+    road.helios = (float(grade.max()), int(np.argmax(grade)), float(hs.max()), off)
+    joins.extend([(len(roads), 0, parent), (len(roads), 1, parent)])
+    scenic_roads.append((len(roads), dict(name="SHelios", sea=0)))   # (no plan, heights or land spec: all made here)
+    roads.append(road)
+
+
+def helios_land(road):
+    """SHelios' NET_SCENIC rows: a bench cut into the mountain. Every HELIOS_LAND[0] samples while the
+    road is on it (and one row either side of that stretch), each side's land reaches the mountain's own
+    height at the far end of its run."""
+    every, above, run = HELIOS_LAND
+    on = [i for i in range(0, road.N, every) if helios_z(*road.p[i]) > above]
+    assert on == list(range(on[0], on[-1] + every, every)), "SHelios leaves the mountain and comes back"
+    assert on[0] >= every and on[-1] + every <= road.N - 1
+    rows = []
+    for i in [on[0] - every] + on + [on[-1] + every]:
+        x, y = road.p[i]
+        nx, ny = -road.t[i, 1], road.t[i, 0]   # its left
+        out = road.width / 2 + run
+        rows.append([i, round(max(-4.0, helios_z(x + nx * out, y + ny * out)), 2), run,
+                     round(max(-4.0, helios_z(x - nx * out, y - ny * out)), 2), run, 1])
+    return rows
+
+
 def build():
     roads = []
     ew, ns = [], []
@@ -782,6 +928,8 @@ def build():
         road.keys = [[round(f * (road.N - 1)), tier + dz, 0.0] for f, dz in height_keys]
         joins.extend([(len(roads), 0, parent), (len(roads), 1, parent)])
         roads.append(road)
+    # Helios last of all: every road and junction before it keeps its index.
+    add_helios(roads, joins)
     return roads, joins, cities, ew, ns, jumps, onramps, shafts
 
 
@@ -796,6 +944,8 @@ def scenic_table(roads):
     flat end's -4 and it, the sea side begins halfway) and its run is the shelf."""
     out = []
     for r, spec in scenic_roads:
+        if "land" not in spec:
+            continue   # (SHelios: its rows are the mountain's own, last below)
         R = roads[r]
         rows = []
         for seg, frac, left, lrun, right, rrun, gap in spec["land"]:
@@ -823,6 +973,9 @@ def scenic_table(roads):
         rows.append([i, max(-4, h + left) if edge == 1 else -4, 1750,
                      max(-4, h + right) if edge == 1 else -4, 2200, edge])
     out.append([r, 0, rows])
+    # Helios is a bench cut into its mountain from foot to foot.
+    r = next(i for i, road in enumerate(roads) if road.name == "SHelios")
+    out.append([r, 0, helios_land(roads[r])])
     return out
 
 
@@ -878,6 +1031,8 @@ def heights(roads, ew, ns):
                 R.keys.append([round(first+(last-first)*q/5), base+rise, 0.0])
             R.keys.append([R.N-1, base, 0.0])
     for r, spec in scenic_roads:
+        if "heights" not in spec:
+            continue   # (SHelios: its keys are the mountain's surface, set as it's built)
         R = roads[r]
         R.keys = [[0, 0.0, 0.0]] + [[scenic_at(R, seg, frac), float(h), float(m)] for seg, frac, h, m in spec["heights"]] + [[R.N - 1, 0.0, 0.0]]
         assert all(a[0] < b[0] for a, b in zip(R.keys, R.keys[1:])), f"{R.name}: its height keys aren't in order"
@@ -1061,10 +1216,15 @@ def check(roads, joins, J, cities, ew, ns, jumps=(), onramps=(), overlaps=()):
         grade = np.diff(hs) / R.len[:-1]
         bend = np.diff(grade) / R.len[1:-1]
         tight = min(q[1] for q in R.segs if q[0] != "S")
+        stretch = f"its stretch {R.segs[spec['stretch']][1] / KM:.1f} km, " if "stretch" in spec else ""
         print(f"  scenic {R.name}: {R.len[:-1].sum() / KM:.0f} km, x {R.p[:, 0].min() / KM:.1f}-{R.p[:, 0].max() / KM:.1f} km, "
               f"y {R.p[:, 1].min() / KM:.1f}-{R.p[:, 1].max() / KM:.1f} km, {hs.min():.0f}-{hs.max():.0f} m up, steepest {abs(grade).max() * 100:.1f}%, "
               f"tightest crest or dip {1 / abs(bend).max() / KM:.1f} km, tightest bend {tight / KM:.0f} km, "
-              f"its stretch {R.segs[spec['stretch']][1] / KM:.1f} km, ends at x {R.end[0] / KM:.1f} km")
+              f"{stretch}ends at x {R.end[0] / KM:.1f} km")
+        if hasattr(R, "helios"):
+            steep, at, top, off = R.helios
+            print(f"    {R.N} samples, {len(R.keys)} height keys within {off * 1000:.1f} mm of the mountain, summit {top:.2f} m, "
+                  f"steepest {steep * 100:.2f}% at sample {at}; " + ", ".join(f"{name} {i}" for name, i in R.way))
         if hs.min() < -0.01:
             bad(f"{R.name} dips to {hs.min():.1f} m")
         if abs(grade).max() > 0.30:
@@ -1093,7 +1253,8 @@ def main():
         print(f"  {name:<9} {biome:<8} at {cx / KM:.0f},{cy / KM:.0f} km: {roads[r].name} sample {i} of {roads[r].N}")
     ok = check(roads, joins, J, cities, ew, ns, jumps, onramps, overlaps)
     # The additional stunt mileage fits the existing sample/memory ceiling at the same resolution.
-    if km > 9100 or N > 380000:
+    # Raised from 9,100 km and 380,000 samples for SHelios (about 370 km, 15,400 samples).
+    if km > 9600 or N > 400000:
         ok = False
         print(f"  BAD  too big: {km:.0f} km, {N} samples")
     print("NETWORK DESIGN OK" if ok else "NETWORK DESIGN NOT OK")

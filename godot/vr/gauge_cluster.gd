@@ -100,6 +100,7 @@ func build() -> void:
 	var body := MeshInstance3D.new()
 	body.name = "binnacle"
 	body.mesh = Interior._hd_mesh(BODY, "Binnacle")
+	Interior.Accent.dress(body)      # its cowl's stitching takes the livery's accent
 	add_child(body)   # it casts shadows: the cowl and the tubes shade the dials
 	for i in Layout.LAMPS.size():
 		_lamp_index[Layout.LAMPS[i]] = i

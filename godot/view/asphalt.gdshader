@@ -2,6 +2,7 @@
 // longitudinal scale wraps at the same floating-origin period as the road mesh.
 shader_type spatial;
 render_mode cull_disabled;
+global uniform float sky_wet;           // 0 dry, 1 in the rain (view/outlook.gd)
 
 #include "res://view/noise.gdshaderinc"
 #include "res://view/pavement_shoulder.gdshaderinc"
@@ -150,6 +151,8 @@ void fragment() {
 		// and the stone wear remains visible through the pools.
 		EMISSION = ALBEDO * vec3(0.45, 0.75, 0.88) * (1.25 * indoors * pool);
 	}
-	ROUGHNESS = clamp(rough, 0.39, 0.98);
-	SPECULAR = spec;
+	// rain (view/outlook.gd): the surface darkens and takes a film of water, deepest in the worn lanes
+	ALBEDO *= 1.0 - 0.42 * sky_wet;
+	ROUGHNESS = mix(clamp(rough, 0.39, 0.98), clamp(rough * 0.34, 0.07, 0.4), sky_wet);
+	SPECULAR = mix(spec, 0.62, sky_wet);
 }

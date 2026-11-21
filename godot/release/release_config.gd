@@ -1,6 +1,9 @@
 extends RefCounted
 
 const Settings := preload("res://release/game_settings.gd")
+const Livery := preload("res://view/livery.gd")
+const Outlook := preload("res://view/outlook.gd")
+const Chase := preload("res://view/network_chase.gd")
 
 const BACKGROUND := Color("10151b")
 const PANEL := Color("192129")
@@ -22,6 +25,23 @@ const COURSES := [
 ]
 # A course that is a place on the Network: its road there (the flight starts at the foot of it).
 const SPOTS := {"coast": "SCoast", "drop": "SDrop"}
+# Where a flight on the Network itself begins (Luke: "would also love to be able to choose insertion
+# point on the network"): [id, the menus' name for it, the spot]. A spot is "" (the city last
+# reached, as it always was), "city:NAME" (that city's terminal), or a road's name, with "@sample"
+# to start that far up it and a second "@-1" to face down it. A scenic road named alone starts at
+# the foot of its scenery (view/craft_view.gd start_spot). The id is what is saved.
+const INSERTIONS := [
+	["last", "Last city reached", ""],
+	["eridanus", "Eridanus", "city:ERIDANUS"], ["dunes", "Dunes", "city:DUNES"], ["glacier", "Glacier", "city:GLACIER"],
+	["basalt", "Basalt", "city:BASALT"], ["mesa", "Mesa", "city:MESA"],
+	["coast", "Coast Road", "SCoast"], ["drop", "The Drop", "SDrop"],
+	["wash", "Sirocco Wash", "SWash@130"], ["frost", "Frostline Pass", "SFrost@140"],
+	["reed", "Reedwater Causeway", "SReed@135"], ["red", "Red Table Cut", "SRed@130"],
+	["needle", "Needle Roll", "SNeedle@96"], ["hammer", "Hammerfall", "SHammer@92"],
+	["gap", "Mesa Gap run-up", "N3@300"],     # N3 northbound, 55 km short of the ramp the launch forks from
+	["helios", "Mount Helios, the foot", "SHelios@1540"],     # 2 km short of where the road meets the mountain
+	["summit", "Mount Helios, the summit", "SHelios@8220"],   # on the top, 10.4 km up, facing down the far side
+]
 
 static func course_index(id: String) -> int:
 	for i in COURSES.size():
@@ -29,10 +49,22 @@ static func course_index(id: String) -> int:
 			return i
 	return -1
 
-## [track, job, the Network road to start on ("" for none)].
+static func insertion_ids() -> Array:
+	return INSERTIONS.map(func(entry): return entry[0])
+
+
+## The saved insertion point's [id, name, spot].
+static func insertion() -> Array:
+	var id := Settings.choice("network_start", insertion_ids())
+	return INSERTIONS[insertion_ids().find(id)]
+
+
+## [track, job, the Network spot to start at ("" for none: a city, the last one reached)].
 static func course_overrides(id: String) -> Array:
 	if SPOTS.has(id):
 		return ["network", "none", SPOTS[id]]
+	if id == "network":
+		return ["network", "none", insertion()[2]]
 	return ["eridanus", "emergency", ""] if id == "emergency" else [id, "none", ""]
 
 
@@ -112,6 +144,51 @@ static func partner_checkbox(font_size: int = 18) -> CheckBox:
 	item.button_pressed = Settings.driving_partner_enabled()
 	item.toggled.connect(Settings.set_driving_partner)
 	return item
+
+## A row that steps through named choices: each press takes the next and saves it. `choices` is
+## [[id, name], ...]; `changed` (optional) hears the new id.
+static func option_button(title: String, key: String, choices: Array, font_size: int = 18, changed: Callable = Callable()) -> Button:
+	var ids := choices.map(func(entry): return entry[0])
+	var item := Button.new()
+	item.custom_minimum_size.y = 38
+	item.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	item.clip_text = true
+	item.add_theme_font_size_override("font_size", font_size)
+	var show := func() -> void:
+		item.text = "%s:  %s" % [title, choices[ids.find(Settings.choice(key, ids))][1]]
+	item.pressed.connect(func() -> void:
+		var next: String = ids[(ids.find(Settings.choice(key, ids)) + 1) % ids.size()]
+		Settings.set_choice(key, next)
+		show.call()
+		if changed.is_valid():
+			changed.call(next))
+	show.call()
+	return item
+
+
+static func insertion_button(font_size: int = 18) -> Button:
+	return option_button("Network start", "network_start", INSERTIONS, font_size)
+
+
+static func paint_button(font_size: int = 18) -> Button:
+	return option_button("Paint", "paint", Livery.CHOICES, font_size)
+
+
+static func craft_button(font_size: int = 18) -> Button:
+	return option_button("Craft", "craft", Chase.CRAFTS, font_size)
+
+
+static func chase_button(font_size: int = 18) -> Button:
+	return option_button("Network chase", "chase", Chase.MODES, font_size)
+
+
+static func time_button(font_size: int = 18) -> Button:
+	return option_button("Network time", "time", Outlook.TIMES, font_size)
+
+
+static func weather_button(font_size: int = 18) -> Button:
+	return option_button("Weather", "weather", Outlook.WEATHERS, font_size)
+
 
 static func controls_panel() -> PanelContainer:
 	var panel := PanelContainer.new()

@@ -77,6 +77,7 @@ const SLIDE_HZ := 1.6                     # the spring: out in about a fifth of 
 const SLIDE_ZETA := 0.5                   # ... lightly damped: one overshoot, then still
 const SLIDE_RATE := deg_to_rad(45.0)      # and never faster than this
 const SLIDE_SCRUB := 0.22                 # the scrub in your hands while it moves, at most (controller amplitude)
+var _rim_flashing := false
 static var slide_feel := true             # the SLIDE / GRIP switch on the left console (false: the cockpit keeps the sim's heading exactly)
 static var _slide_loaded := false         # (its saved setting is read once a run, as the camera's)
 var slide_switch                          # vr/mode_switch.gd again: SLIDE up, GRIP down
@@ -527,6 +528,7 @@ func _build_cockpit() -> void:
 		var knob := MeshInstance3D.new()
 		knob.name = "PilotGrip"
 		knob.mesh = CockpitInteriorScript.deck_mesh("Grip")
+		CockpitInteriorScript.Accent.dress(knob)      # its anodised band is the livery's
 		knob.position = Vector3(0, 0.36, 0)
 		pivot.add_child(knob)
 		var indicator := MeshInstance3D.new()
@@ -564,6 +566,8 @@ func _build_cockpit() -> void:
 	canopy = CanopyScript.build()
 	canopy.position = Vector3(0, CraftModelScript.POD_FRAME_UP, 0)
 	shell.add_child(canopy)
+	if ChaseScript.craft == "patrol":      # the patrol craft: the cockpit's own roof carries the light bar too
+		add_light_bar(canopy)
 	if sim.kind == "network":
 		_mount_approach_projector(canopy)
 	dashboard = GaugeClusterScript.new() if GaugeClusterScript.available() else DashboardScript.new()
@@ -591,7 +595,7 @@ func _build_cockpit() -> void:
 		shell.add_child(menu_panel)
 	var back := MeshInstance3D.new()
 	var bq := QuadMesh.new()
-	bq.size = Vector2(1.05, 0.6)
+	bq.size = Vector2(1.05, 0.72)      # (eight lines now: the hour and the weather joined them)
 	back.mesh = bq
 	var bm := StandardMaterial3D.new()
 	bm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
@@ -876,11 +880,20 @@ func _menu_hands(_l: XRController3D, r: XRController3D) -> void:
 		menu_open(false)
 
 
+static func _outlook_name(rows: Array, id: String) -> String:
+	for row in rows:
+		if row[0] == id:
+			return String(row[1]).to_upper()
+	return id.to_upper()
+
+
 func _menu_items() -> Array:
 	return [{"key": "partner", "label": "DRIVING PARTNER", "value": "ON" if partner_on else "OFF"},
 		{"key": "scheme", "label": "CONTROLS", "value": String(quest.scheme).to_upper()},
 		{"key": "camera", "label": "CAMERA", "value": String(CAMERA_NAMES[camera])},
 		{"key": "nose", "label": "NOSE", "value": "CLOSED" if CraftModelScript.nose_closed else "OPEN"},
+		{"key": "time", "label": "TIME", "value": _outlook_name(Outlook.TIMES, Outlook.time)},
+		{"key": "weather", "label": "WEATHER", "value": _outlook_name(Outlook.WEATHERS, Outlook.weather)},
 		{"key": "maps", "label": "CHOOSE MAP"},
 		{"key": "resume", "label": "RESUME"}]
 
@@ -907,6 +920,23 @@ func menu_choose() -> bool:
 		"nose":
 			set_nose_closed(not CraftModelScript.nose_closed)
 			_save_prefs()
+			var at: int = menu.at
+			menu.items = _menu_items()
+			menu.at = at
+			_menu_show()
+			return true
+		"time", "weather":
+			# The hour or the weather, changed where you sit (the Network's: elsewhere the choice is kept for it).
+			var rows: Array = Outlook.TIMES if menu.key() == "time" else Outlook.WEATHERS
+			var ids: Array = Outlook.ids(rows)
+			var next: String = ids[(ids.find(Outlook.time if menu.key() == "time" else Outlook.weather) + 1) % ids.size()]
+			if menu.key() == "time":
+				Outlook.time = next
+			else:
+				Outlook.weather = next
+			GameSettings.set_choice(menu.key(), next)
+			Outlook.apply(self)
+			print("OUTLOOK: ", Outlook.time, ", ", Outlook.weather)
 			var at: int = menu.at
 			menu.items = _menu_items()
 			menu.at = at
@@ -1068,6 +1098,16 @@ func _process(delta: float) -> void:
 		_brake_trace.capture(self, delta)
 	_apply_shudder(delta)
 	interior.set_mode(sim.mode, sim.hblend)
+	# In pursuit the patrol's lights wash the cabin: the rim light takes the lamp that is lit.
+	var wash: float = 1.0 if pursuing() else patrol_wash()      # the craft's own lamps, or a patrol's close behind
+	if wash > 0.0:
+		var lamp := LightBarScript.showing(Time.get_ticks_msec() / 1000.0)
+		var dark := Color(0.05, 0.06, 0.08)
+		interior.rim_mat.albedo_color = dark.lerp([dark, Color(1.0, 0.12, 0.08), Color(0.12, 0.35, 1.0)][lamp], wash)
+		_rim_flashing = true
+	elif _rim_flashing:
+		_rim_flashing = false
+		interior._mode = ""                # (its own colour again, at the next set_mode)
 	# An untracked hand (flat runs, before the first pose) sits at the origin, i.e. on the eye: its
 	# box's far face, 5 cm out on the near plane, z-fought into a dark rectangle mid-view.
 	for side in hands:
@@ -1175,7 +1215,7 @@ func _update_hud() -> void:
 	if minimap_panel.live:
 		minimap_panel.show_frame(minimap.update(sim.pod.th, get_process_delta_time()))
 	dashboard.show_state({
-		"mph": kmh / 1.609344, "kmh": kmh, "mach": cues.mach, "backlight": 0.5 if light_preset == "twilight" else 1.0, "mach_line": cues.readout(), "progress": progress,
+		"mph": kmh / 1.609344, "kmh": kmh, "mach": cues.mach, "backlight": lerpf(1.0, 0.5, maxf(1.0 if light_preset == "twilight" else 0.0, Outlook.darkness())), "mach_line": cues.readout(), "progress": progress,
 		"footer": "%s   /   %s" % [handling_text(), ctl],
 		"points": int(_skill_shown.get("points", 0)) if _skill_on else 0, "feat": String(_skill_shown.get("award", "")) if _skill_on else "", "feat_age": float(_skill_shown.get("age", 1e9)),
 		"thr": [inp.thrL, inp.thrR], "brk": [inp.brkL, inp.brkR], "heat": [sim.eL.heat, sim.eR.heat],
@@ -1186,7 +1226,7 @@ func _update_hud() -> void:
 		"blink": (Time.get_ticks_msec() / 250) % 2 == 0,
 	})
 	if screen_reflection:      # in the terminal's hall and before dawn the glass needs less to show
-		screen_reflection.set_dark(maxf(terminal_lighting.enclosure if terminal_lighting else 0.0, 0.7 if light_preset == "twilight" else 0.0))
+		screen_reflection.set_dark(maxf(terminal_lighting.enclosure if terminal_lighting else 0.0, 0.7 * maxf(1.0 if light_preset == "twilight" else 0.0, Outlook.darkness())))
 	if chase_hud and chase_hud.visible:
 		var guide: String = approach_display.message if approach_display else ""   # (what the projector over the nose is showing)
 		var lit: String = {"ramjet": "RAMJET", "burner": "AFTERBURNER"}.get(sim.mode, "RAMJET ARMED" if sim.armed else "")

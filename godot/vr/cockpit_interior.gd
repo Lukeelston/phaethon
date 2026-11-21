@@ -23,6 +23,7 @@ extends Node3D
 const CM := preload("res://view/craft_model.gd")
 const Kit := preload("res://view/mesh_kit.gd")
 const Finish := preload("res://view/craft_materials.gd")
+const Accent := preload("res://view/accent.gd")      # the livery's accent on the authored fittings' enamel and thread
 static var _flight_deck_meshes: Dictionary = {}
 const UP := CM.POD_FRAME_UP
 const MODE_LIGHT := {"normal": Color(0.25, 0.6, 1.0), "burner": Color(1.0, 0.55, 0.12), "ramjet": Color(0.7, 0.3, 1.0)}
@@ -92,10 +93,12 @@ func build() -> void:
 	coaming.mesh = deck_mesh("Coaming")
 	# This fitting wraps the existing exterior hull lip like the windscreen seal.
 	coaming.add_to_group("exterior")
+	Accent.dress(coaming)
 	add_child(coaming)
 	var bezel := MeshInstance3D.new()
 	bezel.name = "InstrumentBezel"
 	bezel.mesh = deck_mesh("Bezel")
+	Accent.dress(bezel)
 	add_child(bezel)
 	if hd_parts and instrument_rails and ResourceLoader.exists(HD_PARTS.Bezel):
 		var rails := MeshInstance3D.new()
@@ -109,6 +112,7 @@ func build() -> void:
 		var tub := MeshInstance3D.new()
 		tub.name = "SeatTub"
 		tub.mesh = _hd_mesh(HD_TUB, "Tub")
+		Accent.dress(tub)
 		add_child(tub)
 	# Realism spike: the dashboard (Luke: "move it [the gauge cluster] up to the rail, and create a true
 	# dash board"). The instruments stood alone in the footwell with the open nose showing round them.
@@ -117,6 +121,7 @@ func build() -> void:
 		var dash := MeshInstance3D.new()
 		dash.name = "Dashboard"
 		dash.mesh = _hd_mesh(HD_DASH, "Dash")
+		Accent.dress(dash)
 		add_child(dash)
 		# Its top's outer edge is turned up behind the rim light to the lip's underside (from a low head
 		# the open nose showed through the slot between them). That lies against the lip, as the light does.

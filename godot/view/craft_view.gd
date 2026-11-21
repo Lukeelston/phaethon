@@ -23,6 +23,10 @@ extends Node3D
 
 const CraftSimScript := preload("res://sim/craft_sim.gd")
 const GameSettings := preload("res://release/game_settings.gd")
+const Livery := preload("res://view/livery.gd")
+const Outlook := preload("res://view/outlook.gd")      # the Network's time of day and weather
+const ChaseScript := preload("res://view/network_chase.gd")   # chase mode, and which craft the pilot flies
+const LightBarScript := preload("res://view/light_bar.gd")
 const LeverInputScript := preload("res://input/lever_input.gd")
 const RangeWorldScript := preload("res://view/range_world.gd")
 const LandmarkScript := preload("res://view/landmark.gd")
@@ -144,6 +148,9 @@ var verdant_world: Node3D    # ... and the green valley round it (view/verdant_w
 var dust: Node3D
 var partner: Node3D          # the driving partner (view/driving_partner.gd), null when it's off
 var partner_on := false      # common release preference, overridden by launch flags
+var chase: Node3D            # chase mode on the Network (view/network_chase.gd), null when it's off
+var light_bars: Array = []   # the pilot's own, in the patrol craft (one on each model of the pod that is built)
+var siren: AudioStreamPlayer # ... and its siren
 var menu = MainMenuScript.new()   # the main menu (view/main_menu.gd): the flight waits while it's open
 var menu_label: Label             # the flat view's panel
 var _menu_was_muted := false
@@ -151,6 +158,12 @@ var _menu_was_muted := false
 
 func _ready() -> void:
 	var opts := {"obstacleCollisions": GameSettings.obstacle_collisions_enabled()}
+	if not Livery.pinned:    # the menus' paint (a test or a render that has chosen one keeps it)
+		Livery.current = GameSettings.choice("paint", Livery.ids())
+	Outlook.load_saved()     # ... and their time of day and weather
+	ChaseScript.load_saved() # ... and the craft, and whether chase mode is on
+	if ChaseScript.craft == "patrol":
+		Livery.current = "police"       # the patrol craft comes in its own black and white
 	var seek := 0.0
 	var mute := false
 	for a in OS.get_cmdline_user_args():
@@ -206,10 +219,13 @@ func _ready() -> void:
 			net_beaten = saved.get("beaten", {})
 			if int(saved.get("last", -1)) >= 0 and int(saved.get("last", -1)) < CraftSimScript.NET_CITIES.size():
 				opts["startCity"] = int(saved.last)
-		var spot := scenic_spot(spot_override)
-		if spot.x >= 0:   # a scenic road's own menu entry: at the foot of it
-			opts["startRoad"] = spot.x
-			opts["startSample"] = spot.y
+		var spot := start_spot(spot_override)
+		if spot.size() == 1:     # a city chosen on the menu: its terminal, whichever was last reached
+			opts["startCity"] = spot[0]
+		elif spot.size() == 3:   # out on a road: a scenic road's own menu entry (at the foot of it), or an insertion point
+			opts["startRoad"] = spot[0]
+			opts["startSample"] = spot[1]
+			opts["startDir"] = spot[2]
 	partner_on = GameSettings.resolve_driving_partner(OS.get_cmdline_user_args())
 	if "--pod=heavy" in OS.get_cmdline_user_args():   # the heavy pod (Luke: "giving the pod some weight"): 1,500 kg, not
 		opts["podMass"] = 1500.0                       # 500, with thrust and drag scaled to the total mass so the
@@ -276,6 +292,21 @@ func _ready() -> void:
 	_follow_origin()
 	_place_camera(1.0)
 	set_partner(partner_on)
+	Outlook.apply(self)      # the world is built for a fair afternoon: turn it to the hour and weather chosen (the Network's only)
+	if ChaseScript.craft == "patrol":
+		if craft and craft.canopy:
+			add_light_bar(craft.canopy)
+		if engine_audio != null:
+			siren = AudioStreamPlayer.new()
+			siren.stream = ChaseScript.wail()
+			siren.volume_db = -21.0
+			add_child(siren)
+	if ChaseScript.enabled and traffic_net:
+		chase = ChaseScript.new()
+		add_child(chase)
+		chase.traffic = traffic_net
+		chase.build(self)
+		traffic_net.chase = chase
 
 
 func _sim_step() -> void:
@@ -612,6 +643,57 @@ func _net_race_result() -> void:
 			_flash("%s PEELED OFF" % who)
 
 
+## The patrol craft's light bar goes on its roof (pod-local, under `canopy`).
+func add_light_bar(canopy_root: Node3D) -> void:
+	var bar := LightBarScript.new()
+	canopy_root.add_child(bar)
+	bar.build(LightBarScript.ON_ROOF)
+	light_bars.append(bar)
+
+
+## Is the pilot, in the patrol craft, on a runner's tail just now? (Its lights and siren go by this.)
+func pursuing() -> bool:
+	return chase != null and chase.state == "on" and chase.role == "pursuit"
+
+
+## How strongly a patrol behind lights the cabin: 0 none, 1 on the tail. (There is no mirror: its lamps
+## washing over the rim light, and its siren, are how the pilot knows it is there.)
+func patrol_wash() -> float:
+	if chase == null or chase.role != "getaway" or chase.state != "on" or chase.car == null:
+		return 0.0
+	return clampf(1.0 - (chase.gap - 60.0) / 340.0, 0.0, 1.0)
+
+
+func _patrol_lights() -> void:
+	var on := pursuing()
+	for bar in light_bars:
+		bar.flash(on, Time.get_ticks_msec() / 1000.0)
+	if siren and siren.playing != on:
+		if on:
+			siren.play()
+		else:
+			siren.stop()
+
+
+func _chase_result() -> void:
+	var how: String = chase.result
+	chase.result = ""
+	var times := int(chase.tally[how])
+	match how:
+		"caught":
+			_flash("RUNNER CAUGHT  (%d)" % times)
+			if skill_score:
+				skill_score._award("chase", "RUNNER CAUGHT", 2500)
+		"lost":
+			_flash("RUNNER LOST")
+		"busted":
+			_flash("BUSTED  (%d)" % times)
+		"escaped":
+			_flash("PATROL ESCAPED  (%d)" % times)
+			if skill_score:
+				skill_score._award("chase", "PATROL ESCAPED", 2000)
+
+
 ## The dash on the Network: the target city and how far (straight line), where you left and your
 ## clock since; a racer's line while one's about.
 func _net_text() -> String:
@@ -877,6 +959,25 @@ static func scenic_spot(road_name: String) -> Vector2i:
 		if CraftSimScript.NET_ROADS[int(entry[0])][0] == road_name:
 			return Vector2i(int(entry[0]), int(entry[2][0][0]) + 40)
 	return Vector2i(-1, -1)
+
+
+## Where a Network flight begins, from a menu's spot (release/release_config.gd INSERTIONS):
+## [city] for "city:NAME"; [road, sample, way] for a road's name with an optional "@sample" and a
+## second "@-1" to face down it (a scenic road named alone: scenic_spot); [] for none or unknown.
+static func start_spot(spot: String) -> Array:
+	if spot.begins_with("city:"):
+		for c in CraftSimScript.NET_CITIES.size():
+			if String(CraftSimScript.NET_CITIES[c][0]) == spot.trim_prefix("city:"):
+				return [c]
+		return []
+	var parts := spot.split("@")
+	if parts.size() == 1:
+		var scenic := scenic_spot(spot)
+		return [scenic.x, scenic.y, 1] if scenic.x >= 0 else []
+	for r in CraftSimScript.NET_ROADS.size():
+		if String(CraftSimScript.NET_ROADS[r][0]) == parts[0]:
+			return [r, maxi(int(parts[1]), 0), -1 if parts.size() > 2 and int(parts[2]) < 0 else 1]
+	return []
 
 
 ## The job to fly: the override ("none": no job, whatever the command line says), else --job=.
@@ -1315,6 +1416,7 @@ func _sync_world() -> void:
 		horizon.sync(org_x, org_y)
 	if landscape:
 		landscape.sync(org_x, org_y)
+		Outlook.tick(self, get_process_delta_time())
 		ground_mat.set_shader_parameter("absolute_org", Vector2(org_x,org_y))
 	if gp_world:
 		gp_world.sync(org_x, org_y)
@@ -1341,6 +1443,11 @@ func _sync_world() -> void:
 			traffic_audio.update(Vector2(sim.pod.x, sim.pod.y), pv.normalized() if pv.length() > 1.0 else Vector2.ZERO, cars, wz, get_process_delta_time())
 		if traffic_net.race_result != "":
 			_net_race_result()
+		if chase:
+			chase.update(get_process_delta_time())
+			if chase.result != "":
+				_chase_result()
+		_patrol_lights()
 		if minimap:
 			minimap.marks = traffic_net.marks(sim.pod.x, sim.pod.y, 40000.0)
 	if verdant_world:

@@ -8,7 +8,9 @@ render_mode fog_disabled, cull_back;
 #include "res://view/noise.gdshaderinc"
 
 uniform float glow = 0.0;
-uniform vec3 haze_color = vec3(0.58, 0.68, 0.80);
+global uniform vec3 sky_haze;          // the haze's colour (display values): the afternoon's (0.58, 0.68, 0.80) unless view/outlook.gd says otherwise
+global uniform float sky_haze_scale;
+#define haze_color sky_haze
 varying vec3 tint;
 varying float part;
 varying vec3 local;
@@ -22,7 +24,7 @@ void vertex() {
 }
 
 void fragment() {
-	float haze = clamp(1.0 - exp(-length(VERTEX) * 0.000025), 0.0, 1.0);
+	float haze = clamp(1.0 - exp(-length(VERTEX) * 0.000025 * sky_haze_scale), 0.0, 1.0);
 	vec3 sky = pow(haze_color, vec3(2.2));
 	// Walls take their joints across and up the face; decks take them in plan.
 	vec3 n = abs(normalize(facing));
