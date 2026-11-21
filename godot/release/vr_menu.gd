@@ -103,7 +103,7 @@ func _build_screen() -> void:
 		choices.add_theme_constant_override("separation", 6)
 	for course in UI.COURSES:
 		var button := UI.button(course.name, choose_course.bind(course.id), 46 if crowded else 64)
-		button.add_theme_font_size_override("font_size", 24 if crowded else 28)
+		button.add_theme_font_size_override("font_size", (22 if UI.COURSES.size() > 8 else 24) if crowded else 28)      # (nine courses: a size down, or the board's last line sat on its edge)
 		choices.add_child(button)
 		buttons.append(button)
 	var details := VBoxContainer.new()

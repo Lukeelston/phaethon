@@ -44,7 +44,7 @@ func _ready() -> void:
 	var course_list: Container = left
 	if UI.COURSES.size() > 6:   # eight and more: two abreast, or the list runs off the window
 		course_list = GridContainer.new()
-		(course_list as GridContainer).columns = 2
+		(course_list as GridContainer).columns = 3 if UI.COURSES.size() > 8 else 2      # (nine: a fifth row of two pushed Quit out of a 720-line window)
 		course_list.add_theme_constant_override("h_separation", 8)
 		course_list.add_theme_constant_override("v_separation", 6)
 		left.add_child(course_list)
