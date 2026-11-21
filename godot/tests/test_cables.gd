@@ -130,13 +130,17 @@ func _fittings_clear(rig: Node3D) -> void:
 			for k in 8:
 				pts.append(box.get_endpoint(k))
 		var path := str(rig.get_path_to(vi))
+		# (the rim light is fastened against the lip's underside, under the coaming's hem: it may lie
+		# against the lip, and must not be in it. Everything else keeps a centimetre clear.)
+		var margin := 0.0 if vi.is_in_group("under_the_lip") else 0.01
 		for q in pts:
 			var pod: Vector3 = to_rig * (vi.global_transform * q) - Vector3(0, CM.POD_FRAME_UP, 0)
-			var why: String = CM.hull_clearance(pod)
+			var why: String = CM.hull_clearance(pod, margin)
 			n += 1
 			if why != "":
+				if not parts.has(path):      # (every part that clips, and where it first does: one example hid the others)
+					example += "%s%s %s at pod (%.3f, %.3f, %.3f)" % ["" if example.is_empty() else "; ", path, why, pod.x, pod.y, pod.z]
 				parts[path] = parts.get(path, 0) + 1
-				example = "%s %s at pod (%.2f, %.2f, %.2f)" % [path, why, pod.x, pod.y, pod.z]
 	_check("VR cockpit: every fitting clears the hull (%d points, %d parts clipping%s)" % [n, parts.size(), "" if parts.is_empty() else ": " + example],
 		parts.is_empty() and n > 1000)
 

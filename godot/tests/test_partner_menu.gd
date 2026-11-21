@@ -53,7 +53,12 @@ func _run() -> void:
 				if course.id == "network":
 					_quick_menu(view)
 					view.menu_open(true)
-					view.menu.at = 2
+					# (by its name: it was the third line until the menu grew a CAMERA line there, and
+					# from then this chose the chase camera and waited for a menu that never came)
+					var lines := []
+					for item in view.menu.items:
+						lines.append(item.key)
+					view.menu.at = lines.find("maps")
 					view.menu_choose()
 				else:
 					view.return_to_menu()
@@ -107,7 +112,7 @@ func _quick_menu(c) -> void:
 	var keys := []
 	for item in c.menu.items:
 		keys.append(item.key)
-	check("quick menu has partner, controls, maps, resume", keys == ["partner", "scheme", "maps", "resume"])
+	check("quick menu has partner, controls, camera, nose, maps, resume", keys == ["partner", "scheme", "camera", "nose", "maps", "resume"])
 	var time_before: float = c.sim.time
 	var partner_before := Vector3(c.partner.x, c.partner.y, c.partner.z)
 	var traffic_before: Array = c.traffic_net.cars.duplicate(true)

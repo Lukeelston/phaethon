@@ -151,8 +151,8 @@ class Part:
         return obj
 
 
-def hull_top(x,z):
-    # Same Catmull-Rom hull stations as craft_model.gd, in rig space.
+def hull_section(z):
+    # Same Catmull-Rom hull stations as craft_model.gd: the section's half-width, bottom and top (pod space).
     hull = [(-2.22,.06,-.19,-.11),(-2.12,.30,-.28,-.05),(-1.9,.62,-.4,-.01),
             (-1.5,.90,-.50,0),(-1,1.06,-.56,-.02),(-.4,1.13,-.58,-.05),
             (.4,1.15,-.58,-.06),(1.05,1.11,-.56,.04),(1.45,.98,-.51,.17),
@@ -162,8 +162,20 @@ def hull_top(x,z):
     def cat(col):
         a,b,c,d = [hull[min(len(hull)-1,max(0,k+off))][col] for off in [-1,0,1,2]]
         return .5*(2*b+(c-a)*t+(2*a-5*b+4*c-d)*t*t+(3*b-a-3*c+d)*t**3)
-    w,lo,hi = [cat(i) for i in [1,2,3]]
+    return [cat(i) for i in [1,2,3]]
+
+
+def hull_top(x,z):
+    # The hull's top at (x, z), in rig space.
+    w,lo,hi = hull_section(z)
     return .6+(hi+lo)*.5+(hi-lo)*.5*(1-(abs(x)/w)**2.6)**(1/2.6)
+
+
+def hull_floor(x,z,inside=.035):
+    # The hull's floor at (x, z), in rig space, `inside` in from the outer skin (0.035: the trim's own
+    # face; craft_model.gd's hull_clearance wants every fitting a centimetre clear of that).
+    w,lo,hi = hull_section(z)
+    return .6+(hi+lo)*.5-((hi-lo)*.5-inside)*(1-min(abs(x)/(w-inside),1.0)**2.6)**(1/2.6)
 
 
 def coaming_point(degrees, angle, radius):

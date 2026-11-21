@@ -14,6 +14,14 @@ This closes them with one moulded panel a side, in the rig's frame like the othe
               opening; the rim light lies in a crease at the wall's waist
   side liner  a strip from the console's outer edge up to the rim: the slot over the console; and a
               small cap behind the console's end, where the liner's foot swings in onto the wall
+  the bottom  (Luke, after flying the above: "i'd like to see the bottom of the tub fixed please".
+              The panels stopped in the air: the hip's front lip hung 0.07 m over the hull's floor,
+              with the hoses on the wall showing under it, and between the deck plate and the
+              cushion a slot looked straight down to the hull.) A sill each side, from the hip
+              panel's lip forward between the deck plate and the console to a lip of its own ahead
+              of the console, slotted for the lever between its quadrant's rails; and an apron
+              across the front of the seat, from under the deck plate's rear edge up under the
+              cushion, turned up at its ends into the hip panels
 Carbon twill under lacquer, with a padded leather insert at the hip, fluted fore and aft and
 stitched in the cockpit's orange thread. Forms are geometry; weave, grain, flutes and stitching are
 synthesised in surface metres; the occlusion is path traced with the seat, the consoles and the
@@ -29,7 +37,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import art_bezel_hd as kit  # noqa: E402  the atlas and its helpers
-from art_cockpit import hull_top  # noqa: E402  the game's own hull stations (rig frame)
+from art_cockpit import hull_floor, hull_top  # noqa: E402  the game's own hull stations (rig frame)
 from art_coaming_hd import ARGS, box, f32, fbm, png, smooth, vnoise  # noqa: E402
 from art_gauges_hd import LEATHER, THREAD, Part, bake, grain  # noqa: E402
 from art_grip_hd import pbr  # noqa: E402
@@ -45,6 +53,13 @@ CONSOLE_X, CONSOLE_Y = .552, .374    # the console's inner face, just under its 
 CONSOLE_OUT = np.array((.672, .362)) # just inside the console's outer top edge (its corner is rounded: a liner standing on the edge itself left a slit under its foot)
 Z0, Z1, ZC, ZE = .47, .60, .865, 1.135  # the front lip, the cushion's front, the console's aft end, the panel's aft end
 LINER_Z = (.0, .915)                 # the side liner runs the console's length and closes onto the quarter wall behind it
+SILL_Y = .112                        # the sill's height: under the deck plate's edge (.1175 to .1425) and a third of the way up the quadrant's plates (.09 to .14)
+SILL_X = (.418, .556)                # from under the deck plate's edge to just inside the console's inner face
+SILL_Z = (-.075, Z0 - .02)           # from its own lip ahead of the console's front (-.055) back to the hip panel's front lip
+SLOT_X, SLOT_Z = (.441, .479), (.045, .355)   # the lever's slot, between the quadrant's rails and its end blocks
+APRON_Z = (.540, .640)               # the apron: from under the deck plate's rear edge (.55) into the cushion's front (.60: it is .10 to .19 high there, and rounded)
+APRON_Y = (.128, .186)               # ... rising from inside the plate's thickness to inside the cushion's, never over its top
+APRON_AFT = .705                     # ... and on at that height under the bolsters' noses: they begin at .64 and are rounded, the cushion's flank falls away under them, and each left a pocket open to the hull
 
 
 def rim(z):
@@ -85,9 +100,9 @@ def hip_edges(z):
     g = ease((z - ZC) / .04)                          # 0 beside the console .. 1 aft of it
     inner = lerp(DECK, np.array((SEAT_X, SEAT_Y)), f)
     outer = lerp(np.array((CONSOLE_X, lerp(.21, CONSOLE_Y, f))), under_rim(z), g)
-    if z < Z0:                                        # the lip rolls down to the deck
-        inner = inner - np.array((0, .013 * ease((Z0 - z) / .02)))
-        outer = outer - np.array((0, .06 * ease((Z0 - z) / .02)))
+    if z < Z0:                                        # the lip rolls down onto the sill
+        inner = inner - np.array((0, (DECK[1] - SILL_Y) * ease((Z0 - z) / .02)))
+        outer = outer - np.array((0, (.21 - SILL_Y) * ease((Z0 - z) / .02)))
     return inner, outer, g
 
 
@@ -128,6 +143,53 @@ def cap(side, z, t):
     over the corner the two leave between them while the liner's foot swings in."""
     p = lerp(hip_edges(z)[1], liner_foot(z), t)
     return np.array((side * p[0], p[1], z))
+
+
+def sill_y(x, z):
+    """The sill's height at (x, z): level, and rolled down ahead of the console to just clear of the
+    hull's floor. (The floor rises outboard: a lip rolled down by one drop all the way across went
+    through the trim at its outer end.)"""
+    low = max(SILL_Y - .045, hull_floor(x, z, .035 + .013))
+    return lerp(SILL_Y, low, ease((-.055 - z) / .02))
+
+
+def sills(part, area):
+    """Both sills: four pieces round the lever's slot, all on one painted rectangle of the atlas."""
+    zs = np.unique(np.concatenate([np.linspace(SILL_Z[0], -.055, 6), np.linspace(-.055, SLOT_Z[0], 4), np.linspace(SLOT_Z[0], SLOT_Z[1], 9), np.linspace(SLOT_Z[1], SILL_Z[1], 5)]))
+    xs = np.unique(np.concatenate([np.linspace(SILL_X[0], SLOT_X[0], 3), np.linspace(SLOT_X[0], SLOT_X[1], 3), np.linspace(SLOT_X[1], SILL_X[1], 5)]))
+    ys = np.array([sill_y(SILL_X[0], z) for z in zs])       # (the paint is measured along the inner edge)
+    along = np.concatenate([[0], np.cumsum(np.hypot(np.diff(zs), np.diff(ys)))])
+    across = xs - xs[0]
+    length, width = float(along[-1]), float(across[-1])
+    pieces = (((SILL_Z[0], SLOT_Z[0]), SILL_X), ((SLOT_Z[0], SLOT_Z[1]), (SILL_X[0], SLOT_X[0])),
+              ((SLOT_Z[0], SLOT_Z[1]), (SLOT_X[1], SILL_X[1])), ((SLOT_Z[1], SILL_Z[1]), SILL_X))
+    for (z0, z1), (x0, x1) in pieces:
+        rows = np.where((zs >= z0 - 1e-9) & (zs <= z1 + 1e-9))[0]
+        cols = np.where((xs >= x0 - 1e-9) & (xs <= x1 + 1e-9))[0]
+        for side in (1.0, -1.0):
+            points = np.array([[(side * xs[i], sill_y(xs[i], zs[j]), zs[j]) for i in cols] for j in rows])
+            part.patch(area, length, width, points, along[rows], across[cols], lambda p: EYE - p)
+    paint_carbon(area, length, width)
+    return length, width
+
+
+def apron(part, area):
+    """The apron across the seat's front: rows run across the cabin, columns up from the deck to the cushion."""
+    def edge(z):
+        return hip_edges(max(z, Z0))[0]                # the hip panel's inner edge there: (x, y)
+    ss = np.linspace(-1, 1, 49)
+    zs = np.concatenate([np.linspace(APRON_Z[0], APRON_Z[1], 9), np.linspace(APRON_Z[1], APRON_AFT, 4)[1:]])
+    points = np.zeros((len(ss), len(zs), 3))
+    for i, z in enumerate(zs):
+        mid = lerp(APRON_Y[0], APRON_Y[1], ease((z - APRON_Z[0]) / (APRON_Z[1] - APRON_Z[0])))
+        ex, ey = edge(z)
+        for j, s in enumerate(ss):
+            points[j, i] = (s * (ex + .006), mid + (ey - .004 - mid) * abs(s)**2.5, z)  # dished across the knees, rising into each hip panel's edge
+    along = arc_length(points[:, len(zs) // 2])
+    across = arc_length(points[len(ss) // 2])
+    part.patch(area, float(along[-1]), float(across[-1]), points, along, across, lambda p: EYE - p)
+    paint_carbon(area, float(along[-1]), float(across[-1]))
+    return float(along[-1]), float(across[-1])
 
 
 # ---- paint ----
@@ -228,12 +290,22 @@ def tub():
     hip_size = sheet(part, kit.rect(16, 16, 900, 1560), hip, zs, 26, paint_hip)             # (an atlas rectangle is across by along; 26 across puts a row on the waist's crease)
     liner_size = sheet(part, kit.rect(940, 16, 260, 1800), liner, np.concatenate([np.linspace(LINER_Z[0], ZC, 33)[:-1], np.linspace(ZC, LINER_Z[1], 9)]), 7, paint_carbon)
     sheet(part, kit.rect(1220, 16, 160, 200), cap, np.linspace(ZC - .012, ZC + .046, 9), 5, paint_carbon)
+    sill_size = sills(part, kit.rect(1580, 16, 300, 1180))
+    apron_size = apron(part, kit.rect(1400, 16, 150, 1300))
+    print("TUB", "sill %.2f x %.2f m at %.3f, slotted %.3f x %.3f m; apron %.2f m across, %.2f m up" % (sill_size + (SILL_Y, SLOT_Z[1] - SLOT_Z[0], SLOT_X[1] - SLOT_X[0]) + apron_size), flush=True)
+    for side in (1.0, -1.0):
+        x = sorted((side * .415, side * .505))
+        slab(stand_ins, (x[0], .09, .02), (x[1], .14, .05))                           # the quadrant's end blocks and rails, round the lever's slot
+        slab(stand_ins, (x[0], .09, .35), (x[1], .14, .38))
     for side in (1.0, -1.0):
         x = sorted((side * .55, side * .68))
         slab(stand_ins, (x[0], .126, .005), (x[1], .386, .865))                       # the console
-        x = sorted((side * .21, side * .32))
-        slab(stand_ins, (x[0], .13, .64), (x[1], .265, 1.10))                         # the cushion's bolster
-    slab(stand_ins, (-.30, .085, .60), (.30, .21, 1.12))                              # the cushion
+        x = sorted((side * .22, side * .31))
+        slab(stand_ins, (x[0], .14, .68), (x[1], .265, 1.10))                         # the cushion's bolster, from behind its rounded nose
+    # the cushion: its front is narrower and lower, and its flanks are rounded off. (As one square box it
+    # stood over the apron's ends and they baked black: two pockets at the cushion's corners.)
+    slab(stand_ins, (-.24, .085, .60), (.24, .185, .70))
+    slab(stand_ins, (-.30, .085, .70), (.30, .21, 1.12))
     slab(stand_ins, (-.31, .15, 1.04), (.31, .93, 1.20))                              # the seat's back
     slab(stand_ins, (-.42, .117, -.55), (.42, .143, .55))                             # the deck plate
     x_rim, top = rim(1.0)

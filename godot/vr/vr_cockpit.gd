@@ -57,6 +57,24 @@ const COCKPIT_ROLL_RATE := deg_to_rad(30.0)
 const COCKPIT_ROLL_ACCEL := deg_to_rad(90.0)
 var _comfort_roll := 0.0
 var _comfort_roll_rate := 0.0
+# The rear stepping out, made visible (Luke: "is the vehicle kicking the back out at all when turning? ...
+# I don't feel it in practice. not full fledged 'drifting', but a little slide"). The sim does let the
+# pod settle up to three degrees outside a loaded turn (craft_sim.gd's tow_swing, at its full three
+# degrees in any hard turn), but from the seat that is the engines three degrees across the screen,
+# eased in over a quarter second, and nothing else. This is that same slide shown from where you sit:
+# the cockpit yaws a few degrees further into the turn about the nose hitch, so the seat swings
+# outward, on a lightly damped spring: it steps out, overshoots a touch, and catches as the turn lets
+# go. Looks and feel only: the sim's pod, its heading and its walls are where they were.
+const TOW_SWING_MAX := deg_to_rad(3.0)    # the sim's own limit (craft_sim.gd)
+const SLIDE_MAX := deg_to_rad(6.0)        # the cockpit's extra yaw at the sim's full swing
+const SLIDE_ARM := 2.2                    # the pivot this far ahead of your head, m: the seat swings 0.23 m out at full slide
+const SLIDE_HZ := 1.6                     # the spring: out in about a fifth of a second ...
+const SLIDE_ZETA := 0.5                   # ... lightly damped: one overshoot, then still
+const SLIDE_RATE := deg_to_rad(45.0)      # and never faster than this
+const SLIDE_SCRUB := 0.22                 # the scrub in your hands while it moves, at most (controller amplitude)
+static var slide_feel := true             # (false: the cockpit keeps the sim's heading exactly)
+var _slide := 0.0
+var _slide_rate := 0.0
 var _buzz_hold := {}   # controller -> seconds an event buzz still owns it (the shudder waits)
 const SHAKE_M := 0.004   # cockpit shake per unit of air-brake shudder, metres
 const GRAB_SHAKE_M := 0.007   # the gear's grab: the cockpit's jolt, metres (fore and aft, a little up)
@@ -74,6 +92,7 @@ const CAMERA_NAMES := {"cockpit": "COCKPIT", "chase": "CHASE", "far": "FAR CHASE
 const CAMERA_OFFSETS := {"chase": Vector3(0.0, 1.3, 5.2), "far": Vector3(0.0, 3.6, 12.0)}   # from the seated eye: up, and aft
 static var camera := "cockpit"
 static var _camera_loaded := false   # the saved choice is read once a run: after that the menu's is the latest
+static var _nose_loaded := false     # (the same, for the nose open or closed)
 var screen_reflection      # the cockpit, faintly, in the windscreen (view/screen_reflection.gd); null without the roof
 var chase_hud: Label3D      # outside, the gauges are out of reading distance: the speed, the Mach line and the guidance, low and left
 var hands := {}
@@ -118,6 +137,9 @@ func _ready() -> void:
 	if not _camera_loaded and CAMERAS.has(prefs.get("camera", "")):
 		camera = prefs.camera
 	_camera_loaded = true
+	if not _nose_loaded and prefs.get("nose", "open") == "closed":   # (once a run: after that the menu's own choice stands)
+		set_nose_closed(true)
+	_nose_loaded = true
 	var forced := false
 	for a in OS.get_cmdline_user_args():
 		forced = forced or a.begins_with("--handling=")
@@ -156,7 +178,8 @@ func _load_prefs() -> Dictionary:
 func _save_prefs() -> void:
 	var f := FileAccess.open(PREFS, FileAccess.WRITE)
 	if f:
-		f.store_string(JSON.stringify({"scheme": quest.scheme, "handling": handling_ask if handling_ask != "" else sim.P.handling, "camera": camera}))
+		f.store_string(JSON.stringify({"scheme": quest.scheme, "handling": handling_ask if handling_ask != "" else sim.P.handling, "camera": camera,
+			"nose": "closed" if CraftModelScript.nose_closed else "open"}))
 
 
 ## Thumbstick click (either stick): sit where you are. Recentres the view AND the height, so
@@ -209,7 +232,7 @@ func _apply_shudder(delta: float) -> void:
 	var w: Array = wind_audio.shake
 	for k in 2:
 		var hand: XRController3D = hands.left if k == 0 else hands.right
-		var strength := brake_haptic_strength(s[k])
+		var strength := maxf(brake_haptic_strength(s[k]), SLIDE_SCRUB * slide_scrub(k == 1))   # the brake's shudder, or the slide's scrub
 		if strength > 0.0 and _buzz_hold.get(hand, 0.0) <= 0.0:
 			hand.trigger_haptic_pulse("haptic", 0.0, strength, 0.05, 0.0)
 	var up: float = s[0] * w[0] + s[1] * w[1]
@@ -826,6 +849,7 @@ func _menu_items() -> Array:
 	return [{"key": "partner", "label": "DRIVING PARTNER", "value": "ON" if partner_on else "OFF"},
 		{"key": "scheme", "label": "CONTROLS", "value": String(quest.scheme).to_upper()},
 		{"key": "camera", "label": "CAMERA", "value": String(CAMERA_NAMES[camera])},
+		{"key": "nose", "label": "NOSE", "value": "CLOSED" if CraftModelScript.nose_closed else "OPEN"},
 		{"key": "maps", "label": "CHOOSE MAP"},
 		{"key": "resume", "label": "RESUME"}]
 
@@ -849,10 +873,26 @@ func menu_choose() -> bool:
 			menu.at = at
 			_menu_show()
 			return true
+		"nose":
+			set_nose_closed(not CraftModelScript.nose_closed)
+			_save_prefs()
+			var at: int = menu.at
+			menu.items = _menu_items()
+			menu.at = at
+			_menu_show()
+			return true
 		"maps":
 			return_to_menu()
 			return false
 	return super()
+
+
+## Skin the pod's nose over, or open it to its cage again: a spike option, to fly both (Luke: "I'm
+## curious how it would look if we enclosed the front of the pod, now that the vehicle tilts and i
+## can see apex lines"). Every pod standing in the scene changes with it, and it is remembered.
+func set_nose_closed(closed: bool) -> void:
+	CraftModelScript.set_nose_closed(closed, get_tree().root if is_inside_tree() else self)
+	print("NOSE: ", "closed" if closed else "open")
 
 
 ## The panel in the cockpit: over the dash, in the middle of the view.
@@ -912,6 +952,29 @@ func _ease_cockpit_roll(raw_roll: float, delta: float) -> float:
 	return _comfort_roll
 
 
+## The slide's angle now, radians, + = the nose further left (a left turn): toward the sim's swing
+## on a spring (see SLIDE_MAX).
+func _ease_slide(delta: float) -> float:
+	var target := clampf(sim.tow_swing / TOW_SWING_MAX, -1.0, 1.0) * SLIDE_MAX if slide_feel else 0.0
+	var w := TAU * SLIDE_HZ
+	var remaining := clampf(delta, 0.0, 0.05)
+	while remaining > 0.000001:
+		var step := minf(remaining, 1.0 / 240.0)
+		_slide_rate = clampf(_slide_rate + (w * w * (target - _slide) - 2.0 * SLIDE_ZETA * w * _slide_rate) * step, -SLIDE_RATE, SLIDE_RATE)
+		_slide = clampf(_slide + _slide_rate * step, -SLIDE_MAX * 1.25, SLIDE_MAX * 1.25)
+		remaining -= step
+	return _slide
+
+
+## How hard the slide scrubs in a hand, 0..1: mostly while the rear is moving, a little while it is
+## held out, more in the hand on the outside of the turn.
+func slide_scrub(right_hand: bool) -> float:
+	var moving := clampf(absf(_slide_rate) / deg_to_rad(30.0), 0.0, 1.0)
+	var held := clampf(absf(_slide) / SLIDE_MAX, 0.0, 1.0)
+	var outside := (_slide > 0.0) == right_hand    # a left turn swings the seat right
+	return clampf(0.8 * moving + 0.2 * held, 0.0, 1.0) * smoothstep(0.08, 0.3, held) * (1.0 if outside else 0.55)
+
+
 func _place_camera(_k: float) -> void:
 	# The cockpit lists with the pod, rolled about your head rather than the floor: the view
 	# tilts but your eyes don't swing sideways (a floor pivot moves them ~0.9 m at 60 deg).
@@ -935,11 +998,14 @@ func _place_camera(_k: float) -> void:
 			chase_hud.visible = camera != "cockpit"
 	else:
 		var Q := shaft_carry_at(sim.pod.x, sim.pod.y)   # (identity but up a shaft: there the world turns over round you)
-		var b_full: Basis = Q * Basis.from_euler(Vector3(pitch, yaw, roll))   # lean + the track's banking (capped), and its slope
+		var slide := _ease_slide(get_process_delta_time())   # the rear stepped out: the cockpit turned further into the turn ...
+		var b_slid := Basis(Vector3.UP, yaw + slide)
+		var b_full: Basis = Q * Basis.from_euler(Vector3(pitch, yaw + slide, roll))   # lean + the track's banking (capped), and its slope
 		var base := wz(sim.pod.x, sim.pod.y, sim.pod.z - 0.8 + CraftModelScript.POD_LIFT) + Q * Vector3.UP * (r.x - surface(sim.pod.x, sim.pod.y).x)   # floor 0.8 m below the pod body centre, lifted with the pod
+		var hitch := head + Vector3(0.0, 0.0, -SLIDE_ARM)    # ... about a point ahead of you, so the seat swings outward
 		rig.basis = b_full
-		rig.position = base + Q * (b_yaw * head) - b_full * head
-		_place_origin(Q * b_yaw, base)
+		rig.position = base + Q * (b_yaw * hitch + b_slid * (head - hitch)) - b_full * head
+		_place_origin(Q * b_yaw, base)                        # (an outside camera keeps the sim's heading, and watches the tail go)
 	var thr := [inp.thrL, inp.thrR]
 	for k in 2:
 		lever_pivots[k].rotation.x = deg_to_rad(lerpf(30.0, -30.0, thr[k]))

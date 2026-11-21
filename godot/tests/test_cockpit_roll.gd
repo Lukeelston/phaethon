@@ -63,7 +63,9 @@ func _process(delta: float) -> bool:
 	var rate := (angle-previous)/delta
 	angle_peak = maxf(angle_peak,absf(angle))
 	rate_peak = maxf(rate_peak,absf(rate))
-	if absf(rate-rate_before)/delta > accel_peak:
+	# (not the engine's first frames: their smoothed interval is not the one the camera integrated over,
+	# and a difference of differences over it read thousands of deg/s2 at 0.14 s, before any lean)
+	if t > 0.3 and absf(rate-rate_before)/delta > accel_peak:
 		accel_peak = absf(rate-rate_before)/delta
 		accel_at = t
 	if t > 11.8 and t < 12.0: reversal_angle = angle

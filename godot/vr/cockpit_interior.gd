@@ -220,25 +220,93 @@ func build() -> void:
 	tubes.material_override = Finish.rubber()
 	add_child(tubes)
 
-	# rim light: just under the cockpit rim, inset into the opening, all the way round
-	var rim := SurfaceTool.new()
-	rim.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var ring := []
-	for k in 97:
-		var ph := TAU * k / 96.0
-		var x := (CM.OPEN_AX - 0.05) * cos(ph)
-		var z := CM.OPEN_ZC + (CM.OPEN_AZ - 0.05) * sin(ph)
-		ring.append(Vector3(x, CM.hull_top(x, z) - 0.16 + UP, z))
-	_clear_tube(rim, ring, 0.0035, Color.WHITE, 6)
+	# rim light: a slim bar tucked up under the coaming's hem, all the way round (Luke: "the blue line
+	# that runs around the edge still looks low poly and floats in some places": it was a 96-sided
+	# hexagonal tube hung in the air 0.16 m under the rim and 0.05 m inside it, touching nothing but
+	# the consoles it ran through). A dark holder against the hem, the lens along its inner corner.
+	var bars := _rim_bar()
+	var holder := MeshInstance3D.new()
+	holder.name = "RimLightHolder"
+	holder.mesh = bars[0]
+	holder.material_override = Finish.rubber()
+	add_child(holder)
 	var rmi := MeshInstance3D.new()
 	rmi.name = "RimLighting"
-	rmi.mesh = rim.commit()
+	rmi.mesh = bars[1]
 	rim_mat = StandardMaterial3D.new()
 	rim_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	rim_mat.albedo_color = MODE_LIGHT.normal
 	rmi.material_override = rim_mat
+	rmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(rmi)
+	for bar: MeshInstance3D in [holder, rmi]:
+		bar.add_to_group("under_the_lip")    # fastened against the lip's underside: the fittings' check holds it out of the lip, not a margin clear of it (tests/test_cables.gd)
 	parts_built = solid.size() + metal.size() + rubber.size() + paint.size() + lit.size() + 5 + hoses.size() + 1
+
+
+const RIM_STATIONS := 384         # round the opening: 12 mm apart at most, no facet wider than a quarter of a degree from the seat
+const RIM_INSET := 0.0195         # the bar's middle, in from the opening's edge ...
+const RIM_DROP := 0.0590          # ... and under the hull's top there: against the coaming's lower hem (0.020 m in, 0.050 m down)
+const RIM_HOLDER := [Vector2(-0.0046, 0.0052), Vector2(0.0030, 0.0052), Vector2(0.0046, 0.0036), Vector2(0.0046, -0.0010),
+	Vector2(0.0022, -0.0052), Vector2(-0.0030, -0.0052), Vector2(-0.0046, -0.0036), Vector2(-0.0046, 0.0036)]   # its section: (toward the seat, up), m
+const RIM_LENS := [Vector2(0.0047, 0.0026), Vector2(0.0060, 0.0002), Vector2(0.0054, -0.0024), Vector2(0.0034, -0.0048), Vector2(0.0012, -0.0058)]   # the lens along its inner lower corner, a millimetre proud
+
+
+const RIM_REACH := deg_to_rad(136.5)   # it runs this far round from the nose each way: as far as the coaming it hangs under (138 degrees)
+
+
+## The rim light's holder and lens as two meshes, swept round the opening from the coaming's one end
+## to its other (behind the seat's shoulders there is no hem to hang it from, and nobody to see it).
+func _rim_bar() -> Array:
+	var frames := []      # [the bar's middle, toward the seat, up] or null where it is cut
+	for k in RIM_STATIONS + 1:
+		var ph := TAU * k / RIM_STATIONS
+		var x := CM.OPEN_AX * cos(ph)
+		var z := CM.OPEN_ZC + CM.OPEN_AZ * sin(ph)
+		var inward := Vector3(-cos(ph) / CM.OPEN_AX, 0.0, -sin(ph) / CM.OPEN_AZ).normalized()
+		var at := Vector3(x, CM.hull_top(x, z) + UP - RIM_DROP, z) + inward * RIM_INSET
+		var from_nose := absf(angle_difference(-PI / 2.0, ph))
+		frames.append(null if from_nose > RIM_REACH or _occupied(at, 0.012) else [at, inward, Vector3.UP])
+	var out := []
+	for section: Array in [RIM_HOLDER, RIM_LENS]:
+		var closed: bool = section == RIM_HOLDER
+		var st := SurfaceTool.new()
+		st.begin(Mesh.PRIMITIVE_TRIANGLES)
+		st.set_smooth_group(0)
+		st.set_color(Color(0.035, 0.037, 0.042))     # (the holder's rubber takes its colour from the vertices)
+		var m := section.size()
+		for k in RIM_STATIONS + 1:
+			# an end cap wherever a run of the holder starts or stops
+			var here: bool = frames[k] != null
+			var before: bool = k > 0 and frames[k - 1] != null
+			var after: bool = k < RIM_STATIONS and frames[k + 1] != null
+			if closed and here and (not before or not after) and (before or after):
+				var along: Vector3 = (frames[k + 1][0] - frames[k][0]) if after else (frames[k][0] - frames[k - 1][0])
+				var facing: Vector3 = -along if after else along
+				for j in range(1, m - 1):
+					var tri := [0, j, j + 1].map(func(i): return frames[k][0] + frames[k][1] * section[i].x + frames[k][2] * section[i].y)
+					var flip: bool = (tri[1] - tri[0]).cross(tri[2] - tri[0]).dot(facing) > 0.0
+					for p: Vector3 in ([tri[0], tri[2], tri[1]] if flip else tri):
+						st.add_vertex(p)
+		for k in RIM_STATIONS:
+			if frames[k] == null or frames[k + 1] == null:
+				continue
+			for j in (m if closed else m - 1):
+				var a: Vector2 = section[j]
+				var b: Vector2 = section[(j + 1) % m]
+				var p0: Vector3 = frames[k][0] + frames[k][1] * a.x + frames[k][2] * a.y
+				var p1: Vector3 = frames[k][0] + frames[k][1] * b.x + frames[k][2] * b.y
+				var q0: Vector3 = frames[k + 1][0] + frames[k + 1][1] * a.x + frames[k + 1][2] * a.y
+				var q1: Vector3 = frames[k + 1][0] + frames[k + 1][1] * b.x + frames[k + 1][2] * b.y
+				var outward: Vector3 = frames[k][1] * (a.x + b.x) + frames[k][2] * (a.y + b.y)
+				for tri in [[p0, p1, q0], [p1, q1, q0]]:
+					var flip: bool = (tri[1] - tri[0]).cross(tri[2] - tri[0]).dot(outward) > 0.0   # (Godot's fronts wind clockwise)
+					for p: Vector3 in ([tri[0], tri[2], tri[1]] if flip else tri):
+						st.add_vertex(p)
+		st.index()
+		st.generate_normals()
+		out.append(st.commit())
+	return out
 
 
 ## Hide structural runs behind occupied fittings, including their tube radius.

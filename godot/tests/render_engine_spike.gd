@@ -31,6 +31,9 @@ const VIEWS := [
 	["h4-housing-from-the-shoulder", 2.0, false, 0.0, ["pod", Vector3(0.22, 0.22, 0.72), Vector3(0.0, 0.44, 0.27)]],
 	["h5-canopy-from-outside", 2.0, false, 0.0, ["pod", Vector3(1.5, 0.95, -2.1), Vector3(0.0, 0.42, 0.0)]],
 	["h6-canopy-from-the-side", 2.0, false, 0.0, ["pod", Vector3(3.2, 0.5, -0.4), Vector3(0.0, 0.42, -0.4)]],
+	["h7-guidance-head-leaned-left", 2.0, false, 0.0, ["pod", Vector3(-0.22, 0.14, 0.55), Vector3(0.0, 0.386, -0.126)]],
+	["h8-guidance-on-the-glass-from-the-right-hip", 2.0, false, 0.0, ["pod", Vector3(0.34, -0.02, 0.8), Vector3(-0.06, 0.4, -0.15)]],
+	["h9-guidance-on-the-glass-from-outside", 2.0, false, 0.0, ["pod", Vector3(-1.3, 0.75, -0.9), Vector3(0.0, 0.38, -0.1)]],
 	# the windscreen's reflection of the cockpit: from the seat, looking up into the glass, the head
 	# moved a hand's breadth, and what the mirror itself saw
 	["r1-seat-ahead", 2.0, false, 0.0, "seat", 0.0, -3.0],
@@ -47,6 +50,30 @@ const VIEWS := [
 	["k6-seat-ceiling-aft", 1.0, false, 0.0, ["pod", Vector3(0.0, 0.12, 0.6), Vector3(0.25, 0.6, 1.0)]],
 	["k7-cabin-from-above", 1.0, false, 0.0, ["pod", Vector3(0.0, 2.3, 0.75), Vector3(0.0, 0.0, 0.55)]],
 	["k8-cabin-from-above-left", 1.0, false, 0.0, ["pod", Vector3(-1.1, 1.5, 1.5), Vector3(0.1, -0.2, 0.6)]],
+	# the rim light round the opening, the foot of the tub, and the nose ahead of the feet: from the
+	# seated eye, from a head leaned to the rim, and the nose from outside
+	["n1-seat-feet", 1.0, false, 0.0, ["pod", Vector3(0.0, 0.12, 0.6), Vector3(0.0, -0.55, -0.6)]],
+	["n2-seat-rim-left", 1.0, false, 0.0, ["pod", Vector3(0.0, 0.12, 0.6), Vector3(-0.62, 0.02, 0.15)]],
+	["n3-seat-rim-ahead-left", 1.0, false, 0.0, ["pod", Vector3(0.0, 0.12, 0.6), Vector3(-0.35, -0.02, -0.55)]],
+	["n4-seat-hip-right-down", 1.0, false, 0.0, ["pod", Vector3(0.0, 0.12, 0.6), Vector3(0.42, -0.6, 0.72)]],
+	["n5-seat-ahead-low", 1.0, false, 0.0, ["pod", Vector3(0.0, 0.12, 0.6), Vector3(0.0, -0.18, -1.2)]],
+	["n6-nose-from-outside", 1.0, false, 0.0, ["pod", Vector3(1.4, 0.5, -2.6), Vector3(0.0, 0.0, -0.9)]],
+	["n7-head-leaned-to-the-rim", 1.0, false, 0.0, ["pod", Vector3(-0.2, 0.2, 0.5), Vector3(-0.66, 0.02, 0.0)]],
+	["n8-seat-rim-right-aft", 1.0, false, 0.0, ["pod", Vector3(0.0, 0.12, 0.6), Vector3(0.6, 0.02, 0.95)]],
+	["n9-seat-sill-left", 1.0, false, 0.0, ["pod", Vector3(0.0, 0.12, 0.6), Vector3(-0.49, -0.49, 0.25)]],
+	["n10-seat-apron-right", 1.0, false, 0.0, ["pod", Vector3(0.0, 0.12, 0.6), Vector3(0.3, -0.42, 0.56)]],
+	["n11-head-forward-looking-down", 1.0, false, 0.0, ["pod", Vector3(0.0, 0.2, 0.25), Vector3(0.0, -0.45, 0.57)]],
+	["n12-cushion-corner-right-from-above", 1.0, false, 0.0, ["pod", Vector3(0.31, -0.02, 0.72), Vector3(0.31, -0.41, 0.63)]],
+	["n13-cushion-corner-right-from-ahead", 1.0, false, 0.0, ["pod", Vector3(0.2, -0.12, 0.3), Vector3(0.31, -0.41, 0.65)]],
+	# the nose, open or closed (--closed-nose): from the seat, in a hard turn, and from outside
+	["c1-seat-ahead", 2.0, false, 0.0, "seat", 0.0, -3.0],
+	["c2-seat-headset-field", 2.0, false, 0.0, "seat", 96.0, -12.0],
+	["c3-seat-looking-down-the-nose", 2.0, false, 0.0, "seat", 0.0, -24.0],
+	["c4-seat-hard-right", 4.0, true, 0.9, "seat", 96.0, -10.0],
+	["c5-seat-hard-left", 4.0, true, 0.9, "seat", 96.0, -10.0],
+	["c6-nose-from-outside", 1.0, false, 0.0, ["pod", Vector3(1.6, 0.7, -2.9), Vector3(0.0, -0.1, -0.9)]],
+	["c7-pod-from-the-side", 1.0, false, 0.0, ["pod", Vector3(3.6, 0.6, -0.9), Vector3(0.0, -0.1, -0.5)]],
+	["c8-footwell-from-the-seat", 1.0, false, 0.0, ["pod", Vector3(0.0, -0.05, 0.35), Vector3(0.0, -0.35, -1.5)]],
 ]
 const MESSAGE := "JUMP LIP  2 MI / 4.0 S
 ASCENT J0 > N2 UPPER
@@ -66,6 +93,9 @@ func _run() -> void:
 		return
 	if "--open" in OS.get_cmdline_user_args():
 		preload("res://view/canopy.gd").roofed = false
+	Seat._nose_loaded = true       # (the pilot's saved choice stays out of the pictures)
+	if "--closed-nose" in OS.get_cmdline_user_args():
+		preload("res://view/craft_model.gd").nose_closed = true
 	if "--no-reflection" in OS.get_cmdline_user_args():
 		preload("res://view/screen_reflection.gd").enabled = false
 	if "--reflection-every-frame" in OS.get_cmdline_user_args():   # timings: a picture every frame, to weigh one
@@ -162,6 +192,8 @@ func _run() -> void:
 		if str(view[0]).begins_with("r1") and seat.screen_reflection:   # the mirror's own picture, beside the views of it
 			print("REFLECTION sheet: %d cells, %.0f %% of the screen; sights %s" % [seat.screen_reflection.cells, seat.screen_reflection.share * 100.0, seat.screen_reflection.sights])
 			seat.screen_reflection.port.get_texture().get_image().save_png(out_dir.path_join("r0-the-picture.png"))
+		if str(view[0]).begins_with("h1") and seat.approach_display and seat.approach_display.port:   # the readout's own picture, beside the views of it on the glass
+			seat.approach_display.port.get_texture().get_image().save_png(out_dir.path_join("h0-the-picture.png"))
 		var path := out_dir.path_join(str(view[0]) + ".png")
 		if root.get_texture().get_image().save_png(path) != OK:
 			push_error("Couldn't save " + path)

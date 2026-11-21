@@ -56,7 +56,16 @@ const CAGE_Z1 := -1.95       # ... to here, where a solid cap carries the cable 
                              # you see the track coming through it (Luke: "a skeleton frame at the
                              # foot hull so that I can see what's coming")
 const CAGE_R := 0.02         # hoop radius: covers the skin's cut edges (> SKIN / 2); longerons thinner
+const RIB_IN := SKIN + 0.008 # (the closed nose) its frames stand this far in from the outer skin: on the trim's inner face ...
+const RIB_R := 0.014         # ... and are this thick: proud of the trim inside, never through the skin outside
+## The nose skinned over instead of an open cage: a spike option, to fly both (Luke: "I'm curious how
+## it would look if we enclosed the front of the pod, now that the vehicle tilts and i can see apex
+## lines"). The skin and the trim run through the cage's length, the top decks' paint and the
+## pinstripes run on to the painted nose, and the cage's hoops and longerons stay as frames and
+## stringers inside. Set it with set_nose_closed(): each hull is built once and kept.
+static var nose_closed := false
 static var _hull_cache: ArrayMesh
+static var _hull_closed_cache: ArrayMesh
 const FLAP_OPEN := deg_to_rad(68.0)   # full brake
 const FLAP_RATE := 9.0                # flap travel, full range per second (~0.11 s open or shut)
 # The engines are flat rounded slabs (Luke: "horizontally flat, rounded rectangular prisms"),
@@ -526,7 +535,9 @@ static func _tri(st: SurfaceTool, i0: int, i1: int, i2: int, p0: Vector3, p1: Ve
 ## the cockpit (2), fittings (3), the nose cage (4), the paint (5: _outer_skin), the pinstripes and
 ## the lip's piping (6), lamps (7). Built once and shared (the flat view's pod and the VR cockpit).
 static func pod_hull() -> ArrayMesh:
-	if _hull_cache:
+	if nose_closed and _hull_closed_cache:
+		return _hull_closed_cache
+	if not nose_closed and _hull_cache:
 		return _hull_cache
 	var nz := 76
 	var na := 96
@@ -581,7 +592,7 @@ static func pod_hull() -> ArrayMesh:
 				var cc: float = (grid[i][j][1] + grid[i + 1][j][1]) / 2.0
 				if cen.y > cc and _in_opening(cen.x, cen.z):
 					continue   # the cockpit
-				if cen.z > CAGE_Z1 and cen.z < CAGE_Z0:
+				if not nose_closed and cen.z > CAGE_Z1 and cen.z < CAGE_Z0:
 					continue   # the open cage
 				var outward := Vector3(cen.x, cen.y - cc, 0.0) * (1.0 if layer == 0 else -1.0)
 				_tri(st, a, b, c, pts[a], pts[b], pts[c], outward)
@@ -672,6 +683,10 @@ static func pod_hull() -> ArrayMesh:
 
 	# the cage: hoops round the section and longerons along it, on the skin's mid-line, the
 	# first and last hoops right on the cut edges. Nothing crosses the cockpit opening.
+	# (The closed nose keeps them as its frames and stringers, on the trim's inner face.)
+	var inset := RIB_IN if nose_closed else SKIN / 2.0
+	var hoop_r := RIB_R if nose_closed else CAGE_R
+	var bars := Color(0.21, 0.21, 0.225) if nose_closed else SILVER   # (closed: coated like the trim, a shade lighter. Left polished they still read as a cage, with panels behind it)
 	var cage := SurfaceTool.new()
 	cage.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var zs: Array[float] = []   # the ring stations that bound the cut
@@ -690,31 +705,31 @@ static func pod_hull() -> ArrayMesh:
 		var z := lerpf(za, zb, float(k) / (hoops - 1))
 		var run: Array = []
 		for j in 97:
-			var p := cage_point(z, TAU * j / 96.0)
+			var p := cage_point(z, TAU * j / 96.0, inset)
 			if p.y > hull_section(z)[1] and _in_opening(p.x, z):
 				if run.size() > 1:
-					_tube(cage, run, CAGE_R, SILVER)
+					_tube(cage, run, hoop_r, bars)
 				run = []
 			else:
 				run.append(p)
 		if run.size() > 1:
-			_tube(cage, run, CAGE_R, SILVER)
+			_tube(cage, run, hoop_r, bars)
 	for k in range(1, 10):   # longerons, the bottom keel among them; no top spine, so the
 		var th := PI / 2.0 + TAU * k / 10.0   # middle of the view ahead stays clear
 		var run: Array = []
 		for m in 41:
 			var z := lerpf(za, zb, float(m) / 40.0)
-			var p := cage_point(z, th)
+			var p := cage_point(z, th, inset)
 			if p.y > hull_section(z)[1] and _in_opening(p.x, z):
 				if run.size() > 1:
-					_tube(cage, run, CAGE_R * 0.8, SILVER)
+					_tube(cage, run, hoop_r * 0.8, bars)
 				run = []
 			else:
 				run.append(p)
 		if run.size() > 1:
-			_tube(cage, run, CAGE_R * 0.8, SILVER)
+			_tube(cage, run, hoop_r * 0.8, bars)
 	cage.commit(mesh)
-	mesh.surface_set_material(4, Finishes.satin() if Finishes.hd else Kit.polished(1.0, 0.18))
+	mesh.surface_set_material(4, trim if nose_closed else (Finishes.satin() if Finishes.hd else Kit.polished(1.0, 0.18)))
 	paint.index()
 	paint.commit(mesh)
 	var coat := StandardMaterial3D.new()   # candy over metal flake, under a clear coat
@@ -741,8 +756,24 @@ static func pod_hull() -> ArrayMesh:
 		[Kit.box(Vector3(0.035, 0.01, 1.5)), Kit.at(Vector3(0.5, -0.59, 0.3)), UNDERGLOW],
 	], mesh)
 	mesh.surface_set_material(7, Kit.vertex_colors(true))
-	_hull_cache = mesh
+	if nose_closed:
+		_hull_closed_cache = mesh
+	else:
+		_hull_cache = mesh
 	return mesh
+
+
+## Close the nose or open it again, on every pod already standing under `under` (the cockpit's own
+## hull, the craft's, a driving partner's): each takes the other hull.
+static func set_nose_closed(closed: bool, under: Node = null) -> void:
+	var before := pod_hull()
+	nose_closed = closed
+	var after := pod_hull()
+	if under == null or before == after:
+		return
+	for part: MeshInstance3D in under.find_children("*", "MeshInstance3D", true, false):
+		if part.mesh == before:
+			part.mesh = after
 
 
 ## The outer skin (surface 0, polished metal) and its paint (into `paint`: the top decks and the
@@ -767,7 +798,7 @@ static func _outer_skin(grid: Array, nz: int, na: int, mesh: ArrayMesh, paint: S
 			var cc: float = (grid[i][j][1] + grid[i + 1][j][1]) / 2.0
 			if cen.y > cc and _in_opening(cen.x, cen.z):
 				continue   # the cockpit
-			if cen.z > CAGE_Z1 and cen.z < CAGE_Z0:
+			if not nose_closed and cen.z > CAGE_Z1 and cen.z < CAGE_Z0:
 				continue   # the open cage
 			var ha: float = (grid[i][j][2] + grid[i + 1][j][2]) / 2.0
 			var hb: float = (grid[i][j][3] + grid[i + 1][j][3]) / 2.0
@@ -825,7 +856,7 @@ static func _outer_skin(grid: Array, nz: int, na: int, mesh: ArrayMesh, paint: S
 		var run: Array = []
 		for i in range(1, nz):
 			var p: Vector3 = pts[i * na + jj]
-			if p.z < CAGE_Z0 + 0.02:
+			if p.z < (-1.96 if nose_closed else CAGE_Z0 + 0.02):    # (closed: on to the painted nose)
 				continue
 			run.append(p + nrm[i * na + jj] * 0.005)
 		if run.size() > 1:
@@ -842,10 +873,10 @@ static func _paint_at(ax: float, sy: float, z: float):
 	return null
 
 
-## A point on the skin's mid-line at station z, angle th round the section.
-static func cage_point(z: float, th: float) -> Vector3:
+## A point on the skin's mid-line (or `inset` in from the outer skin) at station z, angle th round the section.
+static func cage_point(z: float, th: float, inset := SKIN / 2.0) -> Vector3:
 	var h := hull_section(z)
-	return Vector3((h[0] - SKIN / 2.0) * Kit._sp(cos(th), 2.0 / HULL_N), h[1] + (h[2] - SKIN / 2.0) * Kit._sp(sin(th), 2.0 / HULL_N), z)
+	return Vector3((h[0] - inset) * Kit._sp(cos(th), 2.0 / HULL_N), h[1] + (h[2] - inset) * Kit._sp(sin(th), 2.0 / HULL_N), z)
 
 
 ## A round tube along a polyline (parallel-transported frames, so it doesn't twist).

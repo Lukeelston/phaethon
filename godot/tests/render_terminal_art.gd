@@ -47,6 +47,11 @@ func _run() -> void:
 		preload("res://view/approach_projector.gd").beams = false
 	if "--no-plume" in OS.get_cmdline_user_args():   # timings: the jets' gas undrawn
 		preload("res://view/craft_model.gd").plumes = false
+	Seat._nose_loaded = true                              # (the pilot's saved choice stays out of the pictures and the timings)
+	if "--closed-nose" in OS.get_cmdline_user_args():   # the nose skinned over (the quick menu's NOSE line)
+		preload("res://view/craft_model.gd").nose_closed = true
+	if "--guidance-every-frame" in OS.get_cmdline_user_args():   # timings: the approach readout's picture drawn every frame, to weigh one
+		preload("res://view/approach_projector.gd").picture_every_frame = true
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--camera="):   # timings: the quick menu's chase views
 			Seat.camera = arg.trim_prefix("--camera=")
