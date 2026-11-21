@@ -2,7 +2,7 @@
 ## switch for engine power, and another for a parking brake ... And then of course a dope start
 ## button"): two pods hung from the roof's header rail, one either side of the projector, turned
 ## toward the seated eye. Read left to right they are the start-up itself (vr/startup_sequence.gd),
-## and each control's legend carries its number, printed, so the order can be read with the battery
+## and each control's legend carries its number, engraved, so the order can be read with the battery
 ## dead:
 ##   left pod    1 BATT     a bat-handle toggle. A standby lamp beside it breathes while the craft
 ##                          is cold: the one thing alight in a dark cockpit.
@@ -16,9 +16,14 @@
 ## throws it; pushed into the button's face it presses it. The panel only reports what was worked
 ## (poke); the sequence decides what that does, and show_state() draws its answer, so a refused
 ## switch never moves. The next control to work breathes.
+## The pods, their fittings and the parts that move are authored (Luke, after flying the first,
+## code-built panel: "polishing the startup switches so that they are on quality par with the rest
+## of the cockpit"): tools/art_start_panel_hd.py writes art/cockpit/start_panel_hd.glb, each mesh in
+## its pod's frame or about its own pivot, with the legends engraved in the faceplates.
 ## Everything here faces down and aft, away from the sky and the suns, and lit as the rest of the
 ## cockpit is it would be black. It has a flood lamp of its own under the rail, as an overhead panel
-## does, worked out in its finish (vr/panel_finish.gdshader): dim by daylight alone, up with the battery.
+## does, worked out in its finish (vr/panel_finish.gdshader): dim by daylight alone, up with the
+## battery, which also lights the legends from behind.
 ## Pod-local: x across (the pilot's right), y up the face as the pilot sees it, z out of the face.
 ##   var p := OverheadPanel.new(); canopy.add_child(p); p.build()
 ##   for hit in p.poke(controller, delta): ...      # [control, dir]: "batt" / "engine" / "park" with +1 or -1, "start" with 0
@@ -26,10 +31,10 @@
 class_name OverheadPanel
 extends Node3D
 
-const Kit := preload("res://view/mesh_kit.gd")
-const Finish := preload("res://view/craft_materials.gd")
+const Outlook := preload("res://view/outlook.gd")
 const Ring := preload("res://vr/start_ring.gdshader")
 const FinishShader := preload("res://vr/panel_finish.gdshader")
+const HD := "res://art/cockpit/start_panel_hd.glb"
 const EYE := Vector3(0.0, 0.12, 0.6)            # the seated eye, canopy space (view/approach_projector.gd EYE)
 const POD_W := 0.6                              # each pod's place along the header: this share of the way out from its middle
 const DROP := 0.064                             # its controls' line below the rail's centre line ...
@@ -41,6 +46,13 @@ const BODY_Y := -0.012                          # its middle below the controls'
 const CONTROLS := {                             # where each stands on its pod: [pod (-1 left, 1 right), x]
 	"batt": [-1.0, -0.046], "engine": [-1.0, 0.044], "start": [1.0, -0.043], "park": [1.0, 0.05]}
 const LEGENDS := {"batt": "1  BATT", "engine": "2  ENGINE", "start": "3  START", "park": "4  PARK"}
+const LEGEND_Y := -0.0445                       # a legend's middle below its control, and its box (half its width, half its height)
+const LEGEND_BOX := Vector2(0.021, 0.0052)
+const LAMP_Y := -0.0535                         # a lamp's bar under its legend
+const STANDBY_X := -0.028                       # the standby lamp, beside 1 BATT
+const PLATE := Vector2(0.177, 0.096)            # a faceplate inside its housing's rim ...
+const PLATE_AREA := Rect2(12.0 / 2048.0, 12.0 / 2048.0, 1040.0 / 2048.0, 564.0 / 2048.0)   # ... and the left one's place in the maps (the right one's is PLATE_STEP further down)
+const PLATE_STEP := 584.0 / 2048.0
 const THROW_ANGLE := deg_to_rad(28.0)           # a toggle's swing either side of square
 const GUARD_SWING := deg_to_rad(108.0)          # the guard lifted
 const ZONE := Vector3(0.042, 0.07, 0.13)        # a toggle's zone in front of the face: half-width, half-height, depth
@@ -54,13 +66,19 @@ const RELEASE_Z := 0.045                        # and let go again past this
 const PRESS_TRAVEL := 0.005
 const RING_SEGMENTS := 24
 const FLOOD := Vector3(0.0, 0.78, 0.62)         # toward the flood lamp from a pod's face, pod-local: up its face and out from it
-const GLOW := Vector2(0.42, 0.95)               # what a face gives back of its own colour: by daylight alone, and with the lamp on
+const FLOOD_AT := Vector3(0.0, 0.075, 0.07)     # ... and where it is: under the rail, over the pod's top edge
+const GLOW := Vector2(0.5, 1.0)                 # what a face gives back of its own colour: by daylight alone, and with the lamp on
+const NIGHT := 0.3                              # ... and what is left of the daylight's share at night (the standby lamp is then the one thing alight)
+const BACKLIGHT := 0.85                         # the legends' own light with the battery on
+const HALO := 0.3                               # a lamp's spill round its lens, of its lens's light
 const GREEN := Color(0.3, 1.0, 0.45)
 const AMBER := Color(1.0, 0.62, 0.12)
 const WHITE := Color(1.0, 0.95, 0.85)
-const LEGEND := Color(0.86, 0.87, 0.8)
 
 static var fitted := true  # (timings: false before the cockpit is built leaves the panel out)
+static var _meshes := {}   # the authored meshes by name, loaded once
+static var _maps := {}     # ... and their maps: base, normal, orm, glow
+static var _halo: GradientTexture2D
 var pods := {}             # -1.0 / 1.0 -> Node3D
 var levers := {}           # control -> Node3D (the toggles' handles)
 var swings := {}           # control -> its shown angle
@@ -68,14 +86,13 @@ var guard: Node3D
 var guard_swing := 0.0
 var button: Node3D
 var button_in := 0.0       # how far the button is pushed in, 0..1 (eased)
-var lamps := {}            # name -> StandardMaterial3D: "batt", "engine", "park", "standby"
+var lamps := {}            # name -> StandardMaterial3D, a lamp's spill round its lens: "batt", "engine", "park", "standby"
 var ring: ShaderMaterial   # the start button's ring of lights
 var ring_progress := 1.0   # how much of it is lit, 0..1 (the tests read these two)
 var ring_colour := Color.BLACK
-var legends: Array[Label3D] = []
-var cap_label: Label3D
-var paint: ShaderMaterial  # the panel's two finishes: painted parts ...
-var steel: ShaderMaterial  # ... and bare metal
+var legends: Array[String] = []   # what is engraved under the controls (and START again on the button's cap)
+var paint: ShaderMaterial  # the panel's finish: every authored part wears it
+var steel: ShaderMaterial  # (the code-built panel kept bare metal apart: now the same finish)
 var _flood := Vector3.UP   # toward the flood lamp, canopy space
 var _prev := {}            # controller -> {pod side -> its tip's last place there}
 var _cool := {-1.0: 0.0, 1.0: 0.0}
@@ -108,17 +125,33 @@ static func control_point(control: String) -> Vector3:
 	return pod_frame(c[0]) * Vector3(c[1], 0.0, 0.03)
 
 
+## Where a place on a pod's faceplate (x across, y up, pod metres) is in the authored maps.
+static func plate_uv(side: float, at: Vector2) -> Vector2:
+	var u := PLATE_AREA.position.x + (at.x + PLATE.x * 0.5) / PLATE.x * PLATE_AREA.size.x
+	var v := PLATE_AREA.position.y + (BODY_Y + PLATE.y * 0.5 - at.y) / PLATE.y * PLATE_AREA.size.y
+	return Vector2(u, v + (PLATE_STEP if side > 0.0 else 0.0))
+
+
+## The authored panel: its meshes by name and its four maps.
+static func art() -> Dictionary:
+	if _meshes.is_empty():
+		var source := (load(HD) as PackedScene).instantiate()
+		for child in source.find_children("*", "MeshInstance3D", true, false):
+			_meshes[str(child.name)] = (child as MeshInstance3D).mesh
+		source.free()
+		var made := (_meshes["PodL"] as Mesh).surface_get_material(0) as BaseMaterial3D
+		_maps = {"base": made.albedo_texture, "normal": made.normal_texture, "orm": made.roughness_texture, "glow": made.emission_texture}
+	return {"meshes": _meshes, "maps": _maps}
+
+
 func build() -> void:
 	name = "OverheadPanel"
+	art()
 	paint = ShaderMaterial.new()
 	paint.shader = FinishShader
-	paint.set_shader_parameter("roughness", 0.62)
-	paint.set_shader_parameter("sheen", 0.03)
-	steel = ShaderMaterial.new()
-	steel.shader = FinishShader
-	steel.set_shader_parameter("roughness", 0.32)
-	steel.set_shader_parameter("sheen", 0.55)
-	steel.set_shader_parameter("fill", 0.22)
+	for map: String in _maps:
+		paint.set_shader_parameter(map + "_map", _maps[map])
+	steel = paint
 	_flood = (pod_frame(-1.0).basis * FLOOD + pod_frame(1.0).basis * FLOOD).normalized()
 	for side: float in [-1.0, 1.0]:
 		var pod := Node3D.new()
@@ -126,23 +159,28 @@ func build() -> void:
 		pod.transform = pod_frame(side)
 		add_child(pod)
 		pods[side] = pod
-		_build_pod(pod, side)
+		_part(pod, "Housing", str(pod.name))
+		_part(pod, "Clamps", "ClampsL" if side < 0.0 else "ClampsR")   # (up to the rail and round it)
 	for control: String in CONTROLS:
 		var c: Array = CONTROLS[control]
 		var pod: Node3D = pods[c[0]]
 		var x: float = c[1]
-		_legend(pod, Vector3(x, -0.0445, 0.0032), LEGENDS[control])
+		legends.append(LEGENDS[control])
 		if control != "start":
-			lamps[control] = _lamp(pod, Kit.box(Vector3(0.03, 0.0034, 0.0016)), Vector3(x, -0.0535, 0.003))
+			lamps[control] = _lamp(pod, Vector3(x, LAMP_Y, 0.0034), Vector2(0.05, 0.02))
 		match control:
 			"batt":
-				_toggle(pod, control, x, false)
-				lamps["standby"] = _lamp(pod, Kit.cyl(0.0031, 0.0031, 0.0016, 20), Vector3(x - 0.028, 0.0, 0.003), Vector3(PI / 2.0, 0, 0))
+				_toggle(pod, control, x, "Bat")
+				lamps["standby"] = _lamp(pod, Vector3(x + STANDBY_X, 0.0, 0.0062), Vector2(0.024, 0.024))
 			"engine":
-				_toggle(pod, control, x, false)
-				_build_guard(pod, x)
+				_toggle(pod, control, x, "Bat")
+				guard = Node3D.new()
+				guard.name = "guard"
+				guard.position = Vector3(x, 0.026, 0.005)     # its hinge pin
+				pod.add_child(guard)
+				_part(guard, "cage", "Guard")
 			"park":
-				_toggle(pod, control, x, true)
+				_toggle(pod, control, x, "Paddle")
 			"start":
 				_build_button(pod, x)
 	for node in find_children("*", "GeometryInstance3D", true, false):
@@ -152,100 +190,29 @@ func build() -> void:
 	show_state(null, 0.0)
 
 
-func _part(parent: Node3D, tag: String, parts: Array, material: Material) -> MeshInstance3D:
+func _part(parent: Node3D, tag: String, mesh: String) -> MeshInstance3D:
 	var mi := MeshInstance3D.new()
 	mi.name = tag
-	mi.mesh = Kit.compound(parts)
-	mi.material_override = material
+	mi.mesh = _meshes[mesh]
+	mi.material_override = paint
 	parent.add_child(mi)
 	return mi
 
 
-## A pod: a housing with a recessed faceplate, screwed at its corners, on two clamps round the rail.
-func _build_pod(pod: Node3D, side: float) -> void:
-	var turn := Vector3(PI / 2.0, 0, 0)
-	var body := [
-		[Finish.beveled_plate(BODY, 0.007), Kit.at(Vector3(0, BODY_Y, -BODY.y * 0.5), turn), Color(0.36, 0.38, 0.41)],
-		[Finish.beveled_plate(Vector3(BODY.x - 0.014, 0.003, BODY.z - 0.014), 0.0012), Kit.at(Vector3(0, BODY_Y, 0.001), turn), Color(0.2, 0.215, 0.24)]]
-	var metal := []
-	for sx in [-1.0, 1.0]:
-		for sy in [-1.0, 1.0]:
-			metal.append([Finish.slotted_screw(0.003), Kit.at(Vector3(sx * (BODY.x * 0.5 - 0.0085), BODY_Y + sy * (BODY.z * 0.5 - 0.0085), 0.003), turn), Color(0.6, 0.63, 0.67)])
-	# the clamps: a strut from the pod's back up to the rail, and a collar round the rail there
-	var inv := pod.transform.affine_inverse()
-	var clamps := []
-	var none := Color(0.42, 0.45, 0.48)
-	for sx: float in [-0.058, 0.058]:
-		var w := POD_W * side + sx / 0.41
-		var on_rail: Vector3 = inv * header_at(w)
-		var foot := Vector3(sx, 0.014, -BODY.y + 0.002)
-		var run := on_rail - foot
-		clamps.append([Kit.cyl(0.0055, 0.0055, run.length(), 16), Transform3D(Basis(Quaternion(Vector3.UP, run.normalized())), foot + run * 0.5), none])
-		var along: Vector3 = inv.basis * (header_at(w + 0.01) - header_at(w - 0.01)).normalized()
-		clamps.append([Finish.washer(RAIL_R - 0.002, RAIL_R + 0.006, 0.016, 28), Transform3D(Basis(Quaternion(Vector3.UP, along)), on_rail), none])
-	_part(pod, "Housing", body, paint)
-	_part(pod, "Clamps", clamps, paint)
-	# the controls' fixed metal goes in with the screws: one mesh for a pod's bare metal
-	for control: String in CONTROLS:
-		var c: Array = CONTROLS[control]
-		if c[0] != side:
-			continue
-		var x: float = c[1]
-		if control == "start":
-			metal.append([Finish.washer(0.0245, 0.0312, 0.0085, 56), Kit.at(Vector3(x, 0, 0.00425), turn), Color(0.72, 0.75, 0.8)])
-			metal.append([Finish.washer(0.0305, 0.0336, 0.003, 56), Kit.at(Vector3(x, 0, 0.0015), turn), Color(0.4, 0.42, 0.46)])
-		else:
-			metal.append([Finish.washer(0.0058, 0.0115, 0.003, 28), Kit.at(Vector3(x, 0, 0.003), turn), Color(0.55, 0.58, 0.63)])
-			metal.append([Finish.washer(0.0047, 0.0088, 0.0045, 6), Kit.at(Vector3(x, 0, 0.0058), turn), Color(0.78, 0.81, 0.85)])
-	_part(pod, "Hardware", metal, steel)
-
-
-## A bat-handle toggle (a broad paddle for the brake): a collar and a nut on the face, the handle on
-## a pivot that swings about x.
-func _toggle(pod: Node3D, control: String, x: float, paddle: bool) -> void:
-	var turn := Vector3(PI / 2.0, 0, 0)
+## A toggle's handle (a bat, or the brake's paddle) on a pivot that swings about x. Its lock ring,
+## nut and bushing are the pod's.
+func _toggle(pod: Node3D, control: String, x: float, mesh: String) -> void:
 	var lever := Node3D.new()
 	lever.name = control + "_lever"
 	lever.position = Vector3(x, 0, 0.006)
 	pod.add_child(lever)
-	var handle := [[Kit.cyl(0.0036, 0.0048, 0.026, 24), Kit.at(Vector3(0, 0, 0.013), turn), Color(0.74, 0.77, 0.82)]]
-	if paddle:
-		handle.append([Kit.rounded_box(Vector3(0.025, 0.0075, 0.017), 4.0, 12), Kit.at(Vector3(0, 0, 0.0345)), Color(1.0, 0.8, 0.1)])
-	else:
-		handle.append([Kit.cyl(0.0066, 0.004, 0.015, 24), Kit.at(Vector3(0, 0, 0.0335), turn), Color(0.93, 0.94, 0.96)])
-	_part(lever, "handle", handle, steel)
+	_part(lever, "handle", mesh)
 	levers[control] = lever
 	swings[control] = THROW_ANGLE
 
 
-## The guard over the engine switch: a red cage hinged along its top edge, over the handle, with a
-## window in its front (the switch is seen through it) and a lip at its foot to lift it by.
-func _build_guard(pod: Node3D, x: float) -> void:
-	guard = Node3D.new()
-	guard.name = "guard"
-	guard.position = Vector3(x, 0.026, 0.005)
-	pod.add_child(guard)
-	var none := Color(0.93, 0.1, 0.05)
-	var deep := 0.046
-	var tall := 0.054
-	var wide := 0.0342
-	var wall := 0.0026
-	var cage := [
-		[Kit.box(Vector3(wide, wall, deep)), Kit.at(Vector3(0, -tall + wall * 0.5, deep * 0.5)), none],                 # the foot
-		[Kit.box(Vector3(wide, 0.009, wall)), Kit.at(Vector3(0, -0.0045, deep - wall * 0.5)), none],                    # the front: its top bar ...
-		[Kit.box(Vector3(wide, 0.013, wall)), Kit.at(Vector3(0, -tall + 0.0065, deep - wall * 0.5)), none],             # ... its bottom bar
-		[Kit.box(Vector3(0.017, wall, 0.005)), Kit.at(Vector3(0, -tall + wall * 0.5, deep + 0.0025)), none]]            # the lip
-	for sx in [-1.0, 1.0]:
-		cage.append([Kit.box(Vector3(wall, tall, deep)), Kit.at(Vector3(sx * (wide - wall) * 0.5, -tall * 0.5, deep * 0.5)), none])          # a cheek
-		cage.append([Kit.box(Vector3(0.0075, tall, wall)), Kit.at(Vector3(sx * (wide - 0.0075) * 0.5, -tall * 0.5, deep - wall * 0.5)), none])   # a front rail
-	cage.append([Kit.cyl(0.003, 0.003, wide + 0.006, 14), Kit.at(Vector3.ZERO, Vector3(0, 0, PI / 2.0)), Color(0.62, 0.65, 0.7)])   # the hinge pin
-	_part(guard, "cage", cage, paint)
-
-
-## The start button: a machined bezel, the ring of lights inside it, and a broad red cap that goes in.
+## The start button: the ring of lights in the bezel's throat, and the cap that goes in.
 func _build_button(pod: Node3D, x: float) -> void:
-	var turn := Vector3(PI / 2.0, 0, 0)
-	var none := Color(0.86, 0.06, 0.04)
 	# the ring: a flat band between the cap and the bezel, u once round it clockwise from the top
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
@@ -272,47 +239,39 @@ func _build_button(pod: Node3D, x: float) -> void:
 	button.name = "start_button"
 	button.position = Vector3(x, 0, 0)
 	pod.add_child(button)
-	_part(button, "cap", [
-		[Kit.cyl(BUTTON_R - 0.0016, BUTTON_R, 0.004, 56), Kit.at(Vector3(0, 0, 0.0105), turn), none],
-		[Kit.cyl(BUTTON_R, BUTTON_R, 0.0085, 56), Kit.at(Vector3(0, 0, 0.00425), turn), none]], paint)
-	cap_label = Label3D.new()
-	cap_label.name = "cap_label"
-	cap_label.text = "START"
-	cap_label.font_size = 40
-	cap_label.pixel_size = 0.000225
-	cap_label.outline_size = 0
-	cap_label.shaded = false
-	cap_label.double_sided = false
-	cap_label.position = Vector3(0, 0, 0.0128)
-	button.add_child(cap_label)
+	_part(button, "cap", "Cap")
+	legends.append("START")
 
 
-func _lamp(pod: Node3D, mesh: Mesh, at: Vector3, rot := Vector3.ZERO) -> StandardMaterial3D:
+## A lamp's spill: its light on the bezel and the plate round its lens (the lens itself is the
+## finish's: lit through the fourth map). Added to what is there, so a dark lamp draws nothing.
+func _lamp(pod: Node3D, at: Vector3, size: Vector2) -> StandardMaterial3D:
+	if _halo == null:
+		var fade := Gradient.new()
+		fade.offsets = PackedFloat32Array([0.0, 0.3, 0.6, 1.0])
+		fade.colors = PackedColorArray([Color(1, 1, 1, 1), Color(1, 1, 1, 0.34), Color(1, 1, 1, 0.08), Color(1, 1, 1, 0)])
+		_halo = GradientTexture2D.new()
+		_halo.gradient = fade
+		_halo.fill = GradientTexture2D.FILL_RADIAL
+		_halo.fill_from = Vector2(0.5, 0.5)
+		_halo.fill_to = Vector2(1.0, 0.5)
+		_halo.width = 64
+		_halo.height = 64
 	var m := StandardMaterial3D.new()
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	m.albedo_texture = _halo
 	m.albedo_color = Color.BLACK
+	var quad := QuadMesh.new()
+	quad.size = size
 	var mi := MeshInstance3D.new()
 	mi.name = "lamp"
-	mi.mesh = mesh
+	mi.mesh = quad
 	mi.material_override = m
 	mi.position = at
-	mi.rotation = rot
 	pod.add_child(mi)
 	return m
-
-
-func _legend(pod: Node3D, at: Vector3, text: String) -> void:
-	var l := Label3D.new()
-	l.name = "legend_" + text.replace(" ", "")
-	l.text = text
-	l.font_size = 36
-	l.pixel_size = 0.00027
-	l.outline_size = 0
-	l.shaded = false            # printed white, and lit from behind once the battery is on
-	l.double_sided = false
-	l.position = at
-	pod.add_child(l)
-	legends.append(l)
 
 
 ## A controller's tip, in a pod's frame.
@@ -371,11 +330,17 @@ func show_state(seq, delta: float) -> void:
 	_press_t = maxf(0.0, _press_t - delta)
 	var power: float = seq.power if seq else 0.0
 	var snap := delta <= 0.0
-	# the flood lamp: where it is now (the cockpit turns), and how bright (daylight alone until the battery is on)
-	var lamp: Vector3 = (global_basis * _flood).normalized() if is_inside_tree() else _flood
-	for finish: ShaderMaterial in [paint, steel]:
-		finish.set_shader_parameter("light", lamp)
-		finish.set_shader_parameter("glow", lerpf(GLOW.x, GLOW.y, power))
+	# the flood lamp: where it is now (the cockpit turns), and how bright (daylight alone until the battery is on);
+	# the legends are lit from behind with it
+	var turned := global_basis if is_inside_tree() else Basis.IDENTITY
+	paint.set_shader_parameter("light", (turned * _flood).normalized())
+	paint.set_shader_parameter("ahead", (turned * Vector3(0.0, 0.3, -0.95)).normalized())
+	paint.set_shader_parameter("overhead", (turned * Vector3.UP).normalized())
+	if is_inside_tree():
+		paint.set_shader_parameter("lamp_left", (pods[-1.0] as Node3D).global_transform * FLOOD_AT)
+		paint.set_shader_parameter("lamp_right", (pods[1.0] as Node3D).global_transform * FLOOD_AT)
+	paint.set_shader_parameter("glow", lerpf(GLOW.x * lerpf(1.0, NIGHT, Outlook.darkness()), GLOW.y, power))
+	paint.set_shader_parameter("backlight", BACKLIGHT * power)
 	var on := {"batt": seq.batt if seq else false, "engine": seq.master if seq else false, "park": seq.park if seq else true}
 	for control: String in levers:
 		swings[control] = lerpf(swings[control], -THROW_ANGLE if on[control] else THROW_ANGLE, 1.0 if snap else 1.0 - exp(-delta * 22.0))
@@ -415,12 +380,9 @@ func show_state(seq, delta: float) -> void:
 	if on.park:
 		park = AMBER * ((0.3 + 1.9 * breath) if next == "park" else 1.5)
 	_light("park", park * power)
-	var ink := LEGEND * lerpf(0.55, 1.2, power)
-	for l in legends:
-		l.modulate = Color(ink.r, ink.g, ink.b, 1.0)
-	var cap := Color(1.0, 0.97, 0.9) * lerpf(0.7, 1.25, power)
-	cap_label.modulate = Color(cap.r, cap.g, cap.b, 1.0)
 
 
+## A lamp's light: its lens (the finish's), and its spill.
 func _light(lamp: String, colour: Color) -> void:
-	(lamps[lamp] as StandardMaterial3D).albedo_color = Color(colour.r, colour.g, colour.b, 1.0)
+	paint.set_shader_parameter("lamp_" + lamp, Vector3(colour.r, colour.g, colour.b))
+	(lamps[lamp] as StandardMaterial3D).albedo_color = Color(colour.r * HALO, colour.g * HALO, colour.b * HALO, 1.0)

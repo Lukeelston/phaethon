@@ -307,6 +307,32 @@ func _gain(k: int, layer: String) -> float:
 	return best
 
 
+## The panel's fourth map as pixels: red is the paint that is lit from behind.
+func _lit_map() -> Image:
+	var image: Image = (Overhead.art().maps.glow as Texture2D).get_image()
+	if image == null or image.is_empty():
+		image = Image.load_from_file(ProjectSettings.globalize_path("res://art/cockpit/start_panel_hd_StartPanelHD_Glow.png"))
+	if image and image.is_compressed():
+		image.decompress()
+	return image
+
+
+## How much of a box on a pod's faceplate (its middle and half its size, pod metres) is lit paint.
+func _painted(image: Image, side: float, at: Vector2, half: Vector2) -> float:
+	if image == null:
+		return -1.0
+	var size := Vector2(image.get_size())
+	var from: Vector2 = Overhead.plate_uv(side, at + Vector2(-half.x, half.y)) * size
+	var to: Vector2 = Overhead.plate_uv(side, at + Vector2(half.x, -half.y)) * size
+	var hits := 0
+	var texels := 0
+	for py in range(int(from.y), int(to.y)):
+		for px in range(int(from.x), int(to.x)):
+			texels += 1
+			hits += int(image.get_pixel(px, py).r > 0.5)
+	return float(hits) / maxf(1.0, float(texels))
+
+
 func _cockpit() -> Node:
 	var c = Cockpit.new()
 	root.add_child(c)
@@ -336,11 +362,48 @@ func _panel() -> void:
 				var d := corner - eye
 				lowest = minf(lowest, rad_to_deg(atan2(d.y, Vector2(d.x, d.z).length())))
 	_check("read from the seat left to right they are 1 BATT, 2 ENGINE, 3 START, 4 PARK (x %s)" % [order], order[0] < order[1] and order[1] < 0.0 and 0.0 < order[2] and order[2] < order[3])
-	var words := []
-	for l: Label3D in p.legends:
-		words.append(l.text)
+	var words: Array = p.legends.duplicate()
 	words.sort()
-	_check("each legend carries its number, printed: %s" % [words], words == ["1  BATT", "2  ENGINE", "3  START", "4  PARK"])
+	_check("each legend carries its number, and the button's cap says START again: %s" % [words], words == ["1  BATT", "2  ENGINE", "3  START", "4  PARK", "START"])
+	# ... and is there to be read with the battery dead: cut into the faceplate, in its box under its control
+	var art: Dictionary = Overhead.art()
+	var named := ["PodL", "PodR", "ClampsL", "ClampsR", "Bat", "Paddle", "Guard", "Cap"]
+	var found := 0
+	var triangles := 0
+	for part: String in named:
+		if art.meshes.has(part):
+			found += 1
+			triangles += (art.meshes[part] as Mesh).get_faces().size() / 3
+	_check("the panel is authored: %d of its %d meshes (%d triangles) and its four maps" % [found, named.size(), triangles],
+		found == named.size() and triangles > 8000 and triangles < 30000 and art.maps.base != null and art.maps.normal != null and art.maps.orm != null and art.maps.glow != null)
+	var lit := _lit_map()
+	var cut := []
+	var engraved := lit != null
+	for control: String in Overhead.CONTROLS:
+		var c: Array = Overhead.CONTROLS[control]
+		var share := _painted(lit, c[0], Vector2(c[1], Overhead.LEGEND_Y), Overhead.LEGEND_BOX)
+		cut.append(share)
+		engraved = engraved and share > 0.06 and share < 0.5
+	var between := maxf(_painted(lit, -1.0, Vector2(-0.002, Overhead.LEGEND_Y), Vector2(0.003, Overhead.LEGEND_BOX.y)),
+		_painted(lit, 1.0, Vector2(0.0035, Overhead.LEGEND_Y), Vector2(0.003, Overhead.LEGEND_BOX.y)))
+	_check("each legend is engraved and filled where the panel says it is (lit paint over %s of its box), with bare plate between two of them (%.3f)" % [cut, between], engraved and between < 0.01)
+	# the parts that move are their own, each about its own pivot
+	var own: bool = (p.levers.batt.get_node("handle") as MeshInstance3D).mesh == art.meshes.Bat and (p.levers.engine.get_node("handle") as MeshInstance3D).mesh == art.meshes.Bat \
+		and (p.levers.park.get_node("handle") as MeshInstance3D).mesh == art.meshes.Paddle and (p.guard.get_node("cage") as MeshInstance3D).mesh == art.meshes.Guard \
+		and (p.button.get_node("cap") as MeshInstance3D).mesh == art.meshes.Cap
+	var probe = Sequence.new()
+	probe.cold()
+	p.show_state(probe, 0.0)
+	var tip_off: Vector3 = (p.levers.batt as Node3D).transform * Vector3(0, 0, 0.043)
+	var lip_shut: Vector3 = (p.guard as Node3D).transform * Vector3(0, -0.054, 0.05)
+	probe.flick("batt", 1)
+	probe.flick("engine", 1)
+	p.show_state(probe, 0.0)
+	var tip_on: Vector3 = (p.levers.batt as Node3D).transform * Vector3(0, 0, 0.043)
+	var lip_up: Vector3 = (p.guard as Node3D).transform * Vector3(0, -0.054, 0.05)
+	p.show_state(v.startup, 0.0)
+	_check("the bat handles, the paddle, the guard and the cap are their own parts: thrown, a bat's tip rises %.0f mm; lifted, the guard's lip swings %.0f mm up its face, to %.0f mm over its hinge" % [(tip_on.y - tip_off.y) * 1000.0, (lip_up.y - lip_shut.y) * 1000.0, (lip_up.y - (p.guard as Node3D).position.y) * 1000.0],
+		own and tip_on.y - tip_off.y > 0.03 and lip_up.y - lip_shut.y > 0.04 and lip_up.y > (p.guard as Node3D).position.y)
 	_check("each is an arm's reach from the seated eye (%.2f to %.2f m)" % [reach.min(), reach.max()], reach.min() > 0.3 and reach.max() < 0.62)
 	_check("each pod is turned to the seated eye (within %.0f degrees of square)" % rad_to_deg(acos(clampf(faces, -1.0, 1.0))), faces > cos(deg_to_rad(10.0)))
 	var image_top := rad_to_deg(Projector.IMAGE_ELEVATION + Projector.IMAGE_WIDTH * Projector.SIZE.y / Projector.SIZE.x * 0.5)
@@ -366,7 +429,7 @@ func _panel() -> void:
 			continue                             # the clamps go up to the rail and round it: that is what they are
 		var to_canopy: Transform3D = v.canopy.global_transform.affine_inverse() * part.global_transform
 		var points: PackedVector3Array = part.mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
-		for k in range(0, points.size(), 3):
+		for k in range(0, points.size(), maxi(3, points.size() / 120)):       # (an authored part has thousands of points: a hundred or so of each)
 			var q := to_canopy * points[k]
 			var nearest := INF
 			var side := 0.0
@@ -382,7 +445,7 @@ func _panel() -> void:
 	var outside := 0
 	for node in p.find_children("*", "GeometryInstance3D", true, false):
 		outside += int(node.is_in_group("exterior"))
-	_check("its %d parts are the roof's, not the hull's fittings" % outside, outside == p.find_children("*", "GeometryInstance3D", true, false).size() and outside > 20)
+	_check("its %d parts are the roof's, not the hull's fittings" % outside, outside == p.find_children("*", "GeometryInstance3D", true, false).size() and outside >= 14)
 
 
 func _run() -> void:
