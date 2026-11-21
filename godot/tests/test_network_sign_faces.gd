@@ -5,6 +5,7 @@ extends SceneTree
 const World := preload("res://view/network_world.gd")
 const Sim := preload("res://sim/craft_sim.gd")
 var failures := 0
+var steep := 0          # boards met on a deck steep enough to lean them (Helios's face)
 var checks := 0
 var examples := {}
 var kinds := {}
@@ -43,8 +44,13 @@ func _run() -> void:
 				check("reverse terminal spec reuses its peer",node.get_child_count()==previous)
 				continue
 			var holder := node.get_child(-1) as Node3D
+			# (a board stands along the deck's own up: straight up everywhere but Helios's face, where it is
+			# the deck's normal, and there it faces the approach along the deck)
+			var up: Vector3 = world._deck_up(key.x,road,i)
 			var outward := Vector3(-road.tx[i],0,road.ty[i])*float(spec[1])
-			_check_faces(holder,spec,outward)
+			outward = (outward-up*outward.dot(up)).normalized()
+			steep += int(up.dot(Vector3.UP)<0.99)
+			_check_faces(holder,spec,outward,up)
 			kinds[spec[2]] = true
 			if spec[2]=="terminal": terminals += 1
 			if spec[2] in ["jump","fork"] and not examples.has(spec[2]):
@@ -78,10 +84,11 @@ func _run() -> void:
 	if DisplayServer.get_name()!="headless":
 		await _render_arrows()
 	for board: Node in examples.values(): board.free()
+	check("some boards stand on a deck steep enough to lean them, and stand square to it (%d)" % steep,steep>=2)
 	print("NETWORK SIGN FACES %s (%d checks, %d paired gantries, %d failures)" % ["PASS" if failures==0 else "FAIL",checks,paired,failures])
 	quit(int(failures>0))
 
-func _check_faces(holder: Node3D,spec: Array,outward: Vector3) -> void:
+func _check_faces(holder: Node3D,spec: Array,outward: Vector3,up: Vector3) -> void:
 	var kind := str(spec[2])
 	var info: Dictionary = spec[4]
 	for reverse in [false,true]:
@@ -89,7 +96,7 @@ func _check_faces(holder: Node3D,spec: Array,outward: Vector3) -> void:
 		var panel: MeshInstance3D = root_face.get_node("LegendPanel")
 		var normal := root_face.global_basis.z
 		var mat: ShaderMaterial = panel.material_override
-		check("panel faces approach upright",normal.dot(-outward if reverse else outward)>0.99 and root_face.global_basis.y.dot(Vector3.UP)>0.99)
+		check("panel faces approach upright",normal.dot(-outward if reverse else outward)>0.99 and root_face.global_basis.y.dot(up)>0.99)
 		var labels := root_face.find_children("*","Label3D",true,false)
 		var words := []
 		for label: Label3D in labels:
