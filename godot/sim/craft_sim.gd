@@ -39,6 +39,11 @@ const DEFAULTS := {
 	"heatThrottle": 0.15, "heatBurner": 0.12, "heatRamjet": 0.35, "coolBase": 0.05, "coolSpeed": 0.10,
 	"batteryDrain": 0.08, "batteryCharge": 0.05, "repairRate": 0.12, "damagePerMs": 0.012,
 	"limits": false,   # battery and heat: off (Luke: "turn off battery and heat, let it be crazy"): the burner never runs dry, engines never heat up
+	# the boost (inp.boost: the ramjet ARM button held; inp.surge: a power-up's gift): thrust times
+	# boostMult a stage, on top of whatever is lit (1.3: the step the ramjet is over the burner,
+	# 1.9 / 1.45). With `limits` on the held one drains the battery at boostDrain a second (five
+	# seconds from full) and each stage heats the engines by boostHeat a second. Mirrors sim-core.js.
+	"boostMult": 1.3, "boostDrain": 0.2, "boostHeat": 0.1,
 	"rideH": 1.5, "hoverOmega": 9.0, "hoverZeta": 0.9,
 	"binderKz": 3.0e6, "binderCz": 60000.0, "towKz": 2.0e5, "towCz": 16000.0,
 	"track": "circuit", "startX": 0.0, "startY": 0.0, "handling": "speed",
@@ -684,6 +689,7 @@ const CORK_EASE := 0.15   # each corkscrew's roll rate ramps up and down over th
 var battery := 1.0
 var armed := false
 var mode := "normal"
+var boost := 0            # the boost's stages this step: the held one, a power-up's surge (0, 1 or 2)
 # Live handling switch, mirroring sim-core.js: inp.handling asks for "speed" or "starfighter";
 # STARFIGHTER only engages below P.sfEngageV, then the handling keys blend over P.modeBlendT s.
 var hwant := "speed"
@@ -800,6 +806,30 @@ func set_handling(name: String) -> void:
 	P.merge(_overrides, true)
 	hwant = name
 	hblend = 1.0 if name == "starfighter" else 0.0
+
+
+## The consumables, switched where the craft is (Godot only, as set_handling: the cockpit's
+## OPTIONS page): the battery the burner and the boost spend, and the engines' heat. Off, the
+## flight is the one it has been since they were turned off; switched either way the battery is
+## full, the engines cool and alight.
+func set_limits(on: bool) -> void:
+	_overrides["limits"] = on
+	P.limits = on
+	battery = 1.0
+	for e in [eL, eR]:
+		e.heat = 0.3 if on else 0.0
+		e.flameout = false
+
+
+## The boost's thrust multiplier this step, and its stages in `boost`; with the limits on the held
+## stage spends the battery (and is dead without any). Mirrors sim-core.js.
+func _boost(inp: Dictionary, repair: bool, dt: float) -> float:
+	var held: bool = bool(inp.get("boost", false)) and not repair and (battery > 0.0 or not P.limits)
+	var surge: bool = bool(inp.get("surge", false)) and not repair
+	boost = (1 if held else 0) + (1 if surge else 0)
+	if held and P.limits:
+		battery = maxf(0.0, battery - P.boostDrain * dt)
+	return pow(P.boostMult, boost) if boost > 0 else 1.0
 
 
 func _build_range() -> void:
@@ -2247,8 +2277,14 @@ func step(inp: Dictionary, dt: float) -> void:
 	mode = "ramjet" if ramjet else ("burner" if burner else "normal")
 	if burner and P.limits:
 		battery = maxf(0.0, battery - P.batteryDrain * dt)
-	elif not in_gate:
+	elif not in_gate and not bool(inp.get("boost", false)):   # (no charging under a held boost: a flat battery stays flat until it is let go)
 		battery = minf(1.0, battery + P.batteryCharge * dt)
+	# the boost: the held one wants charge in the battery when the limits are on, and spends it;
+	# a surge is a gift. Neither asked for (the replays, every flight before them): nothing here runs.
+	var boost_mult := 1.0
+	boost = 0
+	if inp.has("boost") or inp.has("surge"):
+		boost_mult = _boost(inp, repair, dt)
 	var speed := sqrt(Pd.vx * Pd.vx + Pd.vy * Pd.vy)
 
 	var gm: float = float(inp.get("thrMul", 1.0))   # the gearbox's pull (its ratio, at its revs; 1 without one)
@@ -2262,6 +2298,8 @@ func step(inp: Dictionary, dt: float) -> void:
 		# Thus dv/dt ~ exp(-v/scale), giving logarithmic speed growth rather than
 		# a terminal speed. Only baseline drag changes: brake drag stays intact.
 		var drive_mult: float = P.ramjetMult if ramjet else (P.burnerMult if burner else 1.0)
+		if boost > 0:   # (the drag fourth is shaped to follows the boost up: more speed, still no runaway)
+			drive_mult *= boost_mult
 		var nominal_thrust: float = 2.0 * P.thrustMax * (0.87 / P.gate) * drive_mult * gm
 		var total_cd: float = (2.0 * P.engineCd + P.podCd) * line
 		var reference_speed := sqrt(maxf(1.0, nominal_thrust / total_cd))
@@ -2277,6 +2315,8 @@ func step(inp: Dictionary, dt: float) -> void:
 		var gain := 0.0
 		if not e.flameout and P.limits:
 			gain = maxf(0.0, thr - 0.6) * P.heatThrottle + (P.heatBurner if burner else 0.0) + (P.heatRamjet if ramjet else 0.0)
+			if boost > 0:
+				gain += P.boostHeat * boost
 		var cool: float = P.coolBase + P.coolSpeed * minf(1.5, speed / 200.0) + (0.15 if e.flameout else 0.0)
 		e.heat = clampf(e.heat + (gain - cool) * dt, 0.0, 1.25)
 		if e.heat >= 1.0 and not e.flameout:
@@ -2294,6 +2334,8 @@ func step(inp: Dictionary, dt: float) -> void:
 		if repair:
 			lever = minf(lever, 0.6)
 		var mult: float = P.ramjetMult if ramjet else (P.burnerMult if burner else 1.0)
+		if boost > 0:
+			mult *= boost_mult
 		var thrust: float = 0.0 if e.flameout else P.thrustMax * lever * mult * (0.45 + 0.55 * e.health) * e.sputter
 		e.thrust = thrust / P.thrustMax
 		e.fx += thrust * P.forceScale * gm * c

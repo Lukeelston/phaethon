@@ -41,6 +41,11 @@
     heatThrottle: 0.15, heatBurner: 0.12, heatRamjet: 0.35, coolBase: 0.05, coolSpeed: 0.10,
     batteryDrain: 0.08, batteryCharge: 0.05, repairRate: 0.12, damagePerMs: 0.012,
     limits: false,   // battery and heat: off (Luke, 2026-10-18: "turn off battery and heat, let it be crazy"): the burner never runs dry, engines never heat up
+    // the boost (inp.boost: the ramjet ARM button held; inp.surge: a power-up's gift): thrust times
+    // boostMult a stage, on top of whatever is lit (1.3: the step the ramjet is over the burner,
+    // 1.9 / 1.45). With `limits` on the held one drains the battery at boostDrain a second (five
+    // seconds from full) and each stage heats the engines by boostHeat a second. Mirrors craft_sim.gd.
+    boostMult: 1.3, boostDrain: 0.2, boostHeat: 0.1,
     rideH: 1.5, hoverOmega: 9, hoverZeta: 0.9,
     binderKz: 3e6, binderCz: 60000, towKz: 2e5, towCz: 16000,
     track: 'circuit', startX: 0, startY: 0, handling: 'speed',
@@ -859,7 +864,7 @@
     const S = {
       P, T, eL: body(P.engineMass, eI), eR: body(P.engineMass, eI), pod: body(P.podMass, pI),
       hwant: hname, hblend: hname === 'starfighter' ? 1 : 0,
-      battery: 1, armed: false, mode: 'normal', binderBroken: false, crashT: 0, time: 0, towU: -1, towSwing: 0,
+      battery: 1, armed: false, mode: 'normal', boost: 0, binderBroken: false, crashT: 0, time: 0, towU: -1, towSwing: 0,
       lap: 0, lapStart: null, lastLap: null, bestLap: null, visited: new Set(), checkpoint: 0,
       progressI: 0, cables: [{ f: 0 }, { f: 0 }], events: [], rand: xorshift32(P.seed),
       runStart: null, lastRun: null, bestRun: null, finished: false, runActive: false, result: null,
@@ -1312,7 +1317,18 @@
       const burner = !ramjet && inGate && S.battery > 0;
       S.mode = ramjet ? 'ramjet' : burner ? 'burner' : 'normal';
       if (burner && P.limits) S.battery = Math.max(0, S.battery - P.batteryDrain * dt);
-      else if (!inGate) S.battery = Math.min(1, S.battery + P.batteryCharge * dt);
+      else if (!inGate && !inp.boost) S.battery = Math.min(1, S.battery + P.batteryCharge * dt);   // (no charging under a held boost: a flat battery stays flat until it is let go)
+      // The boost: the held one wants charge in the battery when the limits are on, and spends it;
+      // a surge is a gift. Neither asked for (the replays, every flight before them): nothing here runs.
+      let boostMult = 1;
+      S.boost = 0;
+      if (inp.boost !== undefined || inp.surge !== undefined) {
+        const held = !!inp.boost && !inp.repair && (S.battery > 0 || !P.limits);
+        const surge = !!inp.surge && !inp.repair;
+        S.boost = (held ? 1 : 0) + (surge ? 1 : 0);
+        if (held && P.limits) S.battery = Math.max(0, S.battery - P.boostDrain * dt);
+        if (S.boost > 0) boostMult = P.boostMult ** S.boost;
+      }
       const speed = Math.hypot(Pd.vx, Pd.vy);
 
       const gm = inp.thrMul ?? 1;   // the gearbox's pull (its ratio, at its revs; 1 without one)
@@ -1323,7 +1339,8 @@
       if (inp.gearOverdrive) {
         // Fourth's baseline drag approaches full-throttle thrust, giving logarithmic
         // speed growth without a terminal speed. Brake drag remains fully effective.
-        const driveMult = ramjet ? P.ramjetMult : burner ? P.burnerMult : 1;
+        let driveMult = ramjet ? P.ramjetMult : burner ? P.burnerMult : 1;
+        if (S.boost > 0) driveMult *= boostMult;   // (the drag fourth is shaped to follows the boost up: more speed, still no runaway)
         const nominalThrust = 2 * P.thrustMax * (0.87 / P.gate) * driveMult * gm;
         const totalCd = (2 * P.engineCd + P.podCd) * line;
         const referenceSpeed = Math.sqrt(Math.max(1, nominalThrust / totalCd));
@@ -1333,7 +1350,8 @@
       }
       for (const [e, thr, brk] of [[L, inp.thrL, inp.brkL], [R, inp.thrR, inp.brkR]]) {
         const c = Math.cos(e.th), s = Math.sin(e.th);
-        const gain = e.flameout || !P.limits ? 0 : Math.max(0, thr - 0.6) * P.heatThrottle + (burner ? P.heatBurner : 0) + (ramjet ? P.heatRamjet : 0);
+        let gain = e.flameout || !P.limits ? 0 : Math.max(0, thr - 0.6) * P.heatThrottle + (burner ? P.heatBurner : 0) + (ramjet ? P.heatRamjet : 0);
+        if (S.boost > 0 && !e.flameout && P.limits) gain += P.boostHeat * S.boost;
         const cool = P.coolBase + P.coolSpeed * Math.min(1.5, speed / 200) + (e.flameout ? 0.15 : 0);
         e.heat = clamp(e.heat + (gain - cool) * dt, 0, 1.25);
         if (e.heat >= 1 && !e.flameout) { e.flameout = true; S.events.push({ type: 'flameout', who: e === L ? 'L' : 'R' }); }
@@ -1343,7 +1361,8 @@
         if (e.sputterT <= 0) { e.sputterT = 0.15; e.sputter = S.rand() < (0.5 - e.health) * 1.2 ? 0.3 : 1; }
         let lever = Math.min(thr, P.gate) / P.gate;
         if (inp.repair) lever = Math.min(lever, 0.6);
-        const mult = ramjet ? P.ramjetMult : burner ? P.burnerMult : 1;
+        let mult = ramjet ? P.ramjetMult : burner ? P.burnerMult : 1;
+        if (S.boost > 0) mult *= boostMult;
         const thrust = e.flameout ? 0 : P.thrustMax * lever * mult * (0.45 + 0.55 * e.health) * e.sputter;
         e.thrust = thrust / P.thrustMax;
         e.fx += thrust * P.forceScale * gm * c; e.fy += thrust * P.forceScale * gm * s;

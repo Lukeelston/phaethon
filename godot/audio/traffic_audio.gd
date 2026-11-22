@@ -83,6 +83,8 @@ static func make_whoosh() -> AudioStreamWAV:
 
 
 func update(pod: Vector2, heading: Vector2, cars: Array, to_world: Callable, delta: float) -> void:
+	if not is_inside_tree() or is_queued_for_deletion() or _voices.is_empty():
+		return
 	var seen := {}
 	var where := {}
 	for c: Array in cars:
@@ -113,6 +115,14 @@ func update(pod: Vector2, heading: Vector2, cars: Array, to_world: Callable, del
 var _pod_speed := 0.0    # m/s along heading (set by the caller before update: set_speed)
 
 
+func _exit_tree() -> void:
+	for voice in _voices:
+		voice.stop()
+	_along.clear()
+	_follow.fill(-1)
+	_left.fill(0.0)
+
+
 func set_speed(v: float) -> void:
 	_pod_speed = v
 
@@ -122,8 +132,6 @@ func _play(id: int, c: Array, lat: float, dv: float, to_world: Callable) -> void
 	# louder the nearer and the harder the pass: full at 20 m and 600 m/s, down 18 dB at NEAR or 25 m/s
 	var db := -4.0 - 18.0 * clampf((lat - 20.0) / (NEAR - 20.0), 0.0, 1.0) - 12.0 * (1.0 - clampf(dv / 600.0, 0.0, 1.0))
 	last_db = db
-	if _voices.is_empty():
-		return
 	var k := 0
 	for q in _voices.size():   # a free voice, else the one nearest its end
 		if _left[q] <= 0.0:

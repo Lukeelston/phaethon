@@ -4,21 +4,23 @@ extends Node
 
 const View := preload("res://view/craft_view.gd")
 const Settings := preload("res://release/game_settings.gd")
+const UI := preload("res://release/release_config.gd")
 const MENU_SCENE := "res://release/menu.tscn"
-const COURSES := ["range", "gp", "eridanus", "emergency", "network", "carving", "network", "aurora"]
+const COURSES := ["range", "gp", "eridanus", "emergency", "network", "carving", "coast", "network", "drop", "aurora"]
 
 var failures := 0
 var checks := 0
 var evidence := ""
 var capture: AudioEffectCapture
-var _started_ms := 0
+var _case_started_ms := 0
+var _case_name := "launch"
 var _finished := false
 var _settings_existed := false
 var _settings_before := PackedByteArray()
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
-	_started_ms = Time.get_ticks_msec()
+	_case_started_ms = Time.get_ticks_msec()
 	evidence = OS.get_user_data_dir().path_join("release-verification")
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--evidence="):
@@ -26,8 +28,8 @@ func _ready() -> void:
 	_run.call_deferred()
 
 func _process(_delta: float) -> void:
-	if not _finished and Time.get_ticks_msec() - _started_ms > 120000:
-		check("verification finishes within 120 seconds", false)
+	if not _finished and Time.get_ticks_msec() - _case_started_ms > 120000:
+		check("%s finishes within 120 seconds" % _case_name, false)
 		_finish()
 
 func check(label: String, passed: bool) -> bool:
@@ -90,8 +92,11 @@ func _run() -> void:
 	capture.buffer_length = 3.0
 	AudioServer.add_bus_effect(0, capture)
 	var case_index := 0
-	for course in COURSES:
-		var track: String = "network" if course == "aurora" else course
+	var courses: Array = ["network"] if "--network-only" in OS.get_cmdline_user_args() else COURSES
+	for course in courses:
+		_case_started_ms = Time.get_ticks_msec()
+		_case_name = course
+		var track: String = "network" if UI.SPOTS.has(course) else course
 		var menu = get_tree().current_scene
 		var collisions := case_index % 2 == 1
 		var partner_enabled := case_index % 2 == 0
@@ -117,6 +122,8 @@ func _run() -> void:
 			_finish()
 			return
 		check(course + " scene loaded", view.sim.kind == track if track in ["range", "network"] else view.sim.track_name == ("eridanus" if course == "emergency" else course))
+		if UI.SPOTS.has(course):
+			check(course + " starts on its named road", view.sim.roads[view.sim.pod.path].name == UI.SPOTS[course])
 		if course == "aurora":
 			check("Aurora starts on the southwest pressure-lock approach", view.sim.pod.path == View.CraftSimScript.NET_PRESSURE[0]
 				and view.sim.pod.hint < View.CraftSimScript.NET_PRESSURE[1] and view.network_world.pressure_line.is_visible_in_tree())
@@ -130,6 +137,9 @@ func _run() -> void:
 		if course == "carving":
 			check("Carving starts in Speedcraft with race dressing", view.sim.P.handling == "speed" and view.gp_world != null and view.gp_world.corners.size()>10)
 		var start := Vector2(view.sim.pod.x, view.sim.pod.y)
+		if course == "network":
+			check("Network starts on a released roadside pad", view.pad != null and view.pad.released and view.pad.gate_open == 1.0 and absf(view.pad.home[3]) > 0.1)
+			await shot("network-start")
 		# Background window focus changes can clear a synthetic held key.
 		# Feed the intended hold each frame, as the VR diagnostic already does.
 		for frame in 150:
@@ -138,6 +148,10 @@ func _run() -> void:
 		key(KEY_E, false)
 		var position := Vector2(view.sim.pod.x, view.sim.pod.y)
 		check(course + " keyboard accelerates craft", position.distance_to(start) > 1.0 and view.inp.thrL > 0.0 and view.inp.thrR > 0.0)
+		if course == "network":
+			print("NETWORK_FLIGHT display=%s course=%s aircraft=%s distance_m=%.2f speed_mph=%.2f left=%.2f right=%.2f" % [
+				DisplayServer.get_name(), view.sim.kind, pilot_craft, position.distance_to(start),
+				view._kmh() / 1.609344, view.inp.thrL, view.inp.thrR])
 		await shot(course)
 		if course == "range":
 			var buffer := capture.get_buffer(capture.get_frames_available())
@@ -160,6 +174,21 @@ func _run() -> void:
 		check(course + " pause freezes skill tracking", view.skill_score.time == score_before)
 		check(course + " pause mutes output", AudioServer.is_bus_mute(0))
 		check(course + " pause shows current partner setting", overlay.partner_checkbox.button_pressed == partner_enabled)
+		if course == "network":
+			var before_camera: Vector3 = view.cam.position
+			var before_hull: Mesh = view.craft.pod.mesh
+			var before_hour: String = View.Outlook.time
+			var before_weather: String = View.Outlook.weather
+			overlay.find_child("Camera", true, false).pressed.emit()
+			overlay.find_child("Nose", true, false).pressed.emit()
+			overlay.find_child("Hour", true, false).pressed.emit()
+			overlay.find_child("Weather", true, false).pressed.emit()
+			check("Network pause moves the live chase camera", before_camera.distance_to(view.cam.position) > 1.0)
+			check("Network pause changes the actual hull", view.craft.pod.mesh != before_hull)
+			check("Network pause changes the current hour", View.Outlook.time != before_hour and View.Outlook.time == Settings.choice("time", View.Outlook.ids(View.Outlook.TIMES)))
+			check("Network pause changes the current weather", View.Outlook.weather != before_weather and View.Outlook.weather == Settings.choice("weather", View.Outlook.ids(View.Outlook.WEATHERS)))
+			check("Network pause applies the selected sky to this flight", View.Outlook._applied and View.Outlook._aloft_view == view.get_instance_id())
+			await shot("network-pause")
 		overlay.partner_checkbox.button_pressed = not partner_enabled
 		check(course + " pause toggles the actual partner", view.partner_on != partner_enabled and (view.partner != null) != partner_enabled and Settings.driving_partner_enabled() != partner_enabled)
 		overlay.partner_checkbox.button_pressed = partner_enabled
@@ -182,6 +211,8 @@ func _run() -> void:
 		check(course + " restart retains partner", view.partner_on == partner_enabled and (view.partner != null) == partner_enabled)
 		check(course + " restart starts a fresh skill run", view.skill_score.total == 0)
 		if course == "network":
+			check("Network restart restores the starting pad", view.pad != null and view.pad.released and view.pad.gate_open == 1.0)
+			check("Network restart retains chase camera", view.flat_camera == Settings.choice("flat_camera", ["far", "near"]))
 			check("Network traffic follows obstacle checkbox", view.traffic_net.collide == collisions)
 			for city in view.sim.cities:
 				if city.name == "DUNES":

@@ -181,18 +181,80 @@ def guard(at, seconds):
     return damp(pitch(cut("guard_zippo5", at, at + seconds, snap=True), 0.84), 0.16, 0.05)
 
 
-def starter(body_from, speed):
-    """An engine's starter: the solenoid's clack, 1.6 s of a real starter turning an engine that does not
-    fire, then the starter let go and spinning down (the recording's own ending)."""
-    crank = src("crank_wont")
-    t0 = onset(crank, 0.5, 0.1) - 0.004
-    first = fade(crank[int(t0 * RATE):int((t0 + 0.36) * RATE)].copy(), 0.002, 0.0)
-    body = crank[int(body_from * RATE):int((body_from + 1.33) * RATE)].copy()
-    turning = splice(first, body, 0.06)[:int(1.6 * RATE)]
-    down = fade(crank[int(9.32 * RATE):int(9.84 * RATE)].copy(), 0.0, 0.06)
-    whole = pitch(splice(turning, down, 0.05), speed)
+def ramp(y, r0, r1, seconds):
+    """A machine run up to speed, as a tape would be: played at r0 of its speed at first, reaching r1
+    after `seconds` and holding it (pitch and pace together)."""
+    up = signal.resample_poly(y, 4, 1)                       # (finer steps for the reading below)
+    n = int(len(y) / max(min(r0, r1), 0.05))
+    t = np.arange(n) / RATE
+    rate = r0 + (r1 - r0) * np.minimum(t / seconds, 1.0)
+    at = np.concatenate(([0.0], np.cumsum(rate)[:-1])) * 4.0
+    return np.interp(at[at < len(up) - 1], np.arange(len(up)), up)
+
+
+# The staged start (Luke, after the seventeenth flight: "Replace the two V8 startup sounds with a staged
+# supercar style start - Brief pre-starter whine, then starter engage"). One sound an engine, played when
+# its start is asked for, laid out on the start-up's own clock (vr/startup_sequence.gd CRANK_S: the engine
+# catches 1.6 s after its starter's sound begins, and the catch is the next sound):
+#   0.00 .. PRIME_S   the electrics: an ignition's relays, a fuel pump priming, a small motor's whine running up
+#   PRIME_S .. 1.6    the starter thrown in (its solenoid, then a high-geared starter spinning a big engine,
+#                     the engine's own turning coming up under it)
+#   1.6 ..            the starter let go as the engine fires
+# engine_audio.gd keeps the engine's own voice still for the same PRIME_S (TUNE.start_prime_s).
+PRIME_S = 0.80
+CRANK_S = 1.6
+
+
+def staged_start(speed, whine_from, engage):
+    """One engine's start, to the catch. speed: this engine's machinery against the other's (a hair slower
+    is lower); whine_from: which stretch of the motor's whir it gets; engage: when its starter goes in."""
+    # the electrics: two relays and the fuel pump coming up behind them (a car's ignition switched on) ...
+    pump = src("prime_pump")
+    p0 = onset(pump, 0.10, 0.05) - 0.004
+    prime = fade(pump[int(p0 * RATE):int((p0 + CRANK_S + 0.1) * RATE)].copy(), 0.002, 0.25)
+    prime = full(butter(pitch(prime, speed), "highpass", 90.0))
+    # ... and the whine: a small electric motor run up to speed, its mains hum taken out, rising for half a
+    # second and held; it gives way as the starter loads the bus
+    whir = src("whir_dremel")
+    w0 = onset(whir, 0.08, 0.05) + whine_from
+    whine = butter(butter(whir[int(w0 * RATE):int((w0 + 1.4) * RATE)].copy(), "highpass", 480.0), "lowpass", 9000.0)
+    whine = ramp(whine, 0.56 * speed, 1.0 * speed, 0.5)[:int((engage + 0.22) * RATE)]
+    t = np.arange(len(whine)) / RATE
+    whine = full(whine * np.minimum(t / 0.3, 1.0) ** 1.5 * np.where(t < engage, 1.0, np.exp(-(t - engage) / 0.07)))
+    # the starter: its solenoid, then a V10's starter (bright, quick) kept clear of that engine's own lows,
+    # and lengthened by a repeat of its steady middle to reach the catch
+    m6 = src("start_m6")
+    s0 = onset(m6, 0.215, 0.05) - 0.004
+    span = CRANK_S - engage + 0.14
+    first = m6[int(s0 * RATE):int((s0 + 0.50) * RATE)].copy()
+    again = m6[int((s0 + 0.30) * RATE):int((s0 + 0.655) * RATE)].copy()
+    spin = butter(splice(fade(first, 0.002, 0.0), again, 0.06), "highpass", 320.0)
+    spin = pitch(spin, speed)
+    while len(spin) < int(span * RATE):                      # (a slower engine's is a little longer already)
+        spin = splice(spin, butter(pitch(again, speed), "highpass", 320.0), 0.06)
+    spin = full(limit(fade(spin[:int(span * RATE)], 0.002, 0.13), 5.0))
+    # the engine turning over under it: that recording's own compressions, coming up to the catch
+    turning = butter(m6[int((s0 + 0.17) * RATE):int((s0 + 0.66) * RATE)].copy(), "lowpass", 260.0)
+    turning = full(fade(pitch(turning, speed), 0.12, 0.05))
+    turn_at = CRANK_S + 0.03 - len(turning) / RATE
     clack = damp(butter(cut("solenoid_12v", 1.0, 1.1, snap=True), "highpass", 70.0), 0.03, 0.03)
-    return mix((clack, 0.0, 0.3), (full(limit(butter(whole, "highpass", 60.0), 7.0)), 0.025, 1.0))
+    # (at its top the whine sits 3 to 5 dB under the starter's own stretch, measured: a thing heard before it, not
+    # behind it. The starter going in is the tallest thing in it by 10 dB: held 6 dB down, so the rest can be heard.)
+    return limit(mix((prime, 0.0, 0.5), (whine, 0.03, 0.62), (clack, engage - 0.012, 0.3), (spin, engage, 1.0), (turning, turn_at, 0.4)), 6.0)
+
+
+def catch_flare():
+    """An engine firing: a Lamborghini's own first second and a half (it fires, flares and comes back toward
+    its idle), with a V10 lighting under it for the weight a phone leaves out; gone under the engine's own
+    voice by the end."""
+    lambo = src("start_lambo")
+    f0 = onset(lambo, 1.01, 0.06, db=-20.0) - 0.004
+    flare = swell(fade(lambo[int(f0 * RATE):int((f0 + 1.9) * RATE)].copy(), 0.002, 0.5), 0.003, 1.15, 0.5)
+    m6 = src("start_m6")
+    l0 = onset(m6, 0.215, 0.05) + 0.655
+    low = butter(m6[int(l0 * RATE):int((l0 + 1.5) * RATE)].copy(), "lowpass", 210.0)
+    low = swell(fade(low, 0.004, 0.3), 0.004, 0.55, 0.4)
+    return mix((full(flare), 0.0, 1.0), (full(low), 0.0, 0.5))
 
 
 def build():
@@ -224,12 +286,11 @@ def build():
     buzz = swell(cut("arc_tesla", 0.07, 1.45, fout=0.2), 0.02, 0.3, 0.3)
     hum = swell(cut("hum_60", 0.5, 1.95, fout=0.2), 0.12, 0.5, 0.3)
     out["arc"] = [mix((crackle, 0.0, 1.0), (buzz, 0.015, 0.4), (hum, 0.03, 0.4))]
-    # the starters: the same machine each side, a different stretch of it and a hair slower on the right
-    out["starter"] = [starter(2.2, 1.0), starter(5.1, 0.965)]
-    # an engine catching: a five-litre V8 firing up (its low end), and a truck's first bark (its top)
-    whump = swell(cut("start_50", 0.185, 1.75, fout=0.3), 0.004, 0.45, 0.4)
-    bark = swell(butter(cut("start_truck", 0.36, 1.5, fout=0.2), "highpass", 350.0), 0.01, 0.2, 0.28)
-    out["catch"] = [mix((whump, 0.0, 1.0), (bark, 0.01, 0.3))]
+    # the staged start: the same machinery each side, a hair slower (and so lower) on the right, its starter going
+    # in a moment later
+    out["starter"] = [staged_start(1.0, 0.0, PRIME_S), staged_start(0.965, 0.0, PRIME_S + 0.04)]
+    # ... and the engine catching: it fires, flares and settles
+    out["catch"] = [catch_flare()]
     # the parking brake: a heavy breaker's throw for the clamp, and air
     thunk = damp(pitch(cut("sw_breaker_kyles", 1.60, 2.0, snap=True), 0.8), 0.07, 0.07)
     puff = cut("air_pffft", 1.545, 1.67, fin=0.004, fout=0.04)
@@ -253,12 +314,16 @@ SOUNDS = {
     "power": [-8.5, 0.4, "power"], "down": [-15.0, 0.4, "down"], "avionics": [-31.0, 0.4, ("power", -16.0)],
     "chime": [-14.0, 0.4, "chime"],
     "pump": [-6.0, 0.4, ("arc", -6.0)], "arc": [-10.0, 0.4, "arc"],
-    # (the starter is 2 dB under a match with the old one, the catch 5 under: recorded in the game's own
-    # mix, a matched starter peaked at -1 dB with the engine coughing under it. The catch's weight is all
-    # below 500 Hz and the engine's voice is coming up under it. A refusal is 4 dB under a match: knocks,
-    # not tones. The WAVs' .import files are set to PCM (compress/mode=0), as the engines' are: the game
-    # reads their frames.)
-    "starter": [-8.5, 0.4, "starter"], "catch": [-8.5, 0.4, ("starter", 1.0)],
+    # (the old starter was 2 dB under a match with the synthesised one, the old catch 5 under: recorded in the
+    # game's own mix, a matched starter peaked at -1 dB with the engine coughing under it. The staged start
+    # that replaced them on 2026-11-22 was set against those two by the same measure: see the levels below
+    # and tools/audio_src/startup's CREDITS. A refusal is 4 dB under a match: knocks, not tones. The WAVs'
+    # .import files are set to PCM (compress/mode=0), as the engines' are: the game reads their frames.)
+    # (the staged start, set in the game's own mix against the start it replaced, both recorded with
+    # tests/record_startup.gd: its starter's stretch as loud as the old cranking was, -20.5 dB rms, which
+    # puts its whine 3 dB under that and 6 dB over the fans; its catch left as loud as the old catch, -18.8.
+    # The mix peaks at -5.9 dBFS through the start, where the old one peaked at -5.5.)
+    "starter": [-6.5, 0.4, "starter"], "catch": [-8.5, 0.4, ("starter", 1.0)],
     "clamp": [-6.0, 0.05, "clamp"], "release": [-7.5, 0.4, "release"],
     "refuse": [-4.0, 0.05, "refuse"],
 }

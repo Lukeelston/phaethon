@@ -64,8 +64,39 @@ func _run() -> void:
 	_check("passes: %d whooshes (want 2), at %s dB" % [ta.passes, dbs.values()], ta.passes == 2)
 	_check("follow: the voices at %s (their cars, a moment after their passes); the nearer, slower pass %s dB, the further, harder one %s dB" % [pos, dbs.get(1, -80.0), dbs.get(2, -80.0)],
 		pos.size() >= 1 and dbs.get(1, -80.0) > -30.0 and dbs.get(2, -80.0) > -30.0)
+	ta.free()
+	await _test_lifetime(to_world)
 	print("TRAFFIC AUDIO ", "PASS" if fails == 0 else "FAIL (%d failed)" % fails)
 	quit(0 if fails == 0 else 1)
+
+
+func _test_lifetime(to_world: Callable) -> void:
+	var ta := TA.new()
+	ta.setup()
+	ta.set_speed(1000.0)
+	var sample := func(x: float) -> void:
+		ta.update(Vector2.ZERO, Vector2.RIGHT, [[7, x, 30.0, 2.0, 800.0, 0.0]], to_world, 1.0 / 60.0)
+	var voice := ta._voices[0]
+	sample.call(20.0)
+	sample.call(-20.0)
+	_check("a pass before tree entry starts no voice", ta.passes == 0 and not voice.playing)
+	root.add_child(ta)
+	sample.call(-20.0)
+	sample.call(20.0)
+	_check("an attached voice starts on its car's crossing", ta.passes == 1 and voice.playing)
+	root.remove_child(ta)
+	sample.call(20.0)
+	root.add_child(ta)
+	sample.call(-20.0)
+	_check("reattachment drops the old crossing and voice", ta.passes == 1 and not voice.playing and ta._left[0] == 0.0)
+	sample.call(20.0)
+	_check("a new crossing plays after reattachment", ta.passes == 2 and voice.playing)
+	ta.queue_free()
+	sample.call(-20.0)
+	_check("a crossing during teardown starts no new pass", ta.passes == 2)
+	await ta.tree_exited
+	await process_frame
+	_check("freeing traffic audio frees its voices", not is_instance_valid(ta) and not is_instance_valid(voice))
 
 
 func _check(label: String, ok: bool) -> void:

@@ -5,17 +5,22 @@
 ## Every one is cut from a field recording (Luke, after the eleventh flight: the synthesised ones
 ## "sound like an 80's racing arcade box. Use real free assets if you must"): a metal switch, a
 ## hinged lid, a sprung button, a large relay, a server's fans, a motorcycle's fuel pump, a Tesla
-## coil, a car's starter turning an engine that will not fire, a five-litre V8 lighting, a breaker
-## and an air valve. tools/startup_audio_bake.py trims, layers and levels them into res://audio/startup;
-## its CREDITS.md lists each source (all CC0).
-## The engines' own voices (turning over, catching, idling) are still EngineAudio's, told by its
-## `off` and `crank`.
+## coil, a breaker and an air valve. tools/startup_audio_bake.py trims, layers and levels them into
+## res://audio/startup; its CREDITS.md lists each source (all CC0).
+## An engine's start is staged (Luke, after the seventeenth flight: "Replace the two V8 startup sounds
+## with a staged supercar style start - Brief pre-starter whine, then starter engage"). "starter" is
+## the whole of it up to the catch, on the sequence's own clock: 0.8 s of electrics (an ignition's
+## relays, a fuel pump priming, a small motor's whine running up), then the starter thrown in (a BMW
+## M6's, quick and high-geared) and the engine turning under it; "catch" is a Lamborghini firing,
+## flaring and settling, 1.6 s after the start was asked for. The right engine's are a hair lower.
+## The engines' own voices are still EngineAudio's, told by its `off` and `crank`: silent through the
+## whine and the starter, then straight up through idle with a flare of their own.
 ## A switch's sound comes from its pod when the panel is fitted (a 3D player there, panned by where
 ## the head is turned); the rest are the whole cockpit's, and a starter and a catch are their engine's.
 ## Unverified by ear: lengths, peaks and loudness are measured (each new sound was set as loud as
 ## the one it replaced), and that is all that can be said until a pilot has heard them.
 ##   add_child(a); a.setup(overhead.pods)      once, inside the tree ({} or nothing: no pods)
-##   a.play("toggle_on")                        a sound by name; play("starter", 1) for the right engine's
+##   a.play("toggle_on")                        a sound by name; play("starter", 1) for the right engine's start
 ##   a.hum(power, running, delta)               every frame: the fans, heard while the engines are dark
 class_name StartupAudio
 extends Node

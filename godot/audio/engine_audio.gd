@@ -60,7 +60,7 @@ const TUNE := {
 	"gear_rise": [0.55, 0.38, 0.27, 0.19, 0.13],   # maximum positive spool change per second
 	"bark_db": 3.0, "bark_s": 0.15,  # a quick stab barks: up to +3 dB, gone in 0.15 s
 	"crank": 0.3,                    # pistons bottom out at this fraction of idle RPM
-	"burner_spool": 0.15, "ramjet_spool": 0.3,
+	"burner_spool": 0.15, "ramjet_spool": 0.3, "boost_spool": 0.1,
 	# The V8 turns slower than it did (850-7,600): the same lever is a lower note, firing at 47 Hz
 	# at idle and 373 Hz flat out.
 	"v8_rpm": [700.0, 5600.0], "v12_rpm": [1100.0, 11800.0], "turbine_n": [0.25, 1.0],
@@ -109,6 +109,13 @@ const TUNE := {
 	"lp_hz": [700.0, 16000.0],       # bus low-pass, off-load (lifting) -> on-load (pulling)
 	"pan": 0.6,
 	"cough_s": 0.7,                  # after a reignite, combustion catches in fits for this long
+	# The start-up's staged start (Luke, after the seventeenth flight: "a staged supercar style start - Brief
+	# pre-starter whine, then starter engage"; the sounds themselves are audio/startup_audio.gd's, laid out by
+	# tools/startup_audio_bake.py on the same clock, its PRIME_S). For start_prime_s after its start is asked
+	# for an engine is on its electrics and does not turn. Then its starter spins it clean: no fits, it is not
+	# an old V8 that might not go. At the catch it comes straight up through idle (start_catch, a time
+	# constant) and flares start_flare of the way to full lever, back at idle start_flare_s later.
+	"start_prime_s": 0.80, "start_catch": 0.09, "start_flare": 0.24, "start_flare_s": 1.1,
 	# The second engine (sound only): lights above second_on_mph, dies below second_off_mph.
 	"second_on_mph": 1500.0, "second_off_mph": 1300.0,
 	"second_rpm": [600.0, 3800.0],   # low and slow: ~63 Hz doublets at full lever, the lope at half that
@@ -157,8 +164,9 @@ var anger := 1.0   # the V8's temper: what is left of the stage
 var _wind := 0.0   # the whine's wind-up, 0..1
 var second_on := false   # craft fast enough for the second engine (with hysteresis)
 # The start-up (vr/startup_sequence.gd), told by the cockpit. An engine that is `off` is silent
-# and winds down as a flamed-out one does; one that is on its starter (`crank`) turns over at
-# cranking speed and fires in fits; taken out of `off` it catches as a reignite does. `test_stage`
+# and winds down as a flamed-out one does; one whose start has been asked for (`crank`) waits out
+# the pre-starter whine, then turns over at cranking speed without firing; taken out of `off` it
+# catches clean and flares (TUNE.start_*: the staged start). `test_stage`
 # is the run-up's turbine test: that much of the second stage is in, whatever the airspeed.
 var off: Array[bool] = [false, false]
 var crank: Array[bool] = [false, false]
@@ -239,6 +247,7 @@ func setup(craft_sim) -> void:
 		add_child(pops2)
 		var v := {"bus": bus, "subs": subs, "spool": 0.0, "comb": 1.0, "fire": 1.0, "load": 0.5, "burn": 0.0,
 			"was_out": false, "cough_t": 0.0, "cough_k": 1.0, "cough_next": 0.0, "players": {}, "at": {},
+			"crank_t": 0.0, "was_held": false, "flare_t": 0.0,      # the start-up: seconds on the starter's button, and its catch's flare
 			"bang": bang, "sec": {"state": "off", "t": 0.0, "spool": -0.33, "vel": 0.0, "fire": 0.0, "cough_k": 0.0, "cough_next": 0.0},
 			"rotor_mph": 0.0, "rotor_p": 1.0, "sec_run": 0.0,
 			"spool_v": 0.0, "lever_prev": 0.0, "bark": 0.0, "alive": 1.0,
@@ -348,6 +357,7 @@ func update(inp: Dictionary, delta: float) -> void:
 	_t += dt
 	var gate: float = sim.P.gate
 	var boost: float = {"burner": TUNE.burner_spool, "ramjet": TUNE.ramjet_spool}.get(sim.mode, 0.0)
+	boost += TUNE.boost_spool * float(sim.boost)      # the held boost, a power-up's surge: the spool pushed past, the burner's rumble under it
 	var ceiling := 1.0
 	var rise_rate := INF
 	var gear := int(inp.get("gearIndex", -1))
@@ -390,12 +400,22 @@ func update(inp: Dictionary, delta: float) -> void:
 			rev_target = minf(rev_target, 0.6)
 		var running_target: float = rev_target * ceiling + boost
 		var held: bool = off[k]                      # the start-up: this engine is not running
-		var cranking: bool = held and crank[k]       # ... and is on its starter
+		var cranking: bool = held and crank[k]       # ... and its start has been asked for
+		v.crank_t = v.crank_t + dt if cranking else 0.0
+		var turning: bool = cranking and v.crank_t >= TUNE.start_prime_s   # (until then it is on its electrics: the pre-starter whine)
 		var out: bool = e.flameout or held
-		var target: float = (-0.15 if cranking else -0.33) if out else running_target
+		if v.was_held and not held and not e.flameout:   # the start-up's catch: up through idle at once, and a flare
+			v.flare_t = TUNE.start_flare_s
+		v.was_held = held
+		if v.flare_t > 0.0:
+			v.flare_t = maxf(0.0, v.flare_t - dt)
+			running_target = maxf(running_target, TUNE.start_flare * minf(1.0, v.flare_t / (0.7 * TUNE.start_flare_s)))
+		var target: float = (-0.15 if turning else -0.33) if out else running_target
 		if out or v.spool < 0.0:
 			# winding down from a flameout, turning over on the starter, or relighting from below idle: no flare
-			v.spool = _follow(v.spool, target, (0.3 if cranking else TUNE.windmill) if out else TUNE.relight, dt)
+			# (a start-up's catch is the one that does not hang about down there)
+			var tau: float = (0.3 if cranking else TUNE.windmill) if out else (TUNE.start_catch if v.flare_t > 0.0 else TUNE.relight)
+			v.spool = _follow(v.spool, target, tau, dt)
 			v.spool_v = 0.0
 		else:
 			_rev(v, "spool", "spool_v", target, dt, rise_rate)
@@ -407,13 +427,10 @@ func update(inp: Dictionary, delta: float) -> void:
 		# Combustion: off at a flameout, in fits for a moment after a reignite, and the sim's
 		# own sputter (a damaged engine misfiring) chops it on top.
 		if v.was_out and not out:
-			v.cough_t = TUNE.cough_s
+			v.cough_t = 0.0 if v.flare_t > 0.0 else TUNE.cough_s   # (a start-up's catch is clean; a relight in flight still comes in fits)
 		v.was_out = out
-		if cranking:                 # on the starter: it fires now and then, and does not catch
-			v.cough_next -= dt
-			if v.cough_next <= 0.0:
-				v.cough_next = randf_range(0.05, 0.14)
-				v.cough_k = 0.55 if randf() < 0.45 else 0.0
+		if cranking:                 # on its electrics, then on the starter: it turns and does not fire until it catches
+			v.cough_k = 0.0          # (it used to fire now and then all the way: an old V8 that might not go)
 		elif v.cough_t > 0.0:
 			v.cough_t -= dt
 			v.cough_next -= dt

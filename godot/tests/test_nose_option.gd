@@ -69,10 +69,14 @@ func _run() -> void:
 	var pods := _wearing(open)
 	_check("the cockpit stands in the open hull (%d pods wear it)" % pods, pods >= 1 and _wearing(closed) == 0)
 	v.menu_open(true)
+	for k in v.menu.items.size():      # (the line is on the quick menu's second page, OPTIONS)
+		if String(v.menu.items[k].key) == "options":
+			v.menu.at = k
+	v.menu_choose()
 	var keys := []
 	for item in v.menu.items:
 		keys.append(item.key)
-	_check("the quick menu has a NOSE line, on OPEN: %s" % [keys], keys.has("nose") and v.menu.items[keys.find("nose")].value == "OPEN")
+	_check("the quick menu's OPTIONS page has a NOSE line, on OPEN: %s" % [keys], keys.has("nose") and v.menu.items[keys.find("nose")].value == "OPEN")
 	v.menu.at = keys.find("nose")
 	_check("choosing NOSE keeps the menu open and reads CLOSED", v.menu_choose() and v.menu.open and CM.nose_closed and v.menu.items[v.menu.at].value == "CLOSED")
 	_check("every pod took the closed hull (%d)" % _wearing(closed), _wearing(closed) == pods and _wearing(open) == 0)

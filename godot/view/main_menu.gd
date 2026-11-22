@@ -11,6 +11,7 @@ extends RefCounted
 var open := false
 var at := 0
 var items: Array = []
+var title := "FLIGHT HOLD"      # the panel's first line (the headset's second page is OPTIONS)
 
 
 func move(d: int) -> void:
@@ -23,7 +24,7 @@ func key() -> String:
 
 
 func text() -> String:
-	var out := PackedStringArray(["FLIGHT HOLD", ""])
+	var out := PackedStringArray([title, ""])
 	for k in items.size():
 		var it: Dictionary = items[k]
 		var v := String(it.get("value", ""))

@@ -97,6 +97,8 @@ var branch_at := -1  # --branch-at=J: start on the shade line at its sample J (w
 var cruise := -1.0   # --cruise=T holds both levers at T (demos, screenshots)
 var hold_brake := [0.0, 0.0]
 var cam_offset := Vector3.ZERO   # --cam: debug close-up (forward, left, up)
+const FLAT_CAMERAS := [["far", "Far chase"], ["near", "Close chase"]]
+var flat_camera := "far"
 var handling_ask := ""             # the live handling switch: "speed" / "starfighter" (VR: the console
                                    # toggle or Y-hold; keyboard: M), sent with every step
 static var vehicle_override := ""
@@ -171,6 +173,13 @@ const StartPadScript := preload("res://view/start_pad.gd")
 var light_bars: Array = []   # the pilot's own, in the patrol craft (one on each model of the pod that is built)
 var siren: AudioStreamPlayer # ... and its siren
 var menu = MainMenuScript.new()   # the main menu (view/main_menu.gd): the flight waits while it's open
+# Power-ups (view/power_ups.gd): lit gates over the road that give the engines a few seconds' surge.
+# Off for a bare view (a test, a render, a replay: --power-ups asks); the headset's cockpit turns
+# them on from its OPTIONS page, where they are on unless switched off.
+const PowerUpsScript := preload("res://view/power_ups.gd")
+static var power_ups_on := false
+var power_ups: Node3D
+var surge := 0.0                  # s left of a gate's surge (the sims' inp.surge while it lasts)
 var menu_label: Label             # the flat view's panel
 var _menu_was_muted := false
 
@@ -286,6 +295,7 @@ func _ready() -> void:
 	cues.build(self)
 	dust = DustScript.new()
 	add_child(dust)
+	set_power_ups(power_ups_on or "--power-ups" in OS.get_cmdline_user_args())
 	dust.build(self)
 	if sim.kind == "network":
 		dust.road_spray()
@@ -348,6 +358,11 @@ func _sim_step() -> void:
 	sub += 1
 	if handling_ask != "":
 		inp["handling"] = handling_ask
+	if surge > 0.0:               # a power-up's surge, while it lasts
+		surge -= DT
+		inp["surge"] = true
+	elif inp.has("surge"):
+		inp.erase("surge")
 	sim.step(inp, DT)
 	for e in sim.events:
 		_on_event(e)
@@ -1633,6 +1648,43 @@ func _sync_world() -> void:
 			burn_rect.color = Color(1.0, 0.97, 0.9, dawn.burn)
 	if landmark:
 		landmark.sync(org_x, org_y, sim.time, cam.global_position)
+	if power_ups:
+		power_ups.sync()
+
+
+## The power-ups, on or off where the craft is (the cockpit's OPTIONS page). Never for a replay or
+## a cruise: nothing a test or a recorded lap flies meets a gate.
+func set_power_ups(on: bool) -> void:
+	power_ups_on = on
+	on = on and replay.is_empty() and cruise < 0.0
+	if on and power_ups == null:
+		power_ups = PowerUpsScript.new()
+		add_child(power_ups)
+		power_ups.build(self)
+	elif not on and power_ups != null:
+		power_ups.queue_free()
+		power_ups = null
+		surge = 0.0
+
+
+## A gate flown through (view/power_ups.gd): the engines surge for a few seconds; with the
+## consumables on the cyan one half fills the battery and the white one cools the engines.
+func power_up(kind: String) -> void:
+	surge = PowerUpsScript.SURGE_S
+	if sim.P.limits:
+		if kind == "energy":
+			sim.battery = minf(1.0, sim.battery + PowerUpsScript.ENERGY_GIFT)
+		elif kind == "coolant":
+			for e in [sim.eL, sim.eR]:
+				e.heat = maxf(0.0, e.heat - PowerUpsScript.COOLANT_GIFT)
+	_flash(String({"energy": "SURGE  /  ENERGY +50%", "coolant": "SURGE  /  ENGINES COOLED"}.get(kind, "SURGE")))
+	print("POWER-UP: %s at %.0f mph" % [kind, _kmh() / 1.609344])
+
+
+## What the boost is doing, for a readout: nothing, one stage (the ARM button held, or a gate's
+## surge), or both at once.
+func boost_text() -> String:
+	return "" if sim.boost <= 0 else ("   BOOST" if sim.boost == 1 else "   BOOST x2")
 
 
 ## The Network's ground: each city's landscape, weighted by nearness (inverse distance, 4th power),
@@ -1691,6 +1743,8 @@ func _build_craft() -> void:
 
 ## Overridable: the flat view's chase camera and 2D HUD.
 func _make_view() -> void:
+	flat_camera = GameSettings.choice("flat_camera", ["far", "near"])
+	CraftModelScript.set_nose_closed(GameSettings.choice("flat_nose", ["open", "closed"]) == "closed", self)
 	if sim.kind == "network":
 		_mount_approach_projector(craft.canopy)
 	cam = Camera3D.new()
@@ -1761,7 +1815,10 @@ func _place_camera(k: float) -> void:
 		cam.position = pod_p + fwd * cam_offset.x + left * cam_offset.y + Vector3.UP * cam_offset.z
 		cam.look_at(mid, Vector3.UP)
 		return
-	cam.position = pod_p - fwd * 12.0 + cam_up * 4.5
+	if flat_camera == "near":
+		cam.position = pod_p - fwd * 5.2 + cam_up * 2.2
+	else:
+		cam.position = pod_p - fwd * 12.0 + cam_up * 4.5
 	cam.look_at(pod_p + fwd * 40.0 + cam_up * 1.0, cam_up)
 
 
@@ -2055,6 +2112,7 @@ func _update_hud() -> void:
 	if minimap_2d and minimap_2d.visible:
 		minimap_2d.show_frame(minimap.update(cam_th, get_process_delta_time()))
 	var mode_txt: String = {"ramjet": "RAMJET", "burner": "AFTERBURNER"}.get(sim.mode, "RAMJET ARMED" if sim.armed else "")
+	mode_txt += boost_text()
 	hud.text = "%4d mph   %s   %s\nTHR %.2f | %.2f   BRK %.2f | %.2f   HEAT %d%% | %d%%   HP %d%% | %d%%   BAT %d%%   %s\n%s" % [
 		_kmh() / 1.609344, cues.readout(), _hud_progress(false), inp.thrL, inp.thrR, inp.brkL, inp.brkR,
 		sim.eL.heat * 100, sim.eR.heat * 100, sim.eL.health * 100, sim.eR.health * 100, sim.battery * 100, mode_txt,

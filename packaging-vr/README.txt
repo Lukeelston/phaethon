@@ -77,7 +77,8 @@ Both grip buttons   Air brakes; individual grips brake their own side
 Right stick up/down Speedcraft gears 1-4; Starfighter stays in its single gear
 Left stick up/down  Afterburner on/off; Starfighter or Speedcraft fourth gear
 A                   Reignite engines
-B                   Arm ramjet
+B tap               Arm ramjet
+B hold              Boost: extra thrust while held
 X                   Hold to repair
 Y tap               Restart
 Y hold 1 second     Switch Speedcraft / Starfighter handling

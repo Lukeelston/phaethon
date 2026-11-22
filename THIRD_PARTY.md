@@ -6,7 +6,7 @@ These credits accompany the Windows Desktop and Windows PC VR editions. The `lic
 
 ### Start-up and preflight
 
-Phaethon uses excerpts from the 18 Freesound field recordings below. Each author published the recording under the [CC0 1.0 Universal public domain dedication](https://creativecommons.org/publicdomain/zero/1.0/). The game trims, layers and levels the recordings into the start-up sound bank. Each ID links to the original sound and its licence.
+Phaethon uses excerpts from the 19 Freesound sources below. Each author published the sound under the [CC0 1.0 Universal public domain dedication](https://creativecommons.org/publicdomain/zero/1.0/). The game trims, layers and levels the sources into the start-up sound bank. Each ID links to the original sound and its licence.
 
 | Freesound ID | Recordist | Original title | Use in Phaethon |
 | --- | --- | --- | --- |
@@ -23,9 +23,10 @@ Phaethon uses excerpts from the 18 Freesound field recordings below. Each author
 | [398274](https://freesound.org/s/398274/) | FlashTrauma | Electricity | the binder's first sparks |
 | [675760](https://freesound.org/s/675760/) | craigsmith | S16-18 Tesla coil sparking and humming.wav | the binder's buzz |
 | [733737](https://freesound.org/s/733737/) | chungus43A | 60Hz electrical mains hum | the binder's hum |
-| [32416](https://freesound.org/s/32416/) | KRAFTWERK2K1 | car_engine_won't start.wav | both starters |
-| [700655](https://freesound.org/s/700655/) | DigPro120 | 5.0 cold start vehicle motor | an engine catching: its low end |
-| [328224](https://freesound.org/s/328224/) | danshousestudio | Truck starting.wav | an engine catching: its bark |
+| [750486](https://freesound.org/s/750486/) | Nomracer | Fuel pump | an engine's start: its ignition relays and fuel pump priming |
+| [125401](https://freesound.org/s/125401/) | jasonLON | Electric Motor Whir.aif | an engine's start: the pre-starter whine |
+| [478597](https://freesound.org/s/478597/) | Kinoton | Car, BMW M6, Start, Idle, Accelerate | an engine's start: its starter, and the weight under its catch |
+| [564373](https://freesound.org/s/564373/) | JaimeLopes | Lambo Start Up Sound | an engine catching: it fires, flares and settles |
 | [131302](https://freesound.org/s/131302/) | reg7783 | release_air_pffft.wav | the parking brake's air |
 | [438252](https://freesound.org/s/438252/) | craigsmith | G20-37-Buzzer Bursts.wav | a refused control's buzzer |
 
@@ -53,3 +54,16 @@ Phaethon resamples, granulates, layers, filters, saturates and loops the recordi
 ## Roadside scenery
 
 The Phaethon roadside pack contains 18 original designs with close-up and distance models (36 meshes). Its generators produce the buildings, fuel plaza, turbine, vegetation, rocks, fuel-station lettering and both surface atlases. The pack’s source documents and generators identify no outside models, images, fonts or recordings. It carries no separate public asset licence. The editable sources and provenance are maintained with the roadside pack.
+
+## Starting-pad ground crew
+
+The following [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) recordings supply the positional pad sounds. The reproducible edits are in `tools/pad_audio_bake.py`. The sixteen stations key different rhythms on a recorded buzzer and each ends its clearance call on a higher note.
+
+| Pad sound | Original Freesound recordings |
+| --- | --- |
+| Ground-power cart | danshousestudio, [Truck starting.wav](https://freesound.org/s/328224/), its idling engine, and tt_runscript, [1U Rackmount Server Fan](https://freesound.org/s/732705/), its cooling fan. Both excerpts loop. |
+| Lead coming free and hitting the deck | shdwtek, [12 Volt Solenoid Clicks](https://freesound.org/s/679204/), kyles, [switch big breaker metal click on, off.flac](https://freesound.org/s/451933/), and vibe_crc, [zippo_light_5shots.wav](https://freesound.org/s/47988/), layered into a latch snap, impact and bounce. |
+| Gate mechanism | shdwtek’s [solenoid](https://freesound.org/s/679204/), Noizemaker, [NZP BMW 1150GS Fuel pump.wav](https://freesound.org/s/23216/), and CHallSmith, [Electrical Relays, Very Large, Close and](https://freesound.org/s/870770/), for the contactor, drive motor and end stop. |
+| Station clearance | craigsmith, [G20-37-Buzzer Bursts.wav](https://freesound.org/s/438252/), filtered, cut and repitched for the station horn. |
+
+The review recording `docs/glacier-pad-preflight.wav` captures Godot’s stereo Master output. Its cockpit sounds and Alexander Holm’s Salamander piano recordings carry the credits listed under **Sound recordings** above.

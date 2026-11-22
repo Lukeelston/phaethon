@@ -75,6 +75,16 @@ func _run() -> void:
 		absf(right - Sim.net_pad_right(w)) < 0.5 and sim.net_edge(w, right).x == 0.0 and absf(sim.pod.z - road_h - float(sim.P.rideH)) < 0.01 and speed < 0.01 and not View.pad_start)
 	var pad = v.pad
 	v._sync_world()
+	var sound = pad.audio
+	var with_audio := "--mute" not in OS.get_cmdline_user_args()
+	_check("the pad respects the flight audio setting", (sound != null) == with_audio)
+	if sound:
+		_check("hot entry is quiet; all four emitters are on their physical fittings",
+			not sound.cart.playing and not sound.lead.playing and not sound.gate.playing and not sound.clearance.playing
+			and sound.cart.global_position.is_equal_approx(pad.to_global(pad._cart() + Vector3.UP * 0.62))
+			and sound.lead.global_position.is_equal_approx(pad.to_global(pad.PLUG))
+			and sound.gate.global_position.is_equal_approx(pad.gate.global_position)
+			and sound.clearance.global_position.is_equal_approx(pad.station_sign.global_position))
 	var under: Vector3 = v.wz(sim.pod.x, sim.pod.y, road_h)
 	var ahead_of: Vector3 = v.wz(sim.eL.x, sim.eL.y, road_h)
 	var to_engines: Vector3 = pad.global_transform.affine_inverse() * ahead_of if pad else Vector3.ZERO
@@ -106,6 +116,10 @@ func _run() -> void:
 	pad.show_startup(seq)
 	pad.sync(0.016)
 	_check("the first cold frame has the gate down", pad.gate_open == 0.0 and is_zero_approx(pad.gate.rotation.z))
+	if sound:
+		_check("cold entry starts only the cart, with a looping stream",
+			sound.cart.playing and sound.cart.stream.loop_mode == AudioStreamWAV.LOOP_FORWARD
+			and not sound.lead.playing and not sound.gate.playing and not sound.clearance.playing)
 	pad.sync(3.0)
 	var held_red: bool = (pad.big_lamp.material_override as StandardMaterial3D).albedo_color.r > 2.0 and pad.gate_open == 0.0 and pad.lead.visible and absf(pad.gate.rotation.z) < 0.01
 	var cold_steps: Array = pad.lit.duplicate()
@@ -113,9 +127,41 @@ func _run() -> void:
 	seq.batt = true
 	pad.show_startup(seq)
 	var after_batt: Array = [pad.lit.duplicate(), pad.flashing]
+	seq.stage[0] = "run"
+	seq.stage[1] = "run"
+	pad.show_startup(seq)
+	pad.sync(.016)
+	if sound:
+		_check("both engines running drops the lead once and silences the cart while the gate holds",
+			sound.lead.playing and not sound.cart.playing and not sound.gate.playing and not sound.clearance.playing)
+		sound.lead.stop()
+		pad.sync(.016)
+		_check("running another frame leaves the plug on the ground", not sound.lead.playing)
 	seq.hot()
 	pad.show_startup(seq)
+	pad.sync(.016)
+	if sound:
+		_check("release starts the lift; the crew waits until the boom is up", sound.gate.playing and not sound.clearance.playing)
 	pad.sync(3.0)
+	if sound:
+		_check("the raised boom triggers the station call", sound.clearance.playing)
+		sound.clearance.stop()
+		pad.sync(.016)
+		_check("a raised boom does not repeat the call", not sound.clearance.playing)
+		seq.cold()
+		pad.show_startup(seq)
+		pad.sync(.016)
+		var saved_x: float = sim.pod.x
+		sim.pod.x += 220.0
+		pad.sync(.016)
+		var silent: bool = not sound.cart.playing and not sound.nearby
+		seq.hot()
+		pad.show_startup(seq)
+		pad.sync(3.0)
+		sim.pod.x = saved_x
+		pad.sync(.016)
+		_check("leaving earshot silences the cart; returning hot does not replay a departure",
+			silent and not sound.lead.playing and not sound.gate.playing and not sound.clearance.playing)
 	var free_green: bool = (pad.big_lamp.material_override as StandardMaterial3D).albedo_color.g > 2.0 and pad.gate_open == 1.0 and not pad.lead.visible and absf(pad.gate.rotation.z) > 1.3
 	_check("from cold it is held: the big lamp red, the gate down, ground power on (%s), no step lit %s and the first flashing (%d); the battery on lights its lamp and the next flashes %s; running and released: green, the gate up, the lead away (%s), every step lit %s" % [
 			held_red, cold_steps, first, after_batt, free_green, pad.lit],
@@ -133,6 +179,7 @@ func _run() -> void:
 	# alone cannot pass), the legends at each end of the preflight and the draw-surface budget.
 	var station_node: MeshInstance3D = pad.station
 	var shapes := {}
+	var call_takes := {}
 	var station_errors := []
 	var max_triangles := 0
 	var bays := 0   # the named start points (sixteen, and Mount Hyperion's two)
@@ -144,6 +191,9 @@ func _run() -> void:
 		var rd: int = sim.cities[spot[0]].road if spot.size() == 1 else int(spot[0])
 		var index: int = sim.cities[spot[0]].i if spot.size() == 1 else int(spot[1])
 		pad._move([rd, index, 1, Sim.net_pad_right(sim.roads[rd].w[index])])
+		if sound and sound.clearance.stream:
+			var take: AudioStreamWAV = sound.clearance.stream
+			call_takes[hash(take.data)] = true
 		var mesh := station_node.mesh as ArrayMesh
 		if mesh == null or mesh.get_surface_count() != 2:
 			station_errors.append(entry[0])
@@ -160,8 +210,14 @@ func _run() -> void:
 			station_errors.append(entry[0])
 	_check("one station node, %d distinct silhouettes at the %d named menu bays, two static draw surfaces, up to %d triangles, local shops acknowledge release (wrong: %s)" % [shapes.size(), bays, max_triangles, station_errors],
 		shapes.size() == bays and bays >= 18 and station_errors.is_empty() and max_triangles < 8000)
+	if sound:
+		# (Codex's check, for sixteen; Mount Hyperion's two bays were given calls when her branch was merged)
+		_check("every one of the %d addresses selects its own recorded local call (%d heard)" % [bays, call_takes.size()], call_takes.size() == bays)
 	pad._move([int(there.road), int(there.i)+7, 1, 0.0])
 	_check("a debug roadside bay outside the named insertions clears the old station", not station_node.visible and station_node.mesh == null)
+	if sound:
+		_check("moving to an unnamed bay cancels the previous horn and clears its call sign",
+			not sound.clearance.playing and sound.clearance.stream == null)
 	v.queue_free()
 	await process_frame
 

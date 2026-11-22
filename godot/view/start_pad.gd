@@ -26,6 +26,7 @@ extends Node3D
 const Kit := preload("res://view/mesh_kit.gd")
 const Livery := preload("res://view/livery.gd")
 const Stations := preload("res://view/pad_stations.gd")
+const PadAudio := preload("res://audio/pad_audio.gd")
 const Release := preload("res://release/release_config.gd")
 const WIDE := 24.0               # the apron across (m): 11 to the pod's left, 13 to its right
 const LEFT := -11.0
@@ -43,6 +44,7 @@ const BLUE := Color(0.25, 0.75, 3.0)
 const UNLIT := Color(0.035, 0.035, 0.04)
 const GATE_UP := 1.40            # rad the boom lifts through
 const GATE_RATE := 0.9           # of its travel a second
+const PLUG := Vector3(1.28, 1.25, 0.45)
 const SEEN_TO := 12000.0         # m from the craft beyond which it is not drawn
 
 var view
@@ -59,6 +61,7 @@ var lines: Array[Label3D] = []   # the board's three
 var station: MeshInstance3D
 var station_sign: Label3D
 var station_id := ""
+var audio: PadAudio
 var lit := [true, true, true, true]   # each step's lamp
 var flashing := -1               # the step being done now (its lamp flashes), -1 none
 var released := true             # the craft may go
@@ -151,6 +154,9 @@ func build(v) -> void:
 	station_sign.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	station_sign.position = Vector3(0, 2.55, 1.10)
 	station.add_child(station_sign)
+	if view.engine_audio != null:
+		audio = PadAudio.new()
+		audio.setup(self, _cart() + Vector3.UP * 0.62, PLUG, gate, station_sign)
 	# the arrow board's arrow: move over, to the lanes (an approaching driver's left)
 	arrow = MeshInstance3D.new()
 	arrow.mesh = Kit.compound([
@@ -274,7 +280,7 @@ func _build_lead() -> void:
 	lead = Node3D.new()
 	lead.name = "lead"
 	add_child(lead)
-	var pts := [_cart() + Vector3(-0.75, 0.75, -0.4), Vector3(3.6, 0.22, 1.3), Vector3(2.3, 0.3, 0.8), Vector3(1.28, 1.25, 0.45)]
+	var pts := [_cart() + Vector3(-0.75, 0.75, -0.4), Vector3(3.6, 0.22, 1.3), Vector3(2.3, 0.3, 0.8), PLUG]
 	var parts := []
 	for k in pts.size() - 1:
 		var a: Vector3 = pts[k]
@@ -325,6 +331,8 @@ func _set_station(road: int, sample: int) -> String:
 			break
 	if id != station_id:
 		station_id = id
+		if audio:
+			audio.change_station(id)
 		station.mesh = Stations.new().make(id, station.transform.affine_inverse(), _cart(), ahead) if Stations.LEGENDS.has(id) else null
 	station.visible = station.mesh != null
 	if station.visible:
@@ -407,6 +415,8 @@ func sync(delta: float) -> void:
 	rotation = Vector3(_pitch, _th - PI / 2.0, 0.0)
 	visible = Vector2(sim.pod.x - _at.x, sim.pod.y - _at.y).length() < SEEN_TO
 	if not visible:
+		if audio and audio.nearby:
+			audio.leave()
 		return
 	_clock += delta
 	var blink := fposmod(_clock, 0.9) < 0.5
@@ -415,6 +425,9 @@ func sync(delta: float) -> void:
 		(step_lamps[k].material_override as StandardMaterial3D).albedo_color = (GREEN if lit[k] else AMBER) if on else UNLIT
 	(big_lamp.material_override as StandardMaterial3D).albedo_color = GREEN if released else RED
 	gate_open = move_toward(gate_open, 1.0 if released else 0.0, GATE_RATE * delta)
+	if audio and _startup_seen:
+		var pilot := Vector3(sim.pod.x, sim.pod.y, sim.pod.z)
+		audio.sync(pilot.distance_squared_to(_at) < PadAudio.EARSHOT * PadAudio.EARSHOT, plugged, released, gate_open)
 	gate.rotation.z = -GATE_UP * smoothstep(0.0, 1.0, gate_open)
 	lead.visible = plugged
 	(cart_lamp.material_override as StandardMaterial3D).albedo_color = GREEN if plugged else UNLIT

@@ -9,6 +9,7 @@ var _mouse_mode := Input.MOUSE_MODE_VISIBLE
 var _screen: Control
 var _resume: Button
 var partner_checkbox: CheckBox
+var _flight_options: GridContainer
 
 func _ready() -> void:
 	if OS.has_feature("pcvr"):
@@ -43,6 +44,9 @@ func _ready() -> void:
 	partner_checkbox = UI.partner_checkbox()
 	partner_checkbox.toggled.connect(_set_partner)
 	actions.add_child(partner_checkbox)
+	_flight_options = GridContainer.new()
+	_flight_options.columns = 2
+	actions.add_child(_flight_options)
 	actions.add_child(UI.button("Restart this course", restart_game))
 	actions.add_child(UI.button("Return to course menu", return_to_menu))
 	actions.add_child(UI.button("Quit to desktop", quit_game))
@@ -69,6 +73,7 @@ func set_paused(value: bool) -> void:
 		return
 	is_paused = value
 	if value:
+		_refresh_flight_options()
 		_was_muted = AudioServer.is_bus_mute(0)
 		_mouse_mode = Input.mouse_mode
 		AudioServer.set_bus_mute(0, true)
@@ -86,12 +91,41 @@ func _set_partner(enabled: bool) -> void:
 	if _desktop_gameplay():
 		get_tree().current_scene.set_partner(enabled)
 
+func _refresh_flight_options() -> void:
+	# The launch menu can change these preferences while the overlay is hidden.
+	for child in _flight_options.get_children():
+		child.free()
+	var camera := UI.option_button("Camera", "flat_camera", View.FLAT_CAMERAS, 15, _set_camera)
+	var nose := UI.option_button("Nose", "flat_nose", [["open", "Open"], ["closed", "Closed"]], 15, _set_nose)
+	var hour := UI.option_button("Time", "time", UI.Outlook.TIMES, 15, _set_outlook)
+	var weather := UI.option_button("Weather", "weather", UI.Outlook.WEATHERS, 15, _set_outlook)
+	camera.name = "Camera"
+	nose.name = "Nose"
+	hour.name = "Hour"
+	weather.name = "Weather"
+	for option: Button in [camera, nose, hour, weather]:
+		option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_flight_options.add_child(option)
+
+func _set_camera(id: String) -> void:
+	var view := get_tree().current_scene as View
+	view.flat_camera = id
+	view._place_camera(1.0)
+
+func _set_nose(id: String) -> void:
+	View.CraftModelScript.set_nose_closed(id == "closed", get_tree().current_scene)
+
+func _set_outlook(_id: String) -> void:
+	UI.Outlook.load_saved()
+	UI.Outlook.apply(get_tree().current_scene)
+
 func resume_game() -> void:
 	set_paused(false)
 
 func restart_game() -> void:
 	if not _desktop_gameplay():
 		return
+	View.pad_start = get_tree().current_scene.pad != null
 	resume_game()
 	get_tree().reload_current_scene()
 

@@ -224,6 +224,40 @@ func _sounds() -> void:
 		all_ok = all_ok and ok
 		report.append("%s %.2f s peak %.2f rms %.3f ~%d Hz%s" % [sound, seconds, peak, rms, roundi(crossings / 2.0 / seconds), "" if ok else " (!)"])
 	_check("each is the length it should be, mono at 48 kHz, peaks at -3 dB and is not silence: %s" % ", ".join(report), all_ok)
+	# the staged start, in the sounds themselves (Luke: "Brief pre-starter whine, then starter engage"): an engine's
+	# start is the electrics and a whine that climbs, then the starter, louder; its catch flares and dies away
+	var prime: float = preload("res://audio/engine_audio.gd").TUNE.start_prime_s
+	var staged := []
+	var staged_ok := true
+	for w: AudioStreamWAV in bank.starter:
+		var whine := _stretch(w, 0.15, prime - 0.02)
+		var spin := _stretch(w, prime + 0.05, Sequence.CRANK_S)
+		var early := _stretch(w, 0.15, 0.35)
+		var late := _stretch(w, 0.55, prime - 0.02)
+		staged_ok = staged_ok and float(whine[0]) < float(spin[0]) - 1.5 and float(whine[0]) > float(spin[0]) - 9.0 and float(late[1]) > 1.25 * float(early[1])
+		staged.append("the whine %.1f dB climbing from ~%d to ~%d Hz, the starter %.1f dB" % [whine[0], roundi(early[1]), roundi(late[1]), spin[0]])
+	var fire: AudioStreamWAV = bank.catch[0]
+	var fire_s := float(fire.data.size() / 2) / Sounds.RATE
+	var flare := _stretch(fire, 0.0, 0.6)
+	var dying := _stretch(fire, fire_s - 0.4, fire_s)
+	_check("the staged start: %.1f s of electrics before the starter goes in (each engine: %s); the catch flares at %.1f dB and has died away %.0f dB by its end" % [
+			prime, "; ".join(staged), flare[0], float(flare[0]) - float(dying[0])],
+		staged_ok and prime > 0.6 and prime < Sequence.CRANK_S - 0.5 and float(flare[0]) > float(dying[0]) + 10.0)
+
+
+## A stretch of a take: its level (dB, rms) and how often it crosses zero a second (its pitch, roughly).
+func _stretch(w: AudioStreamWAV, from: float, to: float) -> Array:
+	var a := int(from * Sounds.RATE)
+	var b := mini(int(to * Sounds.RATE), w.data.size() / 2)
+	var sum := 0.0
+	var crossings := 0
+	var last := 0.0
+	for i in range(a, b):
+		var x := w.data.decode_s16(i * 2) / 32768.0
+		sum += x * x
+		crossings += int((x >= 0.0) != (last >= 0.0))
+		last = x
+	return [10.0 * log(sum / maxi(1, b - a) + 1e-12) / log(10.0), crossings / 2.0 / maxf(to - from, 1e-3)]
 
 
 # ---- a hand on the panel ----
@@ -556,12 +590,24 @@ func _run() -> void:
 	if "steps" in v.dashboard:
 		_check("... the strip's rail the same: two steps behind, the third filling in its left half (%s)" % [v.dashboard.steps],
 			int(v.dashboard.steps.get("done", -1)) == 2 and bool(v.dashboard.steps.get("pair", false)) and float(v.dashboard.steps.bars[0]) > 0.1 and float(v.dashboard.steps.bars[1]) == 0.0)
+	# the staged start (Luke: "a staged supercar style start - Brief pre-starter whine, then starter engage"): the
+	# start's one sound is under way, and for its first 0.8 s the engine is on its electrics and does not turn
+	var prime: float = v.engine_audio.TUNE.start_prime_s if v.engine_audio else 0.8
 	if v.engine_audio:
-		_check("... its voice turning at cranking speed (spool %.2f), the right one still silent (%.4f)" % [v.engine_audio.voices[0].spool, _gain(1, "v8")],
-			v.engine_audio.crank[0] and v.engine_audio.voices[0].spool > -0.3 and v.engine_audio.voices[0].spool < -0.1 and _gain(1, "v8") < 0.001 and v.startup_audio.played.has("starter"))
-	_fly(Sequence.CRANK_S - 0.6 + Sequence.CATCH_S * 0.5)
+		_check("... on its electrics first, the pre-starter whine: its voice not yet turning (spool %.2f, %.1f s of the %.1f), silent (%.4f), as the right one is (%.4f)" % [
+				v.engine_audio.voices[0].spool, v.engine_audio.voices[0].crank_t, prime, _gain(0, "v8"), _gain(1, "v8")],
+			v.engine_audio.crank[0] and v.engine_audio.voices[0].spool < -0.3 and _gain(0, "v8") < 0.001 and _gain(1, "v8") < 0.001 and v.startup_audio.played.has("starter") and prime > 0.6 and prime < Sequence.CRANK_S - 0.5)
+	_fly(prime + 0.5 - 0.6)
+	if v.engine_audio:
+		_check("... then the starter spins it: its voice turning at cranking speed (spool %.2f) and not firing (%.4f: no fits, it is not an old V8)" % [v.engine_audio.voices[0].spool, _gain(0, "v8")],
+			s.stage[0] == "crank" and v.engine_audio.voices[0].spool > -0.3 and v.engine_audio.voices[0].spool < -0.1 and v.engine_audio.voices[0].fire < 0.01 and _gain(0, "v8") < 0.001)
+	_fly(Sequence.CRANK_S - (prime + 0.5) + Sequence.CATCH_S * 0.5)
 	_check("it catches: a burst of flame at its nozzle (thrust shown %.2f), and no thrust in the sim (%.3f)" % [v.craft.shown_thrust[0], v.sim.eL.thrust],
 		s.stage[0] == "catch" and not v.craft.held[0] and v.craft.flames[0].visible and v.craft.shown_thrust[0] > 0.4 and v.sim.eL.thrust < 0.01)
+	if v.engine_audio:
+		_check("... its voice straight up through idle and flaring (spool %.2f, %.1f s after the catch), firing clean (%.2f, no fits left: %.2f s)" % [
+				v.engine_audio.voices[0].spool, Sequence.CATCH_S * 0.5, v.engine_audio.voices[0].fire, v.engine_audio.voices[0].cough_t],
+			v.engine_audio.voices[0].spool > 0.08 and v.engine_audio.voices[0].spool < 0.3 and v.engine_audio.voices[0].fire > 0.8 and v.engine_audio.voices[0].cough_t <= 0.0)
 	_check("... and its bar flares (%.2f)" % (glass.sheet_mat.get_shader_parameter("flare") as Vector2).x, (glass.sheet_mat.get_shader_parameter("flare") as Vector2).x > 0.9)
 	_fly(Sequence.STAGGER_S + Sequence.CATCH_S + 0.3)
 	_check("both running, the ring green, a pilot light in each nozzle, and the glass asks for the run-up: %s" % v.approach_display.message.replace("\n", " / "),

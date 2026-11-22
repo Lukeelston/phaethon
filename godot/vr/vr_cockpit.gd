@@ -96,6 +96,22 @@ static var _slide_loaded := false         # (its saved setting is read once a ru
 static var map_whole := true              # the map's GLOBAL / LOCAL switch, on its pod: the whole country (false: the roads round the craft, heading up)
 static var map_scheme := 0                # ... and its colour button: which of MinimapPanel.SCHEMES the screen is drawn in
 static var _map_loaded := false           # (both saved, and read once a run)
+# The quick menu's OPTIONS page (Luke, 2026-11-22: "bring back heat and energy as optional consumables.
+# I also think we need power-ups in some way"): the gameplay switches, saved as the others are.
+#   consumables   HEAT AND ENERGY: the sims' `limits` (the battery the burner and the boost spend, the
+#                 engines' heat and their flameouts). Off unless switched on: the flying he has now.
+#   power-ups     CraftView.power_ups_on (view/power_ups.gd): the lit gates. On unless switched off.
+static var consumables := false
+static var _options_loaded := false       # (both read once a run)
+# The boost (Luke: "Holding the ramjet arm button should give an extra boost"): B tapped arms or
+# disarms the ramjet as it always has (on the way up now, not the way down); held past BOOST_HOLD it
+# is the sims' inp.boost for as long as it is held, and arms nothing.
+const BOOST_HOLD := 0.35
+const BOOST_TICK := 0.12                  # s between the ticks in both hands while it burns
+var boosting := false                     # B is being held past BOOST_HOLD
+var _b_held := 0.0
+var _boost_tick := 0.0
+var _menu_page := ""                      # "" the quick menu's first page, "options" its second
 var slide_switch                          # vr/mode_switch.gd again: SLIDE up, GRIP down
 var _slide := 0.0
 var _slide_rate := 0.0
@@ -224,6 +240,13 @@ func _ready() -> void:
 	if not _school_loaded and prefs.has("school"):
 		school = prefs.school != "done"
 	_school_loaded = true
+	if not _options_loaded:
+		consumables = String(prefs.get("consumables", "off")) == "on"
+		power_ups_on = String(prefs.get("powerups", "on")) != "off"
+	_options_loaded = true
+	if bool(sim.P.limits) != consumables:
+		sim.set_limits(consumables)
+	set_power_ups(power_ups_on)
 	if cold and overhead != null and replay.is_empty() and cruise < 0.0:
 		startup.school = school and quest.scheme == "triggers"      # (the lessons are the trigger throttles')
 		_coach_armed = startup.school
@@ -282,6 +305,7 @@ func _save_prefs() -> void:
 		f.store_string(JSON.stringify({"scheme": quest.scheme, "handling": handling_ask if handling_ask != "" else sim.P.handling, "camera": camera,
 			"nose": "closed" if CraftModelScript.nose_closed else "open", "slide": "on" if slide_feel else "off",
 			"startup": "cold" if cold_start else "hot", "school": "on" if school else "done",
+			"consumables": "on" if consumables else "off", "powerups": "on" if power_ups_on else "off",
 			"map": "global" if map_whole else "local", "map_scheme": String(MinimapPanelScript.SCHEMES[map_scheme].name)}))
 
 
@@ -530,6 +554,8 @@ func _diag(delta: float, l: XRController3D, r: XRController3D, p: Dictionary) ->
 		sim.eL.health, sim.eR.health, sim.pod.health,
 		sim.eL.heat, sim.eR.heat, sim.eL.flameout, sim.eR.flameout, sim.mode, sim.battery,
 		l.is_button_pressed("ax_button"), l.is_button_pressed("by_button"), r.is_button_pressed("ax_button"), r.is_button_pressed("by_button")])
+	if sim.boost > 0 or sim.P.limits or (power_ups != null and power_ups.took > 0):
+		print("DIAG systems: boost=%d held=%s surge=%.1f limits=%s gates=%d" % [sim.boost, boosting, maxf(0.0, surge), sim.P.limits, power_ups.took if power_ups != null else 0])
 
 
 func _box(parent: Node3D, size: Vector3, pos: Vector3, c: Color, rot_x := 0.0) -> MeshInstance3D:
@@ -859,7 +885,9 @@ func _read_input(delta: float) -> void:
 	else:
 		inp = {"thrL": maxf(p.thrL, q.thrL), "thrR": maxf(p.thrR, q.thrR), "brkL": maxf(p.brkL, q.brkL), "brkR": maxf(p.brkR, q.brkR)}
 	inp.repair = p.repair or _button(l, "ax_button")
-	inp.reignite = p.reignite or _button(r, "ax_button")
+	# (with the consumables on a flamed-out engine relights by itself once it has cooled: A is the
+	# Network's target button too, and an engine that waits for it is a surprise, not a consequence)
+	inp.reignite = p.reignite or _button(r, "ax_button") or consumables
 	if quest.scheme == "triggers" and not levers.source.begins_with("Gamepad"):
 		# the burner's the left stick's (the levers stay under the gate); the keyboard's still lights it
 		inp.burner = bool(q.get("burner", false)) or (p.thrL >= sim.P.gate and p.thrR >= sim.P.gate)
@@ -882,8 +910,15 @@ func _read_input(delta: float) -> void:
 				_buzz(r, 0.5, 0.06)
 			_a_held = 0.0
 			_a_fired = false
-	if p.arm or _pressed_once("arm", _button(r, "by_button")):
+	if p.arm:
 		sim.armed = not sim.armed
+	match arm_button(_button(r, "by_button"), delta):
+		"arm":
+			sim.armed = not sim.armed
+		"boost":                     # it lights: a thump in the hand that holds it, a lighter one in the other
+			_buzz(r, 0.9, 0.12)
+			_buzz(l, 0.6, 0.08)
+	_boost_step(delta, l, r)
 	# Y: tap restarts, hold flips the handling (live, as the MODE switch)
 	if p.respawn:
 		_respawn()
@@ -942,6 +977,62 @@ func _read_input(delta: float) -> void:
 	_diag(delta, l, r, p)
 
 
+## The ramjet ARM button, a frame: -> "arm" as a tap ends (it came up inside BOOST_HOLD), "boost"
+## on the frame a hold becomes the boost, "" otherwise. `boosting` is true while it is held past
+## BOOST_HOLD; letting go of a boost arms nothing.
+func arm_button(down: bool, delta: float) -> String:
+	if down:
+		_b_held += delta
+		var was := boosting
+		boosting = _b_held >= BOOST_HOLD
+		return "boost" if boosting and not was else ""
+	var tapped := _b_held > 0.0 and not boosting
+	_b_held = 0.0
+	boosting = false
+	return "arm" if tapped else ""
+
+
+## The boost held: the sims' inp.boost once the craft is released and whole, a tick in both hands
+## while the sim is giving it (not when the battery it needs is flat). And the consumables' one
+## housekeeping: a burner left lit on a flat battery is put out, as the pilot would (it will not
+## recharge while the burner is asked for, and nothing on the dash said why).
+func _boost_step(delta: float, l: XRController3D, r: XRController3D) -> void:
+	if boosting and startup.is_hot() and sim.crash_t <= 0.0:
+		inp.boost = true
+	_boost_tick -= delta
+	if boosting and sim.boost > 0 and _boost_tick <= 0.0:
+		_boost_tick = BOOST_TICK
+		_buzz(l, 0.22, 0.04)
+		_buzz(r, 0.22, 0.04)
+	if consumables and quest.burner and sim.battery <= 0.0:
+		quest.burner = false
+		inp.burner = false
+		_buzz(l, 0.45, 0.05)
+		print("SYSTEMS: battery flat, burner out")
+
+
+## The dash's ARM lamp: lit while the ramjet is armed, and flickering against that while the boost
+## burns (it is that button's light).
+func arm_lamp() -> bool:
+	return sim.armed != (sim.boost > 0 and (Time.get_ticks_msec() / 120) % 2 == 0)
+
+
+## A gate flown through: a chime, and a kick in both hands.
+func power_up(kind: String) -> void:
+	super(kind)
+	_sound("chime")
+	for side in ["left", "right"]:
+		if hands.has(side):
+			_buzz(hands[side], 0.8, 0.1)
+
+
+## The consumables, switched where the craft is (the OPTIONS page; a test).
+func set_consumables(on: bool) -> void:
+	consumables = on
+	sim.set_limits(on)
+	print("OPTIONS: heat and energy ", "on" if on else "off")
+
+
 func _track() -> String:   # "range", "gp", "eridanus", "emergency" (Eridanus on the job), "network" (or "circuit")
 	if sim.kind == "network":
 		return "network"
@@ -973,6 +1064,10 @@ func menu_open(on: bool) -> void:
 	_a_fired = false
 	_y_held = 0.0
 	_y_fired = false
+	_b_held = 0.0
+	boosting = false
+	_menu_page = ""
+	menu.title = "FLIGHT HOLD"
 	if on:
 		_seed_menu_edges()
 	elif not on:
@@ -1033,14 +1128,20 @@ static func _outlook_name(rows: Array, id: String) -> String:
 
 
 func _menu_items() -> Array:
+	if _menu_page == "options":      # the second page: the gameplay switches
+		return [{"key": "consumables", "label": "HEAT AND ENERGY", "value": "ON" if consumables else "OFF"},
+			{"key": "powerups", "label": "POWER-UPS", "value": "ON" if power_ups_on else "OFF"},
+			# (NOSE came here from the first page, which is full at ten lines: an eleventh ran off its panel)
+			{"key": "nose", "label": "NOSE", "value": "CLOSED" if CraftModelScript.nose_closed else "OPEN"},
+			{"key": "back", "label": "BACK"}]
 	return [{"key": "partner", "label": "DRIVING PARTNER", "value": "ON" if partner_on else "OFF"},
 		{"key": "scheme", "label": "CONTROLS", "value": String(quest.scheme).to_upper()},
 		{"key": "camera", "label": "CAMERA", "value": String(CAMERA_NAMES[camera])},
-		{"key": "nose", "label": "NOSE", "value": "CLOSED" if CraftModelScript.nose_closed else "OPEN"},
 		{"key": "time", "label": "TIME", "value": _outlook_name(Outlook.TIMES, Outlook.time)},
 		{"key": "weather", "label": "WEATHER", "value": _outlook_name(Outlook.WEATHERS, Outlook.weather)},
 		{"key": "startup", "label": "COLD START", "value": "ON" if cold_start else "OFF"},
 		{"key": "school", "label": "FLIGHT SCHOOL", "value": "ON" if school else "OFF"},
+		{"key": "options", "label": "OPTIONS"},
 		{"key": "maps", "label": "CHOOSE MAP"},
 		{"key": "resume", "label": "RESUME"}]
 
@@ -1105,6 +1206,33 @@ func menu_choose() -> bool:
 			var school_at: int = menu.at
 			menu.items = _menu_items()
 			menu.at = school_at
+			_menu_show()
+			return true
+		"options", "back":           # the second page, and back from it (the cursor returns to OPTIONS)
+			_menu_page = "options" if menu.key() == "options" else ""
+			menu.title = "OPTIONS" if _menu_page == "options" else "FLIGHT HOLD"
+			menu.items = _menu_items()
+			menu.at = 0
+			for k in menu.items.size():
+				if _menu_page == "" and String(menu.items[k].key) == "options":
+					menu.at = k
+			_menu_show()
+			return true
+		"consumables":               # the battery and the engines' heat, from this moment
+			set_consumables(not consumables)
+			_save_prefs()
+			var at: int = menu.at
+			menu.items = _menu_items()
+			menu.at = at
+			_menu_show()
+			return true
+		"powerups":                  # the gates over the road
+			set_power_ups(not power_ups_on)
+			_save_prefs()
+			print("OPTIONS: power-ups ", "on" if power_ups_on else "off")
+			var at: int = menu.at
+			menu.items = _menu_items()
+			menu.at = at
 			_menu_show()
 			return true
 		"maps":
@@ -1714,14 +1842,14 @@ func _update_hud() -> void:
 		tow_meter.set_shader_parameter("loads", Vector2(craft.cable_strain[0], craft.cable_strain[1]))
 	_read_g()
 	dashboard.show_state({
-		"mph": kmh / 1.609344, "kmh": kmh, "mach": cues.mach, "backlight": lerpf(1.0, 0.5, maxf(1.0 if light_preset == "twilight" else 0.0, Outlook.darkness())), "mach_line": cues.readout(), "progress": progress,
+		"mph": kmh / 1.609344, "kmh": kmh, "mach": cues.mach, "backlight": lerpf(1.0, 0.5, maxf(1.0 if light_preset == "twilight" else 0.0, Outlook.darkness())), "mach_line": cues.readout() + boost_text(), "progress": progress,
 		"footer": "%s   /   %s" % [handling_text(), ctl],
 		"points": int(_skill_shown.get("points", 0)) if _skill_on else 0, "feat": String(_skill_shown.get("award", "")) if _skill_on else "", "feat_age": float(_skill_shown.get("age", 1e9)),
 		"thr": [inp.thrL * startup.engine_k(0), inp.thrR * startup.engine_k(1)],
 		"brk": _shown_brakes(), "heat": [sim.eL.heat, sim.eR.heat],
 		"health": [sim.eL.health, sim.eR.health],
 		"flameout": [sim.eL.flameout, sim.eR.flameout], "battery": sim.battery,
-		"burner": sim.mode == "burner", "armed": sim.armed, "ramjet": sim.mode == "ramjet", "turbines": _turbines or _turbine_lamp,
+		"burner": sim.mode == "burner", "armed": arm_lamp(), "ramjet": sim.mode == "ramjet", "turbines": _turbines or _turbine_lamp,
 		"power": startup.power, "sweep": startup.selftest / StartupScript.SELFTEST_S if startup.selftest >= 0.0 else -1.0,
 		"gear": quest.display_gear(), "overdrive": bool(inp.get("gearOverdrive", false)),
 		"g": g_load(), "g_side": g_turn,
@@ -1733,7 +1861,7 @@ func _update_hud() -> void:
 	if chase_hud and chase_hud.visible:
 		var guide: String = approach_display.message if approach_display else ""   # (what the projector over the nose is showing)
 		var lit: String = {"ramjet": "RAMJET", "burner": "AFTERBURNER"}.get(sim.mode, "RAMJET ARMED" if sim.armed else "")
-		chase_hud.text = "%s MPH\n%s%s%s" % [_thousands(roundi(kmh / 1.609344)), cues.readout(), ("   " + lit) if lit != "" else "",
+		chase_hud.text = "%s MPH\n%s%s%s" % [_thousands(roundi(kmh / 1.609344)), cues.readout(), (("   " + lit) if lit != "" else "") + boost_text(),
 			("\n\n" + guide) if guide != "" else ""]
 
 

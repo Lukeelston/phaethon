@@ -1209,7 +1209,7 @@ func sync(sim, inp: Dictionary, delta: float) -> void:
 		flame.visible = burning
 		var jet = jets[k]
 		if delta > 0.0:
-			jet.step(delta, burning, sim.mode, thrust, h, vh)
+			jet.step(delta, burning, "ramjet" if sim.boost > 0 else sim.mode, thrust, h, vh)   # (boosted, the nozzle shows all it has)
 		_burn[k] = jet.lit
 		_ram[k] = jet.ram
 		Jets.set_metal(metal_mats[k], jet.metal)

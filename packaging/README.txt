@@ -46,12 +46,16 @@ GET IN
 No Godot editor, account, headset, or online connection is required to play.
 
 WHAT YOU BOUGHT
-An offline, single-player physics experiment with six destinations:
+An offline, single-player physics experiment with nine course selections:
 - 100-mile sprint: build speed, survive, then stop in the finish box.
 - Grand Prix: a circuit with tighter Starfighter handling.
 - Eridanus: a long course to explore and push your luck on.
 - Emergency Run: an experimental delivery mission on Eridanus.
 - The Network: experimental linked roads and cities to explore.
+- S5 Carving Circuit: a 161 km Speedcraft lap.
+- Coast Road: the Network's western shoreline.
+- The Drop: a mountain climb and descent on the Network's eastern edge.
+- Aurora Pressure Line: a glass crossing with banked walls and a ceiling.
 You steer using the difference between your left and right engine thrust.
 This is a small experimental build, not a finished campaign. Expect strange
 handling, sparse scenery, rough collisions, and the occasional spectacular
@@ -95,7 +99,12 @@ H                  Hold to repair
 R                  Arm ramjet
 M                  Switch handling mode
 Backspace          Reset to track (keeps throttle)
-Escape             Pause / resume; restart, menu and quit are available here
+Escape             Pause / resume, change chase camera or nose, restart or return to menu
+
+On the Network, the pause menu also changes the current time and weather.
+Selections carry into later flights. Choose a starting location in the course
+menu. Your craft starts on its roadside pad with the engines running and the
+gate raised. Restarting a Network course takes you back to a pad.
 
 CONTROLLERS
 Keyboard is the supported starting point. Gamepad support is experimental:
@@ -123,7 +132,7 @@ copyright. Third-party components and the CC BY engine audio retain their
 own licenses and permissions. See THIRD_PARTY.md and licenses/.
 Adapted engine audio is also supplied separately in audio/engines/.
 
-Build: 0.3.6-experimental | 2026-11-20
+Build: 0.3.6-experimental | 2026-11-22
 
 IN THIS LOCAL BUILD
 Central highway transfers and long side-road sweeps now alternate bends with
