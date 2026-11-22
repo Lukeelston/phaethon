@@ -146,12 +146,34 @@ def box(a, radius, passes=2):
 
 
 def lettering():
-    rows = [" ".join(GLYPHS[ch][r].replace("1", "#").replace("0", ".") for ch in "PHAETHON") for r in range(7)]
-    bitmap = np.array([[c == "#" for c in row] for row in rows], f32)
-    return box(np.kron(np.pad(bitmap, 1), np.ones((12, 12), f32)), 3)
+    """The nameplate's word as drawn capitals: the strokes' ends (ax, ay, bx, by) in cap heights about the word's
+    middle, and its width. (It was art_cockpit.py's 5 x 7 dot font blown up twelve times, whose bowls were squares
+    and whose O was an octagon: Luke, of the badge, "looks low-poly". A texel's ink is now its distance to these
+    strokes, so the letters are as smooth as the texture is fine.)"""
+    def arc(cx, cy, rx, ry, a0, a1, n):
+        return [(cx + rx * math.cos(math.radians(a0 + (a1 - a0) * i / n)), cy + ry * math.sin(math.radians(a0 + (a1 - a0) * i / n))) for i in range(n + 1)]
+    glyphs = {   # width, then polylines: x from the letter's left, y up from the baseline, the capitals 1 high
+        "P": (.56, [[(0, 0), (0, 1), (.30, 1)] + arc(.30, .74, .26, .26, 90, -90, 20) + [(0, .48)]]),
+        "H": (.62, [[(0, 0), (0, 1)], [(.62, 0), (.62, 1)], [(0, .5), (.62, .5)]]),
+        "A": (.70, [[(0, 0), (.35, 1), (.70, 0)], [(.11, .30), (.59, .30)]]),
+        "E": (.52, [[(.52, 1), (0, 1), (0, 0), (.52, 0)], [(0, .5), (.44, .5)]]),
+        "T": (.62, [[(0, 1), (.62, 1)], [(.31, 0), (.31, 1)]]),
+        "O": (.70, [arc(.35, .5, .35, .5, 0, 360, 48)]),
+        "N": (.64, [[(0, 0), (0, 1), (.64, 0), (.64, 1)]]),
+    }
+    track = .30                                                # between letters: a badge is set wide
+    strokes, pen = [], 0.0
+    for ch in "PHAETHON":
+        wide, lines = glyphs[ch]
+        for line in lines:
+            strokes += [(pen + a[0], a[1] - .5, pen + b[0], b[1] - .5) for a, b in zip(line, line[1:])]
+        pen += wide + track
+    wide = pen - track
+    return np.array([(ax - wide / 2, ay, bx - wide / 2, by) for ax, ay, bx, by in strokes], f32), wide
 
 
-TEXT = lettering()
+WORD, WORD_WIDE = lettering()
+WORD_STROKE = .15                                              # the strokes' weight, of the capitals' height
 SCREWS = [(sa(a), tp(-1.0), RNG.uniform(0, math.pi)) for left, right in zip(ENDS, ENDS[1:])
           if left != -10 for a in (left + 1.7, right - 1.7)]
 RIVETS = [(sa(a), tp(-2.0)) for a in (-7.2, 7.2)]
@@ -251,9 +273,17 @@ def surface(s, t):
     plate = (u > 0) & (u < 1) & (v > 0) & (v < 1)
     if plate.any():
         rim = np.minimum(np.minimum(u, 1 - u) * (sa(8.1) - sa(-8.1)), np.minimum(v, 1 - v) * (tp(19) - tp(-23)))
-        gy = np.clip(((.8 - v) / .6) * TEXT.shape[0], 0, TEXT.shape[0] - 1).astype(np.int32)
-        gx = np.clip(((u - .14) / .72) * TEXT.shape[1], 0, TEXT.shape[1] - 1).astype(np.int32)
-        ink = smooth((TEXT[gy, gx] - .42) * 9) * ((u > .14) & (u < .86) & (v > .2) & (v < .8))
+        long, tall = abs(sa(8.1) - sa(-8.1)), abs(tp(19) - tp(-23))
+        cap = min(.47 * tall, .74 * long / WORD_WIDE)          # the capitals' height (m): the word fills the plate's middle
+        where = np.nonzero(plate)
+        px, py = (u[where] - .5) * long / cap, (v[where] - .5) * tall / cap
+        near = np.full(px.shape, 9, f32)
+        for ax, ay, bx, by in WORD:                            # the nearest stroke
+            ex, ey = bx - ax, by - ay
+            along = np.clip(((px - ax) * ex + (py - ay) * ey) / max(ex * ex + ey * ey, 1e-12), 0, 1)
+            near = np.minimum(near, np.hypot(px - ax - ex * along, py - ay - ey * along))
+        ink = np.zeros(shape, f32)
+        ink[where] = smooth((.5 * WORD_STROKE - near) * cap / .0003 + .5)   # a 0.3 mm chamfer down each stroke's flank
         for cs, ct in RIVETS:
             ink = np.maximum(ink, smooth((.0022 - np.hypot(s - cs, t - ct)) / .0005))
         hb = -.0005 * smooth(rim / .0012) + (grit - .5) * 9e-6 + .00038 * ink

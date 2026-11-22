@@ -28,7 +28,7 @@ const GAUGES := [
 ]
 # key, gauge, angle at zero, angle at full scale, length, full scale
 const NEEDLES := [
-	["mach", 0, 200, -20, 0.88, 8.0],
+	["mach", 0, 200, -20, 0.88, 16.0],
 	["thrL", 1, 225, -45, 0.88, 1.0],
 	["thrR", 2, 225, -45, 0.88, 1.0],
 	["heatL", 3, 150, 30, 0.8, 1.0],

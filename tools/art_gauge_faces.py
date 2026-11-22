@@ -122,17 +122,28 @@ def numerals(face, a0, a1, count, radius, cap, hot_from=None, hot=RED):
 def mach_face():
     f = Face(CELLS["mach"][2])
     a0, a1 = 200, -20
-    for i in range(41):                                               # a block every Mach, a bar at the halves, fifths between
-        zone = RED if i / 5 >= 7 else WHITE
-        if i % 5 == 0:
-            f.tick(sweep(a0, a1, i / 40), .84, .975, .026, zone)
+    # The scale runs to Mach 16 (it ran to 8, and the needle spent the fast half of a flight on its stop: Luke's
+    # flights peak near Mach 14; "Raise the main mach counter from 8 to about 16"). A numbered block every two
+    # Mach, a bar at each odd Mach, a tick at the halves between, so the face is no busier than it was.
+    full = L.NEEDLES[0][5]
+    assert L.NEEDLES[0][0] == "mach" and full == 16.0, "the face is drawn for Mach 16"
+    for i in range(33):                                               # every half Mach
+        zone = RED if i / 2 >= 14 else WHITE
+        if i % 4 == 0:
+            f.tick(sweep(a0, a1, i / 32), .84, .975, .026, zone)
+        elif i % 4 == 2:
+            f.tick(sweep(a0, a1, i / 32), .885, .975, .014, zone)
         else:
-            f.tick(sweep(a0, a1, i / 40), .925, .975, .009, zone)
-    for i in range(8):
-        f.tick(sweep(a0, a1, (i + .5) / 8), .885, .975, .014, RED if i >= 7 else WHITE)
+            f.tick(sweep(a0, a1, i / 32), .925, .975, .009, zone)
     f.band(a0, a1, .975, .985)
-    f.band(sweep(a0, a1, 7 / 8), a1, .802, .836, RED)                 # the last Mach is the craft's limit
-    numerals(f, a0, a1, 8, .69, .15, hot_from=7)
+    f.band(sweep(a0, a1, 14 / 16), a1, .802, .836, RED)               # past Mach 14 is the craft's limit
+    for n in range(9):                                                # 0, 2 .. 16. The tens are two figures wide: set smaller
+        value = 2 * n                                                 # and narrower, and placed to stand clear of the g-meter
+        tens = value >= 10                                            # (12), the limit's band (14, 16) and the speed window (16)
+        radius = {12: .705, 14: .67, 16: .68}.get(value, .69)
+        t = math.radians(sweep(a0, a1, n / 8))
+        f.text(str(value), radius * math.cos(t), radius * math.sin(t), .118 if tens else .14, RED if value >= 14 else WHITE,
+               weight=800, slant=.17, squeeze=.85 if tens else 1.0)
     f.text("MACH", 0, .515, .07, weight=700, track=.22, glow=220)
     f.text("GEAR", -.225, .325, .042, weight=600, track=.16, glow=170)
     f.text("MPH", 0, -.705, .07, weight=700, track=.22, glow=220)

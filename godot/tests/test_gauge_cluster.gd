@@ -44,7 +44,7 @@ func _initialize() -> void:
 		d.labels.speed.text == "4,452" and d._digit_mat.get_shader_parameter("speed") == 4452)
 	_check("mph only, imperial (%s)" % d.labels.units.text, d.labels.units.text == "MPH")
 	_check("the Mach line and the run line reach the LCD strips", d.labels.mach.text == "MACH 5.8   MILE / 0.81 s" and d.labels.progress.text == "TO BOX 12.00 km")
-	_check("the Mach needle shows 5.8 of 8 (%.1f deg)" % d.needle_angle("mach"), _near(d.needle_angle("mach"), 200.0 - 220.0 * 5.8 / 8.0))
+	_check("the Mach needle shows 5.8 of 16 (%.1f deg)" % d.needle_angle("mach"), _near(d.needle_angle("mach"), 200.0 - 220.0 * 5.8 / 16.0))
 	_check("thrust needles at full and at half (%.0f, %.0f deg)" % [d.needle_angle("thrL"), d.needle_angle("thrR")],
 		_near(d.needle_angle("thrL"), -45.0) and _near(d.needle_angle("thrR"), 90.0))
 	_check("the right air brake at three quarters (%.0f deg), the left at rest (%.0f)" % [d.needle_angle("brkR"), d.needle_angle("brkL")],
@@ -67,7 +67,7 @@ func _initialize() -> void:
 		d.labels.headR.text == "R DAMAGED" and d.labels.headL.text == "L" and Color(d.lamps.hpR0, 1.0) == d.RED and d.lamps.hpR0.a < 0.5)
 	_check("equal throttles point the same way (%.0f, %.0f deg); without a Mach figure the needle follows the speed (%.1f deg)" % [
 		d.needle_angle("thrL"), d.needle_angle("thrR"), d.needle_angle("mach")],
-		_near(d.needle_angle("thrL"), d.needle_angle("thrR")) and absf(d.needle_angle("mach") - (200.0 - 220.0 * (300.0 / 767.27) / 8.0)) < 0.1)
+		_near(d.needle_angle("thrL"), d.needle_angle("thrR")) and absf(d.needle_angle("mach") - (200.0 - 220.0 * (300.0 / 767.27) / 16.0)) < 0.1)
 	_check("TURBINES is dark on pistons alone (no turbines key: the flat panel's callers)", d.lamps.turbines.a == 0.0)
 	_check("the turbines light at %.0f mph and stay lit down to %.0f" % [EngineAudio.TUNE.turbine_mph[0], EngineAudio.TUNE.turbine_off_mph],
 		not EngineAudio.turbines_at(EngineAudio.TUNE.turbine_mph[0] - 1.0, false) and EngineAudio.turbines_at(EngineAudio.TUNE.turbine_mph[0], false)

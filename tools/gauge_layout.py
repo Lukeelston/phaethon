@@ -79,7 +79,7 @@ ODOMETER = (.0, -.1275, .0375, .0120, .0050, 6)
 # ---- what each face shows (radii as fractions of the face radius) ----
 # needle: key, gauge, a0 (value 0), a1 (value 1), length, shown full scale
 NEEDLES = [
-    ("mach", 0, 200, -20, .88, 8.0),
+    ("mach", 0, 200, -20, .88, 16.0),
     ("thrL", 1, 225, -45, .88, 1.0), ("thrR", 2, 225, -45, .88, 1.0),
     ("heatL", 3, 150, 30, .80, 1.0), ("heatR", 4, 150, 30, .80, 1.0),
     ("brkL", 3, 210, 330, .80, 1.0), ("brkR", 4, 210, 330, .80, 1.0),
@@ -93,7 +93,7 @@ TELLTALES = [
     ("burner", 1, 0, -.435, .62, .135, "BURNER"), ("burner", 2, 0, -.435, .62, .135, "BURNER"),
     ("flameoutL", 1, 0, -.615, .78, .125, "FLAMEOUT"), ("flameoutR", 2, 0, -.615, .78, .125, "FLAMEOUT"),
     ("hotL", 3, .49, 0, .44, .19, "HOT"), ("hotR", 4, -.49, 0, .44, .19, "HOT"),
-    # left of the hub, over ARMED: the needle is past it (Mach 1.2) long before the turbines light
+    # left of the hub, over ARMED: the needle is past it (Mach 2.4) long before the turbines light
     ("turbines", 0, -.385, .085, .40, .10, "TURBINES"),
 ]
 # lit arcs: key, gauge, inner r, outer r, a0, a1, segments
