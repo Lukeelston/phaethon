@@ -180,6 +180,14 @@ var menu = MainMenuScript.new()   # the main menu (view/main_menu.gd): the fligh
 # them on from its OPTIONS page, where they are on unless switched off.
 const PowerUpsScript := preload("res://view/power_ups.gd")
 static var power_ups_on := false
+# The avoidance field (Luke, 2026-11-22: "Add a collision avoidance force field"): the sims' inp.avoid, which
+# turns the craft off a wall it is closing on, and inp.avoidPush, the push that misses the traffic and the
+# pillars ahead (view/avoidance_field.gd looks for it, once a frame). Off unless switched on (the cockpit's
+# OPTIONS page; --avoid-field); never for a replay.
+const AvoidanceFieldScript := preload("res://view/avoidance_field.gd")
+static var avoid_on := false
+var avoid_eyes = AvoidanceFieldScript.new()
+var _avoid_push := Vector2.ZERO
 var power_ups: Node3D
 var surge := 0.0                  # s left of a gate's surge (the sims' inp.surge while it lasts)
 var menu_label: Label             # the flat view's panel
@@ -298,6 +306,8 @@ func _ready() -> void:
 	dust = DustScript.new()
 	add_child(dust)
 	set_power_ups(power_ups_on or "--power-ups" in OS.get_cmdline_user_args())
+	if "--avoid-field" in OS.get_cmdline_user_args():
+		avoid_on = true
 	dust.build(self)
 	if sim.kind == "network":
 		dust.road_spray()
@@ -367,6 +377,12 @@ func _sim_step() -> void:
 		inp["surge"] = true
 	elif inp.has("surge"):
 		inp.erase("surge")
+	if avoid_on and replay.is_empty():      # the avoidance field, and what its eyes asked for this frame
+		inp["avoid"] = true
+		inp["avoidPush"] = [_avoid_push.x, _avoid_push.y]
+	elif inp.has("avoid"):
+		inp.erase("avoid")
+		inp.erase("avoidPush")
 	sim.step(inp, DT)
 	for e in sim.events:
 		_on_event(e)
@@ -378,6 +394,8 @@ func _sim_step() -> void:
 func _on_event(e: Dictionary) -> void:
 	if skill_score:
 		skill_score.on_event(e)
+	if e.type == "avoid":   # the avoidance field takes hold (of a wall, of the traffic): it flares, and is in the log below
+		_field_flash(0.8)
 	if e.type == "bump":   # traffic's forcefield: a shove you feel, not a hit (and see: the field flares)
 		_on_hit(e.who, 0.5)
 		_field_flash(1.0)
@@ -1661,6 +1679,10 @@ func _sync_world() -> void:
 		race.update(get_process_delta_time())
 		if minimap:
 			minimap.marks = race.marks()
+	if avoid_on:      # the avoidance field's eyes, for the next frame's steps; and it shows while it works
+		_avoid_push = avoid_eyes.look(sim, traffic_net, network_world) if traffic_net else Vector2.ZERO
+		if sim.avoid_a > 0.0:
+			_field_flash(0.25 + 0.5 * sim.avoid_a / float(sim.P.avoidMaxA))
 	if traffic_net:
 		traffic_net.update(get_process_delta_time())
 		if traffic_audio:   # the whooshes: the vehicles within 3 km going by
@@ -1730,7 +1752,12 @@ func power_up(kind: String) -> void:
 ## What the boost is doing, for a readout: nothing, one stage (the ARM button held, or a gate's
 ## surge), or both at once.
 func boost_text() -> String:
-	return "" if sim.boost <= 0 else ("   BOOST" if sim.boost == 1 else "   BOOST x2")
+	return ("" if sim.boost <= 0 else ("   BOOST" if sim.boost == 1 else "   BOOST x2")) + avoid_text()
+
+
+## ... and the avoidance field, while it is working.
+func avoid_text() -> String:
+	return "   FIELD" if sim.avoid_a > 0.0 else ""
 
 
 ## The Network's ground: each city's landscape, weighted by nearness (inverse distance, 4th power),

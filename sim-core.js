@@ -46,6 +46,21 @@
     // 1.9 / 1.45). With `limits` on the held one drains the battery at boostDrain a second (five
     // seconds from full) and each stage heats the engines by boostHeat a second. Mirrors craft_sim.gd.
     boostMult: 1.3, boostDrain: 0.2, boostHeat: 0.1,
+    // The avoidance field (inp.avoid: the OPTIONS page's AVOIDANCE FIELD; Luke, 2026-11-22: "Add a collision
+    // avoidance force field"). Off unless asked for: the replays never ask, and nothing of it runs for them.
+    //   the wall's cushion  a body within avoidD m of a wall (and never more than avoidShare of the road's width:
+    //                       a 140 m circuit is not all cushion) and CLOSING on it (faster than avoidMinV) asks for
+    //                       what would stop it avoidGap m short, v^2 / 2d, times avoidGain. Under avoidMinA it
+    //                       is not worth the name and nothing is done; over avoidMaxA it is all the field has.
+    //                       It answers closing speed and nothing else: a craft flown along a wall feels nothing.
+    //   the view's demand   inp.avoidPush [ax, ay] m/s^2: what misses the traffic and the pillars ahead, worked
+    //                       out once a frame in the view (view/avoidance_field.gd); the same cap.
+    // What it does with the demand: the part across the craft's path TURNS the craft, as one, about its pod
+    // (path, headings and all, at a / v up to avoidMaxW rad/s): a sideways shove alone is undone by the craft's
+    // own grip, which holds its path to its heading, and it flew into the wall under 30 g of shove. The part
+    // along its path is a plain force on every body by its mass (it slows the craft into a wall it meets square).
+    // With `limits` on it spends the battery, avoidDrain a second at full strength, and stops when it is flat.
+    avoidD: 120, avoidGap: 1.5, avoidGain: 1.3, avoidMaxA: 300, avoidMinA: 50, avoidMinV: 1.5, avoidMaxW: 2, avoidMinSpeed: 20, avoidDrain: 0.5, avoidShare: 0.3,
     rideH: 1.5, hoverOmega: 9, hoverZeta: 0.9,
     binderKz: 3e6, binderCz: 60000, towKz: 2e5, towCz: 16000,
     track: 'circuit', startX: 0, startY: 0, handling: 'speed',
@@ -915,6 +930,7 @@
       P, T, eL: body(P.engineMass, eI), eR: body(P.engineMass, eI), pod: body(P.podMass, pI),
       hwant: hname, hblend: hname === 'starfighter' ? 1 : 0, carryTurn: 0,
       battery: 1, armed: false, mode: 'normal', boost: 0, binderBroken: false, crashT: 0, time: 0, towU: -1, towSwing: 0,
+      avoidA: 0, avoidX: 0, avoidY: 0, avoidSrc: '',   // the avoidance field this step: m/s^2, its direction, 'wall' or 'traffic'
       lap: 0, lapStart: null, lastLap: null, bestLap: null, visited: new Set(), checkpoint: 0,
       progressI: 0, cables: [{ f: 0 }, { f: 0 }], events: [], rand: xorshift32(P.seed),
       runStart: null, lastRun: null, bestRun: null, finished: false, runActive: false, result: null,
@@ -1058,6 +1074,42 @@
       if (!((n.i === R.N - 1 && !R.open1) || (n.i === 0 && !R.open0)) || !(n.over + r > Math.abs(n.lat) + r - n.w / 2)) return 0;
       return n.i === R.N - 1 ? 1 : -1;
     }
+    // The avoidance field's cushion (P.avoidD): a circle within its depth of a wall and closing on it asks for
+    // what would stop it short; the craft is given the most that any circle asks (avoidApply).
+    let avoidOn = false, avoidNeed = 0, avoidNx = 0, avoidNy = 0;
+    function avoidWall(b, cx, cy, r, p, n, pen) {
+      const cap = T.kind === 'network' ? endCap(p, n, r) : 0;
+      const sgn = n.lat > 0 ? -1 : 1, nx = cap !== 0 ? -cap * n.tx : n.nx * sgn, ny = cap !== 0 ? -cap * n.ty : n.ny * sgn;
+      const [vx, vy] = pointVel(b, cx, cy), closing = -(vx * nx + vy * ny);
+      if (closing <= P.avoidMinV) return;
+      const need = closing * closing / (2 * Math.max(-pen - P.avoidGap, P.avoidGap));
+      if (need > avoidNeed) { avoidNeed = need; avoidNx = nx; avoidNy = ny; }
+    }
+    function avoidApply(inp, dt) {
+      let ax = 0, ay = 0, src = '';
+      // (once it is working it works on down to 0.4 of the threshold: at the threshold itself it would chatter, on
+      // and off every few steps, as its own push took the need away)
+      const want = avoidNeed * P.avoidGain;
+      if (want >= (S.avoidSrc === 'wall' ? 0.4 : 1) * P.avoidMinA) { const a = Math.min(P.avoidMaxA, want); ax = a * avoidNx; ay = a * avoidNy; src = 'wall'; }
+      const push = inp.avoidPush;
+      if (push && (push[0] !== 0 || push[1] !== 0)) { ax += push[0]; ay += push[1]; if (src === '') src = 'traffic'; }
+      let mag = Math.hypot(ax, ay);
+      if (mag > P.avoidMaxA) { ax *= P.avoidMaxA / mag; ay *= P.avoidMaxA / mag; mag = P.avoidMaxA; }
+      const Pd = S.pod, v = Math.hypot(Pd.vx, Pd.vy);
+      if (mag <= 0 || v < P.avoidMinSpeed || (P.limits && S.battery <= 0)) { S.avoidA = 0; S.avoidX = 0; S.avoidY = 0; S.avoidSrc = ''; return; }
+      if (P.limits) S.battery = Math.max(0, S.battery - P.avoidDrain * (mag / P.avoidMaxA) * dt);
+      const ux = Pd.vx / v, uy = Pd.vy / v, along = ax * ux + ay * uy, across = -ax * uy + ay * ux;   // across: to the path's left
+      const dth = Math.max(-P.avoidMaxW, Math.min(P.avoidMaxW, across / v)) * dt, c = Math.cos(dth), s = Math.sin(dth);
+      for (const b of S.bodies) {
+        const dx = b.x - Pd.x, dy = b.y - Pd.y, u = b.vx;
+        b.x = Pd.x + dx * c - dy * s; b.y = Pd.y + dx * s + dy * c;
+        b.vx = c * u - s * b.vy; b.vy = s * u + c * b.vy;
+        b.th += dth;
+        b.fx += b.m * along * ux; b.fy += b.m * along * uy;
+      }
+      if (S.avoidA === 0) S.events.push({ type: 'avoid', who: src });
+      S.avoidA = mag; S.avoidX = ax; S.avoidY = ay; S.avoidSrc = src;
+    }
     function collideWalls(b, circles, dt) {
       // (the Network searches 16 samples, not 40: a body moves under a sample a step, and the
       // junctions' linear maps are within 10 samples of the true nearest: the search is ~60% of a step)
@@ -1092,7 +1144,11 @@
           const m = nearestOn(op, cx, cy, oh, 12), pm = deep(op, m, r);
           if (pm < pen) { n = m; pen = pm; p = op; }
         }
-        if (pen <= 0 || pen === Infinity) { b.contact[ci] = false; return; }   // (Infinity: past an open end, no wall)
+        if (pen <= 0 || pen === Infinity) {   // (Infinity: past an open end, no wall)
+          b.contact[ci] = false;
+          if (avoidOn && pen !== Infinity && pen > -Math.min(P.avoidD, P.avoidShare * n.w)) avoidWall(b, cx, cy, r, p, n, pen);
+          return;
+        }
         const cap = T.kind === 'network' ? endCap(p, n, r) : 0;   // a closed end pushes back along the road
         const sgn = n.lat > 0 ? -1 : 1, nx = cap !== 0 ? -cap * n.tx : n.nx * sgn, ny = cap !== 0 ? -cap * n.ty : n.ny * sgn;
         const [vx, vy] = pointVel(b, cx, cy), vn = vx * nx + vy * ny;
@@ -1597,9 +1653,11 @@
       }
       const cL = engineCircles(L), cR = engineCircles(R), cP = [[Pd.x, Pd.y, 1.6]];
       if (T.branches.length) updateGates();
+      avoidOn = !!inp.avoid; avoidNeed = 0;
       if (T.kind === 'network') {
         for (const [b, c] of [[L, cL], [R, cR], [Pd, cP]]) { if (b.offRoad) freeContact(b, c, dt); else collideWalls(b, c, dt); }
       } else if (T.kind === 'circuit') { collideWalls(L, cL, dt); collideWalls(R, cR, dt); collideWalls(Pd, cP, dt); }
+      if (avoidOn) avoidApply(inp, dt); else if (S.avoidA !== 0) { S.avoidA = 0; S.avoidX = 0; S.avoidY = 0; S.avoidSrc = ''; }
       if (S.obstacles.length) { collideObstacles(L, cL); collideObstacles(R, cR); collideObstacles(Pd, cP); }
       bodyPush(L, cL, Pd, cP); bodyPush(R, cR, Pd, cP); bodyPush(L, cL, R, cR);
 

@@ -72,7 +72,7 @@ func _run() -> void:
 	var page: Array = _keys(v)
 	var text: String = v.menu.text()
 	_check("it opens the second page: %s, headed \"%s\", the cursor on its first line" % [page, text.get_slice("\n", 0)],
-		page == ["consumables", "powerups", "nose", "back"] and text.begins_with("OPTIONS") and v.menu.at == 0 and text.contains("HEAT AND ENERGY   OFF") and text.contains("POWER-UPS   ON"))
+		page == ["consumables", "powerups", "field", "nose", "back"] and text.begins_with("OPTIONS") and v.menu.at == 0 and text.contains("HEAT AND ENERGY   OFF") and text.contains("POWER-UPS   ON"))
 	_go(v, "consumables")
 	_check("HEAT AND ENERGY switched on: the sim's limits on from that moment, the engines at their resting heat (%.2f), the line reads ON, saved (%s)" % [v.sim.eL.heat, _saved().get("consumables", "")],
 		Cockpit.consumables and v.sim.P.limits and v.sim.eL.heat == 0.3 and v.menu.text().contains("HEAT AND ENERGY   ON") and _saved().get("consumables", "") == "on" and v.menu.at == 0)
@@ -82,6 +82,13 @@ func _run() -> void:
 		not View.power_ups_on and v.power_ups == null and _saved().get("powerups", "") == "off" and v.menu.text().contains("POWER-UPS   OFF"))
 	_go(v, "powerups")
 	_check("... and on again: built again", View.power_ups_on and v.power_ups != null and _saved().get("powerups", "") == "on")
+	# the avoidance field (sim/craft_sim.gd inp.avoid): off until asked for
+	var field_first: bool = not View.avoid_on and v.menu.text().contains("AVOIDANCE FIELD   OFF")
+	_go(v, "field")
+	var field_on: bool = View.avoid_on and _saved().get("field", "") == "on" and v.menu.text().contains("AVOIDANCE FIELD   ON") and v.menu.key() == "field"
+	_go(v, "field")
+	_check("AVOIDANCE FIELD is off with nothing saved (%s); switched on it is on and saved (%s), and off again (%s)" % [field_first, field_on, _saved().get("field", "")],
+		field_first and field_on and not View.avoid_on and _saved().get("field", "") == "off")
 	_go(v, "back")
 	_check("BACK returns to the first page with the cursor on OPTIONS", _keys(v) == first and v.menu.key() == "options" and v.menu.text().begins_with("FLIGHT HOLD"))
 	_go(v, "options")

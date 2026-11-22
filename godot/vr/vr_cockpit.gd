@@ -243,6 +243,7 @@ func _ready() -> void:
 	if not _options_loaded:
 		consumables = String(prefs.get("consumables", "off")) == "on"
 		power_ups_on = String(prefs.get("powerups", "on")) != "off"
+		avoid_on = String(prefs.get("field", "off")) == "on"      # the avoidance field: off until he asks for it
 	_options_loaded = true
 	if bool(sim.P.limits) != consumables:
 		sim.set_limits(consumables)
@@ -306,6 +307,7 @@ func _save_prefs() -> void:
 			"nose": "closed" if CraftModelScript.nose_closed else "open", "slide": "on" if slide_feel else "off",
 			"startup": "cold" if cold_start else "hot", "school": "on" if school else "done",
 			"consumables": "on" if consumables else "off", "powerups": "on" if power_ups_on else "off",
+			"field": "on" if avoid_on else "off",
 			"map": "global" if map_whole else "local", "map_scheme": String(MinimapPanelScript.SCHEMES[map_scheme].name)}))
 
 
@@ -919,6 +921,7 @@ func _read_input(delta: float) -> void:
 			_buzz(r, 0.9, 0.12)
 			_buzz(l, 0.6, 0.08)
 	_boost_step(delta, l, r)
+	_field_step(delta, l, r)
 	# Y: tap restarts, hold flips the handling (live, as the MODE switch)
 	if p.respawn:
 		_respawn()
@@ -996,6 +999,18 @@ func arm_button(down: bool, delta: float) -> String:
 ## while the sim is giving it (not when the battery it needs is flat). And the consumables' one
 ## housekeeping: a burner left lit on a flat battery is put out, as the pilot would (it will not
 ## recharge while the burner is asked for, and nothing on the dash said why).
+## The avoidance field, felt: while it works, a tick in the hand on the side of what it is pushing the craft
+## off (pushed left, the thing is on the right), harder the harder it works.
+const FIELD_TICK := 0.09
+var _field_tick := 0.0
+func _field_step(delta: float, l: XRController3D, r: XRController3D) -> void:
+	_field_tick -= delta
+	if sim.avoid_a > 0.0 and _field_tick <= 0.0:
+		_field_tick = FIELD_TICK
+		var to_left: bool = sim.pod.vx * sim.avoid_y - sim.pod.vy * sim.avoid_x > 0.0
+		_buzz(r if to_left else l, clampf(0.25 + 0.6 * sim.avoid_a / float(sim.P.avoidMaxA), 0.0, 0.9), 0.05)
+
+
 func _boost_step(delta: float, l: XRController3D, r: XRController3D) -> void:
 	if boosting and startup.is_hot() and sim.crash_t <= 0.0:
 		inp.boost = true
@@ -1131,7 +1146,8 @@ func _menu_items() -> Array:
 	if _menu_page == "options":      # the second page: the gameplay switches
 		# (RACING PILOTS is here too, on the Eridanus track: it was built as an eleventh line of the first page)
 		return [{"key": "consumables", "label": "HEAT AND ENERGY", "value": "ON" if consumables else "OFF"},
-			{"key": "powerups", "label": "POWER-UPS", "value": "ON" if power_ups_on else "OFF"}] + _race_menu_items() + [
+			{"key": "powerups", "label": "POWER-UPS", "value": "ON" if power_ups_on else "OFF"},
+			{"key": "field", "label": "AVOIDANCE FIELD", "value": "ON" if avoid_on else "OFF"}] + _race_menu_items() + [
 			# (NOSE came here from the first page, which is full at ten lines: an eleventh ran off its panel)
 			{"key": "nose", "label": "NOSE", "value": "CLOSED" if CraftModelScript.nose_closed else "OPEN"},
 			{"key": "back", "label": "BACK"}]
@@ -1246,6 +1262,15 @@ func menu_choose() -> bool:
 			var at: int = menu.at
 			menu.items = _menu_items()
 			menu.at = at
+			_menu_show()
+			return true
+		"field":                     # the avoidance field (sim/craft_sim.gd inp.avoid; view/avoidance_field.gd)
+			avoid_on = not avoid_on
+			_save_prefs()
+			print("OPTIONS: avoidance field ", "on" if avoid_on else "off")
+			var field_at: int = menu.at
+			menu.items = _menu_items()
+			menu.at = field_at
 			_menu_show()
 			return true
 		"racers":      # the racing pilots, now and from now on (switched on mid-lap they start from the grid)

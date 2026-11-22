@@ -44,6 +44,23 @@ const DEFAULTS := {
 	# 1.9 / 1.45). With `limits` on the held one drains the battery at boostDrain a second (five
 	# seconds from full) and each stage heats the engines by boostHeat a second. Mirrors sim-core.js.
 	"boostMult": 1.3, "boostDrain": 0.2, "boostHeat": 0.1,
+	# The avoidance field (inp.avoid: the OPTIONS page's AVOIDANCE FIELD; Luke, 2026-11-22: "Add a collision
+	# avoidance force field"). Off unless asked for: the replays never ask, and nothing of it runs for them.
+	#   the wall's cushion  a body within avoidD m of a wall (and never more than avoidShare of the road's width:
+	#                       a 140 m circuit is not all cushion) and CLOSING on it (faster than avoidMinV) asks for
+	#                       what would stop it avoidGap m short, v^2 / 2d, times avoidGain. Under avoidMinA it
+	#                       is not worth the name and nothing is done; over avoidMaxA it is all the field has.
+	#                       It answers closing speed and nothing else: a craft flown along a wall feels nothing.
+	#   the view's demand   inp.avoidPush [ax, ay] m/s^2: what misses the traffic and the pillars ahead, worked
+	#                       out once a frame in the view (view/avoidance_field.gd); the same cap.
+	# What it does with the demand: the part across the craft's path TURNS the craft, as one, about its pod
+	# (path, headings and all, at a / v up to avoidMaxW rad/s): a sideways shove alone is undone by the craft's
+	# own grip, which holds its path to its heading, and it flew into the wall under 30 g of shove. The part
+	# along its path is a plain force on every body by its mass (it slows the craft into a wall it meets square).
+	# With `limits` on it spends the battery, avoidDrain a second at full strength, and stops when it is flat.
+	# Mirrors sim-core.js.
+	"avoidD": 120.0, "avoidGap": 1.5, "avoidGain": 1.3, "avoidMaxA": 300.0, "avoidMinA": 50.0, "avoidMinV": 1.5,
+	"avoidMaxW": 2.0, "avoidMinSpeed": 20.0, "avoidDrain": 0.5, "avoidShare": 0.3,
 	"rideH": 1.5, "hoverOmega": 9.0, "hoverZeta": 0.9,
 	"binderKz": 3.0e6, "binderCz": 60000.0, "towKz": 2.0e5, "towCz": 16000.0,
 	"track": "circuit", "startX": 0.0, "startY": 0.0, "handling": "speed",
@@ -696,6 +713,16 @@ const CORK_EASE := 0.15   # each corkscrew's roll rate ramps up and down over th
 
 # race and craft state
 var battery := 1.0
+# the avoidance field this step (inp.avoid): how hard it is working (m/s^2), which way (the demand, in the
+# world), and on what ("wall", "traffic", "" at rest); and the cushion's own bookkeeping within a step
+var avoid_a := 0.0
+var avoid_x := 0.0
+var avoid_y := 0.0
+var avoid_src := ""
+var _avoid_on := false
+var _avoid_need := 0.0
+var _avoid_nx := 0.0
+var _avoid_ny := 0.0
 var armed := false
 var mode := "normal"
 var boost := 0            # the boost's stages this step: the held one, a power-up's surge (0, 1 or 2)
@@ -2149,6 +2176,7 @@ func _collide_walls(b: Body, circles: Array, dt: float) -> void:
 		_nearest_on(b.path, cx, cy, b.hint, 12)
 		var pen := _deep(b.path, r)
 		var lat := _n_lat
+		var wide := _n_w
 		var wnx := _n_nx
 		var wny := _n_ny
 		var cap := _end_cap(b.path, r)   # a closed end pushes back along the road
@@ -2160,6 +2188,7 @@ func _collide_walls(b: Body, circles: Array, dt: float) -> void:
 			if pm < pen:
 				pen = pm
 				lat = _n_lat
+				wide = _n_w
 				wnx = _n_nx
 				wny = _n_ny
 				cap = _end_cap(o.x, r)
@@ -2167,6 +2196,20 @@ func _collide_walls(b: Body, circles: Array, dt: float) -> void:
 				cty = _n_ty
 		if pen <= 0.0 or pen == INF:   # (INF: past an open end, no wall)
 			b.contact[ci] = false
+			# the avoidance field's cushion: within its depth of a wall and closing on it, this circle asks for
+			# what would stop it short; the craft is given the most that any circle asks (_avoid_apply)
+			if _avoid_on and pen != INF and pen > -minf(P.avoidD, P.avoidShare * wide):
+				var asg := -1.0 if lat > 0.0 else 1.0
+				var anx: float = -cap * ctx if cap != 0 else wnx * asg
+				var any: float = -cap * cty if cap != 0 else wny * asg
+				_point_vel(b, cx, cy)
+				var closing := -(_pvx * anx + _pvy * any)
+				if closing > P.avoidMinV:
+					var need: float = closing * closing / (2.0 * maxf(-pen - P.avoidGap, P.avoidGap))
+					if need > _avoid_need:
+						_avoid_need = need
+						_avoid_nx = anx
+						_avoid_ny = any
 			continue
 		var sgn := -1.0 if lat > 0.0 else 1.0
 		var nx: float = -cap * ctx if cap != 0 else wnx * sgn
@@ -2194,6 +2237,72 @@ func _collide_walls(b: Body, circles: Array, dt: float) -> void:
 		var vt := vx * tx + vy * ty
 		var ft: float = -signf(vt) * minf(P.wallMu * fn, absf(vt) * b.m / dt)
 		_apply_at(b, fn * nx + ft * tx, fn * ny + ft * ty, cx, cy)
+
+
+## The avoidance field's step, mirroring sim-core.js avoidApply: the cushion's demand off the nearest wall
+## and the view's (inp.avoidPush), capped; the part across the craft's path turns the craft as one about its
+## pod, the part along it is a force on every body; the battery pays when the limits are on.
+func _avoid_apply(inp: Dictionary, dt: float) -> void:
+	var ax := 0.0
+	var ay := 0.0
+	var src := ""
+	# (once it is working it works on down to 0.4 of the threshold: at the threshold itself it would chatter, on
+	# and off every few steps, as its own push took the need away)
+	var want: float = _avoid_need * P.avoidGain
+	if want >= (0.4 if avoid_src == "wall" else 1.0) * P.avoidMinA:
+		var a: float = minf(P.avoidMaxA, want)
+		ax = a * _avoid_nx
+		ay = a * _avoid_ny
+		src = "wall"
+	if inp.has("avoidPush"):
+		var push: Array = inp.avoidPush
+		var qx: float = push[0]
+		var qy: float = push[1]
+		if qx != 0.0 or qy != 0.0:
+			ax += qx
+			ay += qy
+			if src == "":
+				src = "traffic"
+	var mag := sqrt(ax * ax + ay * ay)
+	if mag > P.avoidMaxA:
+		ax *= P.avoidMaxA / mag
+		ay *= P.avoidMaxA / mag
+		mag = P.avoidMaxA
+	var v := sqrt(pod.vx * pod.vx + pod.vy * pod.vy)
+	if mag <= 0.0 or v < P.avoidMinSpeed or (P.limits and battery <= 0.0):
+		avoid_a = 0.0
+		avoid_x = 0.0
+		avoid_y = 0.0
+		avoid_src = ""
+		return
+	if P.limits:
+		battery = maxf(0.0, battery - P.avoidDrain * (mag / P.avoidMaxA) * dt)
+	var ux := pod.vx / v
+	var uy := pod.vy / v
+	var along := ax * ux + ay * uy
+	var across := -ax * uy + ay * ux   # to the path's left
+	var dth: float = clampf(across / v, -P.avoidMaxW, P.avoidMaxW) * dt
+	var c := cos(dth)
+	var s := sin(dth)
+	var px: float = pod.x
+	var py: float = pod.y
+	for b: Body in bodies:
+		var dx := b.x - px
+		var dy := b.y - py
+		var u := b.vx
+		b.x = px + dx * c - dy * s
+		b.y = py + dx * s + dy * c
+		b.vx = c * u - s * b.vy
+		b.vy = s * u + c * b.vy
+		b.th += dth
+		b.fx += b.m * along * ux
+		b.fy += b.m * along * uy
+	if avoid_a == 0.0:
+		events.append({"type": "avoid", "who": src})
+	avoid_a = mag
+	avoid_x = ax
+	avoid_y = ay
+	avoid_src = src
 
 
 ## Traffic's forcefields, mirroring sim-core.js collideObstacles: a body's circle inside an obstacle
@@ -2675,6 +2784,8 @@ func step(inp: Dictionary, dt: float) -> void:
 	var cp := [[Pd.x, Pd.y, 1.6]]
 	if not branches.is_empty():
 		_update_gates()
+	_avoid_on = bool(inp.get("avoid", false))
+	_avoid_need = 0.0
 	if kind == "network":
 		for bc in [[L, cl], [R, cr], [Pd, cp]]:
 			if bc[0].off_road:
@@ -2685,6 +2796,13 @@ func step(inp: Dictionary, dt: float) -> void:
 		_collide_walls(L, cl, dt)
 		_collide_walls(R, cr, dt)
 		_collide_walls(Pd, cp, dt)
+	if _avoid_on:
+		_avoid_apply(inp, dt)
+	elif avoid_a != 0.0:
+		avoid_a = 0.0
+		avoid_x = 0.0
+		avoid_y = 0.0
+		avoid_src = ""
 	if not obstacles.is_empty():
 		_collide_obstacles(L, cl)
 		_collide_obstacles(R, cr)
