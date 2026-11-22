@@ -18,7 +18,7 @@
 ##              there, and the craft is held whatever the levers ask, which is what the run-up is
 ##              for: each lever shows on its own thrust dial and in its own nozzle, a gear shifted
 ##              shows on the centre dial, and both levers held forward spool the turbines up to
-##              their test speed (the TURBINES lamp, the one that lights by itself at 2,000 mph).
+##              their test speed (the TURBINES lamp, the one that lights by itself at 4,500 mph).
 ##              Released, the air brakes stow and the craft is yours.
 ## Interlocks, each one a thing a pilot would have to learn anyway: the battery before engine power;
 ## engine power before a start; the brake set before a start at rest; engine power off before the

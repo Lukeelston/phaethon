@@ -1261,17 +1261,18 @@
       const gm = inp.thrMul ?? 1;   // the gearbox's pull (its ratio, at its revs; 1 without one)
       let brakeGrip = P.brakeTurnG * Math.max(inp.brkL, inp.brkR) * smooth01((speed - P.frontBrakeV0) / (P.frontBrakeV1 - P.frontBrakeV0));
       if (S.hblend>0 && S.hblend<1) brakeGrip=Math.max(inp.brkL,inp.brkR)*brakeResponse(speed,L.m)[2];
-      let cruiseDrag = 1;
+      const line = 1 / lineSpeed() ** 2;   // the Aurora Line: the body's drag in air that goes along with it
+      let cruiseDrag = line;
       if (inp.gearOverdrive) {
         // Fourth's baseline drag approaches full-throttle thrust, giving logarithmic
         // speed growth without a terminal speed. Brake drag remains fully effective.
         const driveMult = ramjet ? P.ramjetMult : burner ? P.burnerMult : 1;
         const nominalThrust = 2 * P.thrustMax * (0.87 / P.gate) * driveMult * gm;
-        const totalCd = 2 * P.engineCd + P.podCd;
+        const totalCd = (2 * P.engineCd + P.podCd) * line;
         const referenceSpeed = Math.sqrt(Math.max(1, nominalThrust / totalCd));
         const blend = smooth01((speed / referenceSpeed - 0.6) / 0.2);
         const shapedDrag = nominalThrust * (1 - Math.exp(-speed / (0.65 * referenceSpeed)));
-        cruiseDrag = 1 + (shapedDrag / Math.max(1, totalCd * speed * speed) - 1) * blend;
+        cruiseDrag = line * (1 + (shapedDrag / Math.max(1, totalCd * speed * speed) - 1) * blend);
       }
       for (const [e, thr, brk] of [[L, inp.thrL, inp.brkL], [R, inp.thrR, inp.brkR]]) {
         const c = Math.cos(e.th), s = Math.sin(e.th);
@@ -1605,6 +1606,18 @@
     // The Network's clock: it starts on the first move; crossing a city's terminal (its sample on its
     // road, either way) is arriving there: from another city, an 'arrive' with the time since leaving
     // it; then the clock runs from this city.
+    // The Aurora Line carries its air along with a craft: in the bore the air it meets comes at half its
+    // ground speed, so its body's drag is a quarter and the same engines hold twice the speed (mirrors
+    // craft_sim.gd line_speed: 1 anywhere else, rising to 2 across each lock's 900 m gallery).
+    function lineSpeed() {
+      if (!T.roads) return 1;
+      const pod = S.pod, [road, first, last] = NET_PRESSURE;
+      const R = T.roads[road];
+      if (!R || pod.offRoad || pod.path !== road) return 1;
+      const depth = Math.min(roadF(pod) - first, last - roadF(pod)) * R.pts[first].len;
+      return 1 + smoothstep(0, 900, depth);
+    }
+
     function stepPressure() {
       const pod = S.pod, [road, first, last] = NET_PRESSURE;
       const R = T.roads[road], p = R.pts[first], q = R.pts[pod.hint];

@@ -67,11 +67,22 @@ const TUNE := {
 	# The V8 holds its level through the rev. Over 1 at idle: the fixed high-pass takes the
 	# infrasound the loop was levelled with, and the idle came out 3 dB down. The V12's curve is
 	# its full, precise self; while the V8 is angry it plays at angry_v12 of this.
-	"mix_v8": [[0.0, 1.2], [0.35, 1.3], [0.8, 1.3], [1.3, 1.25]],
+	# (3 dB up on what it was, 1.2 / 1.3 / 1.3 / 1.25: Luke, after the twelfth flight, "the rumbly v8 sound
+	# mix should be louder".)
+	"mix_v8": [[0.0, 1.7], [0.35, 1.84], [0.8, 1.84], [1.3, 1.77]],
 	"mix_v12": [[0.0, 0.12], [0.3, 0.45], [0.7, 0.95], [1.3, 1.0]],
-	# The second stage (Luke: "maybe the turbine turns on at 2-3k also"): the turbines light at
-	# turbine_mph[0], are all the way in by turbine_mph[1] and shut down under turbine_off_mph.
-	"turbine_mph": [2000.0, 3000.0], "turbine_off_mph": 1700.0,
+	# The second stage: the turbines light at turbine_mph[0], are all the way in by turbine_mph[1] and
+	# shut down under turbine_off_mph. (It was 2,000 to 3,000 mph, off under 1,700: Luke's "maybe the
+	# turbine turns on at 2-3k also". After the twelfth flight: the rumbly V8 mix should "persist to 4500
+	# mph before fading out to the turbines". The craft tops out a little over 5,000 on full levers, so
+	# the stage is all in by 5,300. The cluster's TURBINES lamp lights by the same rule, so it moved too.)
+	"turbine_mph": [4500.0, 5300.0], "turbine_off_mph": 4200.0,
+	# As the turbines engage the pistons shift: their note drops as on an upshift, then climbs with the
+	# speed until they have faded out under the turbines (Luke, hearing the mix swept against speed: "it
+	# should shift when turbines are engaged, then continue to pitch up until it fades out, instead of
+	# just staying at a constant pitch"). The note against its revs: turbine_shift as they light,
+	# turbine_climb by turbine_mph[1]; the shift itself takes turbine_shift_s. Back to 1 when they stop.
+	"turbine_shift": 0.76, "turbine_climb": 1.22, "turbine_shift_s": 0.1,
 	"turbine_light": 0.4,            # this much of the stage is in as soon as they light; the rest comes with speed
 	"turbine_tau": [0.9, 1.6],       # the stage coming in, going out: time constants, s
 	"turbine_start": 0.4,            # the whine starts this far down its pitch
@@ -141,6 +152,7 @@ var _pops: AudioStreamRandomizer
 var _t := 0.0   # seconds of update, for the twin wander
 var turbines_on := false   # craft fast enough for the turbines (with hysteresis)
 var stage := 0.0   # how far the turbines are in, 0..1
+var shift := 1.0   # the pistons' note against their revs: 1 until the turbines engage, then turbine_shift climbing to turbine_climb
 var anger := 1.0   # the V8's temper: what is left of the stage
 var _wind := 0.0   # the whine's wind-up, 0..1
 var second_on := false   # craft fast enough for the second engine (with hysteresis)
@@ -347,7 +359,9 @@ func update(inp: Dictionary, delta: float) -> void:
 	var duck := 0.0 if sim.crash_t > 0.0 else 1.0   # crash: the engines go with the picture
 	var bodies := [sim.eL, sim.eR]
 	var thr := [inp.thrL, inp.thrR]
-	var mph: float = sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy) * 2.23694
+	# (the speed of the air the craft meets: half its ground speed on the Aurora Line, so there the turbines,
+	# the second engine and the rotor come in at twice the speed over the ground)
+	var mph: float = sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy) * 2.23694 / (float(sim.line_speed()) if sim.has_method("line_speed") else 1.0)
 	if not second_on and mph >= TUNE.second_on_mph:
 		second_on = true
 	elif second_on and mph < TUNE.second_off_mph:
@@ -360,6 +374,9 @@ func update(inp: Dictionary, delta: float) -> void:
 	var spinning := turbines_on or test_stage > 0.02
 	stage = _follow(stage, want, TUNE.turbine_tau[0] if want > stage else TUNE.turbine_tau[1], dt)
 	_wind = _follow(_wind, 1.0 if spinning else 0.0, TUNE.turbine_wind[0] if spinning else TUNE.turbine_wind[1], dt)
+	# the pistons' shift as the turbines engage at speed (not for the run-up's test on the brake)
+	var shifted: float = lerpf(TUNE.turbine_shift, TUNE.turbine_climb, smoothstep(TUNE.turbine_mph[0], TUNE.turbine_mph[1], mph)) if turbines_on else 1.0
+	shift = 1.0 if flat else _follow(shift, shifted, TUNE.turbine_shift_s, dt)
 	# flat holds everything open (turbines in, temper full): only the crossfader may move anything there
 	var turbines := 1.0 if flat else stage
 	anger = 1.0 if flat else 1.0 - stage
@@ -475,7 +492,7 @@ func update(inp: Dictionary, delta: float) -> void:
 				"burner":
 					at = 1.0 + 0.1 * maxf(0.0, s - 1.0)
 				"v8", "v12":
-					at = layer_at(layer, s) * twin
+					at = layer_at(layer, s) * twin * shift
 					if short_intakes and layer == "v12":
 						at *= 1.145
 				"turbine":

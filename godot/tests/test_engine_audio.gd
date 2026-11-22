@@ -2,10 +2,17 @@
 ## and logs each layer's RPM, so tools/engine_audio_check.py can confirm the pitch follows
 ## the levers. Real time (the audio thread runs at wall-clock pace), about 31 s.
 ## Run: Godot_v4.7.1-stable_win64_console.exe --headless --audio-output-latency 10 --max-fps 90 --path godot -s res://tests/test_engine_audio.gd
-##        -- --out=C:/path/capture.wav [--solo=v8|v12|turbine|roar|burner|second|rotor|pops] [--flat] [--profile=second]
+##        -- --out=C:/path/capture.wav [--solo=v8|v12|turbine|roar|burner|second|rotor|pops] [--flat]
+##           [--profile=second|turbine] [--runup-turbines]
 ## --flat holds every gain at 1 and the low-pass open, so only the band crossfades move the level.
 ## --profile=second flies the second engine's run instead: accelerate through second_on_mph, blip,
 ## then brake below second_off_mph (22.5 s).
+## --profile=turbine flies the turbines' run: flat out through turbine_mph[0] and turbine_mph[1],
+## then the air brakes under turbine_off_mph (25.5 s). The lever run tops out near 3,700 mph, under
+## the 4,500 the turbines light at, so on it:
+## --runup-turbines holds the run-up's turbine test on from 9.5 s (EngineAudio.test_stage, the
+## preflight's own switch: the second stage in whatever the airspeed), so the turbine voice can be
+## heard following the levers, the split and the flameout.
 ## Writes capture.wav and capture.csv. Exit code 0 = streams loaded, audio captured, no clipping.
 extends SceneTree
 
@@ -14,6 +21,8 @@ const EngineAudioScript := preload("res://audio/engine_audio.gd")
 const DT := 1.0 / 480.0
 const END := 30.5
 const END_SECOND := 22.5
+const END_TURBINE := 25.5
+const RUNUP_AT := 9.5
 
 var sim
 var audio
@@ -22,6 +31,7 @@ var out_path := "user://engine_capture.wav"
 var solo := ""
 var flat := false
 var prof := "default"
+var runup := false
 var end_t := END
 var t := 0.0
 var acc := 0.0
@@ -83,6 +93,15 @@ static func profile_second(time: float) -> Dictionary:
 	return {"thrL": l, "thrR": l, "brkL": brk, "brkR": brk, "repair": false, "reignite": false}
 
 
+## The turbines' run: both levers through the gate from 1 s (the craft passes turbine_mph[0] at
+## about 9 s and turbine_mph[1] at about 17.5, measured), held to 19 s, then full air brakes, which
+## take it under turbine_off_mph inside half a second.
+static func profile_turbine(time: float) -> Dictionary:
+	var l := 1.0 if time >= 1.0 and time < 19.0 else 0.0
+	var brk := 1.0 if time >= 19.0 else 0.0
+	return {"thrL": l, "thrR": l, "brkL": brk, "brkR": brk, "repair": false, "reignite": false}
+
+
 func _initialize() -> void:
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--out="):
@@ -93,8 +112,12 @@ func _initialize() -> void:
 			flat = true
 		elif a.begins_with("--profile="):
 			prof = a.get_slice("=", 1)
+		elif a == "--runup-turbines":
+			runup = true
 	if prof == "second":
 		end_t = END_SECOND
+	elif prof == "turbine":
+		end_t = END_TURBINE
 	sim = CraftSimScript.new({"track": "range", "vehicle": CraftSimScript.PilotCraft.resolve(OS.get_cmdline_user_args(), "")})
 	rec = AudioEffectRecord.new()
 	AudioServer.add_bus_effect(0, rec)
@@ -130,7 +153,9 @@ func _process(_delta: float) -> bool:
 	if now > t:
 		delta = now - t
 		t = now
-	var inp := profile_second(t) if prof == "second" else profile(t)
+	var inp := profile_second(t) if prof == "second" else (profile_turbine(t) if prof == "turbine" else profile(t))
+	if runup and t >= RUNUP_AT:
+		audio.test_stage = 1.0
 	if prof == "default" and t >= 21.0 and t - delta < 21.0:
 		sim.eL.heat = 1.1   # force a left flameout
 	acc += minf(delta, 0.05)

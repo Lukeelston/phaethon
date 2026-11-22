@@ -299,7 +299,7 @@ func update(c: Dictionary, delta: float) -> Dictionary:
 					burner = false
 			elif absf(ly) < SHIFT_OFF:
 				_flick_l = false
-			_gearbox(float(c.get("speed", 0.0)))
+			_gearbox(float(c.get("airspeed", c.get("speed", 0.0))))
 			out.grab = _clutch(delta)
 			out.mul = pull if gear >= 0 else 1.0
 			out.rpm = rpm

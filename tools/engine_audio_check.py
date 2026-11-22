@@ -1,10 +1,14 @@
 """EngineAudio gate: does the sound actually follow the levers?
 
-Runs godot/tests/test_engine_audio.gd eleven times in parallel: V8, V12 and turbine solo, the
+Runs godot/tests/test_engine_audio.gd thirteen times in parallel: V8, V12 and turbine solo, the
 same three --flat (every gain held at 1, low-pass open, and no twin detune, pops or bark, so
-only the crossfader can move the level), the overrun pops solo, the full mix, and the second
+only the crossfader can move the level), the overrun pops solo, the full mix, the second
 engine's own run (--profile=second) with the second engine solo, the bass rotor solo, and
-everything mixed.
+everything mixed, and the turbines' own run (--profile=turbine: flat out through turbine_mph,
+then the air brakes) with the turbines solo and the V8 solo.
+The lever run tops out near 3,700 mph, under the 4,500 the turbines light at, so its turbine
+solo holds the run-up's turbine test on from 9.5 s (--runup-turbines): the voice's own checks
+(pitch, split, pan, flameout) are made there, and where it lights is checked on its own run.
 Each run records the game's master bus.
 Then it measures the recordings against the RPM each run logged:
   pitch     V8/V12 firing pitch (subharmonic summation; for the V8, that or the octave under it,
@@ -13,7 +17,9 @@ Then it measures the recordings against the RPM each run logged:
             wherever they are in)
   turbines  the second stage: nothing from them until the craft reaches turbine_mph[0] (under
             -60 dBFS, at least 30 dB under their full level), they light within 200 mph of it,
-            and the whine winds up from 0.4 of its pitch
+            the whine winds up from 0.4 of its pitch, and under turbine_off_mph they stop
+  shift     as the turbines light the V8's note drops to turbine_shift of its revs' pitch, then
+            climbs with the speed until it has faded out under them
   split     left lever 0.87, right 0.15: each channel carries its own engine on pitch, and each
             engine is at least 9 dB louder on its own side
   flameout  a dead left engine drops the pistons out of the left channel (at least 9 dB)
@@ -87,7 +93,7 @@ def godot_exe():
 def capture(out_dir):
     procs = {}
     for run in ["v8", "v12", "turbine", "v8_flat", "v12_flat", "turbine_flat", "pops", "all", "second", "rotor",
-                "second_all"]:
+                "second_all", "turbine_run", "v8_run"]:
         wav = os.path.join(out_dir, "engine_%s.wav" % run)
         args = [godot_exe(), "--headless", "--path", os.path.join(ROOT, "godot"), "-s",
                 "res://tests/test_engine_audio.gd", "--", "--out=" + wav.replace("\\", "/")]
@@ -97,6 +103,10 @@ def capture(out_dir):
             args.append("--flat")
         if run.startswith("second") or run == "rotor":
             args.append("--profile=second")
+        if run.endswith("_run"):       # the turbines' run: flat out through turbine_mph, then the brakes
+            args.append("--profile=turbine")
+        if run == "turbine":           # the lever run never reaches turbine_mph[0]: the run-up's turbine test holds them in
+            args.append("--runup-turbines")
         procs[run] = (subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True), wav)
     fails = 0
     for solo, (p, wav) in procs.items():
@@ -359,22 +369,29 @@ def check_layer(layer, wav, flat_wav, tally):
 
 
 SECOND_ON_MPH, SECOND_OFF_MPH = 1500.0, 1300.0   # EngineAudio.TUNE second_on_mph / second_off_mph
-TURBINE_ON_MPH, TURBINE_START = 2000.0, 0.4      # EngineAudio.TUNE turbine_mph[0], turbine_start
+TURBINE_ON_MPH, TURBINE_START = 4500.0, 0.4      # EngineAudio.TUNE turbine_mph[0], turbine_start
+TURBINE_OFF_MPH = 4200.0                          # EngineAudio.TUNE turbine_off_mph
+TURBINE_SHIFT = 0.76                              # EngineAudio.TUNE turbine_shift
 
 
 def check_turbines(wav, tally):
-    """The turbines are the second stage, on the turbine-only capture of the main run: silent on
-    pistons alone, lit as the craft passes turbine_mph[0], winding up from low."""
+    """The turbines are the second stage, on the turbine-only capture of their own run (flat out
+    through turbine_mph, then the air brakes): silent on pistons alone, lit as the craft passes
+    turbine_mph[0], winding up from low, and stopping once it is under turbine_off_mph."""
     print("[turbines]")
     x, sr, log = load(wav)
     mono = x.mean(axis=1)
-    ts = np.arange(0.5, 14.0, 0.05)
+    ts = np.arange(0.5, log["t"][-1] - 0.3, 0.05)
     w = int(0.1 * sr)
     db = np.array([10 * np.log10(np.mean(mono[int(t * sr) - w // 2:int(t * sr) + w // 2] ** 2) + 1e-12) for t in ts])
     mph = np.interp(ts, log["t"], log["mph"])
     stage = np.interp(ts, log["t"], log["stage"])
     full = float(np.median(db[stage > 0.9])) if (stage > 0.9).any() else 0.0
-    before = db[mph < TURBINE_ON_MPH - 150]
+    reached = mph >= TURBINE_ON_MPH
+    if not reached.any():
+        tally.add("the run reaches turbine_mph[0] (top %.0f mph of %.0f)" % (mph.max(), TURBINE_ON_MPH), 0, 1, 1.0)
+        return
+    before = db[(mph < TURBINE_ON_MPH - 150) & (ts < ts[np.argmax(reached)])]
     # (a layer at rest still plays at -80 dB, so its floor is about -75 dBFS, not digital silence)
     tally.add("turbines silent on pistons alone (%.0f dBFS, %.0f dB under their full level)" % (before.max(), full - before.max()),
               int((stage > 0.9).any() and before.max() <= -60.0 and before.max() <= full - 30.0), 1, 1.0)
@@ -389,6 +406,51 @@ def check_turbines(wav, tally):
     after = float(wound[(ts > t_on + 3.0) & (ts < t_on + 3.5)].mean())
     tally.add("the whine winds up: x%.2f of its pitch as it lights, x%.2f three seconds on" % (start, after),
               int(start <= TURBINE_START + 0.2 and after >= 0.97), 1, 1.0)
+    # under turbine_off_mph they stop: the stage goes out (turbine_tau[1]) and the whine winds down
+    slowed = (mph < TURBINE_OFF_MPH) & (ts > ts[np.argmax(reached)])
+    t_off = float(ts[np.argmax(slowed)]) if slowed.any() else ts[-1]
+    drop2 = full - float(db[(ts > t_off + 1.9) & (ts < t_off + 2.1)].mean()) if t_off + 2.1 < ts[-1] else 0.0
+    drop4 = full - float(db[(ts > t_off + 3.9) & (ts < t_off + 4.1)].mean()) if t_off + 4.1 < ts[-1] else 0.0
+    tally.add("under %.0f mph they stop: %.0f dB down two seconds on, %.0f dB four seconds on" % (TURBINE_OFF_MPH, drop2, drop4),
+              int(slowed.any() and drop2 >= 20.0 and drop4 >= 30.0 and drop4 > drop2 + 3.0), 1, 1.0)   # (measured 2026-11-21: 29 and 38 dB)
+
+
+def check_shift(wav, tally):
+    """The pistons' shift, on the V8-only capture of the turbines' run: as the turbines light the
+    V8's note drops to turbine_shift of its revs' pitch, as on an upshift, then climbs with the
+    speed until it has faded out under them."""
+    print("[shift]")
+    x, sr, log = load(wav)
+    mono = x.mean(axis=1)
+    reached = log["mph"] >= TURBINE_ON_MPH
+    if not reached.any():
+        tally.add("the run reaches turbine_mph[0] (top %.0f mph of %.0f)" % (log["mph"].max(), TURBINE_ON_MPH), 0, 1, 1.0)
+        return
+    t_on = float(log["t"][np.argmax(reached)])
+
+    def heard(t):
+        f = expect("v8", log, "L", t)
+        return measure("v8", seg(mono, sr, t, span("v8", f)), sr, f)
+    logged = expect("v8", log, "L", t_on + 0.5) / expect("v8", log, "L", t_on - 0.5)
+    got = heard(t_on + 0.5) / heard(t_on - 0.5)
+    tally.add("the V8 shifts down as the turbines light: x%.2f heard, x%.2f logged (turbine_shift %.2f)" % (got, logged, TURBINE_SHIFT),
+              int(abs(got / logged - 1) < 0.04 and abs(logged - TURBINE_SHIFT) < 0.06), 1, 1.0)
+    # ... then it climbs. The note moves inside one window, so (as for the turbines' wind-down) the
+    # measured pitch must sit within 3% of the range the logged pitch sweeps across the window.
+    hits = n = 0
+    last = t_on + 0.5
+    for t in np.arange(t_on + 0.5, log["t"][-1] - 0.5, 0.1):
+        if at(log, "stage", t) > 0.7 or at(log, "thrL", t) < 0.9:   # faded out under the turbines, or the levers shut
+            break
+        f = expect("v8", log, "L", t)
+        half = span("v8", f) / 2
+        a, b = expect("v8", log, "L", t - half), expect("v8", log, "L", t + half)
+        n += 1
+        hits += min(a, b) * 0.97 <= heard(t) <= max(a, b) * 1.03
+        last = t
+    climbed = expect("v8", log, "L", last) / expect("v8", log, "L", t_on + 0.5)
+    tally.add("... then climbs with the speed (x%.2f in %.1f s)" % (climbed, last - t_on - 0.5), hits, n)
+    tally.add("... and by then is well over where it shifted to", int(climbed >= 1.15), 1, 1.0)
 
 
 def check_second(wav, tally):
@@ -630,7 +692,8 @@ def main():
     tally = Tally()
     for layer in ("v8", "v12", "turbine"):
         check_layer(layer, wavs[layer], wavs[layer + "_flat"], tally)
-    check_turbines(wavs["turbine"], tally)
+    check_turbines(wavs["turbine_run"], tally)
+    check_shift(wavs["v8_run"], tally)
     check_second(wavs["second"], tally)
     check_rotor(wavs["rotor"], tally)
     check_polish(wavs["v8"], wavs["v8_flat"], wavs["pops"], tally, wavs["v12"], wavs["v12_flat"])

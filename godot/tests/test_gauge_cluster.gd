@@ -69,9 +69,10 @@ func _initialize() -> void:
 		d.needle_angle("thrL"), d.needle_angle("thrR"), d.needle_angle("mach")],
 		_near(d.needle_angle("thrL"), d.needle_angle("thrR")) and absf(d.needle_angle("mach") - (200.0 - 220.0 * (300.0 / 767.27) / 8.0)) < 0.1)
 	_check("TURBINES is dark on pistons alone (no turbines key: the flat panel's callers)", d.lamps.turbines.a == 0.0)
-	_check("the turbines light at 2,000 mph and stay lit down to 1,700",
-		not EngineAudio.turbines_at(1999.0, false) and EngineAudio.turbines_at(2000.0, false)
-		and EngineAudio.turbines_at(1700.0, true) and not EngineAudio.turbines_at(1699.0, true))
+	_check("the turbines light at %.0f mph and stay lit down to %.0f" % [EngineAudio.TUNE.turbine_mph[0], EngineAudio.TUNE.turbine_off_mph],
+		not EngineAudio.turbines_at(EngineAudio.TUNE.turbine_mph[0] - 1.0, false) and EngineAudio.turbines_at(EngineAudio.TUNE.turbine_mph[0], false)
+		and EngineAudio.turbines_at(EngineAudio.TUNE.turbine_off_mph, true) and not EngineAudio.turbines_at(EngineAudio.TUNE.turbine_off_mph - 1.0, true)
+		and EngineAudio.TUNE.turbine_off_mph < EngineAudio.TUNE.turbine_mph[0] and EngineAudio.TUNE.turbine_mph[0] < EngineAudio.TUNE.turbine_mph[1])
 	_check("a low battery turns its arc red, and no gear blanks the digit", Color(d.lamps.bat0, 1.0) == d.RED and d.labels.gear.text == "" and not d.labels.gear_lbl.visible)
 	# the points counter between the strips, and the feat on the strip beside it
 	var run := {"mph": 2000.0, "kmh": 3218.0, "mach_line": "MACH 2.6", "progress": "", "footer": "SPEED   /   TRIGGER THROTTLES", "thr": [1.0, 1.0], "brk": [0.0, 0.0],

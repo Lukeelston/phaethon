@@ -11,6 +11,7 @@
 extends "res://tests/render_terminal_art.gd"
 
 const Sequence := preload("res://vr/startup_sequence.gd")
+const Controls := preload("res://input/quest_controls.gd")
 const DT := 1.0 / 60.0
 const LEVEL := Vector3(3, 0, 0)
 const TURN := 54.0       # frames a turn of the head takes
@@ -189,6 +190,8 @@ func _run() -> void:
 			ok = await _climb()
 		"snow":
 			ok = await _snow()
+		"sweep":
+			ok = await _sweep()
 		_:
 			push_error("No such scene: " + scene)
 			ok = false
@@ -310,4 +313,57 @@ func _snow() -> bool:
 	await _glide(where, first + third, mouth, 1400.0, in_lane)
 	_say("The rails carry on along the exit itself: held, they take the craft off the highway.")
 	await _glide(exit_road, 0.0, 150.0, 1100.0, 0.0)
+	return true
+
+
+## The engines against speed, for listening: full levers held and the craft carried along a straight
+## main road with its speed swept evenly from rest to 5,600 mph in 45 s, the trigger scheme's gearbox
+## shifted up at each gear's top speed as a pilot shifts it (a camera pass: the sound follows the
+## levers, the gears and the speed it is given, the craft does not fly). Gear and speed are in the caption.
+func _sweep() -> bool:
+	if not await _begin("E3@9000", false, false):
+		return false
+	var road_i := -1
+	for r in seat.sim.roads.size():
+		if String(seat.sim.roads[r].name) == "E3":
+			road_i = r
+	var road = seat.sim.roads[road_i]
+	var at := 9000.0
+	seat.cam.rotation_degrees = LEVEL
+	print("FILM_BEGIN %.3f" % (frames * DT))
+	var total := roundi(45.0 / DT)
+	for f in total:
+		var mph := 5600.0 * f / float(total)
+		var i := int(at)
+		var dx: float = road.px[i + 1] - road.px[i]
+		var dy: float = road.py[i + 1] - road.py[i]
+		var d := maxf(sqrt(dx * dx + dy * dy), 0.01)
+		var v := mph * 0.44704
+		seat.sim.respawn_on(road_i, i, 1)
+		seat._ride.clear()
+		for body in seat.sim.bodies:
+			body.x += dx * (at - i)
+			body.y += dy * (at - i)
+			body.vx = dx / d * v
+			body.vy = dy / d * v
+		# the trigger scheme's gearbox as a pilot works it: up a gear at each gear's top speed, fourth winding on
+		var gear := 4
+		for g in range(1, 5):
+			if v <= float(Controls.GEARS[g][2]) * Controls.V_TOP_SPEED:
+				gear = g
+				break
+		var x: float = v / (float(Controls.GEARS[gear][2]) * Controls.V_TOP_SPEED)
+		var revs: float = x if gear < 4 or x <= 1.0 else 1.0 + log(x)
+		var lever: float = seat.sim.P.gate * 0.995
+		seat.inp = {"thrL": lever, "thrR": lever, "brkL": 0.0, "brkR": 0.0, "repair": false, "reignite": false,
+			"gearRpm": revs, "gearIndex": gear, "gearOverdrive": gear == 4, "thrMul": 1.0}
+		seat._process(DT)
+		if f % 30 == 0:
+			_say("Full levers, gear %d, %d mph" % [gear, roundi(mph / 100.0) * 100])
+			var ea = seat.engine_audio
+			print("FILMS %.2f s: %.0f mph, gear %d revs %.2f, stage %.2f, temper %.2f, turbines on %s, v8 at %.0f rpm" % [frames * DT, mph, gear, revs, ea.stage, ea.anger, ea.turbines_on, float(ea.voices[0].at.v8)])
+		await _frame()
+		at += v * DT / d
+		if int(at) + 3 >= road.N:
+			break
 	return true

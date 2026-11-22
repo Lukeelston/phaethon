@@ -1,10 +1,13 @@
 ## The Aurora Line is a single pressure vessel. Its clear span has no asphalt
 ## ribbon through it. Repeated sections share meshes; only the two pressure
 ## locks need their own glass shape. Hardware is culled in kilometre blocks.
+## Each lock has a takeoff and landing area (view/aurora_stations.gd): a pad to stop on outside its
+## seal, the distances and lights that bring a craft to it from inside, and the lock's own cycle.
 extends Node3D
 
 const PressureSkin := preload("res://sim/pressure_surface.gd")
 const Kit := preload("res://view/mesh_kit.gd")
+const Stations := preload("res://view/aurora_stations.gd")
 const SIDES := 96
 const BAYS := 16
 const SPACING := 3072.0
@@ -26,6 +29,8 @@ var _frame_shapes: Array[Mesh] = []
 var _horizon_slots: Array = []
 var _detail_slots: Array[MeshInstance3D] = []
 var _stations := Node3D.new()
+var seal_fields: Array[ShaderMaterial] = []   # each lock's field across its bore, southwest then northeast (the stations work them)
+var stations                                  # view/aurora_stations.gd
 var glazing := ShaderMaterial.new()
 var metal := StandardMaterial3D.new()
 
@@ -70,6 +75,9 @@ func build(sim) -> void:
 		var at := span * station / (names.size() - 1)
 		_instance(compressor, at, 0, 65000, "Compressor")
 		_station_plate(at, names[station], station)
+	stations = Stations.new()
+	add_child(stations)
+	stations.build(sim, self)
 
 func sync(ox: float, oy: float) -> void:
 	var along := (ox - _sx) * _tx + (oy - _sy) * _ty
@@ -84,6 +92,7 @@ func sync(ox: float, oy: float) -> void:
 		return
 	_anchor = center
 	_stations.position.z = -z
+	stations.place(z)
 	for k in _horizon_slots.size():
 		var block := center + k - _horizon_slots.size() / 2
 		var active := block >= 0 and block < blocks
@@ -210,6 +219,7 @@ func _airlock(z: float, way: float) -> void:
 	var field := ShaderMaterial.new()
 	field.shader = preload("res://view/aurora_seal.gdshader")
 	disk.set_material(field)
+	seal_fields.append(field)
 	for j in SIDES:
 		for a in [-1.0, TAU * j / SIDES, TAU * (j + 1) / SIDES]:
 			var p := Vector2(0, PressureSkin.RADIUS) if a < 0 else PressureSkin.section(a, 0)

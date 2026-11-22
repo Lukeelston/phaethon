@@ -635,7 +635,7 @@ func update(_inp: Dictionary, delta: float) -> void:
 	var dt := minf(delta, 0.1)
 	_t += dt
 	var p = sim.pod
-	var v: float = sqrt(p.vx * p.vx + p.vy * p.vy)
+	var v: float = sqrt(p.vx * p.vx + p.vy * p.vy) / (float(sim.line_speed()) if sim.has_method("line_speed") else 1.0)   # the air the craft meets
 	var mph := v * 2.236936
 	var g := speed_g(mph)
 	var moving := smoothstep(3.0, 25.0, mph)   # fade in from a standstill

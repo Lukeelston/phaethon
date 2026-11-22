@@ -614,6 +614,20 @@ func pressure_fill() -> float:
 	return smoothstep(0.0, Pressure.APRON, pressure_depth(_road_f(pod)))
 
 
+## The Aurora Line carries its air along with a craft (Luke, after the twelfth flight: "adjust the
+## aurora line such that it effectively doubles the craft's speed"): in the bore the air a craft meets
+## comes at 1 / LINE_SPEED of its speed over the ground, so its body's drag is a quarter and the same
+## engines hold twice the speed. How many times faster than that air the craft is going: 1 anywhere
+## else, rising to LINE_SPEED across each lock's gallery as the pressure does. The air brakes and
+## flaps bite on the craft's whole speed, as outside (they are what stops it at the far lock). The
+## gearbox, the engines' voices and the wind go by the air's speed (speed / line_speed()).
+const LINE_SPEED := 2.0
+
+
+func line_speed() -> float:
+	return lerpf(1.0, LINE_SPEED, pressure_fill()) if kind == "network" else 1.0
+
+
 ## Translate the whole tow rig together in its developed tangent plane. Its
 ## lateral travel becomes real arc length; forces, cable stretch and velocity
 ## are invariant under the translation. Only outbound airlocks unwind a roll.
@@ -2139,18 +2153,19 @@ func step(inp: Dictionary, dt: float) -> void:
 	var brake_grip: float = P.brakeTurnG * maxf(inp.brkL, inp.brkR) * smoothstep(P.frontBrakeV0, P.frontBrakeV1, speed)
 	if hblend>0.0 and hblend<1.0:
 		brake_grip = maxf(inp.brkL,inp.brkR)*brake_response(speed,L.m)[2]
-	var cruise_drag := 1.0
+	var line := 1.0 / pow(line_speed(), 2.0)   # the Aurora Line: the body's drag in air that goes along with it
+	var cruise_drag := line
 	if bool(inp.get("gearOverdrive", false)):
 		# Fourth's normal aero drag approaches full-throttle thrust exponentially.
 		# Thus dv/dt ~ exp(-v/scale), giving logarithmic speed growth rather than
 		# a terminal speed. Only baseline drag changes: brake drag stays intact.
 		var drive_mult: float = P.ramjetMult if ramjet else (P.burnerMult if burner else 1.0)
 		var nominal_thrust: float = 2.0 * P.thrustMax * (0.87 / P.gate) * drive_mult * gm
-		var total_cd: float = 2.0 * P.engineCd + P.podCd
+		var total_cd: float = (2.0 * P.engineCd + P.podCd) * line
 		var reference_speed := sqrt(maxf(1.0, nominal_thrust / total_cd))
 		var blend := smoothstep(0.6, 0.8, speed / reference_speed)
 		var shaped_drag := nominal_thrust * (1.0 - exp(-speed / (0.65 * reference_speed)))
-		cruise_drag = lerpf(1.0, shaped_drag / maxf(1.0, total_cd * speed * speed), blend)
+		cruise_drag = line * lerpf(1.0, shaped_drag / maxf(1.0, total_cd * speed * speed), blend)
 	for side in [[L, inp.thrL, inp.brkL], [R, inp.thrR, inp.brkR]]:
 		var e: Body = side[0]
 		var thr: float = side[1]

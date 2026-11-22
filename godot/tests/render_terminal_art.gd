@@ -147,6 +147,12 @@ func _run() -> void:
 		for arg in OS.get_cmdline_user_args():
 			if arg.begins_with("--look-up="):   # timings: the head tipped back this many degrees (90: straight up through the canopy)
 				seat.cam.rotation_degrees.x = float(arg.trim_prefix("--look-up="))
+			if arg.begins_with("--hide="):   # timings: the nodes of these names undrawn (what a part costs: the same run with and without it)
+				for part in arg.trim_prefix("--hide=").split(","):
+					for node in root.find_children(part, "", true, false):
+						if node is Node3D:
+							node.visible = false
+							print("TERMINAL_HIDE ", node.get_path())
 		await _benchmark()
 	seat.free()
 	quit()

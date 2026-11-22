@@ -64,9 +64,40 @@ func _run() -> void:
 		_exit(dir)
 	s.respawn_on(r, lo - 2)
 	check("reset clears angular position", s.pressure_arc == 0.0)
+	# the line's air goes along with the craft: at twice the speed in the bore it meets the drag it meets outside
+	_seed(lo - 2, 1, 0)
+	var outside_x: float = s.line_speed()
+	_seed(lo + 19, 1, 0)
+	var gallery_x: float = s.line_speed()
+	_seed((lo + hi) / 2, 1, 3000.0)
+	var bore_x: float = s.line_speed()
+	var in_bore := _coast(0.25)
+	var e3 := -1
+	for k in s.roads.size():
+		if s.roads[k].name == "E3":
+			e3 = k
+	s.respawn_on(e3, 9000, 1)
+	for b in s.bodies:
+		b.vx = 1500.0 * s.roads[e3].tx[9000]
+		b.vy = 1500.0 * s.roads[e3].ty[9000]
+	var on_road := _coast(0.25)
+	_seed((lo + hi) / 2, 1, 1500.0)
+	var bore_same_speed := _coast(0.25)
+	check("the line doubles a craft's speed (x%.1f in the bore, x%.2f half way through a lock's gallery, x%.1f outside): coasting at 6,700 mph in the bore it loses %.1f m/s in a quarter second, as at 3,350 mph on E3 (%.1f), and at 3,350 mph in the bore a quarter of that (%.1f)" % [
+		bore_x, gallery_x, outside_x, -in_bore, -on_road, -bore_same_speed],
+		bore_x == 2.0 and outside_x == 1.0 and gallery_x > 1.4 and gallery_x < 1.6 and on_road < -1.0
+		and absf(in_bore - on_road) < 0.06 * absf(on_road) and absf(bore_same_speed - 0.25 * on_road) < 0.06 * absf(on_road))
 	v.free()
 	print("AURORA PRESSURE LINE ", "PASS" if failed == 0 else "FAIL")
 	quit(0 if failed == 0 else 1)
+
+## What the pod's speed changes by over `seconds` with the levers shut (m/s; negative: it slows).
+func _coast(seconds: float) -> float:
+	var hands_off := {"thrL": 0.0, "thrR": 0.0, "brkL": 0.0, "brkR": 0.0, "repair": false, "reignite": true}
+	var before: float = sqrt(s.pod.vx * s.pod.vx + s.pod.vy * s.pod.vy)
+	for k in roundi(seconds / DT):
+		s.step(hands_off, DT)
+	return sqrt(s.pod.vx * s.pod.vx + s.pod.vy * s.pod.vy) - before
 
 func _seed(i: int, dir: int, speed: float) -> void:
 	s.respawn_on(r, i, dir)

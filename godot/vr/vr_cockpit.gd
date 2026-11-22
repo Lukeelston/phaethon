@@ -807,6 +807,8 @@ func _read_input(delta: float) -> void:
 	var c := {"lt": _axis(l, "trigger"), "rt": _axis(r, "trigger"), "lg": _axis(l, "grip"), "rg": _axis(r, "grip"),
 		"ls": _stick(l, "primary"), "rs": _stick(r, "primary"), "lz": l.position.z, "rz": r.position.z,
 		"speed": sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy), "yaw": (sim.eL.w + sim.eR.w) / 2.0,
+		# (the gearbox goes by the speed of the air the craft meets: half its ground speed on the Aurora Line)
+		"airspeed": sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy) / sim.line_speed(),
 		"sf": sim.hblend}
 	var q: Dictionary = quest.update(c, delta)
 	if q.shift != 0:   # a shift: a click in the right hand (up firmer than down)
@@ -1555,7 +1557,7 @@ func _update_hud() -> void:
 	var progress := _hud_progress(true)
 	_update_skill_readout()
 	var kmh := _kmh()
-	_turbines = EngineAudio.turbines_at(kmh / 1.609344, _turbines)
+	_turbines = EngineAudio.turbines_at(kmh / 1.609344 / sim.line_speed(), _turbines)   # (by the air's speed, as the engines' voices are)
 	# the run-up's turbine test lights the same lamp once they are at their test speed
 	_turbine_lamp = startup.held() and (startup.turbine >= 0.97 or (_turbine_lamp and startup.turbine > 0.6))
 	var map_live: bool = (sim.kind == "circuit" or sim.kind == "network") and startup.power > 0.5

@@ -113,9 +113,13 @@ func _run() -> void:
 	reference = Controls.V_TOP_SF
 	controls.sync_handling(sf)
 	await _advance(1.2, 20.0)
-	var sf_note := _played_rpm()
+	# (the note against the pistons' shift at turbine engagement, EngineAudio.shift: this run passes through
+	# the turbines' speeds, and what must stay put is the gear's own note)
+	var sf_note := _gear_rpm()
 	await _advance(8.0, 20.0)
-	_check("Starfighter first keeps a bounded note and never forwards overdrive", view.inp.gearIndex == 0 and not view.inp.gearOverdrive and absf(_played_rpm()[0] - sf_note[0]) < 2.0 and absf(_played_rpm()[1] - sf_note[1]) < 2.0)
+	_check("Starfighter first keeps a bounded note and never forwards overdrive (%.0f rpm, then %.0f; the turbines' shift x%.2f)" % [sf_note[0], _gear_rpm()[0], audio.shift],
+		view.inp.gearIndex == 0 and not view.inp.gearOverdrive and absf(_gear_rpm()[0] - sf_note[0]) < 2.0 and absf(_gear_rpm()[1] - sf_note[1]) < 2.0)
+	sf_note = _played_rpm()
 	await _advance(8.0, 2.0, 0.0)
 	_check("Starfighter throttle lift drops both engine notes", _played_rpm()[0] < sf_note[0] * 0.8 and _played_rpm()[1] < sf_note[1] * 0.8)
 	if capture_dir != "":
@@ -193,6 +197,11 @@ func _advance(x: float, seconds: float, trigger := 1.0) -> void:
 		_tick(x, DT, trigger)
 		if frame % 120 == 119:
 			await process_frame
+
+## ... and with the turbines' shift taken back out: the note the gear itself asks for.
+func _gear_rpm() -> Array:
+	var played := _played_rpm()
+	return [played[0] / audio.shift, played[1] / audio.shift]
 
 func _played_rpm() -> Array:
 	return [audio.voices[0].players.v8[-1].pitch_scale * float(audio._rate_at.v8),
