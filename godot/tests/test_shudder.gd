@@ -25,7 +25,7 @@ func _process(delta: float) -> bool:
 	var braking := t > 5.0 and t < 7.0
 	v.inp = {"thrL": 0.7, "thrR": 0.7, "brkL": 1.0 if braking else 0.0, "brkR": 0.0, "repair": false, "reignite": true}
 	if t > 5.8 and t < 7.0:
-		peak = maxf(peak, v.shell.position.length())
+		peak = maxf(peak, _shaken())
 		shud = [maxf(shud[0], v.wind_audio.shudder[0]), maxf(shud[1], v.wind_audio.shudder[1])]
 	if t < 8.0:
 		return false
@@ -33,12 +33,18 @@ func _process(delta: float) -> bool:
 	_check("left brake at %.0f mph: left shudder %.2f, right %.2f" % [mph, shud[0], shud[1]], shud[0] > 0.3 and shud[1] < 0.02)
 	_check("the cockpit shakes a few mm (peak %.1f mm), and your head isn't in what shakes" % (peak * 1000.0),
 		peak > 0.0008 and peak < 0.01 and not v.shell.is_ancestor_of(v.cam))
-	_check("brakes in: still again (shell %.2f mm, shudder %.3f)" % [v.shell.position.length() * 1000.0, v.wind_audio.shudder[0]],
-		v.shell.position.length() < 0.0002 and v.wind_audio.shudder[0] < 0.01)
+	_check("brakes in: still again (shell %.2f mm, shudder %.3f)" % [_shaken() * 1000.0, v.wind_audio.shudder[0]],
+		_shaken() < 0.0002 and v.wind_audio.shudder[0] < 0.01)
 	var good := fails == 0 and passed == 3
 	print("SHUDDER ", "PASS" if good else "FAIL (%d failed, %d passed)" % [fails, passed])
 	quit(0 if good else 1)
 	return true
+
+
+## How far the shudder has the shell from its place: where it stands, less the speed rush's own easing of
+## it fore and aft (vr/speed_rush.gd, on unless switched off; tests/test_speed_rush.gd is its test).
+func _shaken() -> float:
+	return (v.shell.position - v._rush_shift).length()
 
 
 func _check(label: String, ok: bool) -> void:

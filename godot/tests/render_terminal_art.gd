@@ -48,6 +48,11 @@ func _run() -> void:
 			preload("res://view/canopy.gd").probe = arg.trim_prefix("--roof-probe=")
 	if "--no-beam" in OS.get_cmdline_user_args():   # timings: the approach guidance without its projector beam
 		preload("res://view/approach_projector.gd").beams = false
+	if "--no-streaks" in OS.get_cmdline_user_args():   # timings: the speed rush's streaks undrawn
+		preload("res://vr/speed_rush.gd").streaks_drawn = false
+	if "--no-rush" in OS.get_cmdline_user_args():   # the speed rush switched off (the cockpit where it was, no streaks)
+		Seat.speed_rush = false
+		Seat._rush_loaded = true
 	if "--no-plume" in OS.get_cmdline_user_args():   # timings: the jets' gas undrawn
 		preload("res://view/craft_model.gd").plumes = false
 	Seat._nose_loaded = true                              # (the pilot's saved choice stays out of the pictures and the timings)

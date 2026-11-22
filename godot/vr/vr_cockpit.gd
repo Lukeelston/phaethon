@@ -52,6 +52,7 @@ const BrakeDiagnosticsScript := preload("res://vr/brake_diagnostics.gd")
 const StartupScript := preload("res://vr/startup_sequence.gd")
 const OverheadPanelScript := preload("res://vr/overhead_panel.gd")
 const StartupAudioScript := preload("res://audio/startup_audio.gd")
+const SpeedRushScript := preload("res://vr/speed_rush.gd")
 var _brake_trace: RefCounted
 static var require_neutral_on_entry := false
 var _await_neutral_controls := false
@@ -103,6 +104,20 @@ static var _map_loaded := false           # (both saved, and read once a run)
 #   power-ups     CraftView.power_ups_on (view/power_ups.gd): the lit gates. On unless switched off.
 static var consumables := false
 static var _options_loaded := false       # (both read once a run)
+# The speed rush (Luke, 2026-11-22: "can you also add a little parallax/zoom effect with speed?";
+# vr/speed_rush.gd): the cockpit's fittings ease a few centimetres away from the pilot under the craft's
+# pull and with its speed, and back toward him under the air brakes, and fine streaks stream by alongside.
+# Only the shell moves, fore and aft, as it does for the air brakes' shudder: the rig, the headset's
+# origin and so the world and the horizon are untouched. The OPTIONS page's SPEED RUSH line; on unless
+# switched off, when the shell stands exactly where it did.
+static var speed_rush := true
+static var _rush_loaded := false          # (its saved setting is read once a run, as the camera's)
+var rush                                  # vr/speed_rush.gd; null in a cockpit without its view (the camera's own tests)
+var _shake := Vector3.ZERO                # the shell's shudder (the air brakes', the gear's grab, the run-up's tremble) ...
+var _rush_shift := Vector3.ZERO           # ... and the speed rush's part of its place: the shell stands at their sum
+var _rush_flow := Transform3D.IDENTITY    # the air's frame for the streaks, in this node's space: its origin the seated eye, its -Z the craft's way, level
+var _hardpoints: Array[Marker3D] = []     # where the tow links hook: on the rig, carried with the rush's shift (not with the shudder)
+var _hardpoint_at: Array[Vector3] = []
 # The boost (Luke: "Holding the ramjet arm button should give an extra boost"): B tapped arms or
 # disarms the ramjet as it always has (on the way up now, not the way down); held past BOOST_HOLD it
 # is the sims' inp.boost for as long as it is held, and arms nothing.
@@ -234,6 +249,9 @@ func _ready() -> void:
 	if not _slide_loaded and prefs.has("slide"):
 		slide_feel = prefs.slide != "off"
 	_slide_loaded = true
+	if not _rush_loaded and prefs.has("rush"):
+		speed_rush = prefs.rush != "off"
+	_rush_loaded = true
 	if not _map_loaded:
 		map_whole = String(prefs.get("map", "global")) != "local"
 		map_scheme = maxi(0, MinimapPanelScript.scheme_named(String(prefs.get("map_scheme", ""))))
@@ -322,7 +340,7 @@ func _save_prefs() -> void:
 			"nose": "closed" if CraftModelScript.nose_closed else "open", "slide": "on" if slide_feel else "off",
 			"startup": "cold" if cold_start else "hot", "school": "on" if school else "done",
 			"consumables": "on" if consumables else "off", "powerups": "on" if power_ups_on else "off",
-			"field": "on" if avoid_on else "off",
+			"field": "on" if avoid_on else "off", "rush": "on" if speed_rush else "off",
 			"map": "global" if map_whole else "local", "map_scheme": String(MinimapPanelScript.SCHEMES[map_scheme].name)}))
 
 
@@ -371,7 +389,8 @@ func _apply_shudder(delta: float) -> void:
 		_buzz_hold[c] = maxf(0.0, _buzz_hold[c] - delta)
 	var tremble := _startup_shake(delta)
 	if not wind_audio:
-		shell.position = _grab_jolt(delta) + tremble
+		_shake = _grab_jolt(delta) + tremble
+		shell.position = _shake + _rush_shift
 		return
 	var s: Array = wind_audio.shudder
 	var w: Array = wind_audio.shake
@@ -383,7 +402,8 @@ func _apply_shudder(delta: float) -> void:
 			hand.trigger_haptic_pulse("haptic", 0.0, strength, 0.05, 0.0)
 	var up: float = s[0] * w[0] + s[1] * w[1]
 	var side: float = s[0] * w[0] - s[1] * w[1]
-	shell.position = Vector3(0.6 * side, up, 0.0) * SHAKE_M + _grab_jolt(delta) + tremble
+	_shake = Vector3(0.6 * side, up, 0.0) * SHAKE_M + _grab_jolt(delta) + tremble
+	shell.position = _shake + _rush_shift      # (the speed rush's easing fore and aft: _ease_rush)
 
 
 ## The gear's grab: the cockpit jolts fore and aft (a little up), GRAB_HZ, dying over GRAB_DECAY.
@@ -474,6 +494,9 @@ func _make_view() -> void:
 		m.material_override = _mat(Color(0.2, 0.22, 0.25))
 		c.add_child(m)
 	_build_cockpit()
+	rush = SpeedRushScript.new()      # the speed rush's streaks: in the air round the cockpit, not on the rig (they do not lean with it)
+	add_child(rush)
+	rush.build(self)
 	if network_world:
 		TerminalLighting.mark_craft(rig)
 	_build_fade(xr_cam)
@@ -567,7 +590,7 @@ func _diag(delta: float, l: XRController3D, r: XRController3D, p: Dictionary) ->
 		int(sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy) * 3.6)])
 	print("DIAG craft: scheme=%s grip=%.2f/%.2f brk=%.2f/%.2f shudder=%.2f/%.2f shake=%.1fmm hp=%.2f/%.2f pod=%.2f heat=%.2f/%.2f flameout=%s/%s mode=%s bat=%.2f btn X=%s Y=%s A=%s B=%s" % [
 		quest.scheme, l.get_float("grip"), r.get_float("grip"), inp.brkL, inp.brkR,
-		wind_audio.shudder[0] if wind_audio else 0.0, wind_audio.shudder[1] if wind_audio else 0.0, shell.position.length() * 1000.0,
+		wind_audio.shudder[0] if wind_audio else 0.0, wind_audio.shudder[1] if wind_audio else 0.0, _shake.length() * 1000.0,
 		sim.eL.health, sim.eR.health, sim.pod.health,
 		sim.eL.heat, sim.eR.heat, sim.eL.flameout, sim.eR.flameout, sim.mode, sim.battery,
 		l.is_button_pressed("ax_button"), l.is_button_pressed("by_button"), r.is_button_pressed("ax_button"), r.is_button_pressed("by_button")])
@@ -648,6 +671,8 @@ func _build_cockpit() -> void:
 		mark.name = "hardpoint_%s" % ("l" if s < 0.0 else "r")
 		mark.position = Vector3(0.18 * s, CraftModelScript.POD_FRAME_UP + CraftModelScript.POD_EYE_H, -2.1)
 		rig.add_child(mark)   # anchors, not fittings: on the rig, steady through the shudder
+		_hardpoints.append(mark)
+		_hardpoint_at.append(mark.position)
 	if shrike:
 		CraftModelScript.Shrike.fit_seat(shell)
 	elif SeatFinish.hd:
@@ -1249,6 +1274,7 @@ func _menu_items() -> Array:
 			{"key": "powerups", "label": "POWER-UPS", "value": "ON" if power_ups_on else "OFF"},
 			{"key": "field", "label": "AVOIDANCE FIELD", "value": "ON" if avoid_on else "OFF"}] + _race_menu_items() + [
 			{"key": "autopilot", "label": "AUTOPILOT", "value": "ON" if autopilot.on else "OFF"},
+			{"key": "rush", "label": "SPEED RUSH", "value": "ON" if speed_rush else "OFF"},
 			# (NOSE came here from the first page, which is full at ten lines: an eleventh ran off its panel)
 			{"key": "nose", "label": "NOSE", "value": "CLOSED" if CraftModelScript.nose_closed else "OPEN"},
 			{"key": "back", "label": "BACK"}]
@@ -1379,6 +1405,15 @@ func menu_choose() -> bool:
 			var at_auto: int = menu.at
 			menu.items = _menu_items()
 			menu.at = at_auto
+			_menu_show()
+			return true
+		"rush":                      # the speed rush: the cockpit's easing with the load and the speed, the streaks alongside
+			speed_rush = not speed_rush
+			_save_prefs()
+			print("OPTIONS: speed rush ", "on" if speed_rush else "off")
+			var rush_at: int = menu.at
+			menu.items = _menu_items()
+			menu.at = rush_at
 			_menu_show()
 			return true
 		"racers":      # the racing pilots, now and from now on (switched on mid-lap they start from the grid)
@@ -1842,6 +1877,7 @@ func _place_camera(_k: float) -> void:
 		origin.transform = Transform3D(Basis.IDENTITY, EYE + (CAMERA_OFFSETS.get(camera, Vector3.ZERO) as Vector3))
 		if chase_hud:
 			chase_hud.visible = camera != "cockpit"
+		_rush_flow = Transform3D(rig.basis.orthonormalized(), rig.transform * EYE)      # (the road's own twist is the air's too)
 	else:
 		var Q := shaft_carry_at(sim.pod.x, sim.pod.y)   # (identity but up a shaft: there the world turns over round you)
 		var slide := _ease_slide(get_process_delta_time())   # the rear stepped out: the cockpit turned further into the turn ...
@@ -1860,6 +1896,12 @@ func _place_camera(_k: float) -> void:
 			outside = Q * Basis.from_euler(Vector3(pitch, yaw, 0.0))
 		rig.position = base + seat_at - b_full * head
 		_place_origin(outside, base)
+		# the air's frame for the speed rush's streaks: along the craft's own way (not its nose's: in a slide the
+		# air comes from off the nose), on the road's slope, and level: it does not lean as the cockpit does
+		var way := yaw
+		if absf(sim.pod.vx) + absf(sim.pod.vy) > 30.0:
+			way += clampf(angle_difference(sim.pod.th, atan2(sim.pod.vy, sim.pod.vx)), -0.35, 0.35)
+		_rush_flow = Transform3D(Q * Basis.from_euler(Vector3(pitch, way, 0.0)), rig.transform * EYE)
 	var thr := [inp.thrL, inp.thrR]
 	for k in 2:
 		lever_pivots[k].rotation.x = deg_to_rad(lerpf(30.0, -30.0, thr[k]))
@@ -1867,6 +1909,29 @@ func _place_camera(_k: float) -> void:
 			var brake: float = inp.brkL if k == 0 else inp.brkR
 			brake_paddles[k].rotation.x = deg_to_rad(-18.0) * clampf(brake, 0.0, 1.0)
 		lever_tips[k].albedo_color = Color(1.0, 0.55, 0.15) if thr[k] >= sim.P.gate else Color(0.16, 0.17, 0.19)
+	_ease_rush(get_process_delta_time())
+
+
+## The speed rush's parallax, a frame (vr/speed_rush.gd): the shell eased fore and aft by the load along the
+## craft's nose (the g-meter's own reading) and by its speed, and the tow links' hooks carried with it. In
+## the seat only: an outside camera watches a cockpit that stays put. Nothing here touches the rig or the
+## headset's origin: the head, the world and the horizon are where _place_camera left them.
+func _ease_rush(delta: float) -> void:
+	if rush == null:
+		return
+	var forward: float = rush.ease_surge(delta, g_along, _kmh() / 1.609344, speed_rush and camera == "cockpit")
+	_rush_shift = Vector3(0.0, 0.0, -forward)
+	shell.position = _shake + _rush_shift
+	craft.pod_frame_shift = _rush_shift
+	for k in _hardpoints.size():
+		_hardpoints[k].position = _hardpoint_at[k] + _rush_shift
+
+
+## ... and its streaks, a frame (after the camera is placed: theirs is the air's frame it worked out). In the
+## seat only, and not through a crash's fade.
+func _sync_rush(delta: float) -> void:
+	if rush != null:
+		rush.sync(delta, _kmh() / 1.609344, speed_rush and camera == "cockpit" and sim.crash_t <= 0.0, _rush_flow)
 
 
 func _process(delta: float) -> void:
@@ -1877,6 +1942,7 @@ func _process(delta: float) -> void:
 	if _brake_trace:
 		_brake_trace.capture(self, delta)
 	_apply_shudder(delta)
+	_sync_rush(delta)
 	interior.set_power(startup.power)
 	interior.set_mode(sim.mode, sim.hblend)
 	# In pursuit the patrol's lights wash the cabin: the rim light takes the lamp that is lit.

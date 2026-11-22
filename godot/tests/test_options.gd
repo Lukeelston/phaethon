@@ -72,7 +72,7 @@ func _run() -> void:
 	var page: Array = _keys(v)
 	var text: String = v.menu.text()
 	_check("it opens the second page: %s, headed \"%s\", the cursor on its first line" % [page, text.get_slice("\n", 0)],
-		page == ["consumables", "powerups", "field", "autopilot", "nose", "back"] and text.begins_with("OPTIONS") and v.menu.at == 0 and text.contains("HEAT AND ENERGY   OFF") and text.contains("POWER-UPS   ON"))
+		page == ["consumables", "powerups", "field", "autopilot", "rush", "nose", "back"] and text.begins_with("OPTIONS") and v.menu.at == 0 and text.contains("HEAT AND ENERGY   OFF") and text.contains("POWER-UPS   ON"))
 	_go(v, "consumables")
 	_check("HEAT AND ENERGY switched on: the sim's limits on from that moment, the engines at their resting heat (%.2f), the line reads ON, saved (%s)" % [v.sim.eL.heat, _saved().get("consumables", "")],
 		Cockpit.consumables and v.sim.P.limits and v.sim.eL.heat == 0.3 and v.menu.text().contains("HEAT AND ENERGY   ON") and _saved().get("consumables", "") == "on" and v.menu.at == 0)

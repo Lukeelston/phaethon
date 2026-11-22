@@ -177,6 +177,8 @@ var energised := 1.0
 var lights_on := true
 var light_meshes: Array[MeshInstance3D] = []
 var pod_frame: Node3D = null          # VR: the cockpit rig stands in for the hidden pod
+var pod_frame_shift := Vector3.ZERO   # ... and its fittings stand this far from their place on it, rig metres (the speed rush eases
+                                      # them fore and aft: vr/speed_rush.gd): the tow links hook to the nose where it is
 const POD_FRAME_UP := 0.6             # pod mesh centre above the rig floor
 const POD_LIFT := 1.3                 # the pod rides this much higher than the sim's body (looks only:
                                       # Luke wanted it "sitting a bit higher up entirely", then "higher than
@@ -1446,7 +1448,7 @@ func _pod_anchor(sim, k: int) -> Vector3:
 	var left: float = (1.0 if k == 0 else -1.0) * sim.P.podAnchorW * sim.P.podWidth / 2.0
 	var local := Vector3(-left, POD_EYE_H, -sim.P.podLen / 2.0 - 0.1)   # onto the post, just ahead of the sim's nose
 	if pod_frame:
-		return pod_frame.transform * (local + Vector3(0, POD_FRAME_UP, 0))
+		return pod_frame.transform * (local + Vector3(0, POD_FRAME_UP, 0) + pod_frame_shift)
 	return pod.transform * local
 
 
