@@ -61,6 +61,10 @@ func _run() -> void:
 			c.v = 1000.0
 			traffic._place(c)
 			sim.respawn_on(r, int(c.f), direction)
+			# (the feed gives the sim only what the craft can reach before the next frame: 144 m standing. At this
+			# speed that is 500 m, the whole 300 m of the train, whose every car this checks)
+			sim.pod.vx = 3000.0
+			sim.pod.vy = 0.0
 			traffic.view = {"org_x": c.x, "org_y": c.y}
 			traffic.cars.clear()
 			traffic.cars.append(c)

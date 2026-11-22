@@ -25,7 +25,7 @@ $summary = Join-Path $runPath 'summary.tsv'
 $windowed = @(
     'test_canopy_contrast_render', 'test_effect_exclusion', 'test_exit_lanes',
     'test_network_shaft_mesh', 'test_network_streaming_render', 'test_quick_menu_render',
-    'test_screen_reflection', 'test_speed_guide_shader', 'test_traffic_fleet'
+    'test_screen_reflection', 'test_speed_guide_shader', 'test_traffic_fleet', 'test_traffic_lamps'
 )
 # Most tests print their filename as words followed by PASS or FAIL.
 $titles = @{

@@ -45,7 +45,14 @@ const R_KEEP := 19000.0          # vehicles kept within this of the craft
 const R_SPAWN := Vector2(11000.0, 18000.0)   # spawned this far out (in the haze)
 const TARGET := 220              # the most vehicles round the craft (near a city); mid-country fewer (_target)
 const SCALE := 2.0               # the vehicles' size: big enough to read at these speeds (a car 24 m, a freight car 34 m)
-const R_FIELD := 2500.0          # vehicles within this are the sims' obstacles
+const R_FIELD := 2500.0          # vehicles within this are the sims' obstacles, at the very most (feed_reach)
+# The feed is made again every frame, so the sim need only be given what the craft can reach before the next one.
+# (It was every vehicle within R_FIELD and every pillar within 1,000 m: at the Eridanus pad some 400 circles, each
+# tested against the craft's three bodies on each of the sim's 480 steps a second. With OBSTACLE COLLISIONS on that
+# doubled the sim's cost, 150 us a step to 320: Luke's sixteenth and seventeenth flights, 82 fps for 94.)
+const FEED_REACH := 120.0        # m: the craft's own length (its engines fly 22 m ahead of the pod), a vehicle's, and room
+const FEED_AHEAD_S := 0.12       # s of flying: the feed is a frame old at most, and the view clamps a frame at 0.05 s
+const FEED_CLOSING := 200.0      # m/s: a vehicle's own speed, coming the other way
 const TRAIN := 8                 # cars in a transport pod's train
 const TRAIN_GAP := 38.0          # m between their centres
 const SF_V := 1150.0 / MPH       # through a city's STARFIGHTER zone
@@ -1400,15 +1407,22 @@ func _render() -> void:
 
 ## The near vehicles as the sims' obstacles: circles along each body (a train's cars each), with
 ## its velocity (the sim moves them between frames).
+## How far from the pod an obstacle can matter before the next feed, at the craft's speed (m/s).
+static func feed_reach(speed: float) -> float:
+	return minf(R_FIELD, FEED_REACH + (maxf(speed, 0.0) + FEED_CLOSING) * FEED_AHEAD_S)
+
+
 func _feed() -> void:
 	if not collide or not sim.P.obstacleCollisions:
 		sim.obstacles = []
 		return
 	var px: float = sim.pod.x
 	var py: float = sim.pod.y
-	var obs: Array = world.obstacles_near(px, py)
+	var reach := feed_reach(Vector2(sim.pod.vx, sim.pod.vy).length())
+	var obs: Array = world.obstacles_near(px, py, reach)
 	for c in cars:
-		if Vector2(c.x - px, c.y - py).length_squared() > R_FIELD * R_FIELD:
+		var trail := TRAIN * TRAIN_GAP if c.kind == TRANSPORT else 0.0      # (a train's cars string out behind its lead)
+		if Vector2(c.x - px, c.y - py).length_squared() > (reach + trail) * (reach + trail):
 			continue
 		var vx := c.hx * c.v
 		var vy := c.hy * c.v
@@ -1437,6 +1451,8 @@ func _feed() -> void:
 				h = _drawing.height(c.road, f)
 			elif grade and sim._net_h.has(c.road):
 				h = _drawing.height(c.road, clampf(c.f - c.dir * back / 24.0, 0.0, sim.roads[c.road].N - 1.0))
+			if Vector2(x - px, y - py).length_squared() > reach * reach:      # (the far cars of a near train)
+				continue
 			obs.append({"id": c.id * 32 + q, "r": radius, "x": x, "y": y,
 				"vx": vx, "vy": vy, "zMin": h, "zMax": h + (9.6 if c.kind == TRANSPORT else 6.0)})
 	sim.obstacles = obs
