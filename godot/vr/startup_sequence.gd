@@ -53,6 +53,26 @@ const TURBINE_UP_S := 2.4        # ... for this long spool the turbines to their
 const TURBINE_DOWN_S := 1.6
 const CLEARED_S := 3.0           # CLEARED stays on the glass this long after the brake comes off
 const STEPS := 5
+# The run-up, taught (Luke, flying the fifteenth: "build a sort of 'tutorial' into the startup sequence.
+# This is going to be a hard game for people to play first time, and i want to bring down the barrier to
+# fun"). With `school` set the run-up is one lesson at a time, each a thing a pilot's hands do in flight,
+# in the order he will need them, and passed by doing it with the craft held on its brake. What "doing
+# it" means is taken from how the game is flown by someone who can: his own two flights that evening,
+# read from the log's one-a-second input lines. Both triggers were fully in 92% of the time and fully
+# out 7%, almost never part way (so: all the way in, and held). The air brakes were on half the time,
+# a grip squeezed 0.40 at the median and hard in 1 to 4% of it (so: a turn is a gentle squeeze, and a
+# full one is for stopping). The throttle stayed on through nearly all of the braking.
+# For the trigger throttles (the default controls); any other scheme keeps the plain run-up.
+const LESSONS := ["throttle", "turbines", "right", "left", "brake", "gear"]
+const SCHOOL_CHECKS := ["steerR", "steerL", "brake"]   # the checks only a taught run-up asks for
+const FULL_LEVER := 0.85         # a trigger all the way in (it gives 0.87 at its stop: the gate)
+const THROTTLE_HOLD_S := 1.0     # ... and held this long
+const GENTLE := Vector2(0.15, 0.65)   # a steering squeeze: a grip between these ...
+const GENTLE_HOLD_S := 0.8       # ... for this long ...
+const OTHER_GRIP := 0.12         # ... with the other grip under this
+const TOO_HARD := 0.8            # a steering squeeze past this is told to ease off
+const HARD_GRIP := 0.85          # both grips past this: the brakes, hard ...
+const HARD_HOLD_S := 0.5         # ... for this long
 
 var batt := true
 var master := true
@@ -65,8 +85,14 @@ var selftest := -1.0             # seconds into the lamp and needle test (-1: no
 var tested := true               # the self-test has finished since the battery came on
 var charge := 1.0                # the binder and the cables, 0 dead .. 1 charged
 var turbine := 0.0               # the run-up's turbine test, 0 stopped .. 1 at test speed
-var checks := {"thrL": true, "thrR": true, "gear": true, "turbines": true}
+var checks := {"thrL": true, "thrR": true, "gear": true, "turbines": true, "steerR": true, "steerL": true, "brake": true}
 var gears := false               # there is a gearbox to try (the cockpit says): the run-up asks for a shift
+var school := false              # the run-up is taught, a lesson at a time (the cockpit says, before cold(): a first flight, or the pilot asked)
+var taught := false              # a taught run-up has been flown away from (the cockpit remembers it, and stops teaching)
+var grips := [0.0, 0.0]          # the grips and the levers as last seen (the glass's bars in a lesson)
+var levers := [0.0, 0.0]
+var _hold := 0.0                 # seconds the lesson's ask has been met without a break
+var _lesson_was := ""
 var cleared := true              # the sequence is behind you (or was never asked for)
 var refusal := ""                # why the last control worked was refused (for the glass), while _refusal_t lasts
 var events: Array[String] = []   # what happened since they were last cleared (the cockpit's sounds and haptics)
@@ -121,7 +147,53 @@ func cold() -> void:
 
 func _uncheck() -> void:
 	for key in checks:
-		checks[key] = false
+		checks[key] = not school and key in SCHOOL_CHECKS      # (the plain run-up does not ask for the lessons' checks)
+	_hold = 0.0
+	_lesson_was = ""
+
+
+## The lesson a taught run-up is on: "throttle", "turbines", "right", "left", "brake", "gear", or ""
+## (not being taught, not in the run-up, or all of them passed).
+func lesson() -> String:
+	if not school or not held():
+		return ""
+	if not (checks.thrL and checks.thrR):
+		return "throttle"
+	if not checks.turbines:
+		return "turbines"
+	if not checks.steerR:
+		return "right"
+	if not checks.steerL:
+		return "left"
+	if not checks.brake:
+		return "brake"
+	if gears and not checks.gear:
+		return "gear"
+	return ""
+
+
+## How many lessons a taught run-up has (the gearbox's is the last, where there is one), and which
+## the pilot is on, 1 up.
+func lesson_count() -> int:
+	return LESSONS.size() if gears else LESSONS.size() - 1
+
+
+func lesson_number() -> int:
+	return LESSONS.find(lesson()) + 1
+
+
+## How far the lesson's ask has been held, 0..1 (the turbines': their own spool).
+func lesson_progress() -> float:
+	match lesson():
+		"throttle":
+			return clampf(_hold / THROTTLE_HOLD_S, 0.0, 1.0)
+		"turbines":
+			return turbine
+		"right", "left":
+			return clampf(_hold / GENTLE_HOLD_S, 0.0, 1.0)
+		"brake":
+			return clampf(_hold / HARD_HOLD_S, 0.0, 1.0)
+	return 0.0
 
 
 func running(k: int) -> bool:
@@ -283,9 +355,12 @@ func press_start(mph := 0.0) -> String:
 	return _did("start")
 
 
-## A frame: `thr` is what the pilot's hands ask of each engine, [left, right]; `gear` the gear shown.
-func step(dt: float, thr: Array, gear := 0) -> void:
+## A frame: `thr` is what the pilot's hands ask of each engine, [left, right]; `gear` the gear shown;
+## `grip` how far each grip is squeezed, [left, right] (the air brakes' own ask: a taught run-up reads it).
+func step(dt: float, thr: Array, gear := 0, grip: Array = [0.0, 0.0]) -> void:
 	dt = clampf(dt, 0.0, 0.1)
+	levers = [float(thr[0]), float(thr[1])]
+	grips = [float(grip[0]), float(grip[1])]
 	power = move_toward(power, 1.0 if batt else 0.0, dt / (POWER_UP_S if batt else POWER_DOWN_S))
 	if selftest >= 0.0:
 		selftest += dt
@@ -321,7 +396,48 @@ func step(dt: float, thr: Array, gear := 0) -> void:
 				if all_running():
 					events.append("running")
 	var both := false
-	if held():
+	if held() and school:
+		# a lesson at a time: only the one the pilot is on can be passed, by holding what it asks
+		var on := lesson()
+		if on != _lesson_was:
+			_lesson_was = on
+			_hold = 0.0
+			_gear_seen = gear         # (the gearbox's lesson: a shift from the gear it began in)
+		var met := false
+		match on:
+			"throttle":
+				met = levers[0] >= FULL_LEVER and levers[1] >= FULL_LEVER
+			"right":
+				met = grips[1] >= GENTLE.x and grips[1] <= GENTLE.y and grips[0] < OTHER_GRIP
+			"left":
+				met = grips[0] >= GENTLE.x and grips[0] <= GENTLE.y and grips[1] < OTHER_GRIP
+			"brake":
+				met = grips[0] >= HARD_GRIP and grips[1] >= HARD_GRIP
+		_hold = _hold + dt if met else 0.0
+		match on:
+			"throttle":
+				if _hold >= THROTTLE_HOLD_S:
+					checks.thrL = true
+					checks.thrR = true
+					events.append("check")
+			"right":
+				if _hold >= GENTLE_HOLD_S:
+					checks.steerR = true
+					events.append("check")
+			"left":
+				if _hold >= GENTLE_HOLD_S:
+					checks.steerL = true
+					events.append("check")
+			"brake":
+				if _hold >= HARD_HOLD_S:
+					checks.brake = true
+					events.append("check")
+			"gear":
+				if gear != _gear_seen:
+					checks.gear = true
+					events.append("check")
+		both = on in ["throttle", "turbines"] and levers[0] >= TURBINE_LEVER and levers[1] >= TURBINE_LEVER
+	elif held():
 		for k in 2:
 			var side := "L" if k == 0 else "R"
 			if float(thr[k]) >= CHECK_LEVER and not checks["thr" + side]:
@@ -343,6 +459,10 @@ func step(dt: float, thr: Array, gear := 0) -> void:
 		cleared = true
 		_cleared_t = CLEARED_S
 		events.append("cleared")
+		if school and checks_done():      # every lesson passed and the brake let go: the next run-up is the plain one
+			taught = true
+			school = false
+			events.append("schooled")
 	_cleared_t = maxf(0.0, _cleared_t - dt)
 	if _refusal_t > 0.0:
 		_refusal_t -= dt
@@ -428,12 +548,53 @@ func message() -> String:
 			note = "BINDER CHARGED" if charge >= 1.0 else "BINDER CHARGING"
 		return "START ENGINES  %s\nOVERHEAD RIGHT > PRESS 3 START\n%s | %s" % [count, note, "ARMED" if park else "NO BRAKE"]
 	if checks_done():
-		return "RELEASE PARK BRAKE  %s\nOVERHEAD RIGHT > FLICK 4 PARK DOWN\n%s | READY" % [count, note if note != "" else "ALL CHECKS GOOD, AIR BRAKES OUT"]
+		var good := "TRIGGERS IN, STEER WITH GENTLE SQUEEZES" if school else "ALL CHECKS GOOD, AIR BRAKES OUT"
+		return "RELEASE PARK BRAKE  %s\nOVERHEAD RIGHT > FLICK 4 PARK DOWN\n%s | READY" % [count, note if note != "" else good]
+	if school:
+		return _lesson_page(count, note)
 	var route := "LEVERS %s %s > %sTURBINES %s" % [_tick(checks.thrL), _tick(checks.thrR), ("GEAR %s > " % _tick(checks.gear)) if gears else "",
 		("%d%%" % roundi(turbine * 100.0)) if turbine > 0.0 and not checks.turbines else _tick(checks.turbines)]
 	if note == "":
 		note = "PUSH EACH LEVER, SHIFT A GEAR, HOLD BOTH LEVERS" if gears else "PUSH EACH LEVER, THEN HOLD BOTH"
 	return "RUN-UP  %s\n%s\n%s | HELD" % [count, route, note]
+
+
+## A lesson's page for the glass, in the checklist's three lines: what it is, which hand does what,
+## and one thing to know about it (or what the pilot is doing wrong), with how far through the lessons he is.
+func _lesson_page(count: String, note: String) -> String:
+	var where := "%d OF %d" % [lesson_number(), lesson_count()]      # (the glass's status corner is six letters wide)
+	var pct := roundi(lesson_progress() * 100.0)
+	match lesson():
+		"throttle":
+			if note == "":
+				note = "ONE TRIGGER IS HALF THE THRUST: BOTH" if (levers[0] >= FULL_LEVER) != (levers[1] >= FULL_LEVER) else "FULL OR NOTHING: HOLD THEM IN"
+			return "THROTTLE  %s\nBOTH TRIGGERS > SQUEEZE ALL THE WAY%s\n%s | %s" % [count, ("  %d%%" % pct) if pct > 0 else "", note, where]
+		"turbines":
+			if note == "":
+				note = "IN FLIGHT THEY CUT IN AT 4,500 MPH"
+			return "TURBINES  %s\nBOTH TRIGGERS > KEEP HOLDING  %d%%\n%s | %s" % [count, pct, note, where]
+		"right", "left":
+			var k := 1 if lesson() == "right" else 0
+			var side := "RIGHT" if k == 1 else "LEFT"
+			if note == "":
+				if float(grips[1 - k]) >= OTHER_GRIP and float(grips[k]) < GENTLE.x:
+					note = "THE OTHER HAND: THE %s GRIP" % side
+				elif float(grips[1 - k]) >= OTHER_GRIP:
+					note = "ONE GRIP ONLY: LET THE OTHER GO"
+				elif float(grips[k]) > TOO_HARD:
+					note = "TOO HARD: EASE OFF TO A THIRD"
+				else:
+					note = "A THIRD OF A SQUEEZE IS A TURN"
+			return "TURN %s  %s\n%s GRIP > SQUEEZE GENTLY  %d%%\n%s | %s" % [side, count, side, roundi(float(grips[k]) * 100.0), note, where]
+		"brake":
+			if note == "":
+				note = "BOTH TOGETHER, HARDER TO SLOW HARDER"
+			return "BRAKE  %s\nBOTH GRIPS > SQUEEZE HARD  %d%%\n%s | %s" % [count, roundi(minf(float(grips[0]), float(grips[1])) * 100.0), note, where]
+		"gear":
+			if note == "":
+				note = "SHIFT UP WHEN THE REVS TOP OUT"
+			return "SHIFT  %s\nRIGHT STICK > FLICK IT UP\n%s | %s" % [count, note, where]
+	return ""
 
 
 ## One amount, 0..1, as the glass's two bars end to end: the left one fills, then the right.
@@ -483,8 +644,19 @@ func display() -> Dictionary:
 		sub = int(charge >= 1.0)
 	elif not checks_done():
 		shown.bars = _across(1.0 if checks.turbines else turbine)
+		match lesson():      # a taught run-up: the bars are the pilot's own hands, a trigger or a grip each
+			"throttle":
+				shown.bars = [clampf(float(levers[0]) / FULL_LEVER, 0.0, 1.0), clampf(float(levers[1]) / FULL_LEVER, 0.0, 1.0)]
+				shown.pair = true
+			"turbines":
+				shown.bars = _across(turbine)
+			"right", "left", "brake":
+				shown.bars = [clampf(float(grips[0]), 0.0, 1.0), clampf(float(grips[1]), 0.0, 1.0)]
+				shown.pair = true
+			"gear":
+				shown.bars = [1.0, 1.0]
 		for key in checks:
-			sub += int(checks[key] and (key != "gear" or gears))
+			sub += int(checks[key] and (key != "gear" or gears) and (school or not key in SCHOOL_CHECKS))
 	else:
 		shown.aim = 1 if park else 0
 	shown.mark = int(shown.done) * 16 + sub

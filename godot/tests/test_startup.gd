@@ -31,6 +31,8 @@ func _initialize() -> void:
 	Cockpit._slide_loaded = true
 	Cockpit._startup_loaded = true
 	Cockpit.cold_start = true
+	Cockpit._school_loaded = true      # (the plain run-up here: the taught one is tests/test_flight_school.gd's)
+	Cockpit.school = false
 	_run.call_deferred()
 
 

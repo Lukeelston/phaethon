@@ -19,6 +19,9 @@ const VIEWS := [
 	["c2-summit-from-behind", "SHelios@8220", "hot", ["pad", Vector3(-12.0, 9.0, 40.0), Vector3(4.0, 2.0, -30.0)]],
 	["d1-highway-from-the-seat", "N3@300", "cold", ["seat", 0.0, -2.0]],
 	["d2-highway-from-the-road", "N3@300", "hot", ["pad", Vector3(-60.0, 6.0, 20.0), Vector3(4.0, 3.0, -24.0)]],
+	# "school": a taught run-up (vr/startup_sequence.gd `school`), stopped on its third lesson, the right turn
+	["e1-school-the-lesson-on-the-glass", "SFrost@140", "school", ["seat", 0.0, 14.0]],
+	["e2-school-from-the-seat", "SFrost@140", "school", ["seat", 0.0, 4.0]],
 ]
 
 
@@ -71,7 +74,9 @@ func _run() -> void:
 			Seat.best_dir = out_dir.path_join("review_")
 			Seat._startup_loaded = true
 			Seat.cold_start = true
-			Seat.cold_on_entry = was == "cold"
+			Seat.cold_on_entry = was == "cold" or was == "school"
+			Seat._school_loaded = true
+			Seat.school = was == "school"
 			seat = Seat.new()
 			root.add_child(seat)
 			if seat.cam == null or seat.pad == null:
@@ -80,6 +85,22 @@ func _run() -> void:
 				return
 			seat.set_process(false)
 			seat.cruise = 0.0
+			if was == "school":      # through the switches and the first two lessons, to the right turn
+				var s = seat.startup
+				s.gears = true
+				s.flick("batt", 1)
+				for k in 270:
+					s.step(STEP, [0.0, 0.0], 1)
+				s.flick("engine", 1)
+				s.flick("engine", 1)
+				for k in 140:
+					s.step(STEP, [0.0, 0.0], 1)
+				s.press_start()
+				for k in 480:
+					s.step(STEP, [0.0, 0.0], 1)
+				for k in 480:
+					s.step(STEP, [0.87, 0.87], 1)
+				print("START PAD school: on lesson \"%s\" (%d of %d)" % [s.lesson(), s.lesson_number(), s.lesson_count()])
 			var world = seat.network_world
 			for i in 6000:
 				world.sync(seat.sim.pod.x, seat.sim.pod.y)

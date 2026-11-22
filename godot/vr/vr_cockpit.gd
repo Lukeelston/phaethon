@@ -172,6 +172,9 @@ var hands_live := true   # false while the OpenXR session isn't focused (_on_xr_
 # is given what the sequence lets through (_sim_step).
 static var cold_start := true        # the pilot's choice (the quick menu's COLD START, saved): menu flights begin cold
 static var _startup_loaded := false  # (its saved setting is read once a run, as the camera's)
+static var school := true            # FLIGHT SCHOOL (the quick menu's, saved): a cold start's run-up is taught, a lesson at a time
+                                     # (vr/startup_sequence.gd `school`). On for a pilot who has not passed it; passing it turns it off.
+static var _school_loaded := false
 static var cold_on_entry := false    # set by the menu as it launches a flight: this one begins cold, if the pilot's choice allows
 var startup = StartupScript.new()    # (running, until _ready says otherwise)
 var overhead                         # vr/overhead_panel.gd; null without the roof (there is no header to hang it from: no cold start then)
@@ -216,7 +219,11 @@ func _ready() -> void:
 		startup_audio = StartupAudioScript.new()
 		add_child(startup_audio)
 		startup_audio.setup(overhead.pods if overhead != null else {})   # a switch's sound comes from its pod
+	if not _school_loaded and prefs.has("school"):
+		school = prefs.school != "done"
+	_school_loaded = true
 	if cold and overhead != null and replay.is_empty() and cruise < 0.0:
+		startup.school = school and quest.scheme == "triggers"      # (the lessons are the trigger throttles')
 		startup.cold()
 		for k in 2:                       # parked: her air brakes were left out, all of them
 			craft.flap_open[k] = 1.0
@@ -271,7 +278,7 @@ func _save_prefs() -> void:
 	if f:
 		f.store_string(JSON.stringify({"scheme": quest.scheme, "handling": handling_ask if handling_ask != "" else sim.P.handling, "camera": camera,
 			"nose": "closed" if CraftModelScript.nose_closed else "open", "slide": "on" if slide_feel else "off",
-			"startup": "cold" if cold_start else "hot",
+			"startup": "cold" if cold_start else "hot", "school": "on" if school else "done",
 			"map": "global" if map_whole else "local", "map_scheme": String(MinimapPanelScript.SCHEMES[map_scheme].name)}))
 
 
@@ -925,7 +932,7 @@ func _read_input(delta: float) -> void:
 			for hit: Array in overhead.poke(hand, delta):
 				startup_work(String(hit[0]), int(hit[1]), hand)
 	startup.gears = quest.scheme == "triggers" and quest.gear >= 1      # (a gearbox to try in the run-up)
-	startup.step(delta, [inp.thrL, inp.thrR], quest.display_gear())
+	startup.step(delta, [inp.thrL, inp.thrR], quest.display_gear(), [l.get_float("grip"), r.get_float("grip")])
 	_apply_startup(delta)
 	_diag(delta, l, r, p)
 
@@ -1028,6 +1035,7 @@ func _menu_items() -> Array:
 		{"key": "time", "label": "TIME", "value": _outlook_name(Outlook.TIMES, Outlook.time)},
 		{"key": "weather", "label": "WEATHER", "value": _outlook_name(Outlook.WEATHERS, Outlook.weather)},
 		{"key": "startup", "label": "COLD START", "value": "ON" if cold_start else "OFF"},
+		{"key": "school", "label": "FLIGHT SCHOOL", "value": "ON" if school else "OFF"},
 		{"key": "maps", "label": "CHOOSE MAP"},
 		{"key": "resume", "label": "RESUME"}]
 
@@ -1083,6 +1091,15 @@ func menu_choose() -> bool:
 			var at: int = menu.at
 			menu.items = _menu_items()
 			menu.at = at
+			_menu_show()
+			return true
+		"school":       # whether the next cold start's run-up is taught (this flight carries on as it is)
+			school = not school
+			_save_prefs()
+			print("STARTUP: flight school ", "on" if school else "off")
+			var school_at: int = menu.at
+			menu.items = _menu_items()
+			menu.at = school_at
 			_menu_show()
 			return true
 		"maps":
@@ -1202,10 +1219,16 @@ func _startup_event(e: String) -> void:
 			_sound("catch", int(e.right(1)))
 			_buzz(_engine_hand(int(e.right(1))), 1.0, 0.18)
 		"check":
+			if startup.school:           # a lesson passed: it is told, not only felt
+				_sound("chime")
 			for side in ["left", "right"]:
 				_buzz(hands[side], 0.3, 0.03)
 		"cleared":
 			print("STARTUP: cleared, %.1f s into the flight" % sim.time)
+		"schooled":                  # every lesson passed and flown away from: the next cold start is the plain one
+			school = false
+			_save_prefs()
+			print("STARTUP: flight school passed")
 
 
 ## The start-up in the hand that works engine k: it turning over, the kick as it lights, and its
@@ -1247,10 +1270,24 @@ func _sync_craft(delta: float) -> void:
 		super(delta)
 		return
 	var shown := inp.duplicate()
-	shown.brkL = 1.0
-	shown.brkR = 1.0
-	shown.park = true
+	if startup.lesson() in ["right", "left", "brake"]:
+		# a taught run-up's grip lessons: each engine's air brakes follow that hand's own squeeze, so the
+		# pilot sees which engine a grip drags (the sim still has them all out: the brake is set)
+		shown.brkL = float(startup.grips[0])
+		shown.brkR = float(startup.grips[1])
+	else:
+		shown.brkL = 1.0
+		shown.brkR = 1.0
+		shown.park = true
 	craft.sync(sim, shown, delta)
+
+
+## What the brake needles show: full on the parking brake, the hands' own ask in flight, and in a
+## taught run-up's grip lessons each hand's own squeeze.
+func _shown_brakes() -> Array:
+	if startup.park and startup.lesson() in ["right", "left", "brake"]:
+		return [float(startup.grips[0]), float(startup.grips[1])]
+	return [1.0, 1.0] if startup.park else [inp.brkL, inp.brkR]
 
 
 ## In the run-up the engines rev to the levers: a gearbox would hold a craft that is standing still
@@ -1634,7 +1671,7 @@ func _update_hud() -> void:
 		"footer": "%s   /   %s" % [handling_text(), ctl],
 		"points": int(_skill_shown.get("points", 0)) if _skill_on else 0, "feat": String(_skill_shown.get("award", "")) if _skill_on else "", "feat_age": float(_skill_shown.get("age", 1e9)),
 		"thr": [inp.thrL * startup.engine_k(0), inp.thrR * startup.engine_k(1)],
-		"brk": [1.0, 1.0] if startup.park else [inp.brkL, inp.brkR], "heat": [sim.eL.heat, sim.eR.heat],
+		"brk": _shown_brakes(), "heat": [sim.eL.heat, sim.eR.heat],
 		"health": [sim.eL.health, sim.eR.health],
 		"flameout": [sim.eL.flameout, sim.eR.flameout], "battery": sim.battery,
 		"burner": sim.mode == "burner", "armed": sim.armed, "ramjet": sim.mode == "ramjet", "turbines": _turbines or _turbine_lamp,
