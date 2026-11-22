@@ -1,8 +1,11 @@
-## Stationary, headset-visible course menu. No craft or flight audio is loaded.
+## Stationary, headset-visible course menu. No flight and no flight audio is loaded: the title's two
+## craft (release/title_stage.gd) stand round it, silent, and go when a flight starts.
 extends Node3D
 
 const UI := preload("res://release/release_config.gd")
 const View := preload("res://view/craft_view.gd")
+const Title := preload("res://release/title_stage.gd")
+const BOARD_DROP := 0.40      # in the title, the board's middle is this far under the eye and leaned back to face it: the word stands over its top edge
 static var remembered_course := "range"
 
 var selected_course := "range"
@@ -13,6 +16,8 @@ var hands: Array[XRController3D] = []
 var panel_view: SubViewport
 var screen: Control
 var board: MeshInstance3D
+var stage: Node3D             # the title: the place the board stands in (null with Title.enabled off: the board in the dark, as it was)
+var strap: Node3D             # ... and its strap line, hung under the board
 var buttons: Array[Button] = []
 var title: Label
 var description: Label
@@ -35,14 +40,20 @@ func _ready() -> void:
 		get_viewport().use_xr = true
 		get_viewport().msaa_3d = Viewport.MSAA_4X
 		DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
-	var environment := WorldEnvironment.new()
-	environment.environment = Environment.new()
-	environment.environment.background_mode = Environment.BG_COLOR
-	environment.environment.background_color = Color("090e13")
-	add_child(environment)
+	stage = Title.make("vr")      # (it brings its own sky and light)
+	if stage != null:
+		add_child(stage)
+	else:
+		var environment := WorldEnvironment.new()
+		environment.environment = Environment.new()
+		environment.environment.background_mode = Environment.BG_COLOR
+		environment.environment.background_color = Color("090e13")
+		add_child(environment)
 	var origin := XROrigin3D.new()
 	add_child(origin)
 	camera = XRCamera3D.new()
+	if stage != null:
+		camera.far = 200000.0      # (the cloud deck and the far city: a camera's own reach is 4 km)
 	origin.add_child(camera)
 	for side in ["left_hand", "right_hand"]:
 		var hand := XRController3D.new()
@@ -65,6 +76,10 @@ func _ready() -> void:
 	material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR
 	board.material_override = material
 	add_child(board)
+	if stage != null:
+		strap = Title.strap_3d(quad.size.x)
+		strap.position = Vector3(0.0, -quad.size.y / 2.0 - 0.10, 0.0)
+		board.add_child(strap)
 	choose_course(remembered_course if UI.course_index(remembered_course) >= 0 else "range")
 	focus_row(maxi(0, UI.course_index(selected_course)))
 	recenter_panel()
@@ -257,8 +272,15 @@ func recenter_panel() -> void:
 	if forward.length_squared() < 0.01:
 		forward = Vector3.FORWARD
 	forward = forward.normalized()
-	board.global_position = camera.global_position + forward * 3.0
-	board.global_basis = Basis.looking_at(forward, Vector3.UP)
+	if stage == null:
+		board.global_position = camera.global_position + forward * 3.0
+		board.global_basis = Basis.looking_at(forward, Vector3.UP)
+		return
+	# In the title the board stands a little under the eye, leaned back to face it, and the scene is stood
+	# round the pilot the same way: both move only here (the session's start, a recentre), never the camera.
+	board.global_position = camera.global_position + forward * 3.0 + Vector3.DOWN * BOARD_DROP
+	board.global_basis = Basis.looking_at(forward, Vector3.UP) * Basis(Vector3.RIGHT, -atan2(BOARD_DROP, 3.0))
+	stage.place(camera.global_position, forward)
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:

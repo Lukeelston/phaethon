@@ -229,3 +229,39 @@ static func controls_panel() -> PanelContainer:
 	content.add_child(label("Start gently: hold E, then release.\nHold D to ease off; X cuts thrust.", 17, MUTED))
 	content.add_child(label("Keyboard first. Gamepad support is experimental.", 14, MUTED))
 	return panel
+
+
+## The flight controls as a strip, three keys abreast: the same keys as controls_panel(), for the desktop
+## menu over the title (release/menu.gd lays it along the bottom of the picture).
+static func controls_strip() -> PanelContainer:
+	var panel := PanelContainer.new()
+	var backing := box(Color(0.030, 0.043, 0.075, 0.88), Color("34414b"))
+	backing.content_margin_left = 18
+	backing.content_margin_right = 18
+	backing.content_margin_top = 8
+	backing.content_margin_bottom = 8
+	panel.add_theme_stylebox_override("panel", backing)
+	var content := VBoxContainer.new()
+	content.add_theme_constant_override("separation", 5)
+	panel.add_child(content)
+	var head := HBoxContainer.new()
+	head.add_theme_constant_override("separation", 18)
+	content.add_child(head)
+	head.add_child(label("FLIGHT CONTROLS", 14, AMBER))
+	head.add_child(label("Steer with unequal thrust; throttle stays where you leave it. Start gently: hold E.", 13, MUTED))
+	var grid := GridContainer.new()
+	grid.columns = 6
+	grid.add_theme_constant_override("h_separation", 12)
+	grid.add_theme_constant_override("v_separation", 3)
+	content.add_child(grid)
+	for row in [
+		["E / D", "Both throttles up / down"], ["W / S", "Left throttle up / down"], ["↑ / ↓", "Right throttle up / down"],
+		["A / →", "Left / right air brake"], ["X", "Cut both throttles"], ["Space", "Reignite engines"],
+		["H", "Hold to repair"], ["R", "Arm ramjet"], ["M", "Switch handling mode"],
+		["Backspace", "Reset to track; keeps throttle"], ["Esc", "Pause / resume"], ["Pad", "Gamepad: experimental"]
+	]:
+		grid.add_child(label(row[0], 13, AMBER))
+		var what := label(row[1], 13)
+		what.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		grid.add_child(what)
+	return panel

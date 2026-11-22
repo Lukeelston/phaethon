@@ -35,6 +35,9 @@ const TABLE := {
 	# the patrol's black and white (not on the paint row: it comes with the patrol craft)
 	"police": {"name": "Patrol black and white", "paint": Color(0.93, 0.93, 0.92), "stripe": Color(0.035, 0.035, 0.04), "pin": Color(0.05, 0.22, 0.78),
 		"engine": Color(0.93, 0.93, 0.92), "skin": Color(0.05, 0.05, 0.06), "accent": Color(0.06, 0.24, 0.80)},
+	# the box cover's navy, white and orange-red (not on the paint row: the title's craft wears it, release/title_stage.gd)
+	"boxcover": {"name": "Box-cover navy", "paint": Color(0.045, 0.085, 0.30), "stripe": Color(0.86, 0.21, 0.07), "pin": Color(0.96, 0.93, 0.84),
+		"engine": Color(0.88, 0.23, 0.07), "skin": Color(0.80, 0.82, 0.86), "accent": Color(0.06, 0.13, 0.46)},
 }
 const CHOICES := [["ember", "Ember orange"], ["cobalt", "Cobalt blue"], ["viridian", "Racing green"], ["crimson", "Crimson"],
 	["sunflower", "Sunflower yellow"], ["violet", "Violet"], ["bone", "Bone white"], ["obsidian", "Obsidian black"]]   # the menus' paint row: [id, name]
