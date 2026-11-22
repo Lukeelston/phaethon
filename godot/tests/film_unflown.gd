@@ -1,7 +1,7 @@
 ## A film of what has been built and not yet flown, for looking at without a headset: one scene a
 ## run, recorded by the engine's movie writer with the game's own sound. Run windowed:
 ## --xr-mode off --resolution 1280x720 --fixed-fps 60 --write-movie FILE.avi
-## -s res://tests/film_unflown.gd -- --out=DIR --scene=start|climb|snow|sweep|hyperion|shaft
+## -s res://tests/film_unflown.gd -- --out=DIR --scene=start|climb|snow|sweep|hyperion|shaft|caucasus
 ## The world streams in before the scene begins: FILM_BEGIN and FILM_END give the seconds of the film
 ## to keep, FILM lines the captions and FILMT lines where the craft was, twice a second.
 ## start is worked through the start-up's own calls and then flown on the levers; climb is flown
@@ -225,6 +225,8 @@ func _run() -> void:
 			ok = await _hyperion()
 		"shaft":
 			ok = await _shaft()
+		"caucasus":
+			ok = await _caucasus()
 		_:
 			push_error("No such scene: " + scene)
 			ok = false
@@ -397,6 +399,32 @@ func _snow() -> bool:
 	await _glide(where, first + third, mouth, 1400.0, in_lane)
 	_say("The rails carry on along the exit itself: held, they take the craft off the highway.")
 	await _glide(exit_road, 0.0, 150.0, 1100.0, 0.0)
+	return true
+
+
+## The Caucasus (a camera pass, not a flight): up the last of the pull on its main massif, over the Crest
+## (3,260 m, sample 4,534), out onto the Crest's open apron with the land gone on both sides, and down
+## across the Span (the viaduct, samples 5,450 to 5,600).
+func _caucasus() -> bool:
+	if not await _begin("SCaucasus@3960", false, false):
+		return false
+	var road := int(seat.sim.pod.path)
+	seat.cam.rotation_degrees = LEVEL
+	await _glide(road, 3960.0, 3964.0, 2400.0, 0.0)
+	print("FILM_BEGIN %.3f" % (frames * DT))
+	_say("The Caucasus: the pull up its main massif, the Network below on the right. (A camera pass, not a flight.)")
+	await _glide(road, 3964.0, 4330.0, 2400.0, 40.0)
+	_say("The Crest, 3,260 m up: the land falls away on both sides.")
+	await _glide(road, 4330.0, 4520.0, 2400.0, 0.0)
+	_say("Out on the open apron, 100 m past where the wall stood: 1,300 m of air under the glass.")
+	seat.cam.position = Vector3(-0.42, 0.3, 0.0)      # (the head leant out over the left sill: from the seated eye it hides what is below)
+	await _glide(road, 4520.0, 4760.0, 2000.0, -200.0, Vector3(-34, 72, 0))
+	seat.cam.position = Vector3.ZERO
+	_say("Back in, and down to the Span: a viaduct over a gorge 830 m deep.")
+	await _glide(road, 4760.0, 5380.0, 3000.0, 0.0, LEVEL)
+	seat.cam.position = Vector3(0.42, 0.3, 0.0)
+	await _glide(road, 5380.0, 5640.0, 2400.0, 190.0, Vector3(-34, -72, 0))
+	seat.cam.position = Vector3.ZERO
 	return true
 
 

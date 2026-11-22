@@ -37,6 +37,29 @@ const VIEWS := [
 	["g2-coast-board-at-the-exit", "E1", 1085, 60.0, [0.0, 5.0], Vector3.ZERO, 0.0, -1],
 	["g3-drop-board-two-miles", "E3", 21630, -60.0, [0.0, 4.0], Vector3.ZERO, 0.0, 1],
 	["g4-drop-board-at-the-exit", "E3", 21760, -60.0, [0.0, 5.0], Vector3.ZERO, 0.0, 1],
+	# the open edges' aprons (2026-11-22): the craft out past where the wall stood (100 m from the centreline), on the level see-through deck
+	["a1-coast-apron-ahead", "SCoast", 3200, 180.0, [0.0, -3.0], Vector3.ZERO],
+	["a2-coast-apron-seaward", "SCoast", 4170, 200.0, [62.0, -14.0], Vector3.ZERO],
+	["a3-coast-apron-down", "SCoast", 2700, 215.0, [70.0, -38.0], Vector3.ZERO],
+	["a4-drop-rim-apron", "SDrop", 3900, 200.0, [62.0, -18.0], Vector3.ZERO],
+	["a5-drop-dive-apron", "SDrop", 4600, -190.0, [-60.0, -16.0], Vector3.ZERO, 900.0],
+	["a6-coast-apron-from-behind", "SCoast", 3200, 180.0, [0.0, -12.0], Vector3(0.0, 60.0, 160.0)],
+	# the Caucasus (the same day): the Gate, the Col, the Cauldron, the pull, the Crest, the Span, the Shoulder, the Chute
+	["c1-caucasus-gate", "SCaucasus", 1414, 0.0, [0.0, 1.0], Vector3.ZERO],
+	["c2-caucasus-gate-over-the-network", "SCaucasus", 1912, -180.0, [-70.0, -8.0], Vector3.ZERO],
+	["c3-caucasus-col", "SCaucasus", 2300, 0.0, [0.0, 2.0], Vector3.ZERO],
+	["c4-caucasus-cauldron", "SCaucasus", 3208, 0.0, [0.0, 2.0], Vector3.ZERO],
+	["c5-caucasus-pull", "SCaucasus", 4036, -40.0, [0.0, 3.0], Vector3.ZERO],
+	["c6-caucasus-crest", "SCaucasus", 4500, 0.0, [0.0, -2.0], Vector3.ZERO],
+	["c7-caucasus-crest-left-apron", "SCaucasus", 4534, 200.0, [65.0, -20.0], Vector3.ZERO],
+	["c8-caucasus-crest-right-apron", "SCaucasus", 4534, -200.0, [-65.0, -20.0], Vector3.ZERO],
+	["c9-caucasus-crest-from-above", "SCaucasus", 4534, 0.0, [0.0, -24.0], Vector3(0.0, 500.0, 500.0)],
+	["c10-caucasus-span", "SCaucasus", 5440, 0.0, [0.0, -2.0], Vector3.ZERO],
+	["c11-caucasus-span-from-the-side", "SCaucasus", 5520, 0.0, [-90.0, -8.0], Vector3(-2600.0, 300.0, 0.0)],
+	["c12-caucasus-shoulder", "SCaucasus", 6039, -40.0, [-40.0, -6.0], Vector3.ZERO],
+	["c13-caucasus-chute", "SCaucasus", 7288, 0.0, [0.0, 2.0], Vector3.ZERO],
+	["c14-caucasus-crest-from-far", "SCaucasus", 4534, 0.0, [-90.0, -4.0], Vector3(-9000.0, 600.0, 0.0)],
+	["g5-caucasus-board-at-the-exit", "E2", 21900, -60.0, [0.0, 5.0], Vector3.ZERO, 0.0, 1],
 ]
 
 

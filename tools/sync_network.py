@@ -18,6 +18,7 @@ assert ok, "the design isn't OK: fix it before syncing"
 scenic = dn.scenic_table(roads)
 widths = dn.width_table(roads)
 decks = dn.deck_table(roads)
+aprons = dn.apron_table(roads)
 tube = next((i, *r.tube_span) for i, r in enumerate(roads) if r.kind == "tube")
 
 
@@ -28,6 +29,11 @@ def scenic_rows(indent):
 
 def num(v):
     return repr(float(v))
+
+
+def apron_rows():
+    return ", ".join("[%d, [%s], [%s]]" % (r, ", ".join("[%d, %s]" % (k[0], num(k[1])) for k in left), ", ".join("[%d, %s]" % (k[0], num(k[1])) for k in right))
+                     for r, left, right in aprons)
 
 
 def seg(s, q):
@@ -80,6 +86,8 @@ def js_block():
     out.append("  const NET_WIDTHS = [" + ", ".join("[%d, [%s]]" % (r, ", ".join("[%d, %s]" % (k[0], num(k[1])) for k in keys)) for r, keys in widths) + "];")
     out.append("  // the roads sampled every NET_STEP of their deck, flown at the speed along it (Mount Hyperion's)")
     out.append("  const NET_DECK = [" + ", ".join(str(r) for r in decks) + "];")
+    out.append("  // [road, [[sample, m], ...] on its left, the same on its right]: the open edges' aprons (the deck runs on level that much further before its ramp and wall; a smoothstep from key to key, none outside them)")
+    out.append("  const NET_APRONS = [" + apron_rows() + "];")
     out.append("  // </network>")
     return "\n".join(out)
 
@@ -127,6 +135,8 @@ def gd_block():
     out.append("const NET_WIDTHS := [" + ", ".join("[%d, [%s]]" % (r, ", ".join("[%d, %s]" % (k[0], num(k[1])) for k in keys)) for r, keys in widths) + "]")
     out.append("# the roads sampled every NET_STEP of their deck, flown at the speed along it (Mount Hyperion's)")
     out.append("const NET_DECK := [" + ", ".join(str(r) for r in decks) + "]")
+    out.append("# [road, [[sample, m], ...] on its left, the same on its right]: the open edges' aprons (the deck runs on level that much further before its ramp and wall; a smoothstep from key to key, none outside them)")
+    out.append("const NET_APRONS := [" + apron_rows() + "]")
     out.append("# </network>")
     return "\n".join(out)
 

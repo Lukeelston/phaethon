@@ -22,6 +22,12 @@ const VIEWS := [
 	# "school": a taught run-up (vr/startup_sequence.gd `school`), stopped on its third lesson, the right turn
 	["e1-school-the-lesson-on-the-glass", "SFrost@140", "school", ["seat", 0.0, 14.0]],
 	["e2-school-from-the-seat", "SFrost@140", "school", ["seat", 0.0, 4.0]],
+	# the Caucasus' two (2026-11-22): its foot, and the top of its crest (an open apron either side of the bay)
+	["f1-caucasus-foot-from-the-seat", "SCaucasus", "cold", ["seat", 0.0, -2.0]],
+	["f2-caucasus-foot-from-behind", "SCaucasus", "cold", ["pad", Vector3(-9.0, 7.0, 34.0), Vector3(4.0, 2.0, -30.0)]],
+	["f3-caucasus-crest-from-the-seat", "SCaucasus@4534", "cold", ["seat", 0.0, -2.0]],
+	["f4-caucasus-crest-from-behind", "SCaucasus@4534", "hot", ["pad", Vector3(-12.0, 9.0, 40.0), Vector3(4.0, 2.0, -30.0)]],
+	["f5-caucasus-crest-from-the-road", "SCaucasus@4534", "cold", ["pad", Vector3(-46.0, 5.0, -8.0), Vector3(4.0, 3.0, -24.0)]],
 ]
 
 

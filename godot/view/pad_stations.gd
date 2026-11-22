@@ -34,6 +34,9 @@ const LEGENDS := {
 	# (Mount Hyperion's two bays, added when the mountain was: its foot and its summit)
 	"hyperion": ["RAMP WORKS", "POINT IT UP", SAFFRON],
 	"hyperion_summit": ["BRINK WATCH", "CREEP TO THE LIP", ICE],
+	# (the Caucasus' two, added with its road: the foot of the range and the top of its crest)
+	"caucasus": ["PASS HUT", "MIND THE EDGE", OXIDE],
+	"crest": ["CREST WATCH", "BOTH SIDES OPEN", ICE],
 }
 
 var metal: Array = []
@@ -85,6 +88,10 @@ func make(id: String, pad_to_station: Transform3D, cart: Vector3, ahead: float) 
 			_ramp_profile()
 		"hyperion_summit":
 			_brink_gallows()
+		"caucasus":
+			_range_model()
+		"crest":
+			_crest_cairn()
 	_service_deck(pad_to_station, cart, ahead, LEGENDS[id][2])
 	var mesh := Kit.compound(metal)
 	Kit.compound(enamel, mesh)
@@ -111,6 +118,37 @@ func _ramp_profile() -> void:
 	_tube(Vector3(last.x, 0.36, 0), last, 0.14, 0.09, IRON, 6)
 	_tube(last, last + Vector3(0, 0.95, 0), 0.04, 0.04, BONE)
 	_box(last + Vector3(0.36, 0.72, 0), Vector3(0.70, 0.36, 0.05), SAFFRON)
+
+
+## The Caucasus' foot: the range in miniature on a plinth, three peaks and the col between two of them,
+## and the road in brass rail winding through and over it, a flag where it tops the crest.
+func _range_model() -> void:
+	_box(Vector3(0, 0.62, 0), Vector3(4.6, 0.52, 1.9), IRON)
+	var peaks := [[Vector3(-1.45, 0.88, 0.1), 2.5, 0.95], [Vector3(0.05, 0.88, -0.15), 3.9, 1.15], [Vector3(1.5, 0.88, 0.15), 2.9, 1.0]]
+	for peak in peaks:
+		var foot: Vector3 = peak[0]
+		_tube(foot, foot + Vector3(0, float(peak[1]), 0), float(peak[2]), 0.05, OXIDE, 7)
+		_tube(foot + Vector3(0, float(peak[1]) * 0.72, 0), foot + Vector3(0, float(peak[1]), 0), float(peak[2]) * 0.30, 0.04, BONE, 7)
+	var way := [Vector3(-2.2, 0.95, 0.75), Vector3(-1.2, 1.9, 0.85), Vector3(-0.7, 1.45, 0.6), Vector3(-0.2, 2.9, 0.95),
+		Vector3(0.3, 3.75, 0.55), Vector3(0.85, 2.3, 0.85), Vector3(1.55, 2.6, 0.9), Vector3(2.2, 0.95, 0.75)]
+	for k in way.size() - 1:
+		_tube(way[k], way[k + 1], 0.05, 0.05, BRASS, 6, true)
+	_tube(way[4], way[4] + Vector3(0, 0.95, 0), 0.03, 0.03, BONE, 5)
+	_box(way[4] + Vector3(0.24, 0.80, 0), Vector3(0.46, 0.26, 0.04), OXIDE, Vector3.ZERO, true)
+
+
+## The Caucasus' crest: a cairn of squared stones with a staff through it, and a rail out to each
+## side at the height of the deck, a lamp at each end over nothing.
+func _crest_cairn() -> void:
+	for k in 5:
+		var wide := 1.9 - 0.32 * k
+		_box(Vector3(0.9, 0.62 + 0.46 * k, 0), Vector3(wide, 0.44, wide * 0.8), IRON if k % 2 == 0 else INK, Vector3(0, 0.22 * k, 0))
+	_tube(Vector3(0.9, 2.7, 0), Vector3(0.9, 6.4, 0), 0.09, 0.06, INK, 6)
+	_box(Vector3(0.9, 5.2, 0), Vector3(5.0, 0.09, 0.09), BRASS, Vector3.ZERO, true)
+	for x in [-1.6, 3.4]:
+		_tube(Vector3(x, 4.85, 0), Vector3(x, 5.2, 0), 0.03, 0.03, BONE, 5)
+		_tube(Vector3(x, 4.5, 0), Vector3(x, 4.9, 0), 0.20, 0.14, LAMP, 8, true)
+	_box(Vector3(0.9, 6.15, 0.05), Vector3(0.62, 0.34, 0.05), ICE, Vector3.ZERO, true)
 
 
 ## Hyperion's summit: a watchman's lamp hung out over a block cut square like the brink itself,

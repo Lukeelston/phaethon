@@ -32,6 +32,9 @@ const STEP := 512.0          # the terrain's grid (NetworkLandscape.STEP)
 const Helios := preload("res://view/helios.gd")
 const Hyperion := preload("res://view/hyperion.gd")
 const MOUNTAIN := "SHelios"  # this road's land is the mountain's own surface (view/helios.gd), with the road a bench in it
+const RANGE := "SCaucasus"   # this road's land falls away as a mountain's flank does, not as a cliff (FLANK_FALL for FALL)
+const FALL := 2.6            # how a side's land falls from the deck to its floor: this power of what is left of the run (a cliff, then a floor)
+const FLANK_FALL := 1.6      # ... and on RANGE (a 2.5 km fall drawn with 2.6 was one dark wall of rock a kilometre high, like a dam's face)
 # (... and SHyperion's is Mount Hyperion's, view/hyperion.gd: _hill)
 const EASE := 220.0          # m from the deck's edge over which that bench's cut and fill meet the slope
 const SPAN := 512            # samples in each stretch a hint is looked for in (a multiple of 32, the samples a hint looks at)
@@ -82,6 +85,7 @@ func setup(s, heights := []) -> void:   # heights: the world's own per-sample he
 				last += 1
 		var n := last - first + 1
 		var D := {"first": first, "last": last, "sea": int(entry[1]), "hw": float(R.w[first]) / 2.0, "e": s.net_edge_span(float(R.w[first]))}
+		D["fall"] = FLANK_FALL if String(R.name) == RANGE else FALL
 		if hill != null:
 			D["mountain"] = true
 			D["hill"] = hill
@@ -259,7 +263,7 @@ static func _beach(top: float) -> float:
 
 ## The land `d` m out from the deck's edge on one side, where the road is `h` up and that side's land
 ## reaches `target` over `run`: Vector2(how much of this is the road's doing, the height).
-func _side(h: float, target: float, run: float, gap: float, sea: bool, d: float) -> Vector2:
+func _side(h: float, target: float, run: float, gap: float, sea: bool, d: float, fall := FALL) -> Vector2:
 	d = maxf(d, 0.0)
 	if sea:
 		var shelf := run
@@ -284,7 +288,7 @@ func _side(h: float, target: float, run: float, gap: float, sea: bool, d: float)
 	if rising:               # a rock cut, then the mountainside (no steeper than trees stand on: steeper, and it was one dark wall of rock)
 		var cut := minf(delta * 0.2, 30.0)
 		return Vector2(1.0 - smoothstep(run, run + BLEND, d), e0 + cut * smoothstep(0.0, 40.0, d) + (delta - cut) * (1.0 - pow(1.0 - u, 1.6)))
-	return Vector2(1.0 - smoothstep(run + FLOOR_W, run + FLOOR_W + BLEND, d), e0 + delta * (1.0 - pow(1.0 - u, 2.6)))
+	return Vector2(1.0 - smoothstep(run + FLOOR_W, run + FLOOR_W + BLEND, d), e0 + delta * (1.0 - pow(1.0 - u, fall)))
 
 
 ## What the terrain's grid stands at `d` m out from the deck's edge on one side: the land the road's
@@ -298,7 +302,7 @@ func _ground(D: Dictionary, q: int, left: bool, d: float) -> Vector2:
 	var target: float = (D.tl if left else D.tr)[q]
 	if target < h - 15.0 and d < FLANK:
 		return Vector2(1.0, minf(target, h - 1.0) - SINK)
-	var v := _side(h, target, (D.rl if left else D.rr)[q], D.gap[q], false, d)
+	var v := _side(h, target, (D.rl if left else D.rr)[q], D.gap[q], false, d, float(D.fall))
 	v.y -= SINK * (1.0 - smoothstep(FLANK - 300.0, FLANK, d))
 	return v
 
@@ -397,6 +401,27 @@ func known_height(r: int, p: Vector2) -> float:
 	return float(roads[r].hill.land(p)) if roads.has(r) and roads[r].has("mountain") else NAN
 
 
+## Is road r's land a mountain's flank where it falls (RANGE: the Caucasus), not a cliff over a floor?
+func flanked(r: int) -> bool:
+	return roads.has(r) and float(roads[r].fall) != FALL
+
+
+## The height road r's own land stands at `off` m out from its centreline at sample i on one side (at p), where
+## its colour should go by that and not by the terrain sunk under it: a mountain's road (the mountain's), the
+## Caucasus (its flanks': coloured by the foot they fall to they were a pale band let into a red range). NAN elsewhere.
+func tone_height(r: int, i: int, left: bool, off: float, p: Vector2) -> float:
+	if not roads.has(r):
+		return NAN
+	var D: Dictionary = roads[r]
+	if D.has("mountain"):
+		return float(D.hill.land(p))
+	if float(D.fall) == FALL or not on(r, i):
+		return NAN
+	var q := i - int(D.first)
+	var edge: float = float(D.hw) - (float(D.e) if open(r, i, left) else -3.2)
+	return _side(D.h[q], (D.tl if left else D.tr)[q], (D.rl if left else D.rr)[q], D.gap[q], false, maxf(off - edge, 0.0), float(D.fall)).y
+
+
 ## What the terrain's vertex c (at p) stands at: Vector2(weight, height); weight 0 where no scenic
 ## road has a say. The terrain lies SINK under the road's own land out to FLANK, and under the deck
 ## itself wherever one of its triangles could reach it.
@@ -491,7 +516,10 @@ func row(r: int, i: int, left: bool) -> PackedFloat32Array:
 		ds = [0.0, minf(150.0, run * 0.5), minf(300.0, run), run, run + rc * 0.45, run + rc, run + rc + bw * 0.5, run + rc + bw, run + rc + bw + 60.0, run + rc + bw + 300.0]
 	for m in ds.size():
 		var d: float = ds[m]
-		var v := _side(h, target, run, D.gap[q], sea, minf(d, FLANK) if not sea else d)
+		# (a flank that is still falling at FLANK, the Caucasus' with their longer runs: its buried lip follows the fall on down,
+		# as the terrain beyond it does. Held at FLANK's height it stood out over the terrain as a shelf 150 m thick)
+		var falling_on: bool = float(D.fall) != FALL and target < h and run > FLANK
+		var v := _side(h, target, run, D.gap[q], sea, d if sea or falling_on else minf(d, FLANK), float(D.fall))
 		var y := v.y
 		if m == ds.size() - 1:
 			y -= 45.0 if not sea else 6.0

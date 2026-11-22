@@ -22,15 +22,20 @@
 ##   racers     now and then a racer drops in behind you on a highway and shadows you; light your
 ##              ramjet and it's on: first a mile ahead wins (distance driven since the start); ignore
 ##              it and it peels off. Names and styles; the tally in network.json (the view saves it)
-## Rendering: a MultiMesh per kind (the craft's floating origin), and a beacon per vehicle so its
-## tail (or head) light reads from miles away.
+## Rendering: a MultiMesh per kind (the craft's floating origin), near and far; a far body is never
+## drawn under a couple of pixels wide (art/traffic/fleet.gdshader). And a pair of lamps per vehicle
+## (view/traffic_lamps.gdshader): its tail lamps, or its head lamps when its nose is toward the eye,
+## the size they are, so a vehicle a kilometre off is a pair and the far end of a busy road a string
+## of faint points, not one red glow.
 ##   var t := NetworkTraffic.new(); add_child(t); t.build(sim, view, world)
 ##   t.update(delta)     every frame, after the sim's steps (sets sim.obstacles for the next ones)
+class_name NetworkTraffic
 extends Node3D
 
 const Simulation := preload("res://sim/craft_sim.gd")
 const RoadWorld := preload("res://view/network_world.gd")
 const Batch := preload("res://view/traffic_batch.gd")
+const Outlook := preload("res://view/outlook.gd")
 const MPH := 2.236936
 const G := 9.81
 const LANES_HWY := [-157.5, -112.5, -67.5, -22.5, 22.5, 67.5, 112.5, 157.5]   # m left of the centreline
@@ -55,6 +60,22 @@ const BRAKE_BY := [0.0, 250.0, 500.0, 1000.0, 2000.0, 3000.0, 4500.0, 6000.0, 80
 	# before it (a limit read at 500 m may start at 251: braked for at 500 they crossed a zone's edge 70 mph over)
 const AFTER := [0.0, 1000.0, 2000.0, 3500.0, 5000.0, 7000.0, 9000.0, 11000.0, 13000.0, 15000.0, 20000.0, 28000.0, 38000.0, 50000.0]   # m along a road it'll take: where its limits are read
 enum { CAR, SLOW, DEMON, TRANSPORT, RACER }
+# A vehicle's lamps, by kind: [half the pair's spacing, a lamp's radius, how far from its middle its nose's and
+# its tail's lamps are], in metres as drawn (view/traffic_lamps.gdshader). Wide and big on a freighter, close and
+# small on a racer: from a distance the pair's width is the vehicle's size. The reach is each model's own longer
+# end and 0.6 m: one figure of 13 m for all stood a shuttle's, a racer's and a freight car's lamp inside its
+# body (they are 13.9, 14.0 and 17.5 m from middle to end), where the body hid it from straight behind.
+const LAMPS := [Vector3(3.0, 0.42, 12.5), Vector3(3.8, 0.5, 14.5), Vector3(1.7, 0.34, 13.5), Vector3(4.2, 0.6, 18.1), Vector3(1.7, 0.34, 14.6)]
+const TRACTOR_NOSE := 17.6       # ... and a transport's head lamps, on its tractor
+const LAMP_MIN_PX := 1.5         # a lamp's least radius on the picture, pixels of the eye's own buffer: smaller, and it flickers as it crosses them
+const LAMP_ENERGY := Vector2(6.0, 4.5)   # the lamps' strength by day and at night: by day they have a lit road to show against
+# Tail lamps by kind: a car's and a demon's red, a racer's its own magenta, and the slow ones' amber (the slow pods
+# and the transports, which keep right at half a car's speed): past two kilometres a vehicle is a point or two of
+# light, and its colour is what says whether it is something to overtake wide. Head lamps are white on all of them.
+const TAIL := [Color(1.0, 0.15, 0.08), Color(1.0, 0.5, 0.1), Color(1.0, 0.15, 0.08), Color(1.0, 0.5, 0.1), Color(1.0, 0.3, 0.9)]
+const HEAD := Color(1.0, 0.95, 0.85)
+const BODY_MIN_ANG := 0.0011     # a car's least half-width on the picture: it and every other body grow together past 3.6 km
+const BODY_HALF_WIDTH := 4.3     # ... a car's, m as drawn
 const TRACTOR := 5 # Render slot for the lead unit of a transport.
 const FLEET := [
 	preload("res://art/traffic/commuter.glb"), preload("res://art/traffic/shuttle.glb"),
@@ -75,9 +96,51 @@ const RACER_PATIENCE := 45.0     # s it shadows you before it peels off
 const RACE_WIN := 1609.344       # a mile
 
 
+class HeightSpan:
+	var first := -INF
+	var end := INF
+	var height := 0.0
+	var flat := true
+	var inv_length := 0.0
+	var b := 0.0
+	var c := 0.0
+	var d := 0.0
+
+	func at(f: float) -> float:
+		if flat:
+			return height
+		var u := (f - first) * inv_length
+		return height + u * (b + u * (c + u * d))
+
+
+class FleetFrame:
+	var roads: Array[Simulation.TrackPath]
+	var shaft: RoadWorld.ShaftScript
+	var grade_spans: Array[Array]
+	var writers: Array[Batch.Writer] = []
+	var tractor: Batch.Writer
+	var ox := 0.0
+	var oy := 0.0
+	var eye := Vector3.ZERO
+	var eye_x := 0.0      # ... and where that is on the map (sim metres): which end of a vehicle it sees
+	var eye_y := 0.0
+	var pod_v := Vector2.ZERO
+	var grade := true
+
+	func height(road: int, f: float) -> float:
+		var spans := grade_spans[road]
+		if spans.is_empty():
+			return 0.0
+		var span: HeightSpan = spans[clampi(int(f), 0, spans.size() - 1)]
+		if f < span.first or f > span.end:
+			return 0.0
+		return span.height if span.flat else span.at(f)
+
+
 class Car:
 	var id := 0
-	var sort_entry := [0.0, 0]
+	var bucket := -1
+	var bucket_order := -1
 	var kind := 0
 	var road := 0
 	var f := 0.0          # fractional sample along its road
@@ -113,9 +176,297 @@ class Car:
 	var nsp_dir := 0
 	var vcap := 0.0       # the most it may go for what's ahead (its road's limits and its exit's), read every CAP_EVERY frames
 	var vcap_road := -1   # ... read on this road (-1: read it now)
+	var brake_road := -1
+	var brake_dir := 0
+	var brake_grip := 0.0
+	var brake_lo := INF
+	var brake_hi := -INF
+	var brake_here := INF
+	var brake_ahead_sq := INF
 	var owed := 0.0       # s since it was last driven (a far one is driven every other frame)
 	var chase := ""       # chase mode's craft (view/network_chase.gd): "fugitive" picks its own exits, "pursuer" follows the pilot's
 	var craft := false    # ... drawn there as a pod and its engines, not here as one of the fleet
+
+
+	var draw_hx := INF
+	var draw_hy := INF
+	var draw_yaw := Basis.IDENTITY
+	var draw_basis := Basis.IDENTITY
+	var flat_road := -1
+	var flat_from := INF
+	var flat_to := -INF
+	var flat_height := 0.0
+	var flat_spans: Array
+	var path_data: Simulation.TrackPath
+	var path_x := PackedFloat64Array()
+	var path_y := PackedFloat64Array()
+	var path_tx := PackedFloat64Array()
+	var path_ty := PackedFloat64Array()
+	var path_lengths := PackedFloat64Array()
+	var place_pending := false
+
+	var lamp_position := Vector3.ZERO
+	var lamp_color := Color.WHITE
+	var lamp_basis := Basis.IDENTITY   # x: its own left-to-right, half its lamps' spacing long; y: a lamp's radius; z: the body's reach (view/traffic_lamps.gdshader)
+	var lamp_nose := 13.0              # m from its middle forward to its head lamps
+	var lamp_tail := 13.0              # ... and back to its tail lamps (a transport's: behind the last of its train)
+	var lamp_tail_color := Color.RED   # its kind's (TAIL), kept here so a frame reads it and looks nothing up
+
+	func draw(frame: FleetFrame, batch: Batch.Writer) -> void:
+		if place_pending:
+			place(frame.roads[road])
+			place_pending = false
+		var cx: float = x + hx * v * owed
+		var cy: float = y + hy * v * owed
+		if hx != draw_hx or hy != draw_hy:
+			draw_hx = hx
+			draw_hy = hy
+			draw_yaw = Basis(Vector3.UP, atan2(-hx, hy))
+			draw_basis = draw_yaw.scaled(Vector3.ONE * SCALE)
+			var lamps: Vector3 = LAMPS[kind]
+			lamp_basis = draw_yaw * Basis.from_scale(lamps)
+			lamp_nose = TRACTOR_NOSE if kind == TRANSPORT else lamps.z
+			lamp_tail = lamps.z + ((TRAIN - 1) * TRAIN_GAP if kind == TRANSPORT else 0.0)
+			lamp_tail_color = TAIL[kind]
+		var spans := frame.grade_spans[road]
+		if flat_road == road and is_same(flat_spans, spans) and f >= flat_from and f < flat_to:
+			draw_flat(frame, batch, cx, cy, flat_height)
+			return
+		var last: float = frame.roads[road].N - 1.0
+		var h := 1.0
+		var graded := false
+		if not spans.is_empty():
+			var span: HeightSpan = spans[clampi(int(f), 0, int(last))]
+			if f >= span.first and f <= span.end:
+				h += span.height if span.flat else span.at(f)
+			var reach := (TRAIN if kind == TRANSPORT else 1) * TRAIN_GAP / 24.0
+			graded = frame.grade and (not span.flat or f - reach < span.first or f + reach > span.end)
+		var shaft_on: bool = frame.roads[road].shaft and frame.shaft.on(road, f)
+		if not frame.roads[road].shaft:
+			var span: HeightSpan = null if spans.is_empty() else spans[clampi(int(f), 0, int(last))]
+			if span == null or span.flat:
+				flat_road = road
+				flat_spans = spans
+				flat_height = h
+				var reach := TRAIN * TRAIN_GAP / 24.0
+				flat_from = -INF if span == null else span.first + reach
+				flat_to = INF if span == null else span.end - reach
+		# A road with a height profile (a hill, a ramp, a deck's approach): every body sits at its
+		# own height and noses up or down with the grade. They used to stay level at the lead's
+		# height, so a transport's train floated off a climb or sank into it (Luke: "busses look
+		# hilarious half sticking out going up hills"). A level road costs nothing more.
+		graded = graded and not shaft_on
+		var step: float = dir * TRAIN_GAP / 24.0   # samples from one body's centre to the next
+		var h_ahead := h
+		var h_here := h
+		if graded:
+			h_ahead = frame.height(road, clampf(f + step, 0.0, last)) + 1.0
+		var b := draw_basis
+		var cnt := TRAIN if kind == TRANSPORT else 1
+		var board: float = NUMBER_BOARDS.get(name, 0.0) if kind == RACER else 0.0
+		for k in (0 if craft else cnt):
+			var back := k * TRAIN_GAP
+			var p := Vector3(cx - hx * back - frame.ox, h, -(cy - hy * back - frame.oy))
+			var body_basis := b
+			if graded:
+				# the grade under this body: from a body length ahead of it to one behind
+				var h_behind := frame.height(road, clampf(f - step * (k + 1), 0.0, last)) + 1.0
+				p.y = h_here
+				body_basis = (draw_yaw * Basis(Vector3.RIGHT, atan((h_ahead - h_behind) / (2.0 * TRAIN_GAP)))).scaled(Vector3.ONE * SCALE)
+				h_ahead = h_here
+				h_here = h_behind
+			if shaft_on:
+				var station := f - dir * back / 24.0
+				p = frame.shaft.point(road, station, lat, 1.0, frame.ox, frame.oy)
+				body_basis = frame.shaft.frame(road, station) * Basis(Vector3.UP, PI if dir < 0 else 0.0)
+				body_basis = body_basis.scaled(Vector3.ONE * SCALE)
+			var unit: Batch.Writer = frame.tractor if kind == TRANSPORT and k == 0 else batch
+			unit.put(Transform3D(body_basis, p), frame.eye, col, board)
+		# the light you see: its tail if it's going your way, its head lamps if it's coming at you
+		var coming: bool = hx * (frame.eye_x - cx) + hy * (frame.eye_y - cy) > 0.0      # its nose is toward the eye
+		var off := -lamp_nose if coming else lamp_tail
+		var lp := Vector3(cx - hx * off - frame.ox, h + 1.2 * SCALE, -(cy - hy * off - frame.oy))
+		if graded:   # the lamp rides at its own end's height
+			lp.y = frame.height(road, clampf(f - dir * off / 24.0, 0.0, last)) + 1.0 + 1.2 * SCALE
+		if shaft_on:
+			lp = frame.shaft.point(road, f - dir * off / 24.0, lat, 1.0 + 1.2 * SCALE, frame.ox, frame.oy)
+
+		var lc := HEAD if coming else lamp_tail_color
+		if chase == "pursuer":      # a patrol's lights, seen from any distance: red, blue, red, blue
+			lc = Color(1.0, 0.1, 0.08) if int(Time.get_ticks_msec() / 200) % 2 == 0 else Color(0.15, 0.35, 1.0)
+		lamp_position = lp
+		lamp_color = lc
+		if shaft_on:      # round a shaft's bulb the vehicle's own left-to-right is the bulb's, not the map's
+			lamp_basis = (frame.shaft.frame(road, f) * Basis(Vector3.UP, PI if dir < 0 else 0.0)) * Basis.from_scale(LAMPS[kind])
+			draw_hx = INF      # (and its heading's own frame is found again when it comes off the bulb)
+
+	## In a constant Hermite span, every axle and the lights share one deck height.
+	## The cached interval allows the entire train plus the grade lookahead.
+	func draw_flat(frame: FleetFrame, batch: Batch.Writer, cx: float, cy: float, h: float) -> void:
+		var board: float = NUMBER_BOARDS.get(name, 0.0) if kind == RACER else 0.0
+		var count := TRAIN if kind == TRANSPORT else 1
+		if not craft:
+			var lead := frame.tractor if kind == TRANSPORT else batch
+			lead.put(Transform3D(draw_basis, Vector3(cx - frame.ox, h, -(cy - frame.oy))), frame.eye, col, board)
+			for i in range(1, count):
+				var back := i * TRAIN_GAP
+				var at := Vector3(cx - hx * back - frame.ox, h, -(cy - hy * back - frame.oy))
+				batch.put(Transform3D(draw_basis, at), frame.eye, col, board)
+		var coming := hx * (frame.eye_x - cx) + hy * (frame.eye_y - cy) > 0.0
+		var off := -lamp_nose if coming else lamp_tail
+		lamp_position = Vector3(cx - hx * off - frame.ox, h + 1.2 * SCALE, -(cy - hy * off - frame.oy))
+		lamp_color = HEAD if coming else lamp_tail_color
+		if chase == "pursuer":
+			lamp_color = Color(1.0, 0.1, 0.08) if int(Time.get_ticks_msec() / 200) % 2 == 0 else Color(0.15, 0.35, 1.0)
+
+	func place(R: Simulation.TrackPath) -> void:
+		if path_data != R:
+			path_data = R
+			path_x = R.px
+			path_y = R.py
+			path_tx = R.tx
+			path_ty = R.ty
+			path_lengths = R.len
+		var i := clampi(int(f), 0, R.N - 2)
+		var t := clampf(f - i, 0.0, 1.0)
+		var tx0 := path_tx[i]
+		var ty0 := path_ty[i]
+		var ds := path_lengths[i]
+		var tx: float = lerpf(tx0, path_tx[i + 1], t)
+		var ty: float = lerpf(ty0, path_ty[i + 1], t)
+		var l := sqrt(tx * tx + ty * ty)
+		tx /= l
+		ty /= l
+		x = path_x[i] + tx0 * ds * t - ty * lat
+		y = path_y[i] + ty0 * ds * t + tx * lat
+		hx = tx * dir
+		hy = ty * dir
+
+
+	func drive(traffic: NetworkTraffic, arr: Array, idx: int, delta: float, defer_place: bool) -> void:
+		var original_road := road
+		var R := traffic.sim.roads[road]
+		var lanes: Array = traffic._lanes[road]
+		var nl := lanes.size()
+		lc_cool = maxf(0.0, lc_cool - delta)
+		flow_clock = maxf(0.0, flow_clock - delta)
+		if nsp_road != road or nsp_dir != dir:
+			traffic._next_switch(self)
+		# the speed it wants: its own, the curve's, and slow enough to brake (at BRAKE) for every limit up
+		# to 50 km ahead (demons can reach full speed on the straight highways), and for the road
+		# beyond the exit it's taking. Read every CAP_EVERY frames, as if from where it'll be by the next.
+		var read_cap := vcap_road != road or (traffic._tick + id) % CAP_EVERY == 0
+		if kind != RACER or chase == "fugitive":      # (a runner picks its exits as traffic does)
+			if nsp != null and int(nsp[0]) != decided:
+				traffic._decide(self)
+				read_cap = read_cap or vcap_road != road
+			if cruise > 0.0:
+				if read_cap:
+					if kind == CAR or kind == DEMON:
+						cruise_goal = traffic._cruise_for(self, traffic._traffic_tier(road, f))
+					else:
+						cruise_goal = cruise
+				if vdes != cruise_goal:
+					vdes = move_toward(vdes, cruise_goal, BRAKE * delta)
+		if read_cap:
+			vcap = traffic._speed_cap(self, CAP_EVERY * v * delta)
+			vcap_road = road
+		var vt := minf(vcap, vdes)
+		if kind == RACER and traffic.race_state == "tail":
+			vt = traffic._tail_speed(self)
+		# the one ahead in its lane
+		var lead: Car = null
+		var gap := INF
+		var headway_gap := v * headway
+		# A busy adjacent lane must not hide the actual leader beyond nine entries.
+		for k in range(idx + 1, arr.size()):
+			var o: Car = arr[k]
+			if o.road != road or o.dir != dir:
+				continue
+			var separation := (o.f - f) * dir
+			if separation <= 0.0:
+				continue
+			# Ahead entries have not been driven yet. Once outside the headway,
+			# every later entry on this road and direction is outside it too.
+			var clearance := separation * 24.0 - 20.0 * SCALE
+			if clearance >= headway_gap:
+				break
+			if o.id == 0 and chase == "pursuer":
+				continue      # (a patrol keeps no headway from the craft it is after: it comes onto its tail)
+			if absf(o.lat - lat) < 22.0:
+				lead = o
+				gap = clearance
+				break
+		if lead:
+			flow_source = -1
+			flow_notice = 0.0
+			var moved := false
+			if lc_cool <= 0.0 and kind != TRANSPORT:
+				for dl in ([-1, 1] if traffic._rng.randf() < 0.5 else [1, -1]):
+					var ln: int = lane + dl
+					if ln < 0 or ln >= nl:
+						continue
+					var lat_n := traffic._lane_lat(self, ln)
+					if traffic._clear(arr, idx, self, lat_n):
+						lane = ln
+						lc_cool = 1.0 if kind == DEMON or kind == RACER else 3.0
+						moved = true
+						break
+			if not moved:
+				# A blocked gap does not improve sixty times a second. Keep braking at full
+				# rate, but stagger another gap search; full safety scans stay inexpensive.
+				if lc_cool <= 0.0:
+					lc_cool = (0.22 if kind == DEMON or kind == RACER else 0.40) + float(id % 5) * 0.03
+				vt = minf(vt, lead.v + (gap - v * headway * 0.5) / maxf(headway, 0.3))
+		elif (flow_clock <= 0.0 or flow_source >= 0) and traffic._courtesy(self, arr, idx):
+			pass
+		elif kind == DEMON and lc_cool <= 0.0 and traffic._rng.randf() < 0.004:
+			var ln2 := clampi(lane + (1 if traffic._rng.randf() < 0.5 else -1), 0, nl - 1)   # weaving for the joy of it
+			if traffic._clear(arr, idx, self, traffic._lane_lat(self, ln2)):
+				lane = ln2
+				lc_cool = 1.0
+		# speed and place
+		var dv := vt - v
+		v += clampf(dv, -6.0 * G * delta, a_up * delta)
+		v = maxf(v, 0.0)
+		var lane_index := mini(lane, nl - 1)
+		var lt: float = lanes[lane_index if dir > 0 else nl - 1 - lane_index]
+		lat = move_toward(lat, lt, (60.0 if kind == DEMON or kind == RACER else 30.0) * delta)
+		var f0 := f
+		f += dir * v * delta / R.len[clampi(int(f), 0, R.N - 1)]
+		# a junction it's passing: take the other road? (nothing to pass before its next switch)
+		if nsp != null and (float(nsp[0]) - f) * dir <= 0.0:
+			for sp in traffic._switch[road]:
+				if int(sp[1]) != dir:
+					continue
+				var at := float(sp[0])
+				if (at - f0) * dir > 0.0 and (at - f) * dir <= 0.0:
+					var take: bool = sp[5] or (plan != null and plan == sp)
+					if kind == RACER and chase != "fugitive":
+						take = traffic._racer_takes(self, sp)
+					if take and int(traffic.oneway.get(int(sp[2]), int(sp[4]))) != int(sp[4]) and self != traffic.racer:
+						if sp[5]:
+							v = -1.0   # its road ends here and the only way on is against the pilot: gone
+						take = false
+					if take:
+						traffic._switch_to(self, sp)
+						break
+			nsp_road = -1   # passed it: find the next
+		var R2: Simulation.TrackPath = R if road == original_road else traffic.sim.roads[road]
+		if f < 0.5 or f > R2.N - 1.5:   # off an end it couldn't leave: gone (or a racer: kept on the road)
+			if self == traffic.racer:
+				f = clampf(f, 0.5, R2.N - 1.5)
+				v = 0.0
+				nsp_road = -1
+			else:
+				v = -1.0
+		# Headway, merges and courtesy use road coordinates exclusively. The
+		# frame's geometry pass projects ordinary drivers after these decisions.
+		place_pending = defer_place and self != traffic.racer
+		if not place_pending:
+			place(R2)
+		if v < 0.0:
+			traffic.cars.erase(self)
 
 
 var sim: Simulation
@@ -125,10 +476,25 @@ var cars: Array[Car] = []
 var _next_id := 1
 var _rng := RandomNumberGenerator.new()
 var _vlim := []           # per road: the speed limit at each sample (curvature, STARFIGHTER zones)
+var _limit_start: Array[PackedInt32Array] = []
+var _limit_end: Array[PackedInt32Array] = []
+var _grade_spans: Array[Array] = []
+var _grade_sources := []
+var _drawing := FleetFrame.new()
 var _switch := []         # per road: [at sample, need dir, to road, to sample, to dir, forced]
 var _lanes := []          # per road: its lane offsets
 var _mm := {}             # kind -> MultiMeshInstance3D
+var _groups := {}         # Per road + direction; retain last frame's mostly sorted order.
+var _grouped_count := -1
+var _way_road := -1
+var _way_dir := 0
+var _way_lo := -INF
+var _way_hi := INF
+var _pilot := Car.new()
 var _beams: MultiMeshInstance3D
+var _beam_capacity := 0
+var _beam_colors := PackedColorArray()
+var _lamp_dark := -1.0    # the darkness the lamps' strength was last set for (view/outlook.gd)
 var spawned := 0          # tests read these
 var switched := 0
 var illegal := 0
@@ -168,6 +534,8 @@ func build(s, v, w) -> void:
 		_brake_by.append(float(BRAKE_BY[k]))
 	for r in sim.roads.size():
 		var R := sim.roads[r]
+		_grade_sources.append(sim._net_h.get(r))
+		_grade_spans.append(_grade_table(r, R.N))
 		var lim := PackedFloat32Array()
 		lim.resize(R.N)
 		var kap := PackedFloat32Array()   # each sample's turn per metre (the cross product of its tangents)
@@ -184,6 +552,18 @@ func build(s, v, w) -> void:
 			if R.shaft and world.shaft.on(r, float(i)):
 				lim[i] = 1e9     # a shaft's bulb is the plan's, not a bend: it carries them round
 		_vlim.append(lim)
+		# All readings in a run give exactly the same limit, even on a constant-radius bend.
+		var starts := PackedInt32Array()
+		var ends := PackedInt32Array()
+		starts.resize(R.N)
+		ends.resize(R.N)
+		for i in range(1, R.N):
+			starts[i] = starts[i - 1] if lim[i] == lim[i - 1] else i
+		ends[R.N - 1] = R.N
+		for i in range(R.N - 2, -1, -1):
+			ends[i] = ends[i + 1] if lim[i] == lim[i + 1] else i + 1
+		_limit_start.append(starts)
+		_limit_end.append(ends)
 		_lanes.append(LANES_HWY if R.w[0] >= 300.0 else LANES_RAMP)
 		_switch.append([])
 	for J in sim.junctions:
@@ -212,8 +592,50 @@ func build(s, v, w) -> void:
 				for dd in AFTER:
 					var qi := clampi(iq + dq * int(dd / 24.0), 0, Q.N - 1)
 					after.append([dd, _vlim[q][qi]])
-				_switch[r].append([at, d, q, iq, dq, to_end < 260, after])
+				_switch[r].append([at, d, q, iq, dq, to_end < 260, after, {}])
+	_drawing.roads = sim.roads
+	_drawing.shaft = world.shaft
+	_drawing.grade_spans = _grade_spans
 	_build_meshes()
+
+
+## Hermite spans used by the simulation. Index by the integer part of the station,
+## so a freight train can sample its deck eight times without eight binary searches.
+func _grade_table(road: int, count: int) -> Array:
+	var keys: Array = sim._net_h.get(road, [])
+	var spans: Array[HeightSpan] = []
+	if keys.size() < 2:
+		return spans
+	spans.resize(count)
+	var before := HeightSpan.new()
+	before.end = float(keys[0][0])
+	var after := HeightSpan.new()
+	after.first = float(keys[-1][0])
+	spans.fill(after)
+	for i in range(int(before.end)):
+		spans[i] = before
+	for k in keys.size() - 1:
+		var a: Array = keys[k]
+		var z: Array = keys[k + 1]
+		var span := HeightSpan.new()
+		span.first = float(a[0])
+		span.end = float(z[0])
+		span.height = float(a[1])
+		var rise := float(z[1]) - span.height
+		var length := maxf(1.0, span.end - span.first)
+		span.inv_length = 1.0 / length
+		span.b = length * Simulation.NET_STEP * float(a[2])
+		var last_tangent := length * Simulation.NET_STEP * float(z[2])
+		span.c = 3.0 * rise - 2.0 * span.b - last_tangent
+		span.d = -2.0 * rise + span.b + last_tangent
+		span.flat = rise == 0.0 and span.b == 0.0 and last_tangent == 0.0
+		for i in range(int(span.first), int(span.end)):
+			spans[i] = span
+		if k == keys.size() - 2:
+			spans[int(span.end)] = span
+	return spans
+
+
 
 
 ## Every frame: spawn and drop round the craft, drive, follow the craft's racer, render, and hand the
@@ -224,37 +646,61 @@ func update(delta: float) -> void:
 	var px: float = sim.pod.x
 	var py: float = sim.pod.y
 	_track_pod()
-	# drop the far ones, spawn round the edge
+	# Detect external changes too: tests and chase mode can replace the fleet.
+	var regroup := cars.size() != _grouped_count
 	for k in range(cars.size() - 1, -1, -1):
 		var c := cars[k]
 		if c != racer and Vector2(c.x - px, c.y - py).length_squared() > R_KEEP * R_KEEP:
 			cars.remove_at(k)
+			regroup = true
+		elif c.bucket_order != k or c.bucket != c.road * 2 + int(c.dir > 0):
+			regroup = true
 	var tries := 0
 	var want := _target(px, py)
 	while cars.size() < want and tries < 12:
 		tries += 1
 		_spawn(px, py, spawned < want)   # at the start: anywhere from 2 km out, so there's traffic at once
-	# who's ahead of whom, in each road and direction (the craft too)
-	var buckets := {}
-	for c in cars:
-		var key: int = c.road * 2 + (1 if c.dir > 0 else 0)
-		if not buckets.has(key):
-			buckets[key] = []
-		buckets[key].append(c)
-	var pod_car := _pod_as_car()
+	var pod_car := _pod_as_car(_pilot)
+	regroup = regroup or cars.size() != _grouped_count or pod_car.bucket != pod_car.road * 2 + int(pod_car.dir > 0)
+	if regroup:
+		_groups.clear()
+		_grouped_count = cars.size()
+		for i in cars.size() + 1:
+			var car := pod_car if i == cars.size() else cars[i]
+			car.bucket = car.road * 2 + int(car.dir > 0)
+			car.bucket_order = i
+			if not _groups.has(car.bucket):
+				_groups[car.bucket] = []
+			_groups[car.bucket].append(car)
 	# (standing on a pad too: nothing comes the wrong way past a craft parked at the roadside)
 	if pod_car and (pod_car.v > 20.0 or bool(sim.P.get("pads", false))):
 		proad = pod_car.road
 		pdir = pod_car.dir
 	# Nothing comes at you on your road, nor on a road you may be about to join (they came the wrong way
 	# until the craft was on it: an exit taken into a stream of oncoming traffic). Far ones turn round, near ones go.
-	oneway.clear()
-	if proad >= 0:
-		oneway[proad] = pdir
-		var at_sample := float(sim.pod.hint)
-		for sp in _switch[proad]:
-			if int(sp[1]) == pdir and (float(sp[0]) - at_sample) * pdir > -20.0 and not oneway.has(int(sp[2])):
-				oneway[int(sp[2])] = int(sp[4])
+	var hint := float(sim.pod.hint)
+	var new_way := proad != _way_road or pdir != _way_dir or hint < _way_lo or hint >= _way_hi
+	if new_way:
+		_way_road = proad
+		_way_dir = pdir
+		_way_lo = -INF
+		_way_hi = INF
+		oneway.clear()
+		if proad >= 0:
+			oneway[proad] = pdir
+			for sp in _switch[proad]:
+				if int(sp[1]) != pdir:
+					continue
+				# Integer hints. For dir=-1 the first included hint is at-19,
+				# for dir=+1 the first excluded hint is at+20.
+				var boundary := float(sp[0]) + (20.0 if pdir > 0 else -19.0)
+				if hint < boundary:
+					_way_hi = minf(_way_hi, boundary)
+				else:
+					_way_lo = maxf(_way_lo, boundary)
+				if (float(sp[0]) - hint) * pdir > -20.0 and not oneway.has(int(sp[2])):
+					oneway[int(sp[2])] = int(sp[4])
+	if proad >= 0 and (regroup or new_way):
 		for k in range(cars.size() - 1, -1, -1):
 			var c := cars[k]
 			var way: int = oneway.get(c.road, 0)
@@ -266,36 +712,33 @@ func update(delta: float) -> void:
 				_place(c)
 			else:
 				cars.remove_at(k)
-	if pod_car:
-		var key: int = pod_car.road * 2 + (1 if pod_car.dir > 0 else 0)
-		if not buckets.has(key):
-			buckets[key] = []
-		buckets[key].append(pod_car)
-	for key in buckets:
-		var group: Array = buckets[key]
-		if group.size() < 2:
-			continue
-		# Native sort compares exact double positions. The original index breaks
-		# ties on eight-lane grids and retrieves the original car after sorting.
-		var order: Array = []
-		order.resize(group.size())
-		var previous := -INF
-		var sorted := true
-		for i in group.size():
-			var car: Car = group[i]
+	for key: int in _groups:
+		var road: int = key >> 1
+		var profile = sim._net_h.get(road)
+		if not is_same(profile, _grade_sources[road]):
+			_grade_sources[road] = profile
+			_grade_spans[road] = _grade_table(road, sim.roads[road].N)
+		var arr: Array = _groups[key]
+		# Traffic usually keeps its order between frames. Only an overtake,
+		# a merge or a new arrival requires moving an entry.
+		var last := -INF
+		var last_order := -1
+		for i in arr.size():
+			var car: Car = arr[i]
 			var along := car.f * car.dir
-			sorted = sorted and along >= previous
-			previous = along
-			car.sort_entry[0] = along
-			car.sort_entry[1] = i
-			order[i] = car.sort_entry
-		if not sorted:
-			order.sort()
-			var input := group.duplicate()
-			for i in order.size():
-				group[i] = input[order[i][1]]
-	for key in buckets:
-		var arr: Array = buckets[key]
+			if along > last or (along == last and car.bucket_order >= last_order):
+				last = along
+				last_order = car.bucket_order
+				continue
+			var j := i
+			while j > 0:
+				var prior: Car = arr[j - 1]
+				var other := prior.f * prior.dir
+				if other < along or (other == along and prior.bucket_order < car.bucket_order):
+					break
+				arr[j] = prior
+				j -= 1
+			arr[j] = car
 		for idx in arr.size():
 			var c: Car = arr[idx]
 			if c == pod_car:
@@ -303,7 +746,7 @@ func update(delta: float) -> void:
 			c.owed += delta
 			if c != racer and (absf(c.x - px) > NEAR or absf(c.y - py) > NEAR) and (_tick + c.id) % 2 != 0:
 				continue
-			_drive(c, arr, idx, c.owed)
+			c.drive(self, arr, idx, c.owed, true)
 			c.owed = 0.0
 	_race(delta, pod_car)
 	_render()
@@ -327,12 +770,17 @@ func _lane_lat(c: Car, lane: int) -> float:
 
 
 ## The craft as a vehicle (for the others' headways): its road, its way, its place across.
-func _pod_as_car() -> Car:
+func _pod_as_car(c: Car = null) -> Car:
 	var P := sim.pod
 	var R := sim.roads[P.path]
 	var i: int = clampi(P.hint, 0, R.N - 1)
 	var along: float = P.vx * R.tx[i] + P.vy * R.ty[i]
-	var c := Car.new()
+	if c == null:
+		c = Car.new()
+	c.left_width = 7.0
+	c.right_width = 7.0
+	c.front = 24.0
+	c.rear = 24.0
 	c.id = 0
 	c.road = P.path
 	c.dir = 1 if along >= 0.0 else -1
@@ -496,122 +944,47 @@ func _cruise_for(c: Car, express: float) -> float:
 
 
 func _drive(c: Car, arr: Array, idx: int, delta: float) -> void:
-	var R := sim.roads[c.road]
-	var nl: int = _lanes[c.road].size()
-	c.lc_cool = maxf(0.0, c.lc_cool - delta)
-	c.flow_clock = maxf(0.0, c.flow_clock - delta)
-	if c.nsp_road != c.road or c.nsp_dir != c.dir:
-		_next_switch(c)
-	# the speed it wants: its own, the curve's, and slow enough to brake (at BRAKE) for every limit up
-	# to 50 km ahead (demons can reach full speed on the straight highways), and for the road
-	# beyond the exit it's taking. Read every CAP_EVERY frames, as if from where it'll be by the next.
-	if c.kind != RACER or c.chase == "fugitive":      # (a runner picks its exits as traffic does)
-		_decide(c)
-		if c.cruise > 0.0:
-			if c.vcap_road != c.road or (_tick + c.id) % CAP_EVERY == 0:
-				c.cruise_goal = _cruise_for(c, _traffic_tier(c.road, c.f))
-			c.vdes = move_toward(c.vdes, c.cruise_goal, BRAKE * delta)
-	if c.vcap_road != c.road or (_tick + c.id) % CAP_EVERY == 0:
-		c.vcap = _speed_cap(c, CAP_EVERY * c.v * delta)
-		c.vcap_road = c.road
-	var vt := minf(c.vcap, c.vdes)
-	if c.kind == RACER and race_state == "tail":
-		vt = _tail_speed(c)
-	# the one ahead in its lane
-	var lead: Car = null
-	var gap := INF
-	# A busy adjacent lane must not hide the actual leader beyond nine entries.
-	for k in range(idx + 1, arr.size()):
-		var o: Car = arr[k]
-		if o.road != c.road or o.dir != c.dir or (o.f - c.f) * c.dir <= 0.0:
-			continue
-		if o.id == 0 and c.chase == "pursuer":
-			continue      # (a patrol keeps no headway from the craft it is after: it comes onto its tail)
-		if absf(o.lat - c.lat) < 22.0:
-			lead = o
-			gap = (o.f - c.f) * c.dir * 24.0 - 20.0 * SCALE
-			break
-	if lead and gap < c.v * c.headway:
-		c.flow_source = -1
-		c.flow_notice = 0.0
-		var moved := false
-		if c.lc_cool <= 0.0 and c.kind != TRANSPORT:
-			for dl in ([-1, 1] if _rng.randf() < 0.5 else [1, -1]):
-				var ln: int = c.lane + dl
-				if ln < 0 or ln >= nl:
-					continue
-				var lat_n := _lane_lat(c, ln)
-				if _clear(arr, idx, c, lat_n):
-					c.lane = ln
-					c.lc_cool = 1.0 if c.kind == DEMON or c.kind == RACER else 3.0
-					moved = true
-					break
-		if not moved:
-			# A blocked gap does not improve sixty times a second. Keep braking at full
-			# rate, but stagger another gap search; full safety scans stay inexpensive.
-			if c.lc_cool <= 0.0:
-				c.lc_cool = (0.22 if c.kind == DEMON or c.kind == RACER else 0.40) + float(c.id % 5) * 0.03
-			vt = minf(vt, lead.v + (gap - c.v * c.headway * 0.5) / maxf(c.headway, 0.3))
-	elif _courtesy(c, arr, idx):
-		pass
-	elif c.kind == DEMON and c.lc_cool <= 0.0 and _rng.randf() < 0.004:
-		var ln2 := clampi(c.lane + (1 if _rng.randf() < 0.5 else -1), 0, nl - 1)   # weaving for the joy of it
-		if _clear(arr, idx, c, _lane_lat(c, ln2)):
-			c.lane = ln2
-			c.lc_cool = 1.0
-	# speed and place
-	var dv := vt - c.v
-	c.v += clampf(dv, -6.0 * G * delta, c.a_up * delta)
-	c.v = maxf(c.v, 0.0)
-	var lt := _lane_lat(c, c.lane)
-	c.lat = move_toward(c.lat, lt, (60.0 if c.kind == DEMON or c.kind == RACER else 30.0) * delta)
-	var f0 := c.f
-	c.f += c.dir * c.v * delta / R.len[clampi(int(c.f), 0, R.N - 1)]
-	# a junction it's passing: take the other road? (nothing to pass before its next switch)
-	if c.nsp != null and (float(c.nsp[0]) - c.f) * c.dir <= 0.0:
-		for sp in _switch[c.road]:
-			if int(sp[1]) != c.dir:
-				continue
-			var at := float(sp[0])
-			if (at - f0) * c.dir > 0.0 and (at - c.f) * c.dir <= 0.0:
-				var take: bool = sp[5] or (c.plan != null and c.plan == sp)
-				if c.kind == RACER and c.chase != "fugitive":
-					take = _racer_takes(c, sp)
-				if take and int(oneway.get(int(sp[2]), int(sp[4]))) != int(sp[4]) and c != racer:
-					if sp[5]:
-						c.v = -1.0   # its road ends here and the only way on is against the pilot: gone
-					take = false
-				if take:
-					_switch_to(c, sp)
-					break
-		c.nsp_road = -1   # passed it: find the next
-	var R2 = sim.roads[c.road]
-	if c.f < 0.5 or c.f > R2.N - 1.5:   # off an end it couldn't leave: gone (or a racer: kept on the road)
-		if c == racer:
-			c.f = clampf(c.f, 0.5, R2.N - 1.5)
-			c.v = 0.0
-			c.nsp_road = -1
-		else:
-			c.v = -1.0
-	_place(c)
-	if c.v < 0.0:
-		cars.erase(c)
+	c.drive(self, arr, idx, delta, false)
 
 
 ## The fastest it can go here and still brake (at BRAKE) for every limit on its road up to 50 km on
 ## (down to each by the reading before it), each `margin` m nearer than it is.
 func _brake_for(c: Car, margin := 0.0) -> float:
-	var R := sim.roads[c.road]
-	var vl: PackedFloat32Array = _vlim[c.road]   # (as an Array it would be converted: a copy every call)
-	var vt := minf(c.vdes, _limit(c))
-	var gs := sqrt(c.a_lat / G)   # (the same sums as before, with the constants out of the loop: ~200
-	var n1: int = R.N - 1         # cars, a third of them a frame, fifteen readings each)
-	for k in _brake_at_s.size():
-		var ai := clampi(int(c.f + c.dir * _brake_at_s[k]), 0, n1)
-		var la: float = vl[ai]
-		var lv: float = -la if la < 0.0 else la * gs
-		vt = minf(vt, sqrt(lv * lv + 2.0 * BRAKE * maxf(0.0, _brake_by[k] - margin)))
-	return vt
+	var ordinary_margin := margin >= 0.0 and margin <= _brake_by[1]
+	if ordinary_margin and c.brake_road == c.road and c.dir == c.brake_dir and c.a_lat == c.brake_grip and c.f >= c.brake_lo and c.f < c.brake_hi:
+		return minf(minf(c.vdes, c.brake_here), sqrt(maxf(0.0, c.brake_ahead_sq - 2.0 * BRAKE * margin)))
+	var vl: PackedFloat32Array = _vlim[c.road]
+	var starts := _limit_start[c.road]
+	var ends := _limit_end[c.road]
+	var grip := sqrt(c.a_lat / G)
+	var lo := -INF
+	var hi := INF
+	var here := INF
+	var ahead_sq := INF
+	var exact := c.vdes
+	for k in range(-1, _brake_at_s.size()):
+		var offset := 0.0 if k < 0 else c.dir * _brake_at_s[k]
+		var i := clampi(int(c.f + offset), 0, vl.size() - 1)
+		if starts[i] > 0:
+			lo = maxf(lo, starts[i] - offset)
+		if ends[i] < vl.size():
+			hi = minf(hi, ends[i] - offset)
+		var raw := vl[i]
+		var limit := -raw if raw < 0.0 else raw * grip
+		if k <= 0:
+			here = minf(here, limit)
+		else:
+			ahead_sq = minf(ahead_sq, limit * limit + 2.0 * BRAKE * _brake_by[k])
+		if not ordinary_margin:
+			exact = minf(exact, limit if k < 0 else sqrt(limit * limit + 2.0 * BRAKE * maxf(0.0, _brake_by[k] - margin)))
+	c.brake_lo = lo
+	c.brake_hi = hi
+	c.brake_road = c.road
+	c.brake_dir = c.dir
+	c.brake_grip = c.a_lat
+	c.brake_here = here
+	c.brake_ahead_sq = ahead_sq
+	return minf(minf(c.vdes, here), sqrt(maxf(0.0, ahead_sq - 2.0 * BRAKE * margin))) if ordinary_margin else exact
 
 
 ## _brake_for, and slow enough for the road beyond the exit it's decided on.
@@ -621,12 +994,17 @@ func _speed_cap(c: Car, margin: float) -> float:
 		var ds: float = (float(c.plan[0]) - c.f) * c.dir * 24.0
 		if ds > 0.0:   # (not passed it yet)
 			ds = maxf(0.0, ds - margin)
-			var by := 0.0   # down to each by the reading before it, as in _brake_for
-			for pr in c.plan[6]:
-				var la2: float = pr[1]
-				var lv2: float = -la2 if la2 < 0.0 else la2 * sqrt(c.a_lat / G)
-				vt = minf(vt, sqrt(lv2 * lv2 + 2.0 * BRAKE * (ds + by)))
-				by = float(pr[0])
+			var limits: Dictionary = c.plan[7]
+			if not limits.has(c.a_lat):
+				var ahead_sq := INF
+				var by := 0.0
+				for pr in c.plan[6]:
+					var raw: float = pr[1]
+					var limit := -raw if raw < 0.0 else raw * sqrt(c.a_lat / G)
+					ahead_sq = minf(ahead_sq, limit * limit + 2.0 * BRAKE * by)
+					by = float(pr[0])
+				limits[c.a_lat] = ahead_sq
+			vt = minf(vt, sqrt(float(limits[c.a_lat]) + 2.0 * BRAKE * ds))
 	return vt
 
 
@@ -787,18 +1165,7 @@ func _switch_to(c: Car, sp: Array) -> void:
 
 
 func _place(c: Car) -> void:
-	var R := sim.roads[c.road]
-	var i := clampi(int(c.f), 0, R.N - 2)
-	var t := clampf(c.f - i, 0.0, 1.0)
-	var tx: float = lerpf(R.tx[i], R.tx[i + 1], t)
-	var ty: float = lerpf(R.ty[i], R.ty[i + 1], t)
-	var l := sqrt(tx * tx + ty * ty)
-	tx /= l
-	ty /= l
-	c.x = R.px[i] + R.tx[i] * R.len[i] * t - ty * c.lat
-	c.y = R.py[i] + R.ty[i] * R.len[i] * t + tx * c.lat
-	c.hx = tx * c.dir
-	c.hy = ty * c.dir
+	c.place(sim.roads[c.road])
 
 
 # --- the racer -----------------------------------------------------------------------------------
@@ -954,100 +1321,73 @@ func _build_meshes() -> void:
 		batch.configure(FLEET[kind], slots, 500.0, bounds, true, kind == RACER)
 		add_child(batch)
 		_mm[kind] = batch
-	# a beacon per vehicle: its tail (or head) light, a few pixels from miles away
-	var st := SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	for uv in [Vector2(-1, -1), Vector2(1, -1), Vector2(1, 1), Vector2(-1, -1), Vector2(1, 1), Vector2(-1, 1)]:
-		st.set_color(Color.WHITE)
-		st.set_uv(uv)
-		st.set_uv2(Vector2(0.0, 1e6))
-		st.set_normal(Vector3.UP)
-		st.add_vertex(Vector3.ZERO)
+		_drawing.writers.append(batch.writer)
+	_drawing.tractor = _drawing.writers[TRACTOR]
+	# Far bodies: never under a couple of pixels wide (art/traffic/fleet.gdshader), every kind grown alike so a
+	# freighter stays bigger than a car at any distance.
+	for kind in _mm:
+		for node in [_mm[kind], (_mm[kind] as Node).get_node("Distance")]:
+			(node as GeometryInstance3D).set_instance_shader_parameter("grow_per_m", BODY_MIN_ANG / BODY_HALF_WIDTH)
+	# A pair of lamps per vehicle: its tail lamps, or its head lamps when its nose is toward the eye, the size
+	# they are, so a vehicle a kilometre off is a pair and one at the horizon a faint point. They were one glow a
+	# vehicle, a quarter of a degree across at any distance (as wide as the vehicle past a kilometre) and as
+	# bright at the horizon as beside you (Luke: "it just looks like a blur of taillights from far away").
 	var bmm := MultiMesh.new()
 	bmm.transform_format = MultiMesh.TRANSFORM_3D
 	bmm.use_colors = true
-	bmm.mesh = st.commit()
+	bmm.mesh = lamp_mesh()
 	bmm.instance_count = TARGET + 12
+	_beam_capacity = bmm.instance_count
+	_beam_colors.resize(_beam_capacity)
 	bmm.visible_instance_count = 0
 	_beams = MultiMeshInstance3D.new()
 	_beams.name = "traffic_lights"
 	_beams.multimesh = bmm
 	var bm := ShaderMaterial.new()
-	bm.shader = preload("res://view/beacon.gdshader")
-	bm.set_shader_parameter("size", 0.9)
-	bm.set_shader_parameter("min_ang", 0.0022)
-	bm.set_shader_parameter("far_dim", 0.25)
-	bm.set_shader_parameter("energy", 2.0)
+	bm.shader = preload("res://view/traffic_lamps.gdshader")
+	bm.set_shader_parameter("min_px", LAMP_MIN_PX)
+	bm.set_shader_parameter("grow_per_m", BODY_MIN_ANG / BODY_HALF_WIDTH)
 	_beams.material_override = bm
 	_beams.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_beams.custom_aabb = AABB(Vector3(-40000, -100, -40000), Vector3(80000, 20000, 80000))
 	add_child(_beams)
 
 
+## The lamps' mesh: a quad with all four corners at one point, its corner in UV (the shader spreads it).
+static func lamp_mesh() -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for uv in [Vector2(-1, -1), Vector2(1, -1), Vector2(1, 1), Vector2(-1, -1), Vector2(1, 1), Vector2(-1, 1)]:
+		st.set_color(Color.WHITE)
+		st.set_uv(uv)
+		st.set_normal(Vector3.UP)
+		st.add_vertex(Vector3.ZERO)
+	return st.commit()
+
+
 func _render() -> void:
-	var ox: float = view.org_x
-	var oy: float = view.org_y
+	_drawing.ox = view.org_x
+	_drawing.oy = view.org_y
+	_drawing.grade = grade
 	var camera := get_viewport().get_camera_3d()
-	var eye := camera.global_position if camera else Vector3.ZERO
-	var nb := 0
-	var bmm: MultiMesh = _beams.multimesh
-	var pod_v := Vector2(sim.pod.vx, sim.pod.vy)
+	_drawing.eye = camera.global_position if camera else Vector3.ZERO
+	_drawing.eye_x = _drawing.eye.x + _drawing.ox
+	_drawing.eye_y = _drawing.oy - _drawing.eye.z
+	_drawing.pod_v = Vector2(sim.pod.vx, sim.pod.vy)
 	for c in cars:
-		var batch: Batch = _mm[c.kind]
-		var h := 1.0 + sim.net_height(c.road, c.f) if sim._net_h.has(c.road) else 1.0
-		var shaft_on: bool = sim.roads[c.road].shaft and world.shaft.on(c.road, c.f)
-		# A road with a height profile (a hill, a ramp, a deck's approach): every body sits at its
-		# own height and noses up or down with the grade. They used to stay level at the lead's
-		# height, so a transport's train floated off a climb or sank into it (Luke: "busses look
-		# hilarious half sticking out going up hills"). A level road costs nothing more.
-		var graded: bool = grade and not shaft_on and sim._net_h.has(c.road)
-		var last: float = sim.roads[c.road].N - 1.0
-		var step: float = c.dir * TRAIN_GAP / 24.0   # samples from one body's centre to the next
-		var h_ahead := h
-		var h_here := h
-		if graded:
-			h_ahead = sim.net_height(c.road, clampf(c.f + step, 0.0, last)) + 1.0
-		var cx: float = c.x + c.hx * c.v * c.owed   # where it is now (a far one not driven this frame: on along its way)
-		var cy: float = c.y + c.hy * c.v * c.owed
-		var yaw := atan2(-c.hx, c.hy)   # +z (the model's back) against the way it's going
-		var b := Basis(Vector3.UP, yaw).scaled(Vector3.ONE * SCALE)
-		if shaft_on:
-			b = world.shaft.carry(c.road, c.f) * b
-		var cnt := TRAIN if c.kind == TRANSPORT else 1
-		var board: float = NUMBER_BOARDS.get(c.name, 0.0) if c.kind == RACER else 0.0
-		for k in (0 if c.craft else cnt):
-			var back := k * TRAIN_GAP
-			var p := Vector3(cx - c.hx * back - ox, h, -(cy - c.hy * back - oy))
-			var body_basis := b
-			if graded:
-				# the grade under this body: from a body length ahead of it to one behind
-				var h_behind: float = sim.net_height(c.road, clampf(c.f - step * (k + 1), 0.0, last)) + 1.0
-				p.y = h_here
-				body_basis = (Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, atan((h_ahead - h_behind) / (2.0 * TRAIN_GAP)))).scaled(Vector3.ONE * SCALE)
-				h_ahead = h_here
-				h_here = h_behind
-			if shaft_on:
-				var f: float = c.f - c.dir * back / 24.0
-				p = world.shaft.point(c.road, f, c.lat, 1.0, ox, oy)
-				body_basis = world.shaft.frame(c.road, f) * Basis(Vector3.UP, PI if c.dir < 0 else 0.0)
-				body_basis = body_basis.scaled(Vector3.ONE * SCALE)
-			var unit: Batch = _mm[TRACTOR] if c.kind == TRANSPORT and k == 0 else batch
-			unit.put(Transform3D(body_basis, p), eye, c.col, board)
-		if nb < bmm.instance_count:
-			# the light you see: its tail if it's going your way, its head lamps if it's coming at you
-			var coming: bool = c.hx * pod_v.x + c.hy * pod_v.y < 0.0
-			var off := -6.5 * SCALE if coming else 6.5 * SCALE + (cnt - 1) * TRAIN_GAP
-			var lp := Vector3(cx - c.hx * off - ox, h + 1.2 * SCALE, -(cy - c.hy * off - oy))
-			if graded:   # the lamp rides at its own end's height
-				lp.y = sim.net_height(c.road, clampf(c.f - c.dir * off / 24.0, 0.0, last)) + 1.0 + 1.2 * SCALE
-			if shaft_on:
-				lp = world.shaft.point(c.road, c.f - c.dir * off / 24.0, c.lat, 1.0 + 1.2 * SCALE, ox, oy)
-			bmm.set_instance_transform(nb, Transform3D(Basis(), lp))
-			var lc := Color(1.0, 0.95, 0.85) if coming else (Color(1.0, 0.3, 0.9) if c.kind == RACER else Color(1.0, 0.15, 0.08))
-			if c.chase == "pursuer":      # a patrol's lights, seen from any distance: red, blue, red, blue
-				lc = Color(1.0, 0.1, 0.08) if int(Time.get_ticks_msec() / 200) % 2 == 0 else Color(0.15, 0.35, 1.0)
-			bmm.set_instance_color(nb, lc)
-			nb += 1
+		c.draw(_drawing, _drawing.writers[c.kind])
+	var dark: float = Outlook.darkness()
+	if dark != _lamp_dark:      # (the hour changes with the menu, or not at all)
+		_lamp_dark = dark
+		(_beams.material_override as ShaderMaterial).set_shader_parameter("energy", lerpf(LAMP_ENERGY.x, LAMP_ENERGY.y, dark))
+	var bmm := _beams.multimesh
+	var nb := mini(cars.size(), _beam_capacity)
+	for i in nb:
+		var c := cars[i]
+		bmm.set_instance_transform(i, Transform3D(c.lamp_basis, c.lamp_position))
+		if _beam_colors[i] != c.lamp_color:
+			_beam_colors[i] = c.lamp_color
+			bmm.set_instance_color(i, c.lamp_color)
 	for kind in _mm:
 		(_mm[kind] as Batch).finish_frame(_warm > 0)
 	if _warm > 0:
@@ -1072,26 +1412,21 @@ func _feed() -> void:
 			continue
 		var vx := c.hx * c.v
 		var vy := c.hy * c.v
-		var parts: Array = []
-		match c.kind:
-			TRANSPORT:
-				for k in TRAIN:
-					parts.append([k * TRAIN_GAP + 4.5 * SCALE, 4.2 * SCALE])
-					parts.append([k * TRAIN_GAP - 4.5 * SCALE, 4.2 * SCALE])
-			SLOW:
-				parts = [[4.0 * SCALE, 3.2 * SCALE], [-4.0 * SCALE, 3.2 * SCALE]]
-			_:
-				parts = [[3.5 * SCALE, 2.6 * SCALE], [-3.5 * SCALE, 2.6 * SCALE]]
-		for q in parts.size():
-			var back: float = parts[q][0]
+		var units := TRAIN if c.kind == TRANSPORT else 1
+		var half := (4.5 if c.kind == TRANSPORT else (4.0 if c.kind == SLOW else 3.5)) * SCALE
+		var radius := (4.2 if c.kind == TRANSPORT else (3.2 if c.kind == SLOW else 2.6)) * SCALE
+		var lead_height := _drawing.height(c.road, c.f)
+		var shaft_on: bool = world.shaft.on(c.road, c.f)
+		for q in 2 * units:
+			var center_back := (q >> 1) * TRAIN_GAP
+			var back := center_back + (half if q % 2 == 0 else -half)
 			var x: float = c.x - c.hx * back
 			var y: float = c.y - c.hy * back
-			var h: float = sim.net_height(c.road, c.f)
+			var h := lead_height
 			# A level road's train is rigid at the lead's height. A shaft carries each car at its
 			# own sample: project the collision footprint to that same sample in the flat sim. On a
 			# graded road each part stands at its own height, as it is drawn (below).
-			if world.shaft.on(c.road, c.f):
-				var center_back := floorf(float(q) / 2.0) * TRAIN_GAP if c.kind == TRANSPORT else 0.0
+			if shaft_on:
 				var f: float = c.f - c.dir * center_back / 24.0
 				var R := sim.roads[c.road]
 				var i := clampi(int(f), 0, R.N - 2)
@@ -1099,10 +1434,10 @@ func _feed() -> void:
 				var tangent := Vector2(lerpf(R.tx[i], R.tx[i + 1], t), lerpf(R.ty[i], R.ty[i + 1], t)).normalized()
 				x = R.px[i] + R.tx[i] * R.len[i] * t - tangent.y * c.lat - tangent.x * c.dir * (back - center_back)
 				y = R.py[i] + R.ty[i] * R.len[i] * t + tangent.x * c.lat - tangent.y * c.dir * (back - center_back)
-				h = sim.net_height(c.road, f)
+				h = _drawing.height(c.road, f)
 			elif grade and sim._net_h.has(c.road):
-				h = sim.net_height(c.road, clampf(c.f - c.dir * back / 24.0, 0.0, sim.roads[c.road].N - 1.0))
-			obs.append({"id": c.id * 32 + q, "r": parts[q][1], "x": x, "y": y,
+				h = _drawing.height(c.road, clampf(c.f - c.dir * back / 24.0, 0.0, sim.roads[c.road].N - 1.0))
+			obs.append({"id": c.id * 32 + q, "r": radius, "x": x, "y": y,
 				"vx": vx, "vy": vy, "zMin": h, "zMax": h + (9.6 if c.kind == TRANSPORT else 6.0)})
 	sim.obstacles = obs
 

@@ -44,6 +44,9 @@ const INSERTIONS := [
 	["summit", "Helios summit", "SHelios@7244"],   # the centre of the spire's plateau, 16 km up, facing the far rim 3 km on (the designer's Face "centre")
 	["hyperion", "Hyperion, the foot", "SHyperion@1790"],     # 2 km short of the ramp's foot, the mountain dead ahead
 	["hyperion_summit", "Hyperion summit", "SHyperion@5200"],   # 48 km up, 96 m short of the summit's stop line and 384 m short of the lip (the designer's "lip" less 16)
+	# (the Caucasus, 2026-11-22: start points only. A tenth course would not fit the VR board, which is full at nine)
+	["caucasus", "The Caucasus", "SCaucasus"],     # the foot of the range (its scenic stretch's start: the climb comes to you)
+	["crest", "Caucasus crest", "SCaucasus@4534"],   # 3,260 m up, on the level top of the Crest (its height key's own sample): the land gone on both sides, the ridge road ahead
 ]
 
 static func course_index(id: String) -> int:

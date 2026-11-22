@@ -56,6 +56,17 @@ a circle in profile, to 88 degrees), over its summit and down its cliff (add_hyp
 "deck road": from the ramp's foot to the run-out's end it is sampled every STEP of its deck, not of the
 map (the "V" and "W" segments), and the sims carry a craft along it at its speed along the deck; its
 width changes along it (200 m at its mouths, 800 m over the mountain).
+The Caucasus (Luke, 2026-11-22: "Add a mountain road like the coastal road and the drop - One that winds
+through and over a mountain system"): SCaucasus, the third of that family, down the east edge's south
+half: off E2's south side, south through a range (a col between two peaks, a high valley, up onto a
+crest 3,260 m up with the land falling away on both sides, a viaduct over a gorge, a balcony, a canyon
+down) and in onto E1. An ordinary road with SCENIC's land, built after every other road so none before
+it changes its index (SCENIC_LATE).
+The aprons (the same day: "Extend the transparent edges on the coastal road and the drop so you can
+drive farther over the beach and ocean"): where a scenic road's edge is open (its land falls away on
+that side) the deck goes on level for SC_APRON m more before its ramp and its wall, eased in and out
+along the road. apron_table gives it to the sims (NET_APRONS), which move that side's ramp and wall out;
+the views draw it see-through.
 Roads are sampled exactly as the sims sample them (NET_STEP: straights in equal steps, arcs in
 exact chords, a last point at the end). Junction zones are found by walking: a road's end samples
 whose corridor overlaps its parent's (plus a margin), against the parent's nearest samples.
@@ -214,6 +225,47 @@ SCENIC = [
                (16, .5, ("r", -6), 1100, ("r", -6), 1100, 1), (20, .5, ("r", -6), 900, ("r", -6), 900, 1),
                (24, .3, -4, 400, -4, 400, 1)]),
 ]
+# The Caucasus: SCENIC's third road, made last of all (after Hyperion's) so that every road and junction
+# before it keeps its index. Along it: the Gate (the climb off the plain, the Network below on the right),
+# the North Col (a notch between two peaks, 1,720 m), the Cauldron (a high valley, 1,040 m), the long pull
+# up the main massif, the Crest (3,260 m: the land falls away on both sides, 1,360 m on the left and 2,060
+# on the right, as a mountain's flanks: view/network_scenic.gd FLANK_FALL), the Span (a viaduct 3 km long over a gorge 830 m deep), the South Shoulder (a balcony
+# 2,560 m up, a peak on the left and the Network on the right) and the Chute (a canyon down to the plain).
+# Its bends are 10-14 km (first and second gear's), and no part of it comes within 18 km of another, so
+# no two stretches' land meet. A falling side's run is 1,600 m at most (the reach of the road's own land:
+# a flank still falling there met the terrain's coarse grid along a saw's edge).
+SCENIC_LATE = [
+    dict(name="SCaucasus", start=(552.0, "E2", -1, 0.0), end=("E1", 1), sea=0, stretch=21,
+         plan=[("R", 14, 50), ("S", 5), ("R", 12, 70), ("S", 4),                        # 0-3: off E2, round to the south-west
+               ("L", 10, 95), ("S", 5), ("R", 10, 100), ("S", 4),                       # 4-7: the Gate, the North Col, down into the Cauldron
+               ("L", 11, 80), ("S", 5), ("R", 12, 90), ("S", 5),                        # 8-11: the pull, the Crest
+               ("L", 10, 100), ("S", 6), ("R", 11, 85), ("S", 4),                       # 12-15: the Span, the South Shoulder
+               ("L", 12, 75), ("S", 3), ("R", 10, 95), ("S", 4),                        # 16-19: the Chute
+               ("L", 12, 50), ("S", 4),                                                 # 20-21: out onto the plain, south
+               ("R", 14, 70), ("S", 8), ("R", 16, 20)],                                 # 22-24: in onto E1
+         heights=[(1, .5, 0, 0), (3, .5, 620, .045), (4, .6, 1250, .04), (5, .8, 1720, 0), (7, .5, 1040, 0),
+                  (9, .5, 2150, .075), (10, .5, 3260, 0), (11, .2, 3150, -.02), (12, .5, 2330, 0), (13, .7, 2560, 0),
+                  (14, .6, 2480, -.03), (16, .4, 1500, -.07), (18, .5, 620, -.045), (20, .6, 60, -.01), (21, .5, 0, 0)],
+         land=[(1, .5, -4, 400, -4, 400, 1), (2, .5, ("r", 260), 1500, 20, 700, 1), (3, .5, ("r", 650), 2200, 60, 1500, 1),
+               (4, .6, ("r", 950), 2400, 120, 1600, 1), (5, .3, ("r", 800), 2300, ("r", 380), 1700, 1),
+               (5, .8, ("r", 620), 2000, ("r", 560), 1900, 1), (6, .5, ("r", 500), 1900, ("r", 700), 2200, 1),
+               (6, .9, 1030, 1300, ("r", 500), 1900, 1), (7, .5, ("r", -6), 1200, ("r", -6), 1200, 1),
+               (8, .5, ("r", 700), 2200, 1034, 1500, 1), (9, .5, ("r", 1000), 2500, 1040, 1600, 1),
+               (10, .2, ("r", 350), 1600, 1150, 1600, 1), (10, .42, 1900, 1600, 1200, 1600, 1), (10, .8, 1900, 1600, 1200, 1600, 1),
+               (11, .5, ("r", 550), 1900, 1200, 1600, 1), (12, .3, 1500, 1500, 1500, 1500, 1), (12, .42, 1500, 1400, 1500, 1400, 1),
+               (12, .47, 1500, 1400, 1500, 1400, 760), (12, .58, 1500, 1400, 1500, 1400, 760), (12, .64, 1500, 1400, 1500, 1400, 1),
+               (13, .3, ("r", 850), 2400, 1250, 1600, 1), (14, .5, ("r", 800), 2300, 1200, 1600, 1),
+               (15, .5, ("r", 650), 2000, ("r", 500), 1800, 1), (16, .5, ("r", 600), 1900, ("r", 650), 2000, 1),
+               (18, .2, ("r", 420), 1700, ("r", 380), 1600, 1), (19, .5, ("r", 160), 1100, ("r", 140), 1000, 1),
+               (20, .7, ("r", 40), 600, ("r", 30), 600, 1), (21, .6, -4, 400, -4, 400, 1)]),
+]
+# The open edges' aprons: where a SCENIC road's land falls away on a side (the views' own test: the sea's side, or
+# land 12 m and more under the road), the deck runs on level this much further before its ramp and its wall. It was
+# the ramp alone, 30 m: with the apron the see-through deck reaches 180 m out, over the cliff's foot and the beach.
+SC_APRON = 150.0
+SC_APRON_EASE = 200               # samples it grows and goes over (4.8 km: the wall comes in at under 2 degrees; at 2,000 mph that is 28 m/s)
+SC_APRON_IN = 8                   # samples inside an open stretch's ends before it begins
+SC_OPEN = 12.0                    # view/network_scenic.gd open(): the land this far under the road
 # One interior link in each of the four large highway cells. Mouths are specified
 # as (highway, station on its map axis in km, shoulder side, driving direction).
 # Interior poses are (east km, north km, heading degrees); radii are in km.
@@ -1294,32 +1346,7 @@ def build():
     # the scenic roads: last, so every road and junction before them keeps its index
     scenic_roads.clear()
     for spec in SCENIC:
-        x0, start_on, start_side, hdeg = spec["start"]
-        end_on, end_side = spec["end"]
-        P0 = next(R for R in roads if R.name == start_on)
-        P1 = next(R for R in roads if R.name == end_on)
-        assert P0.kind == "highway" and P1.kind == "highway" and abs(P0.hdeg) < 1e-9 and abs(P1.hdeg) < 1e-9
-        segs = [(q[0], q[1] * KM, 0, "sp") if q[0] == "S" else (q[0], q[1] * KM, float(q[2]), "sp") for q in spec["plan"]]
-        y0 = P0.y0 + start_side * OFF
-        k = spec["stretch"]
-        assert segs[k][0] == "S"
-        # the stretch runs north or south: its length moves the end's y one for one
-        _, end = walk(segs[:k], x0 * KM, y0, math.radians(hdeg))
-        way = math.sin(end[2])
-        assert abs(abs(way) - 1.0) < 1e-9, f"{spec['name']}: the stretch must run due north or south"
-        _, end = walk(segs, x0 * KM, y0, math.radians(hdeg))
-        length = segs[k][1] + (P1.y0 + end_side * OFF - end[1]) / way
-        assert length > 2 * KM, f"{spec['name']}: its stretch comes out {length:.0f} m"
-        segs[k] = ("S", length, 0, "sp")
-        R = Road(spec["name"], "scenic", x0 * KM, y0, hdeg, SC_W, segs)
-        assert abs(R.end[1] - (P1.y0 + end_side * OFF)) < 0.01 and abs(math.sin(R.end[2])) < 1e-9, f"{spec['name']} misses {end_on}"
-        # where each segment starts, in samples (the sims' own count)
-        R.seg0 = [0]
-        for q in segs:
-            R.seg0.append(R.seg0[-1] + max(1, math.ceil((q[1] if q[0] == "S" else q[1] * math.radians(q[2])) / STEP)))
-        joins += [(len(roads), 0, roads.index(P0)), (len(roads), 1, roads.index(P1))]
-        scenic_roads.append((len(roads), spec))
-        roads.append(R)
+        add_scenic(roads, joins, spec)
     # Append after the existing scenic roads to preserve saved road and junction indices.
     by_name = {road.name: i for i, road in enumerate(roads)}
     for name, entry, exit_, radius, interior, relief in BACKROADS:
@@ -1376,7 +1403,41 @@ def build():
     add_helios(roads, joins)
     # ... and Hyperion after it, for the same reason.
     add_hyperion(roads, joins)
+    # ... and the Caucasus after that.
+    for spec in SCENIC_LATE:
+        add_scenic(roads, joins, spec)
     return roads, joins, cities, ew, ns, jumps, onramps, shafts
+
+
+def add_scenic(roads, joins, spec):
+    """A SCENIC road: its plan walked from its start on one highway's side, its stretch found so that it ends on
+    the other's."""
+    x0, start_on, start_side, hdeg = spec["start"]
+    end_on, end_side = spec["end"]
+    P0 = next(R for R in roads if R.name == start_on)
+    P1 = next(R for R in roads if R.name == end_on)
+    assert P0.kind == "highway" and P1.kind == "highway" and abs(P0.hdeg) < 1e-9 and abs(P1.hdeg) < 1e-9
+    segs = [(q[0], q[1] * KM, 0, "sp") if q[0] == "S" else (q[0], q[1] * KM, float(q[2]), "sp") for q in spec["plan"]]
+    y0 = P0.y0 + start_side * OFF
+    k = spec["stretch"]
+    assert segs[k][0] == "S"
+    # the stretch runs north or south: its length moves the end's y one for one
+    _, end = walk(segs[:k], x0 * KM, y0, math.radians(hdeg))
+    way = math.sin(end[2])
+    assert abs(abs(way) - 1.0) < 1e-9, f"{spec['name']}: the stretch must run due north or south"
+    _, end = walk(segs, x0 * KM, y0, math.radians(hdeg))
+    length = segs[k][1] + (P1.y0 + end_side * OFF - end[1]) / way
+    assert length > 2 * KM, f"{spec['name']}: its stretch comes out {length:.0f} m"
+    segs[k] = ("S", length, 0, "sp")
+    R = Road(spec["name"], "scenic", x0 * KM, y0, hdeg, SC_W, segs)
+    assert abs(R.end[1] - (P1.y0 + end_side * OFF)) < 0.01 and abs(math.sin(R.end[2])) < 1e-9, f"{spec['name']} misses {end_on}"
+    # where each segment starts, in samples (the sims' own count)
+    R.seg0 = [0]
+    for q in segs:
+        R.seg0.append(R.seg0[-1] + max(1, math.ceil((q[1] if q[0] == "S" else q[1] * math.radians(q[2])) / STEP)))
+    joins += [(len(roads), 0, roads.index(P0)), (len(roads), 1, roads.index(P1))]
+    scenic_roads.append((len(roads), spec))
+    roads.append(R)
 
 
 def scenic_at(R, seg, frac):
@@ -1389,20 +1450,11 @@ def scenic_table(roads):
     the land beside each scenic road. On the sea side the height is -5 (below the open ground's -4: between a
     flat end's -4 and it, the sea side begins halfway) and its run is the shelf."""
     out = []
+    late = []
     for r, spec in scenic_roads:
         if "land" not in spec:
             continue   # (SHelios: its rows are the mountain's own, last below)
-        R = roads[r]
-        rows = []
-        for seg, frac, left, lrun, right, rrun, gap in spec["land"]:
-            i = scenic_at(R, seg, frac)
-            h = R.h(i)
-            side = []
-            for v in (left, right):
-                side.append(-5.0 if v == "sea" else (h + v[1] if isinstance(v, tuple) else float(v)))
-            rows.append([i, round(side[0], 1), float(lrun), round(side[1], 1), float(rrun), float(gap)])
-        assert all(a[0] < b[0] for a, b in zip(rows, rows[1:])), f"{R.name}: its land stations aren't in order"
-        out.append([r, spec["sea"], rows])
+        (late if spec in SCENIC_LATE else out).append([r, spec["sea"], land_rows(roads[r], spec)])
     # Frostline is cut into a high saddle. Its two flanks trade sides at
     # the crest, then fade back into the existing landscape before the merge.
     r = next(i for i, road in enumerate(roads) if road.name == "SFrost")
@@ -1425,6 +1477,76 @@ def scenic_table(roads):
     # Hyperion's road is on its mountain from the ramp's foot to the run-out's end.
     r = next(i for i, road in enumerate(roads) if road.name == "SHyperion")
     out.append([r, 0, hyperion_land(roads[r])])
+    return out + late   # (the Caucasus' rows last, as its road is)
+
+
+def land_rows(R, spec):
+    """A SCENIC road's land stations as the sims carry them: [[sample, left m, its run m, right m, its run m, gap m], ...]."""
+    rows = []
+    for seg, frac, left, lrun, right, rrun, gap in spec["land"]:
+        i = scenic_at(R, seg, frac)
+        h = R.h(i)
+        side = []
+        for v in (left, right):
+            side.append(-5.0 if v == "sea" else (h + v[1] if isinstance(v, tuple) else float(v)))
+        rows.append([i, round(side[0], 1), float(lrun), round(side[1], 1), float(rrun), float(gap)])
+    assert all(a[0] < b[0] for a, b in zip(rows, rows[1:])), f"{R.name}: its land stations aren't in order"
+    return rows
+
+
+def open_sides(R, spec):
+    """Per sample of a SCENIC road's scenic stretch, whether its land falls away on the left and on the right, as
+    view/network_scenic.gd open() finds it (the stations' heights eased from one to the next; the sea's side, or
+    land SC_OPEN under the road). -> (first sample, [[left, right], ...])."""
+    rows = land_rows(R, spec)
+    first, last = rows[0][0], rows[-1][0]
+    out = []
+    k = 0
+    for i in range(first, last + 1):
+        while k < len(rows) - 2 and i >= rows[k + 1][0]:
+            k += 1
+        a, b = rows[k], rows[k + 1]
+        u = min(1.0, max(0.0, (i - a[0]) / (b[0] - a[0])))
+        u = u * u * (3.0 - 2.0 * u)
+        h = R.h(i)
+        sides = []
+        for col, sea in ((1, 1), (3, -1)):
+            t = a[col] + (b[col] - a[col]) * u
+            sides.append((spec["sea"] == sea and t < -4.5) or t < h - SC_OPEN)
+        out.append(sides)
+    return first, out
+
+
+def apron_table(roads):
+    """[[road, left keys, right keys], ...], keys [[sample, m], ...]: the open edges' aprons. On each side, through each
+    stretch where the land falls away: nothing for SC_APRON_IN samples, up to SC_APRON over SC_APRON_EASE, and down the
+    same way at its end (a stretch too short for both gets as much as it has room for). The sims ease from key to
+    key (a smoothstep) and have none outside them."""
+    out = []
+    for r, spec in scenic_roads:
+        if "land" not in spec:
+            continue
+        first, sides = open_sides(roads[r], spec)
+        keys = [[], []]
+        for side in (0, 1):
+            i = 0
+            while i < len(sides):
+                if not sides[i][side]:
+                    i += 1
+                    continue
+                j = i
+                while j + 1 < len(sides) and sides[j + 1][side]:
+                    j += 1
+                a, b = first + i + SC_APRON_IN, first + j - SC_APRON_IN
+                room = b - a
+                if room >= 2 * SC_APRON_EASE:
+                    keys[side] += [[a, 0.0], [a + SC_APRON_EASE, SC_APRON], [b - SC_APRON_EASE, SC_APRON], [b, 0.0]]
+                elif room >= 40:
+                    keys[side] += [[a, 0.0], [a + room // 2, round(SC_APRON * room / (2.0 * SC_APRON_EASE), 1)], [b, 0.0]]
+                i = j + 1
+            assert all(p[0] < q[0] for p, q in zip(keys[side], keys[side][1:])), f"{roads[r].name}: its apron keys aren't in order"
+        if keys[0] or keys[1]:
+            out.append([r, keys[0], keys[1]])
     return out
 
 
@@ -1706,6 +1828,18 @@ def check(roads, joins, J, cities, ew, ns, jumps=(), onramps=(), overlaps=()):
             bad(f"{R.name} is {abs(grade).max() * 100:.0f}% at its steepest (30 at most)")
         if not 0 < R.p[:, 0].min() and R.p[:, 0].max() < 600 * KM:
             bad(f"{R.name} leaves the map")
+    for r, left, right in apron_table(roads):
+        R = roads[r]
+        spans = []
+        for name, keys in (("left", left), ("right", right)):
+            wide = [k for k in keys if k[1] > 0.0]
+            if wide:
+                spans.append(f"{name} {len(keys)} keys, samples {keys[0][0]}-{keys[-1][0]}, {max(k[1] for k in keys):.0f} m at most")
+            # an apron stands off every other road and off the junctions: its outer edge is the deck's
+            for k in keys:
+                if k[1] > 0.0 and (k[0] < 400 or k[0] > R.N - 400):
+                    bad(f"{R.name}'s {name} apron reaches sample {k[0]}: within 400 samples of an end")
+        print(f"  aprons {R.name}: " + "; ".join(spans))
     return ok
 
 
@@ -1732,7 +1866,8 @@ def main():
     tube_km = kinds["tube"][1]
     tube_samples = sum(r.N for r in roads if r.kind == "tube")
     # (... and from 9,600 km and 400,000 samples for SHyperion: 242 km of plan, 12,900 samples)
-    if km - tube_km > 9900 or N - tube_samples > 420000 or tube_km > 980 or tube_samples > 41000:
+    # (... and from 9,900 km and 420,000 samples for SCaucasus: 252 km, 10,500 samples)
+    if km - tube_km > 10200 or N - tube_samples > 432000 or tube_km > 980 or tube_samples > 41000:
         ok = False
         print(f"  BAD  too big: {km:.0f} km, {N} samples")
     print("NETWORK DESIGN OK" if ok else "NETWORK DESIGN NOT OK")

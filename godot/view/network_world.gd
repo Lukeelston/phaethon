@@ -86,11 +86,11 @@ const SCENIC_NAMES := {
 	"SCoast": "COAST ROAD", "SDrop": "THE DROP", "SWash": "SIROCCO WASH",
 	"SFrost": "FROSTLINE PASS", "SReed": "REEDWATER CAUSEWAY", "SRed": "RED TABLE CUT",
 	"SNeedle": "NEEDLE ROLL", "SHammer": "HAMMERFALL", "SAurora": "AURORA LINE", "SHelios": "MOUNT HELIOS",
-	"SHyperion": "MOUNT HYPERION",
+	"SHyperion": "MOUNT HYPERION", "SCaucasus": "THE CAUCASUS",
 }
 const SCENIC_ROUTES := {
 	"SCoast": "S12", "SDrop": "S13", "SWash": "S14", "SFrost": "S15", "SReed": "S16", "SRed": "S17",
-	"SNeedle": "S18", "SHammer": "S19", "SAurora": "S20", "SHelios": "S21", "SHyperion": "S22",
+	"SNeedle": "S18", "SHammer": "S19", "SAurora": "S20", "SHelios": "S21", "SHyperion": "S22", "SCaucasus": "S23",
 }
 enum { PAVED, SAND, RED_GRAVEL, CAUSEWAY }
 # Dedicated stunt roads and their approach boards (deck fraction, direction, legend).
@@ -1161,11 +1161,17 @@ func _sample(J: Dictionary, R: CraftSim.TrackPath, i: int) -> void:
 		if scenic_here and scenic.open(r, i, sgn > 0.0):
 			# The land falls away here: nothing stands in the way of the view. The forcefield that turns
 			# you back is still there (the sims'); what shows is a lit rail, knee high, on slim posts.
+			# (At the outer edge of the apron, where the deck runs on past its old edge: _apron.)
+			var out_i := _apron(R, i, sgn)
+			var out_j := _apron(R, j, sgn)
+			if out_i > 0.0 or out_j > 0.0:
+				wa = _p(R, ox, oy, i, sgn * (hw + out_i), hi + te)
+				wb = _p(R, ox, oy, j, sgn * (hw_j + out_j), hj + te_j)
 			_wall(lglow, wa, wb, 0.55, 0.85, WALL_STRIP, up_j)
 			if i % 4 == 0:
 				_box(deco, wa + _up * 0.42, Vector3(0.35, 0.85, 0.35), Color(0.3, 0.31, 0.33), upright)
 			if i % MAST_EVERY == 0:
-				var post := _p(R, ox, oy, i, sgn * (hw + 0.4), hi + te)
+				var post := _p(R, ox, oy, i, sgn * (hw + out_i + 0.4), hi + te)
 				_box(deco, post + _up * (MAST_H / 2.0), Vector3(0.6, MAST_H, 0.6), Color(0.3, 0.31, 0.33), upright)
 				_box(glow, post + _up * (MAST_H + 0.45), Vector3(0.9, 0.9, 0.9), STRIP_LIGHT, upright)
 				_beacon(lamps, post + _up * (MAST_H + 0.45), STRIP_LIGHT)
@@ -1771,10 +1777,11 @@ func _flank_row(J: Dictionary, R: CraftSim.TrackPath, i: int, left: bool) -> Dic
 		var near_at := Vector2(R.px[i] + R.nx[i] * way * 500.0, R.py[i] + R.ny[i] * way * 500.0)
 		var far_at := Vector2(R.px[i] + R.nx[i] * way * 1500.0, R.py[i] + R.ny[i] * way * 1500.0)
 		# (the mountain's road: its land's colour goes by the mountain's own height there, not the terrain sunk under it)
-		J[key] = [landscape.color_at(near_at, scenic.known_height(r, near_at)), landscape.color_at(far_at, scenic.known_height(r, far_at))]
+		J[key] = [landscape.color_at(near_at, scenic.tone_height(r, i, way > 0.0, 500.0, near_at)), landscape.color_at(far_at, scenic.tone_height(r, i, way > 0.0, 1500.0, far_at))]
 	var near: Color = J[key][0]
 	var far: Color = J[key][1]
 	var climbing: float = scenic.climb(r, i)
+	var gentle: bool = scenic.flanked(r)
 	var p := PackedVector3Array()
 	var normals := PackedVector3Array()
 	var colours := PackedColorArray()
@@ -1799,8 +1806,8 @@ func _flank_row(J: Dictionary, R: CraftSim.TrackPath, i: int, left: bool) -> Dic
 			tone = (scenic.SAND as Color).lerp(tone, smoothstep(4.0, 7.0, y))
 			if m == 4:
 				tone = tone.lerp(FLANK_ROCK, 0.5)   # the sea cliff's face
-		elif (rising and m >= 1 and m <= 2) or (not rising and m >= 1 and m <= 4):
-			tone = tone.lerp(FLANK_ROCK, 0.6)       # a rock cut over the road; a valley wall's face under it
+		elif (rising and m >= 1 and m <= 2) or (not rising and m >= 1 and m <= (2 if gentle else 4)):
+			tone = tone.lerp(FLANK_ROCK, 0.6)       # a rock cut over the road; a valley wall's face under it (a flank's first 40 m, on the Caucasus)
 		var patch: float = 0.86 + 0.3 * smoothstep(-0.4, 0.4, _bank_noise.get_noise_2d((R.py[i] + R.ny[i] * sgn * off) * 2.6 + 9000.0, (R.px[i] + R.nx[i] * sgn * off) * 2.6))
 		colours.append(Color(tone.r * patch, tone.g * patch, tone.b * patch, tone.a))
 	return {"p": p, "n": normals, "c": colours, "d": pairs, "sea": sea, "base": -1}
@@ -1839,6 +1846,10 @@ func _flank_crops(B: Dictionary, a: Dictionary, b: Dictionary, r: int, j: int, s
 		return
 	var tones: PackedColorArray = a.c
 	var steep_road := _deck_up(r, sim.roads[r], j) != Vector3.UP
+	# (the open apron's reach on this side, from the centreline and a little more, and the deck's height: nothing tall stands under it)
+	var out_here := maxf(_apron(sim.roads[r], j, 1.0 if side == 1 else -1.0), _apron(sim.roads[r], maxi(j - BANK_EVERY, 0), 1.0 if side == 1 else -1.0))
+	var under_apron: float = float(sim.roads[r].w[j]) / 2.0 + out_here + 15.0 if out_here > 0.0 else 0.0
+	var deck_at := _h(r, j)
 	for m in range(2, last - 1):   # from 40 m out to where the terrain takes over; not the buried lip
 		var width := da[(m + 1) * 2] - da[m * 2]
 		if absf(da[(m + 1) * 2 + 1] - da[m * 2 + 1]) > 1.1 * maxf(width, 1.0):
@@ -1859,6 +1870,8 @@ func _flank_crops(B: Dictionary, a: Dictionary, b: Dictionary, r: int, j: int, s
 			var u := float(seed % 997) / 997.0
 			var t := float((seed / 997) % 991) / 991.0
 			var at := (pa[m].lerp(pa[m + 1], t)).lerp(pb[m].lerp(pb[m + 1], t), u) - Vector3.UP * 1.5
+			if under_apron > 0.0 and lerpf(da[m * 2], da[(m + 1) * 2], t) < under_apron and at.y > deck_at - 45.0:
+				continue      # (under the open apron and near enough the deck to stand up through it)
 			var tone: Color = tones[m]
 			var green: bool = tone.g > tone.r * 1.04 and tone.g > tone.b * 1.04
 			var snowy: bool = minf(tone.r, minf(tone.g, tone.b)) > 0.5
@@ -2081,11 +2094,16 @@ func _finish(J: Dictionary, R: CraftSim.TrackPath) -> void:
 		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
 		var in_shelter := r == _shelter_road and c1 >= int(halls[r][0]) and c0 <= int(halls[r][1])
 		mesh.surface_set_material(0, _shelter_asphalt if in_shelter else _unsealed.get(J.surface, _asph))
-		if not split.is_empty() and open_edge_probe != "none":
+		if not split.is_empty() and not (split[1] as PackedInt32Array).is_empty() and open_edge_probe != "none":
 			var glass := arr.duplicate()
 			glass[Mesh.ARRAY_INDEX] = split[1]
 			mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, glass)
 			mesh.surface_set_material(1, _glass)
+		var apron := _apron_arrays(J, R) if open_edge_probe != "none" else []
+		if not apron.is_empty():
+			var apron_surface := mesh.get_surface_count()
+			mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, apron)
+			mesh.surface_set_material(apron_surface, _glass)
 	var cpu_surfaces := []
 	if not J.template.is_empty():
 		var cached: Array = J.template[0]
@@ -2790,17 +2808,97 @@ func _open_split(r: int, c0: int, rows: int, cols: int) -> Array:
 	var solid := PackedInt32Array()
 	var clear := PackedInt32Array()
 	var half := cols / 2
+	var R: CraftSim.TrackPath = sim.roads[r]
+	var dropped := false
 	for a in rows - 1:
 		var right: bool = scenic.open(r, c0 + a, false)
 		var left: bool = scenic.open(r, c0 + a, true)
+		# (where the deck runs on past its old edge the ramp is drawn further out, by the apron's own surface:
+		# _apron_arrays. The grid keeps its ramp's points, undrawn, so what is painted on the road stays put)
+		var out_right: bool = _apron(R, c0 + a, -1.0) > 0.0 or _apron(R, c0 + a + 1, -1.0) > 0.0
+		var out_left: bool = _apron(R, c0 + a, 1.0) > 0.0 or _apron(R, c0 + a + 1, 1.0) > 0.0
 		for k in cols - 1:
+			if (out_right and k < half - 1) or (out_left and k >= half):
+				dropped = true
+				continue
 			var p := a * cols + k
 			var quad := PackedInt32Array([p, p + 1, p + cols + 1, p, p + cols + 1, p + cols])
 			if (right and k < half - 1) or (left and k >= half):
 				clear.append_array(quad)
 			else:
 				solid.append_array(quad)
-	return [] if clear.is_empty() else [solid, clear]
+	return [] if clear.is_empty() and not dropped else [solid, clear]
+
+
+## How far road R's deck runs on past its old edge at sample i on one side (sgn: 1 its left, -1 its
+## right): the sims' open apron there (CraftSim NET_APRONS), 0 on every other road.
+static func _apron(R: CraftSim.TrackPath, i: int, sgn: float) -> float:
+	if R.apl.is_empty():
+		return 0.0
+	return float(R.apl[i] if sgn > 0.0 else R.apr[i])
+
+
+## A chunk's open aprons (Luke, 2026-11-22: "Extend the transparent edges on the coastal road and the
+## drop so you can drive farther over the beach and ocean"): on each side where the deck runs on, the
+## see-through deck from the old ramp's foot out to the wall: the level apron, then the ramp, at the
+## sims' own shape (CraftSim.net_lat). One surface's arrays for the glass (UV: m along, m left of the
+## centreline; UV2.x: m in from the edge up the ramp as the grid's, then a third of the way across the
+## level apron), or [] with no apron in the chunk.
+func _apron_arrays(J: Dictionary, R: CraftSim.TrackPath) -> Array:
+	if R.apl.is_empty() or int(J.rows) < 2:
+		return []
+	var r: int = J.r
+	var c0: int = J.c0
+	var v := PackedVector3Array()
+	var n := PackedVector3Array()
+	var uv := PackedVector2Array()
+	var uv2 := PackedVector2Array()
+	var idx := PackedInt32Array()
+	var cols := EDGE_SEGS + 2      # the old ramp's foot, then the ramp's own points
+	for sgn: float in [-1.0, 1.0]:
+		var base := {}             # sample -> its row's first point
+		for a in int(J.rows) - 1:
+			var s0 := c0 + a
+			if _apron(R, s0, sgn) <= 0.0 and _apron(R, s0 + 1, sgn) <= 0.0:
+				continue
+			for s: int in [s0, s0 + 1]:
+				if base.has(s):
+					continue
+				base[s] = v.size()
+				var w: float = R.w[s]
+				var hw := w / 2.0
+				var E := CraftSim.net_edge_span(w)
+				var out := _apron(R, s, sgn)
+				var left := Vector3(R.nx[s], 0.0, -R.ny[s])
+				var mid := Vector3(R.px[s] - J.ox, _h(r, s) + 0.02, -(R.py[s] - J.oy))
+				var u: float = J.u0 + _s[r][s]
+				v.append(mid + left * (sgn * (hw - E)))
+				n.append(Vector3.UP)
+				uv.append(Vector2(u, sgn * (hw - E)))
+				# (the glass's lattice has a line along the road every 10 of this: across the level apron that is every 30 m,
+				# not the ramp's every 10. Eighteen lines at the eye's height over 180 m of deck were a blind across the view)
+				uv2.append(Vector2(E + out / 3.0, 1.0))
+				for k in EDGE_SEGS + 1:
+					var d := E * float(k) / EDGE_SEGS
+					var e := CraftSim.net_edge(w, hw - E + d)
+					v.append(mid + left * (sgn * (hw - E + d + out)) + Vector3.UP * e.x)
+					n.append(Vector3.UP * cos(e.y) - left * (sgn * sin(e.y)))
+					uv.append(Vector2(u, sgn * (hw - E + d + out)))
+					uv2.append(Vector2(E - d, 1.0))
+			var p0: int = base[s0]
+			var p1: int = base[s0 + 1]
+			for k in cols - 1:
+				idx.append_array(PackedInt32Array([p0 + k, p0 + k + 1, p1 + k + 1, p0 + k, p1 + k + 1, p1 + k]))
+	if idx.is_empty():
+		return []
+	var arr := []
+	arr.resize(Mesh.ARRAY_MAX)
+	arr[Mesh.ARRAY_VERTEX] = v
+	arr[Mesh.ARRAY_NORMAL] = n
+	arr[Mesh.ARRAY_TEX_UV] = uv
+	arr[Mesh.ARRAY_TEX_UV2] = uv2
+	arr[Mesh.ARRAY_INDEX] = idx
+	return arr
 
 
 ## The road grid's triangles (rows of `cols` points), cached by size: the same for every chunk.

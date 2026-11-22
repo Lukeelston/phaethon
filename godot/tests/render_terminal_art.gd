@@ -109,6 +109,8 @@ func _run() -> void:
 		if arg.begins_with("--bench-at="):   # road,sample: time the seat along another stretch (open country, a sky bridge)
 			var at := arg.trim_prefix("--bench-at=").split(",")
 			city = {"road": int(at[0]), "i": int(at[1])}
+		if arg.begins_with("--bench-right="):   # m right of the centre line (negative: left), for timing the seat out on a scenic road's open apron
+			_bench_right = float(arg.trim_prefix("--bench-right="))
 	if "--as-flown" in OS.get_cmdline_user_args():   # the first spike flight's world: no banks, no fins, level traffic
 		seat.network_world.banks = false
 		seat.network_world.fins = false
@@ -158,8 +160,11 @@ func _run() -> void:
 	quit()
 
 
+var _bench_right := 0.0   # (--bench-right=)
+
+
 func _set_pose(offset: int) -> void:
-	seat.sim.respawn_on(int(city.road), int(city.i) + offset, 1)
+	seat.sim.respawn_on(int(city.road), int(city.i) + offset, 1, _bench_right)
 	seat._ride.clear()
 
 

@@ -241,16 +241,17 @@ func _sides(sim) -> void:
 	# (Codex's four backroads and two stunt roads are S roads too: long sweeps, one gear's worth of
 	# corners each. So is the Helios road, the twenty-first: counted, not asked for two. So is Mount
 	# Hyperion's, the twenty-third S road: one straight line and two 12 km turns, second gear. The
-	# twelve side roads, the coast road and the drop still want two.)
+	# twelve side roads, the coast road and the drop still want two; so does the Caucasus' road, the
+	# twenty-fourth (2026-11-22): its bends are 10 to 14 km.)
 	var two := 0
 	var twisty := 0
 	for nm: String in gears:
-		var first_built: bool = nm in ["SCoast", "SDrop"] or nm.trim_prefix("S").is_valid_int()
+		var first_built: bool = nm in ["SCoast", "SDrop", "SCaucasus"] or nm.trim_prefix("S").is_valid_int()
 		twisty += int(first_built)
 		if first_built and gears[nm].size() >= 2:
 			two += 1
 	_check("sides: %d S roads, all with corner boards (%d); the %d side and scenic roads each with two gears' worth of corners (%d); none in first (%s); e.g. %s" % [n_side, roads.size(), twisty, two, shifts, gears.get("S0", {}).keys()],
-		n_side == 23 and roads.size() == 23 and twisty == 14 and two == 14 and shifts and W.gear_for(2100.0) == 2 and W.gear_for(3000.0) == 3)
+		n_side == 24 and roads.size() == 24 and twisty == 15 and two == 15 and shifts and W.gear_for(2100.0) == 2 and W.gear_for(3000.0) == 3)
 
 
 func _partner(sim) -> void:
