@@ -1,0 +1,446 @@
+{
+  "baseline_commit": "152c7b3",
+  "feature_commit": "0e3da2b",
+  "runs": {
+    "before": {
+      "e1": [
+        {
+          "batches": 371,
+          "close_view": {
+            "kind": "service",
+            "meters_from_eye": 2569.89477539063,
+            "relative_center": [
+              2387.87939453125,
+              49.326416015625,
+              -950.307739257813
+            ]
+          },
+          "direction": -1,
+          "draws": {
+            "p50": 850.0,
+            "p95": 851.0
+          },
+          "frames": 120,
+          "gpu": "NVIDIA GeForce RTX 5080",
+          "gpu_ms": {
+            "p50": 4.05399990081787,
+            "p95": 4.22100019454956
+          },
+          "instances": 72273,
+          "msaa": 4,
+          "primitives": {
+            "p50": 4006887.0,
+            "p95": 4008033.0
+          },
+          "render_cpu_ms": {
+            "p50": 1.25800001621246,
+            "p95": 1.64800000190735
+          },
+          "road": "E1",
+          "sample": 2548,
+          "size": [
+            4128,
+            2208
+          ],
+          "tiles": [
+            3,
+            9,
+            69
+          ],
+          "update_cpu_ms": {
+            "p50": 5.998,
+            "p95": 7.007
+          },
+          "visible_difference_samples": 318,
+          "world_xy": [
+            86152.0,
+            100000.0
+          ]
+        },
+        {
+          "batches": 371,
+          "close_view": {
+            "kind": "service",
+            "meters_from_eye": 2569.89477539063,
+            "relative_center": [
+              2387.87939453125,
+              49.326416015625,
+              -950.307739257813
+            ]
+          },
+          "direction": -1,
+          "draws": {
+            "p50": 850.0,
+            "p95": 851.0
+          },
+          "frames": 120,
+          "gpu": "NVIDIA GeForce RTX 5080",
+          "gpu_ms": {
+            "p50": 4.05000019073486,
+            "p95": 4.22599983215332
+          },
+          "instances": 72273,
+          "msaa": 4,
+          "primitives": {
+            "p50": 4006887.0,
+            "p95": 4008033.0
+          },
+          "render_cpu_ms": {
+            "p50": 1.14499998092651,
+            "p95": 1.60000002384186
+          },
+          "road": "E1",
+          "sample": 2548,
+          "size": [
+            4128,
+            2208
+          ],
+          "tiles": [
+            3,
+            9,
+            69
+          ],
+          "update_cpu_ms": {
+            "p50": 5.592,
+            "p95": 6.657
+          },
+          "visible_difference_samples": 318,
+          "world_xy": [
+            86152.0,
+            100000.0
+          ]
+        }
+      ],
+      "basalt": [
+        {
+          "batches": 377,
+          "close_view": {
+            "kind": "basalt",
+            "meters_from_eye": 3132.73681640625,
+            "relative_center": [
+              2594.27099609375,
+              45.0819625854492,
+              -1754.71752929688
+            ]
+          },
+          "direction": 1,
+          "draws": {
+            "p50": 1283.0,
+            "p95": 1284.0
+          },
+          "frames": 120,
+          "gpu": "NVIDIA GeForce RTX 5080",
+          "gpu_ms": {
+            "p50": 4.43400001525879,
+            "p95": 4.64300012588501
+          },
+          "instances": 71514,
+          "msaa": 4,
+          "primitives": {
+            "p50": 5269617.0,
+            "p95": 5269749.0
+          },
+          "render_cpu_ms": {
+            "p50": 1.40600001811981,
+            "p95": 1.88199996948242
+          },
+          "road": "Basalt",
+          "sample": 738,
+          "size": [
+            4128,
+            2208
+          ],
+          "tiles": [
+            4,
+            10,
+            67
+          ],
+          "update_cpu_ms": {
+            "p50": 4.506,
+            "p95": 5.319
+          },
+          "visible_difference_samples": 57,
+          "world_xy": [
+            70406.8046875,
+            89884.5390625
+          ]
+        },
+        {
+          "batches": 377,
+          "close_view": {
+            "kind": "basalt",
+            "meters_from_eye": 3132.73681640625,
+            "relative_center": [
+              2594.27099609375,
+              45.0819625854492,
+              -1754.71752929688
+            ]
+          },
+          "direction": 1,
+          "draws": {
+            "p50": 1283.0,
+            "p95": 1284.0
+          },
+          "frames": 120,
+          "gpu": "NVIDIA GeForce RTX 5080",
+          "gpu_ms": {
+            "p50": 4.47900009155273,
+            "p95": 4.68699979782104
+          },
+          "instances": 71514,
+          "msaa": 4,
+          "primitives": {
+            "p50": 5269609.0,
+            "p95": 5269739.0
+          },
+          "render_cpu_ms": {
+            "p50": 1.52799999713898,
+            "p95": 1.99399995803833
+          },
+          "road": "Basalt",
+          "sample": 738,
+          "size": [
+            4128,
+            2208
+          ],
+          "tiles": [
+            4,
+            10,
+            67
+          ],
+          "update_cpu_ms": {
+            "p50": 4.862,
+            "p95": 5.614
+          },
+          "visible_difference_samples": 57,
+          "world_xy": [
+            70406.8046875,
+            89884.5390625
+          ]
+        }
+      ]
+    },
+    "after": {
+      "e1": [
+        {
+          "batches": 332,
+          "close_view": {
+            "kind": "service",
+            "meters_from_eye": 2570.1015625,
+            "relative_center": [
+              2388.609375,
+              25.3428840637207,
+              -949.90625
+            ],
+            "subject_samples": 5348
+          },
+          "direction": -1,
+          "draws": {
+            "p50": 830.0,
+            "p95": 831.0
+          },
+          "frames": 120,
+          "gpu": "NVIDIA GeForce RTX 5080",
+          "gpu_ms": {
+            "p50": 3.53800010681152,
+            "p95": 3.82800006866455
+          },
+          "instances": 68432,
+          "msaa": 4,
+          "primitives": {
+            "p50": 2275775.0,
+            "p95": 2276921.0
+          },
+          "render_cpu_ms": {
+            "p50": 1.1710000038147,
+            "p95": 1.65799999237061
+          },
+          "road": "E1",
+          "sample": 2548,
+          "size": [
+            4128,
+            2208
+          ],
+          "tiles": [
+            3,
+            9,
+            69
+          ],
+          "update_cpu_ms": {
+            "p50": 6.091,
+            "p95": 7.209
+          },
+          "visible_difference_samples": 130,
+          "world_xy": [
+            86152.0,
+            100000.0
+          ]
+        },
+        {
+          "batches": 332,
+          "close_view": {
+            "kind": "service",
+            "meters_from_eye": 2570.1015625,
+            "relative_center": [
+              2388.609375,
+              25.3428840637207,
+              -949.90625
+            ],
+            "subject_samples": 5348
+          },
+          "direction": -1,
+          "draws": {
+            "p50": 830.0,
+            "p95": 831.0
+          },
+          "frames": 120,
+          "gpu": "NVIDIA GeForce RTX 5080",
+          "gpu_ms": {
+            "p50": 3.6029999256134,
+            "p95": 3.8659999370575
+          },
+          "instances": 68432,
+          "msaa": 4,
+          "primitives": {
+            "p50": 2275775.0,
+            "p95": 2277041.0
+          },
+          "render_cpu_ms": {
+            "p50": 1.41700005531311,
+            "p95": 1.79299998283386
+          },
+          "road": "E1",
+          "sample": 2548,
+          "size": [
+            4128,
+            2208
+          ],
+          "tiles": [
+            3,
+            9,
+            69
+          ],
+          "update_cpu_ms": {
+            "p50": 6.235,
+            "p95": 7.745
+          },
+          "visible_difference_samples": 130,
+          "world_xy": [
+            86152.0,
+            100000.0
+          ]
+        }
+      ],
+      "basalt": [
+        {
+          "batches": 337,
+          "close_view": {
+            "kind": "basalt",
+            "meters_from_eye": 10153.1953125,
+            "relative_center": [
+              7337.447265625,
+              41.3879814147949,
+              -7017.0869140625
+            ],
+            "subject_samples": 5286
+          },
+          "direction": 1,
+          "draws": {
+            "p50": 1267.0,
+            "p95": 1268.0
+          },
+          "frames": 120,
+          "gpu": "NVIDIA GeForce RTX 5080",
+          "gpu_ms": {
+            "p50": 3.93199992179871,
+            "p95": 4.0939998626709
+          },
+          "instances": 67675,
+          "msaa": 4,
+          "primitives": {
+            "p50": 2639125.0,
+            "p95": 2640261.0
+          },
+          "render_cpu_ms": {
+            "p50": 1.39499998092651,
+            "p95": 1.90199995040894
+          },
+          "road": "Basalt",
+          "sample": 738,
+          "size": [
+            4128,
+            2208
+          ],
+          "tiles": [
+            4,
+            10,
+            67
+          ],
+          "update_cpu_ms": {
+            "p50": 4.86,
+            "p95": 5.653
+          },
+          "visible_difference_samples": 27,
+          "world_xy": [
+            70406.8046875,
+            89884.5390625
+          ]
+        },
+        {
+          "batches": 337,
+          "close_view": {
+            "kind": "basalt",
+            "meters_from_eye": 10153.1953125,
+            "relative_center": [
+              7337.447265625,
+              41.3879814147949,
+              -7017.0869140625
+            ],
+            "subject_samples": 5286
+          },
+          "direction": 1,
+          "draws": {
+            "p50": 1267.0,
+            "p95": 1268.0
+          },
+          "frames": 120,
+          "gpu": "NVIDIA GeForce RTX 5080",
+          "gpu_ms": {
+            "p50": 3.98300004005432,
+            "p95": 4.11899995803833
+          },
+          "instances": 67675,
+          "msaa": 4,
+          "primitives": {
+            "p50": 2639125.0,
+            "p95": 2640261.0
+          },
+          "render_cpu_ms": {
+            "p50": 1.76499998569489,
+            "p95": 2.30100011825562
+          },
+          "road": "Basalt",
+          "sample": 738,
+          "size": [
+            4128,
+            2208
+          ],
+          "tiles": [
+            4,
+            10,
+            67
+          ],
+          "update_cpu_ms": {
+            "p50": 5.394,
+            "p95": 6.0
+          },
+          "visible_difference_samples": 27,
+          "world_xy": [
+            70406.8046875,
+            89884.5390625
+          ]
+        }
+      ]
+    }
+  }
+}

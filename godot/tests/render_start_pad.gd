@@ -1,7 +1,7 @@
 ## The starting pad, for looking at (view/start_pad.gd): from the seat held cold and released, and
 ## from outside, at a few start points. Run windowed, as render_terminal_art.gd:
 ## --xr-mode off --resolution 1600x900 --fixed-fps 120 --audio-driver Dummy
-## -s res://tests/render_start_pad.gd -- --mute --out=DIR [--views=a,b] [--time=night] [--weather=rain]
+## -s res://tests/render_start_pad.gd -- --mute --out=DIR [--all-seats] [--views=a,b] [--time=night] [--weather=rain]
 extends "res://tests/render_terminal_art.gd"
 
 # Name, the start's spot, "cold" or "hot", then the camera: ["seat", yaw (left +), pitch] in degrees,
@@ -48,7 +48,14 @@ func _run() -> void:
 	DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
 	var spot := ""
 	var was := ""
-	for view in VIEWS:
+	var views: Array = VIEWS
+	var all_seats := "--all-seats" in OS.get_cmdline_user_args()
+	if all_seats:
+		views = []
+		for entry in preload("res://release/release_config.gd").INSERTIONS:
+			if entry[2] != "":
+				views.append([entry[0], entry[2], "cold", ["seat", 0.0, 3.0]])
+	for view in views:
 		if not only.is_empty() and not only.has(view[0]):
 			continue
 		if view[1] != spot or view[2] != was:      # a new place or a new state: a new flight, as a menu would start it
@@ -84,7 +91,8 @@ func _run() -> void:
 					break
 		seat.cam.position = Vector3.ZERO
 		seat.cam.rotation = Vector3.ZERO
-		for frame in 90:
+		# Just into the second flash: the cold frame shows which switch the mast is asking for.
+		for frame in 132:
 			seat.inp = {"thrL": 0.0, "thrR": 0.0, "brkL": 0.0, "brkR": 0.0, "repair": false, "reignite": false, "burner": false}
 			seat._process(STEP)
 			if frame % 3 == 0:
@@ -99,12 +107,16 @@ func _run() -> void:
 		for frame in 2:
 			await process_frame
 		await RenderingServer.frame_post_draw
+		var pad = seat.pad
+		if all_seats and (pad.station_id != view[0] or pad.gate_open != 0 or pad.released or not seat.cam.position.is_zero_approx()):
+			push_error("Capture requires the requested station, a cold, closed gate and the pilot's eye point: " + str(view[0]))
+			quit(1)
+			return
 		var path := out_dir.path_join(str(view[0]) + ".png")
 		if root.get_texture().get_image().save_png(path) != OK:
 			push_error("Couldn't save " + path)
 			quit(1)
 			return
-		var pad = seat.pad
 		print("PAD_SHOT %s: home %s, released %s, steps lit %s, flashing %d, gate %.2f, ground power %s, board %s" % [view[0], pad.home, pad.released, pad.lit, pad.flashing, pad.gate_open, pad.plugged,
 			[pad.lines[0].text, pad.lines[1].text, pad.lines[2].text]])
 	if seat:

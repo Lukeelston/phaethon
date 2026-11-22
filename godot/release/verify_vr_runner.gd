@@ -84,6 +84,10 @@ func _run() -> void:
 	var xr := XRServer.find_interface("OpenXR")
 	var xr_live := xr != null and xr.is_initialized()
 	if OS.has_feature("template"):
+		var notices := OS.get_executable_path().get_base_dir().path_join("THIRD_PARTY.md")
+		if not check("THIRD_PARTY.md ships beside the PC VR executable", FileAccess.file_exists(notices)):
+			_finish()
+			return
 		check("export carries the pcvr feature", OS.has_feature("pcvr"))
 		check("export defaults to VR boot", ProjectSettings.get_setting_with_override("application/run/main_scene") == "res://release/vr_boot.tscn")
 		check("export separates VR user data", OS.get_user_data_dir().ends_with("Phaethon-VR"))

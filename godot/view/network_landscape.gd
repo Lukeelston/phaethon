@@ -35,7 +35,7 @@ var max_slice_ms := 0.0
 var _job := {}
 var _sim
 var _world
-var road_protection := {}
+var road_protection := {} # props clear pavement, city foundations and landmark compounds
 var road_anchors := {}
 var prop_library
 var water_material: ShaderMaterial
@@ -183,6 +183,15 @@ func setup_ground(ground_material: ShaderMaterial) -> void:
 	ground_material.set_shader_parameter("region_colors",colors)
 
 func _flatten_disc(p: Vector2, radius: float) -> void:
+	# The level city foundations contain the hand-placed skyline. Keep the entire footprint of
+	# streamed scenery outside these and the hero compounds, even when a tile is rebuilt headless.
+	var lo := Vector2i(((p - Vector2.ONE * radius) / PROP_CELL).floor())
+	var hi := Vector2i(((p + Vector2.ONE * radius) / PROP_CELL).floor())
+	for x in range(lo.x, hi.x + 1):
+		for y in range(lo.y, hi.y + 1):
+			var corner := Vector2(x, y) * PROP_CELL
+			if p.clamp(corner, corner + Vector2.ONE * PROP_CELL).distance_squared_to(p) <= radius * radius:
+				road_protection[Vector2i(x, y)] = true
 	var c := Vector2i(floori(p.x / STEP), floori(p.y / STEP))
 	var r := ceili(radius / STEP) + 1
 	for x in range(-r, r + 1):
@@ -322,10 +331,12 @@ func prop_records(key: Vector2i, first := 0, count := GROUPS) -> Array:
 	for group in range(first,mini(first+count,GROUPS)):
 		rng.seed = int(key.x)*73856093 ^ int(key.y)*19349663 ^ (937 + group*83492791)
 		var anchor := origin + Vector2(rng.randf(),rng.randf())*TILE
+		var highway_at := Vector2.INF
 		# Additional inhabited clusters follow the highway corridor, not city centers.
 		if group>=64 and road_anchors.has(key):
 			var choices: Array = road_anchors[key]
 			var road_anchor: Array = choices[rng.randi_range(0,choices.size()-1)]
+			highway_at = road_anchor[0]
 			anchor = road_anchor[0]+road_anchor[1]*rng.randf_range(900,2400)*(1 if group%2==0 else -1)
 			# Keep each record inside its owner tile for predictable streaming distance.
 			if not Rect2(origin,Vector2.ONE*TILE).has_point(anchor): continue
@@ -359,6 +370,7 @@ func prop_records(key: Vector2i, first := 0, count := GROUPS) -> Array:
 		if group>=64 and group%4==0:
 			kind = "service" if group%8==0 else ("solar" if region in ["desert","mesa"] else ("basalt" if region == "jungle" else "wind"))
 			number = 1
+		if kind == "service" and highway_at == Vector2.INF: continue # fuel plazas serve the highway
 		for k in number:
 			var p := anchor + Vector2(rng.randf_range(-240,240),rng.randf_range(-240,240))
 			var scale := rng.randf_range(0.75,1.8)
@@ -372,7 +384,25 @@ func prop_records(key: Vector2i, first := 0, count := GROUPS) -> Array:
 			var slope := maxf(absf(surface_at(p+Vector2(radius,0))-h),absf(surface_at(p+Vector2(0,radius))-h)) / radius
 			if slope > (0.045 if building else 0.5): continue
 			if h < -2.0 and region == "swamp" and kind not in ["mangrove","reeds","stilt"]: continue
-			records.append({"kind":kind,"p":p,"height":h,"radius":radius,"scale":scale,"yaw":rng.randf()*TAU})
+			var yaw := rng.randf()*TAU
+			if kind == "service": # local +Z is the pump apron; turn it towards the highway
+				var facing := highway_at - p
+				yaw = atan2(facing.x, -facing.y)
+			# A plaza slab is 5 m thick, with its top at local Y=0. Seat the slab into the
+			# slope and keep its pavement just above the terrain, including on perfectly flat sites.
+			var lift := 0.0
+			if kind == "service":
+				var low := h
+				var high := h
+				for sx in [-1, 0, 1]:
+					for sz in [-1, 0, 1]:
+						var corner := Vector2(sx * 116.0, sz * 81.5).rotated(yaw) * scale
+						var foot := surface_at(p + corner)
+						low = minf(low, foot)
+						high = maxf(high, foot)
+				lift = high - h + 0.18
+				if high - low + 0.18 >= 5.0 * scale: continue
+			records.append({"kind":kind,"p":p,"height":h,"lift":lift,"radius":radius,"scale":scale,"yaw":yaw})
 	return records
 
 func _decorate_slice() -> void:
@@ -383,7 +413,7 @@ func _decorate_slice() -> void:
 		for prop in prop_records(key, _decor_job.group, 1):
 			if not batches.has(prop.kind): batches[prop.kind] = []
 			var local: Vector2 = prop.p-Vector2(key)*TILE
-			batches[prop.kind].append(Transform3D(Basis(Vector3.UP,prop.yaw).scaled(Vector3.ONE*prop.scale),Vector3(local.x,prop.height,-local.y)))
+			batches[prop.kind].append(Transform3D(Basis(Vector3.UP,prop.yaw).scaled(Vector3.ONE*prop.scale),Vector3(local.x,prop.height + prop.lift,-local.y)))
 		_decor_job.group += 1
 		if Time.get_ticks_usec() - start >= DECOR_SLICE_US:
 			break

@@ -12,6 +12,10 @@ var fails := 0
 
 
 func _initialize() -> void:
+	_run.call_deferred()
+
+
+func _run() -> void:
 	var w: AudioStreamWAV = TA.make_whoosh()
 	var n := w.data.size() / 2
 	var e0 := 0.0

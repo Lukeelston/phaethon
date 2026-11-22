@@ -16,6 +16,7 @@ stage.mkdir(exist_ok=True)
 binary='PhaethonVR' if edition=='pcvr' else 'Phaethon'
 folder='pcvr' if edition=='pcvr' else 'windows'
 files={binary+extension:root/'build'/folder/(binary+extension) for extension in ('.exe','.pck')}
+files['THIRD_PARTY.md']=root/'THIRD_PARTY.md'
 for path in (root/'packaging').rglob('*'):
     if path.is_file(): files[path.relative_to(root/'packaging').as_posix()]=path
 if edition=='pcvr':
@@ -32,6 +33,8 @@ archive=build/(version+'.zip')
 with zipfile.ZipFile(archive,'w',compression=zipfile.ZIP_DEFLATED,compresslevel=6) as z:
     for row in inventory: z.write(stage/row['file'],version+'/'+row['file'])
 with zipfile.ZipFile(archive) as z:
+    if z.read(version+'/THIRD_PARTY.md') != (root/'THIRD_PARTY.md').read_bytes():
+        raise ValueError('Archive third-party notices differ from the source.')
     assert z.testzip() is None
     assert len(z.namelist())==len(inventory)
     assert not any(part in z.namelist() for part in ('.git','.env','evidence','tools'))
@@ -46,5 +49,6 @@ sha=hashlib.sha256(archive.read_bytes()).hexdigest()
 inventory_name='package-inventory-pcvr.json' if edition=='pcvr' else 'package-inventory.json'
 if args.version != '0.1.0':
     inventory_name=inventory_name.removesuffix('.json')+'-'+args.version+'.json'
+(root/'evidence').mkdir(exist_ok=True)
 (root/'evidence'/inventory_name).write_text(json.dumps({'archive':str(archive),'bytes':archive.stat().st_size,'sha256':sha,'files':inventory},indent=2),encoding='utf-8')
 print(json.dumps({'archive':str(archive),'bytes':archive.stat().st_size,'sha256':sha,'file_count':len(inventory),'extracted_exe':str(clean/version/(binary+'.exe'))}))

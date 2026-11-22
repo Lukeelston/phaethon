@@ -1,0 +1,55 @@
+# Phaethon third-party notices
+
+These credits accompany the Windows Desktop and Windows PC VR editions. The `licenses/` folder beside this file contains the full notices and licence texts referenced below.
+
+## Sound recordings
+
+### Start-up and preflight
+
+Phaethon uses excerpts from the 18 Freesound field recordings below. Each author published the recording under the [CC0 1.0 Universal public domain dedication](https://creativecommons.org/publicdomain/zero/1.0/). The game trims, layers and levels the recordings into the start-up sound bank. Each ID links to the original sound and its licence.
+
+| Freesound ID | Recordist | Original title | Use in Phaethon |
+| --- | --- | --- | --- |
+| [188194](https://freesound.org/s/188194/) | SpliceSound | Heavy metal light switch, flipping.wav | the BATT and ENGINE toggles |
+| [795663](https://freesound.org/s/795663/) | TheTechTinkerer | toggle switch 1 | the PARK paddle |
+| [451933](https://freesound.org/s/451933/) | kyles | switch big breaker metal click on, off.flac | the parking brake's latch, on and off |
+| [47988](https://freesound.org/s/47988/) | vibe_crc | zippo_light_5shots.wav | the ENGINE guard, lifted and fallen shut |
+| [615298](https://freesound.org/s/615298/) | bog.dan.0 | Big heavy button press | the START button |
+| [870770](https://freesound.org/s/870770/) | CHallSmith | Electrical Relays, Very Large, Close and | the battery contactor, closing and opening |
+| [679204](https://freesound.org/s/679204/) | shdwtek | 12 Volt Solenoid Clicks | the starter solenoid, and a refused control's knock |
+| [732705](https://freesound.org/s/732705/) | tt_runscript | 1U Rackmount Server Fan | the fans winding up and down with the bus, and their loop |
+| [23216](https://freesound.org/s/23216/) | Noizemaker | NZP BMW 1150GS Fuel pump.wav | the fuel pumps priming |
+| [879806](https://freesound.org/s/879806/) | Qvantor | Airplane Cabin Chime | the self-test and turbine chime |
+| [398274](https://freesound.org/s/398274/) | FlashTrauma | Electricity | the binder's first sparks |
+| [675760](https://freesound.org/s/675760/) | craigsmith | S16-18 Tesla coil sparking and humming.wav | the binder's buzz |
+| [733737](https://freesound.org/s/733737/) | chungus43A | 60Hz electrical mains hum | the binder's hum |
+| [32416](https://freesound.org/s/32416/) | KRAFTWERK2K1 | car_engine_won't start.wav | both starters |
+| [700655](https://freesound.org/s/700655/) | DigPro120 | 5.0 cold start vehicle motor | an engine catching: its low end |
+| [328224](https://freesound.org/s/328224/) | danshousestudio | Truck starting.wav | an engine catching: its bark |
+| [131302](https://freesound.org/s/131302/) | reg7783 | release_air_pffft.wav | the parking brake's air |
+| [438252](https://freesound.org/s/438252/) | craigsmith | G20-37-Buzzer Bursts.wav | a refused control's buzzer |
+
+### Engine loops and one-shots
+
+Alexander Holm recorded the Yamaha C5 for **Salamander Grand Piano V3**. Roberto assembled the SFZ+FLAC V3+20200602 edition for FreePats. The recordings carry [Creative Commons Attribution 3.0 Unported](https://creativecommons.org/licenses/by/3.0/). [Original sound bank](https://freepats.zenvoid.org/Piano/acoustic-grand-piano.html)
+
+Phaethon resamples, granulates, layers, filters, saturates and loops the recordings. Hammer strikes supply combustion pulses and pops, sustained notes supply turbine and rotor tones, and damper releases supply noise and crackle. Band-limited copies support shifts in pitch through the overdrive range. The 33 adapted WAVs in `audio/engines/` are distributed under CC BY 3.0. The game’s general terms do not limit those permissions. See [licence](licenses/CC-BY-3.0.txt) and [original attribution](licenses/SALAMANDER_SOURCE_README.txt).
+
+## Lettering
+
+| Typeface | Where it appears | Credit and licence |
+| --- | --- | --- |
+| Roadgeek 2014 Series D and Series E(M) | Highway boards and exit signs use the two bundled fonts. Shrike’s livery also uses Roadgeek lettering. | Copyright 2015 Sammi De Guzman. [MIT licence](licenses/ROADGEEK-2014.txt) · [Project](https://github.com/sammdot/roadgeek-fonts) |
+| Inter | The cockpit’s gauge faces, odometer strip and overhead switch legends use rendered lettering. | Copyright 2016 The Inter Project Authors. [SIL Open Font License 1.1](https://github.com/rsms/inter/blob/master/LICENSE.txt). Godot’s built-in font notices and the full OFL text are also in [Godot’s copyright inventory](licenses/GODOT_COPYRIGHT.txt). |
+
+## Engine and XR
+
+**Godot Engine 4.7.1-stable** uses the MIT licence. Copyright 2014–present Godot Engine contributors and 2007–2014 Juan Linietsky and Ariel Manzur. The matching [engine licence](licenses/GODOT_LICENSE.txt) and [third-party copyright inventory](licenses/GODOT_COPYRIGHT.txt) ship with the game. The inventory includes the engine’s fonts, codecs, rendering libraries and platform dependencies, each under its own terms. [Godot licensing](https://godotengine.org/license/)
+
+**OpenXR Loader** is part of Godot’s native PC VR support. The engine inventory identifies the Khronos loader under Apache License 2.0, copyright 2020–2025 The Khronos Group Inc. See the `thirdparty/openxr/*` entry and Apache licence text in [Godot’s copyright inventory](licenses/GODOT_COPYRIGHT.txt).
+
+**Godot OpenXR Vendors 5.2.0** is used in the separate Quest development project. The Windows Desktop and Windows PC VR packages use Godot’s built-in support and ship without this GDExtension or its vendor binaries. The wrapper uses MIT. The Android XR, Khronos, Magic Leap and PICO components and Meta’s loader carry Apache 2.0. Meta’s SDK carries the Oculus SDK License Agreement. The installed plugin identifies these terms in the individual vendor folders, including `meta/LICENSE-LOADER` and `meta/LICENSE-SDK`. [Plugin source and licence](https://github.com/GodotVR/godot_openxr_vendors) · [Oculus SDK terms](https://developer.oculus.com/licenses/oculussdk/)
+
+## Roadside scenery
+
+The Phaethon roadside pack contains 18 original designs with close-up and distance models (36 meshes). Its generators produce the buildings, fuel plaza, turbine, vegetation, rocks, fuel-station lettering and both surface atlases. The pack’s source documents and generators identify no outside models, images, fonts or recordings. It carries no separate public asset licence. The editable sources and provenance are maintained with the roadside pack.

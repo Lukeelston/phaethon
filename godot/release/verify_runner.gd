@@ -61,6 +61,11 @@ func _run() -> void:
 	_settings_existed = FileAccess.file_exists(Settings.PREFS)
 	if _settings_existed:
 		_settings_before = FileAccess.get_file_as_bytes(Settings.PREFS)
+	if OS.has_feature("template"):
+		var notices := OS.get_executable_path().get_base_dir().path_join("THIRD_PARTY.md")
+		if not check("THIRD_PARTY.md ships beside the desktop executable", FileAccess.file_exists(notices)):
+			_finish()
+			return
 	if not check("evidence directory is absolute", evidence.is_absolute_path()):
 		_finish()
 		return

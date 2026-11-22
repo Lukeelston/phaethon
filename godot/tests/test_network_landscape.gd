@@ -142,28 +142,40 @@ func _run() -> void:
 		for kind in lib.far:
 			var counts := [lib.triangles(lib.cache[kind]), lib.triangles(lib.far[kind]), lib.triangles(lib.distant[kind])]
 			shapes.append("%s %d / %d / %d" % [kind, counts[0], counts[1], counts[2]])
-			fewer = fewer and counts[1] * 2 < counts[0] and counts[2] * 2 <= counts[1]
+			fewer = fewer and counts[1] * 2 < counts[0] and counts[2] < counts[1]
+			if kind in lib.TREES:
+				fewer = fewer and counts[2] * 2 <= counts[1] and counts[1] < lib.triangles(lib.proxy[kind])
 			var whole: AABB = (lib.cache[kind] as Mesh).get_aabb()
 			for other: Mesh in [lib.far[kind], lib.distant[kind]]:
 				var box := other.get_aabb()
 				outline = maxf(outline, absf(box.end.y - whole.end.y) / whole.end.y)
 				outline = maxf(outline, absf(maxf(box.size.x, box.size.z) - maxf(whole.size.x, whole.size.z)) / maxf(whole.size.x, whole.size.z))
-		check("each growing thing has a far shape of under half its triangles and a distant one of half that again (whole / far / distant: %s)" % ", ".join(shapes), fewer and shapes.size() == 6)
+		check("all roadside kinds have a cheaper shape at each tier (whole / far / distant: %s)" % ", ".join(shapes), fewer and shapes.size() == 18)
 		check("... that stand as tall and spread as wide as the whole one (off by %.0f%% at most)" % (outline * 100.0), outline < 0.25)
 		var holder := Node3D.new()
 		lib.batch(holder, "oak", [Transform3D.IDENTITY])
 		var one := holder.get_child(0) as MultiMeshInstance3D
 		var begun: bool = one.multimesh.mesh == lib.distant.oak
 		lib.detail(one, 0)
-		var near_whole: bool = one.multimesh.mesh == lib.cache.oak
+		var near_whole: bool = one.multimesh.mesh == lib.cache.oak and one.material_override == lib.near_material
 		lib.detail(one, 1)
 		var mid_far: bool = one.multimesh.mesh == lib.far.oak
 		lib.detail(one, 2)
 		lib.batch(holder, "urban", [Transform3D.IDENTITY])
 		lib.detail(holder.get_child(1), 2)
-		check("a batch begins in its distant shape and draws whole, far or distant as the landscape says; buildings are whole at any distance",
-			begun and near_whole and mid_far and one.multimesh.mesh == lib.distant.oak and (holder.get_child(1) as MultiMeshInstance3D).multimesh.mesh == lib.cache.urban
+		check("a tile switches tree and building shapes in their original batches",
+			begun and near_whole and mid_far and one.multimesh.mesh == lib.distant.oak and (holder.get_child(1) as MultiMeshInstance3D).multimesh.mesh == lib.distant.urban
 			and land.PROP_NEAR < land.PROP_FAR)
+		var dense: Array = []
+		dense.resize(lib.near_limit.oak + 1)
+		dense.fill(Transform3D.IDENTITY)
+		var grove := Node3D.new()
+		lib.batch(grove, "oak", dense)
+		var trees := grove.get_child(0) as MultiMeshInstance3D
+		lib.detail(trees, 0)
+		check("dense nearby grove uses the untextured authored proxy in one batch", grove.get_child_count() == 1 and trees.multimesh.mesh == lib.proxy.oak and trees.material_override == lib.distance_material)
+		check("shared close atlas has both its color and ORM textures", lib.near_material.get_shader_parameter("color_atlas") != null and lib.near_material.get_shader_parameter("orm_atlas") != null)
+		grove.free()
 		holder.free()
 	if land.get("prop_library") != null:
 		var count := 0
@@ -172,10 +184,27 @@ func _run() -> void:
 		var real_clearance := INF
 		var mesh_support_error := 0.0
 		var actual_meshes := {}
+		var radii := {}
+		# The circular envelope admits any yaw. Check actual vertices of every shape, including proxies.
+		var single_surfaced := true
+		for kind: String in land.prop_library.KINDS:
+			var radius := 0.0
+			for tier: Dictionary in [land.prop_library.cache, land.prop_library.proxy, land.prop_library.far, land.prop_library.distant]:
+				var m: Mesh = tier[kind]
+				single_surfaced = single_surfaced and m.get_surface_count() == 1
+				for vtx: Vector3 in m.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]:
+					radius = maxf(radius, Vector2(vtx.x, vtx.z).length())
+			radii[kind] = radius
+		check("all 36 imported models and procedural silhouettes are single-surface", single_surfaced)
+		var oversize := 0
+		var shared_foundations := 0
+		var buried_plazas := 0
+		var reproducible := true
 		var new_families := {}
 		for region in land.REGIONS:
 			var rk := Vector2i(floori(region[1].x / land.TILE), floori(region[1].y / land.TILE))
 			var records: Array = land.prop_records(rk)
+			reproducible = reproducible and records == land.prop_records(rk)
 			# A region's central tile may be entirely occupied by the highway interchange.
 			# Include its neighboring landscape, while retaining every placement check.
 			for offset in [Vector2i.LEFT,Vector2i.RIGHT,Vector2i.UP,Vector2i.DOWN]:
@@ -184,6 +213,17 @@ func _run() -> void:
 			for prop in records:
 				if prop.kind in ["service","wind","solar","basalt"]: new_families[prop.kind]=true
 				count += 1
+				oversize += int(radii[prop.kind] * prop.scale > prop.radius)
+				for city: Dictionary in v.sim.cities:
+					shared_foundations += int(prop.p.distance_to(Vector2(city.cx, city.cy)) < 8800.0 + prop.radius)
+				for site: Dictionary in v.network_world.scenery.landmarks:
+					shared_foundations += int(prop.p.distance_to(Vector2(site.x, site.y)) < 1700.0 + prop.radius)
+				if prop.kind == "service":
+					for sx in [-1, 0, 1]:
+						for sz in [-1, 0, 1]:
+							var corner := Vector2(sx * 116.0, sz * 81.5).rotated(prop.yaw) * float(prop.scale)
+							var gap: float = prop.height + prop.lift - land.surface_at(prop.p + corner)
+							buried_plazas += int(gap < 0.16 or gap >= 5.0 * prop.scale)
 				unsupported += int(absf(prop.height - land.surface_at(prop.p)) > 0.01)
 				var mk := Vector2i(floori(prop.p.x/land.TILE),floori(prop.p.y/land.TILE))
 				if not actual_meshes.has(mk): actual_meshes[mk] = land.make_mesh(mk).surface_get_arrays(0)
@@ -208,6 +248,10 @@ func _run() -> void:
 		check("props sit on the actual rendered triangles", unsupported == 0 and count > 300)
 		check("intercity service courts, energy sites and basalt spires all placed",new_families.size()==4)
 		check("independent mesh triangle planes support prop anchors (%.4f m)" % mesh_support_error,mesh_support_error<0.01)
+		check("plaza pavement clears the terrain and each foundation still meets it", buried_plazas == 0)
+		check("props stay outside the authored city and landmark compounds", shared_foundations == 0)
+		check("all rendered vertices fit inside the protected footprint at every yaw and scale", oversize == 0)
+		check("replaying the tile seed reproduces its props, positions, scales and facing", reproducible)
 		check("whole prop footprints clear the road protection field", obstructing == 0)
 		check("props independently clear actual road samples with gap allowance (%.1f m)" % real_clearance, real_clearance>100.0)
 	check("terrain and vegetation work is bounded per slice",land.max_slice_ms<6.0)

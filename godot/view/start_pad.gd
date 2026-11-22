@@ -11,6 +11,8 @@
 ##                  whose pad it is (the machine, its paint, its role)
 ##   the gate       a striped boom across the way out, down while the craft is held, up when it may go
 ##   ground power   a cart with a lead to the pod's flank, which drops away when both engines run
+##   local station  the equipment on the port side belongs to this particular shop; its crew
+##                  gives the pilot a parting word when the gate clears
 ##   the closure    cones tapering in behind the pad and an arrow board telling traffic to move over
 ## It follows the cold start (vr/startup_sequence.gd) through show_startup(); a flight with no sequence (the
 ## flat game, a restart) is shown as released: green, the gate up, the lead away.
@@ -23,6 +25,8 @@ extends Node3D
 
 const Kit := preload("res://view/mesh_kit.gd")
 const Livery := preload("res://view/livery.gd")
+const Stations := preload("res://view/pad_stations.gd")
+const Release := preload("res://release/release_config.gd")
 const WIDE := 24.0               # the apron across (m): 11 to the pod's left, 13 to its right
 const LEFT := -11.0
 const BACK := 10.0               # ... behind the pod's middle
@@ -52,11 +56,15 @@ var lead: Node3D                 # ground power's cable
 var cart_lamp: MeshInstance3D
 var arrow: MeshInstance3D
 var lines: Array[Label3D] = []   # the board's three
+var station: MeshInstance3D
+var station_sign: Label3D
+var station_id := ""
 var lit := [true, true, true, true]   # each step's lamp
 var flashing := -1               # the step being done now (its lamp flashes), -1 none
 var released := true             # the craft may go
 var plugged := false             # ground power is on the pod
 var gate_open := 1.0
+var _startup_seen := false
 var _at := Vector3.ZERO          # the pad's place in the sim's metres (x, y, height)
 var _th := 0.0
 var _pitch := 0.0
@@ -133,6 +141,16 @@ func build(v) -> void:
 	_build_head()
 	_build_gate(right, front)
 	_build_lead()
+	station = MeshInstance3D.new()
+	station.name = "LocalStation"
+	station.position = Vector3(-8.05, 0.0, -ahead + 2.5)
+	station.rotation.y = atan2(-station.position.x, -station.position.z)
+	station.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(station)
+	station_sign = _label("", 0.66, Color("#fff1cb"))
+	station_sign.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	station_sign.position = Vector3(0, 2.55, 1.10)
+	station.add_child(station_sign)
 	# the arrow board's arrow: move over, to the lanes (an approaching driver's left)
 	arrow = MeshInstance3D.new()
 	arrow.mesh = Kit.compound([
@@ -186,27 +204,28 @@ func _build_head() -> void:
 	head.name = "head"
 	head.position = _mast()
 	head.rotation.y = atan2(-head.position.x, -head.position.z)      # its face (+z) to the pod
+	head.position += head.basis.z * 0.43  # fastened in front of the square post; keep it out of the lettering
 	add_child(head)
 	var panel := MeshInstance3D.new()
 	panel.mesh = Kit.compound([
-		[Kit.box(Vector3(3.4, 4.3, 0.24)), Kit.at(Vector3(0.0, 7.55, 0.0)), Color(0.05, 0.05, 0.055)],
-		[Kit.box(Vector3(5.2, 2.5, 0.2)), Kit.at(Vector3(0.0, 3.9, 0.0)), Color(0.05, 0.05, 0.055)],
-		[Kit.box(Vector3(5.2, 0.12, 0.22)), Kit.at(Vector3(0.0, 2.72, 0.0)), Livery.coat("paint")]])      # the pilot's own colour along its foot
+		[Kit.box(Vector3(4.0, 4.3, 0.24)), Kit.at(Vector3(0.0, 7.55, 0.0)), Color(0.05, 0.05, 0.055)],
+		[Kit.box(Vector3(6.0, 2.5, 0.2)), Kit.at(Vector3(0.0, 3.9, 0.0)), Color(0.05, 0.05, 0.055)],
+		[Kit.box(Vector3(6.0, 0.12, 0.22)), Kit.at(Vector3(0.0, 2.72, 0.0)), Livery.coat("paint")]])      # the pilot's own colour along its foot
 	panel.material_override = Kit.vertex_colors()
 	panel.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	head.add_child(panel)
 	for k in STEPS.size():
-		var y := 8.35 - 0.72 * k
+		var y := 8.79 - 0.91 * k
 		var lamp := MeshInstance3D.new()
 		lamp.mesh = Kit.cyl(0.24, 0.24, 0.1, 20)
 		lamp.rotation.x = PI / 2.0
-		lamp.position = Vector3(-1.2, y, 0.16)
+		lamp.position = Vector3(-1.50, y, 0.18)
 		lamp.material_override = _lamp_material(UNLIT)
 		lamp.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		head.add_child(lamp)
 		step_lamps.append(lamp)
-		var word := _label(STEPS[k], 0.42, Color(0.86, 0.87, 0.84))
-		word.position = Vector3(-0.72, y, 0.14)
+		var word := _label(STEPS[k], 0.65, Color(0.90, 0.92, 0.89))
+		word.position = Vector3(-1.0, y, 0.17)
 		head.add_child(word)
 	big_lamp = MeshInstance3D.new()
 	big_lamp.mesh = Kit.cyl(0.62, 0.62, 0.12, 28)
@@ -221,8 +240,8 @@ func _build_head() -> void:
 	hood.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	head.add_child(hood)
 	for k in 3:
-		var line := _label("", [0.62, 0.36, 0.36][k], [Color(0.96, 0.95, 0.9), Color(0.75, 0.78, 0.80), Color(0.95, 0.74, 0.25)][k])
-		line.position = Vector3(-2.35, [4.62, 3.9, 3.28][k], 0.12)
+		var line := _label("", [0.76, 0.48, 0.43][k], [Color(0.96, 0.95, 0.9), Color(0.75, 0.78, 0.80), Color(0.95, 0.74, 0.25)][k])
+		line.position = Vector3(-2.72, [4.63, 3.86, 3.24][k], 0.16)
 		head.add_child(line)
 		lines.append(line)
 
@@ -283,6 +302,42 @@ func _place_name(road: int, sample: int) -> String:
 	return id
 
 
+## Match the same insertion definitions the menu uses. A saved city and a newly reached city
+## both resolve here. Two stops can share a road without sharing their station or its name.
+func _set_station(road: int, sample: int) -> String:
+	var id := ""
+	var place := _place_name(road, sample)
+	for entry in Release.INSERTIONS:
+		var spot: Array = view.start_spot(entry[2])
+		if spot.is_empty():
+			continue
+		var city_stop: bool = spot.size() == 1
+		var r := int(sim.cities[spot[0]].road) if city_stop else int(spot[0])
+		var i := int(sim.cities[spot[0]].i) if city_stop else int(spot[1])
+		if r == road and i == sample:
+			id = entry[0]
+			place = String(entry[1]).to_upper()
+			break
+	if id != station_id:
+		station_id = id
+		station.mesh = Stations.new().make(id, station.transform.affine_inverse(), _cart(), ahead) if Stations.LEGENDS.has(id) else null
+	station.visible = station.mesh != null
+	if station.visible:
+		_station_legend()
+	return place
+
+
+func _station_legend() -> void:
+	station_sign.text = Stations.LEGENDS[station_id][1 if released else 0]
+	_fit_line(station_sign, 0.66, 4.93)
+
+
+## Keep the full place and livery names on the physical mast, including longer road names.
+func _fit_line(line: Label3D, high: float, panel_width := 5.44) -> void:
+	var width := ThemeDB.fallback_font.get_string_size(line.text, HORIZONTAL_ALIGNMENT_LEFT, -1, line.font_size).x
+	line.pixel_size = minf(high / line.font_size, panel_width / maxf(1, width))
+
+
 ## Stand at `h` ([road, sample, way, m right]): the sim's metres, the road's heading and its slope there.
 func _move(h: Array) -> void:
 	home = h.duplicate()
@@ -299,10 +354,12 @@ func _move(h: Array) -> void:
 	_th = atan2(R.ty[i] * way, R.tx[i] * way)
 	_pitch = atan(way * rise / run)
 	if lines.size() == 3:
-		lines[0].text = _place_name(road, i)
+		lines[0].text = _set_station(road, i)
+		_fit_line(lines[0], 0.76)
 		lines[1].text = "PAD   %s m" % _thousands(roundi(_at.z))
 		var machine := "SHRIKE RS" if String(sim.P.get("vehicle", "")) == "shrike" else "PHAETHON"
 		lines[2].text = "%s  %s" % [machine, Livery.current.to_upper()]
+		_fit_line(lines[2], 0.43)
 
 
 static func _thousands(n: int) -> String:
@@ -327,7 +384,13 @@ func show_startup(seq) -> void:
 		flashing = 2
 	elif seq.park and not seq.checks_done():
 		flashing = 3
+	var was_released := released
 	released = seq.is_hot()
+	if not _startup_seen:
+		_startup_seen = true
+		gate_open = 1.0 if released else 0.0
+	if released != was_released and station != null and station.visible:
+		_station_legend()
 	plugged = not running
 
 

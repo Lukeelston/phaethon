@@ -7,6 +7,10 @@ func check(label: String, ok: bool) -> void:
 	failures+=int(not ok)
 func _initialize() -> void: _run.call_deferred()
 func _run() -> void:
+	if DisplayServer.get_name() == "headless":
+		check("a windowed renderer is required for frame readback", false)
+		_finish()
+		return
 	View.track_override="network"
 	View.job_override="none"
 	View.best_dir=OS.get_user_data_dir().path_join("stream_render_")
@@ -22,8 +26,15 @@ func _run() -> void:
 	for k in 9: land.sync(p.x,p.y)
 	var key: Vector2i=land.tiles.keys()[0]
 	land._decor_job={"key":key,"group":land.GROUPS-4,"batches":{"service":[Transform3D.IDENTITY]}}
-	land._decorate_slice()
+	# The per-slice time budget can split the final four groups across calls.
+	for group in 4:
+		land._decorate_slice()
+		if land._decor_job.is_empty(): break
 	var tile: Dictionary=land.tiles[key]
+	if not tile.has("deco") or tile.deco.get_child_count() == 0:
+		check("the tile has a published decoration batch", false)
+		_finish()
+		return
 	var initial:=true
 	for batch in tile.deco.get_children():
 		initial=initial and float(batch.get_instance_shader_parameter("stream_reveal"))==0.0
@@ -66,8 +77,12 @@ func _run() -> void:
 				if surface is MeshInstance3D: surface.set_instance_shader_parameter("stream_reveal",1.0)
 		for k in 5: await process_frame
 		await RenderingServer.frame_post_draw
-		root.get_texture().get_image().save_png(out.path_join("ramp-%d.png"%jump))
-		print("SHOT ramp ",jump)
+		var shot := root.get_texture().get_image()
+		check("saved rendered ramp %d" % jump, shot != null and not shot.is_empty()
+			and shot.save_png(out.path_join("ramp-%d.png"%jump)) == OK)
 	v.free()
+	_finish()
+
+func _finish() -> void:
 	print("NETWORK STREAMING RENDER %s (%d failures)"%["PASS" if failures==0 else "FAIL",failures])
 	quit(int(failures>0))

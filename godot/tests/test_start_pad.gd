@@ -84,7 +84,7 @@ func _run() -> void:
 	var meshes: int = pad.find_children("*", "MeshInstance3D", true, false).size() if pad else 0
 	var words: int = pad.find_children("*", "Label3D", true, false).size() if pad else 0
 	_check("it is %d meshes and %d lines of lettering; its board reads %s" % [meshes, words, [pad.lines[0].text, pad.lines[1].text, pad.lines[2].text] if pad else []],
-		meshes <= 16 and words == 7 and pad.lines[0].text == "GLACIER" and pad.lines[1].text.begins_with("PAD") and pad.lines[2].text.contains("PHAETHON"))
+		meshes <= 16 and words == 8 and pad.lines[0].text == "GLACIER" and pad.lines[1].text.begins_with("PAD") and pad.lines[2].text.contains("PHAETHON"))
 
 	# back
 	sim.pod.x += 400.0
@@ -96,7 +96,7 @@ func _run() -> void:
 	pad.sync(0.016)
 	var there: Dictionary = sim.cities[other]
 	_check("reach another city and the pad stands at its terminal: %s (home %s)" % [pad.lines[0].text, pad.home],
-		pad.lines[0].text == String(there.name) and int(pad.home[0]) == int(there.road) and int(pad.home[1]) == int(there.i))
+		pad.station_id == String(there.name).to_lower() and pad.lines[0].text == String(there.name) and int(pad.home[0]) == int(there.road) and int(pad.home[1]) == int(there.i))
 
 	# follows
 	sim.respawn()      # (the craft on the pad where it now stands: far from it the pad is not drawn, nor its lamps worked)
@@ -104,6 +104,8 @@ func _run() -> void:
 	var seq = Startup.new()
 	seq.cold()
 	pad.show_startup(seq)
+	pad.sync(0.016)
+	_check("the first cold frame has the gate down", pad.gate_open == 0.0 and is_zero_approx(pad.gate.rotation.z))
 	pad.sync(3.0)
 	var held_red: bool = (pad.big_lamp.material_override as StandardMaterial3D).albedo_color.r > 2.0 and pad.gate_open == 0.0 and pad.lead.visible and absf(pad.gate.rotation.z) < 0.01
 	var cold_steps: Array = pad.lit.duplicate()
@@ -126,6 +128,38 @@ func _run() -> void:
 	var as_car = T._pod_as_car()
 	_check("parked on the pad the craft's way is the way it faces (%d), and its road is cleared of what comes the other way (road %d, way %d)" % [as_car.dir, T.proad, T.pdir],
 		as_car.dir == int(sim.net_home()[2]) and T.proad == sim.pod.path and T.pdir == as_car.dir)
+
+	# Reuse the same live pad through all sixteen addresses. Compare the vertex positions (paint
+	# alone cannot pass), the legends at each end of the preflight and the draw-surface budget.
+	var station_node: MeshInstance3D = pad.station
+	var shapes := {}
+	var station_errors := []
+	var max_triangles := 0
+	for entry in UI.INSERTIONS:
+		var spot: Array = View.start_spot(entry[2])
+		if spot.is_empty():
+			continue
+		var rd: int = sim.cities[spot[0]].road if spot.size() == 1 else int(spot[0])
+		var index: int = sim.cities[spot[0]].i if spot.size() == 1 else int(spot[1])
+		pad._move([rd, index, 1, Sim.net_pad_right(sim.roads[rd].w[index])])
+		var mesh := station_node.mesh as ArrayMesh
+		if mesh == null or mesh.get_surface_count() != 2:
+			station_errors.append(entry[0])
+			continue
+		var vertices: PackedVector3Array = mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
+		shapes[hash(vertices.to_byte_array())] = true
+		max_triangles = maxi(max_triangles, (vertices.size() + mesh.surface_get_array_len(1)) / 3)
+		seq.cold()
+		pad.show_startup(seq)
+		var shop: String = pad.station_sign.text
+		seq.hot()
+		pad.show_startup(seq)
+		if pad.station != station_node or pad.station_id != entry[0] or pad.lines[0].text != String(entry[1]).to_upper() or shop == pad.station_sign.text:
+			station_errors.append(entry[0])
+	_check("one station node, %d distinct silhouettes at the named menu bays, two static draw surfaces, up to %d triangles, local shops acknowledge release (wrong: %s)" % [shapes.size(), max_triangles, station_errors],
+		shapes.size() == 16 and station_errors.is_empty() and max_triangles < 8000)
+	pad._move([int(there.road), int(there.i)+7, 1, 0.0])
+	_check("a debug roadside bay outside the named insertions clears the old station", not station_node.visible and station_node.mesh == null)
 	v.queue_free()
 	await process_frame
 

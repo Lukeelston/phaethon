@@ -120,7 +120,7 @@ RIGHTS AND CREDITS
 Game code and original content copyright 2026 Luke Elston / ElstonWorks.
 Purchase permits personal gameplay use; it does not transfer the game's
 copyright. Third-party components and the CC BY engine audio retain their
-own licenses and permissions. See THIRD_PARTY_NOTICES.txt and licenses/.
+own licenses and permissions. See THIRD_PARTY.md and licenses/.
 Adapted engine audio is also supplied separately in audio/engines/.
 
 Build: 0.3.6-experimental | 2026-11-20

@@ -4,8 +4,9 @@ instance uniform float stream_reveal = 1.0;
 global uniform vec3 sky_haze;          // the haze's colour (display values): the afternoon's (0.58, 0.68, 0.80) unless view/outlook.gd says otherwise
 global uniform float sky_haze_scale;   // ... and how thick it is: 1 as it was; fog and rain thicken it
 global uniform float sky_snow;         // snow lying (view/outlook.gd)
+uniform bool linear_vertex_color = false;
 varying vec3 tint;
-void vertex() { tint=pow(clamp(COLOR.rgb,vec3(0.0),vec3(1.0)),vec3(2.2)); }
+void vertex() { tint=linear_vertex_color ? COLOR.rgb : pow(clamp(COLOR.rgb,vec3(0.0),vec3(1.0)),vec3(2.2)); }
 void fragment() {
 	float d=length(VERTEX);
 	float reveal=stream_reveal*(1.0-smoothstep(22000.0,30000.0,d));

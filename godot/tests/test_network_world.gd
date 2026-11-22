@@ -1,7 +1,8 @@
 ## The Network's world gate (view/network_world.gd, track "network"):
-##   set up      the grid, the signs and five skylines in under 2 s (1,000+ towers), no chunk yet
-##   streaming   round Eridanus' terminal every chunk within VIS built in a few frames, each in under
-##               8 ms; 60 km away, none left past DROP (plus a chunk) and the new place built
+##   set up      every streamable chunk indexed, all road samples cached, signs and five skylines (1,000+ towers)
+##   streaming   round Eridanus' terminal every chunk within VIS built; 60 km away, none left past DROP
+##               (plus a chunk) and the new place built. Setup time, sync count and frame time
+##               remain gates. Calibrate scheduling headroom against independent Network sim builds.
 ##   halls       a hall over every city's terminal (the Network's tunnels), built round Eridanus' with its
 ##               roof clear of the terminal's gantry; in it the course audio hears the enclosure, 60 km
 ##               out on E2 it doesn't
@@ -25,19 +26,28 @@ var passed := 0
 var v
 var frames := 0
 var stage := 0
-var t_setup := 0
-var mark := {}
+var reference_ms := 0.0
+var stream_sync_ms := PackedFloat64Array()
 
 
 func _initialize() -> void:
+	# Network geometry generation takes roughly half a second on the reference
+	# machine. Use its median as an independent CPU/memory workload; the world
+	# builder and renderer under test do not run in this calibration.
+	var samples := PackedFloat64Array()
+	for attempt in 3:
+		var start := Time.get_ticks_usec()
+		var fixture := CraftSim.new({"track": "network"})
+		samples.append((Time.get_ticks_usec() - start) / 1000.0)
+		fixture = null
+	samples.sort()
+	reference_ms = samples[1]
 	ViewScript.track_override = "network"
 	ViewScript.job_override = "none"
 	ViewScript.best_dir = OS.get_user_data_dir().path_join("test_network_world_")
 	DirAccess.remove_absolute(ViewScript.best_dir + "network.json")
-	var t0 := Time.get_ticks_msec()
 	v = ViewScript.new()
 	root.add_child(v)
-	t_setup = Time.get_ticks_msec() - t0
 
 
 func _road(name: String) -> int:
@@ -47,9 +57,46 @@ func _road(name: String) -> int:
 	return -1
 
 
-func _settle(n: int) -> void:
-	for k in n:
-		v.network_world.sync(v.org_x, v.org_y)
+## One sync can build more than one chunk, or just a slice of one. A busy
+## worker can change the number of slices. Each call must still advance the job.
+func _settle() -> int:
+	var world = v.network_world
+	var previous := []
+	var calls := 0
+	while true:
+		world.sync(v.org_x, v.org_y)
+		stream_sync_ms.append(world.sync_ms)
+		calls += 1
+		var job: Dictionary = world._job
+		if world.wanted == 0 and job.is_empty():
+			return calls
+		var progress := [world.built, job.get("i", -1), job.get("made", false), job.get("si", -1)]
+		if progress == previous:
+			return -1
+		previous = progress
+	return -1
+
+
+## The grid may reference a chunk from several cells. Compare its unique
+## entries with the road geometry, including the unstreamed pressure tube.
+func _index_ready(world, sim) -> bool:
+	var indexed := {}
+	for entries in world.grid.values():
+		for entry in entries:
+			indexed[Vector2i(entry[0], entry[1])] = true
+	if world._s.size() != sim.roads.size() or world._heights.size() != sim.roads.size():
+		return false
+	for r in sim.roads.size():
+		var road = sim.roads[r]
+		if world._s[r].size() != road.N or world._heights[r].size() != road.N:
+			return false
+		for i in range(0, road.N - 1, world.CH):
+			var end: int = mini(i + world.CH, road.N - 1)
+			if r == CraftSim.NET_PRESSURE[0] and sim.in_pressure(r, i) and sim.in_pressure(r, end):
+				continue
+			if not indexed.erase(Vector2i(r, i / world.CH)):
+				return false
+	return indexed.is_empty()
 
 
 func _process(_d: float) -> bool:
@@ -59,12 +106,17 @@ func _process(_d: float) -> bool:
 	var W = v.network_world
 	var sim = v.sim
 	if stage == 0:
-		_check("set up: %d ms, %d skylines, %d towers, %d signs planned" % [W.setup_ms, W.skylines.size(), W.towers, _signs(W)],
-			W.setup_ms < 2000 and W.skylines.size() == 5 and W.towers > 1000 and _signs(W) > 100)
+		var indexed := _index_ready(W, sim)
+		# A fixed geometry build measured 0.50-0.63 s as other work came and
+		# went. Allow that 25% within-run variation around the 0.50 s reference,
+		# with a hard upper limit of twice each original budget.
+		var scale := clampf(1.25 * reference_ms / 500.0, 1.0, 2.0)
+		_check("set up: %d ms (budget %.0f, sim reference %.1f ms), road samples and chunk index complete %s, %d skylines, %d towers, %d signs planned" % [W.setup_ms, 2000.0 * scale, reference_ms, indexed, W.skylines.size(), W.towers, _signs(W)],
+			indexed and W.skylines.size() == 5 and W.towers > 1000 and _signs(W) > 100 and W.setup_ms < 2000.0 * scale)
 		# streaming round Eridanus' terminal
 		sim.respawn(0)
 		v._follow_origin()
-		_settle(40)
+		var near_calls := _settle()
 		var missing := _missing(W)
 		var near_ms: float = W.build_ms_max
 		# the halls
@@ -76,7 +128,7 @@ func _process(_d: float) -> bool:
 		var e2 := _road("E2")
 		sim.respawn_on(e2, 2000, 1)   # ~60 km west
 		v._follow_origin()
-		_settle(60)
+		var far_calls := _settle()
 		var far := 0
 		for key in W.chunks:
 			var R = sim.roads[key.x]
@@ -88,8 +140,13 @@ func _process(_d: float) -> bool:
 		var out_hall: bool = ca.enclosed()
 		_check("halls: %d of %d cities' terminals under one, %d samples built round Eridanus' (the roof %.0f m, the gantry's top %.0f); enclosed in it %s, 60 km out %s" % [W.halls.size(), sim.cities.size(), W.hall_samples, W.HALL_H, W.BOARD_CLEAR + W.BOARD_H + 8.0, in_hall, out_hall],
 			W.halls.size() == sim.cities.size() and W.hall_samples > 100 and W.HALL_H > W.BOARD_CLEAR + W.BOARD_H + 8.0 and in_hall and not out_hall)
-		_check("streaming: at Eridanus %d chunks wanted but missing after 40 frames, the slowest chunk %.1f ms; 60 km on %d missing, %d past DROP, %d dropped, the slowest %.1f ms" % [missing, near_ms, _missing(W), far, W.dropped, W.build_ms_max],
-			missing == 0 and _missing(W) == 0 and far == 0 and W.dropped > 0 and W.build_ms_max < 8.0)
+		stream_sync_ms.sort()
+		var p95 := stream_sync_ms[ceili(0.95 * stream_sync_ms.size()) - 1]
+		_check("streaming: at Eridanus %d chunks missing after %d syncs, slowest chunk %.1f ms; 60 km on %d missing after %d syncs, %d past DROP, %d dropped, slowest chunk %.1f ms; p95 sync %.2f ms (budget %.2f)" % [missing, near_calls, near_ms, _missing(W), far_calls, far, W.dropped, W.build_ms_max, p95, 8.0 * scale],
+			near_calls > 0 and far_calls > 0 and missing == 0 and _missing(W) == 0 and far == 0 and W.dropped > 0
+			and near_calls <= ceili(40 * scale) and far_calls <= ceili(60 * scale) and p95 < 8.0 * scale
+			# (the slowest single chunk stays a gate, on the same budget: one long build is one late frame, and a p95 does not see it)
+			and near_ms < 8.0 * scale and W.build_ms_max < 8.0 * scale)
 		# flyovers: N2 over the centre crossing
 		var n2 := _road("N2")
 		var R2 = sim.roads[n2]
@@ -102,7 +159,7 @@ func _process(_d: float) -> bool:
 				ic = i
 		sim.respawn_on(n2, ic, 1)
 		v._follow_origin()
-		_settle(30)
+		var crossing_calls := _settle()
 		var deck: float = sim.net_height(n2, float(ic))
 		var ride: float = v.surface(sim.pod.x, sim.pod.y).x
 		_check("flyovers: N2's deck %.0f m over the centre crossing; the view rides it at %.1f m" % [deck, ride], deck >= 100.0 and absf(ride - deck) < 0.5)
@@ -122,7 +179,7 @@ func _process(_d: float) -> bool:
 				pts = (rmi.mesh as ArrayMesh).surface_get_array_len(0)
 		var per_row: int = 2 * W.EDGE_SEGS + 2
 		_check("edges: 10 m in from N2's left wall the view rides %.1f m up its ramp (want %.1f), rolled %.1f deg toward the middle (at the right %.1f); the chunk's road grid %d points (%d a row)" % [up_l.x - deck, want, rad_to_deg(up_l.y), rad_to_deg(up_r.y), pts, per_row],
-			absf(up_l.x - deck - want) < 0.5 and want > 3.0 and up_l.y < -0.1 and up_r.y > 0.1 and pts > 0 and pts % per_row == 0)
+			crossing_calls > 0 and absf(up_l.x - deck - want) < 0.5 and want > 3.0 and up_l.y < -0.1 and up_r.y > 0.1 and pts > 0 and pts % per_row == 0)
 		# junction walls: a ramp's mouth on E2 at the centre crossing
 		var J: Array = []
 		for j in sim.junctions:
@@ -196,13 +253,14 @@ func _signs(W) -> int:
 
 ## Chunks within VIS of the origin not built.
 func _missing(W) -> int:
-	var n := 0
+	var missing := {}
 	for cell in W.grid:
 		for e in W.grid[cell]:
 			var d: float = Vector2(e[2] - v.org_x, e[3] - v.org_y).length() - e[4]
-			if d < W.VIS and not W.chunks.has(Vector2i(e[0], e[1])):
-				n += 1
-	return n / 1 if n == 0 else n
+			var key := Vector2i(e[0], e[1])
+			if d < W.VIS and not W.chunks.has(key):
+				missing[key] = true
+	return missing.size()
 
 
 ## Another junction on road r at sample i, on side sgn (a ramp across the road there too).

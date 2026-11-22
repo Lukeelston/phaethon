@@ -1,0 +1,416 @@
+{
+  "service": {
+    "title": "Highway fuel plaza",
+    "near": {
+      "triangles": 1644,
+      "vertices": 2872,
+      "width_height_depth_m": [
+        232.0,
+        45.0,
+        163.0
+      ],
+      "footprint_radius_m": 137.33
+    },
+    "distance": {
+      "triangles": 218,
+      "vertices": 424,
+      "width_height_depth_m": [
+        232.0,
+        45.0,
+        163.0
+      ],
+      "footprint_radius_m": 137.33
+    }
+  },
+  "farm": {
+    "title": "Gambrel barn and grain bins",
+    "near": {
+      "triangles": 1682,
+      "vertices": 2856,
+      "width_height_depth_m": [
+        99.0,
+        36.4,
+        89.0
+      ],
+      "footprint_radius_m": 65.36
+    },
+    "distance": {
+      "triangles": 224,
+      "vertices": 294,
+      "width_height_depth_m": [
+        99.0,
+        36.4,
+        89.0
+      ],
+      "footprint_radius_m": 65.36
+    }
+  },
+  "wind": {
+    "title": "Swept-blade wind turbine",
+    "near": {
+      "triangles": 642,
+      "vertices": 874,
+      "width_height_depth_m": [
+        111.0,
+        199.0,
+        24.5
+      ],
+      "footprint_radius_m": 65.71
+    },
+    "distance": {
+      "triangles": 132,
+      "vertices": 150,
+      "width_height_depth_m": [
+        111.0,
+        199.0,
+        24.5
+      ],
+      "footprint_radius_m": 65.71
+    }
+  },
+  "urban": {
+    "title": "Terraced office district",
+    "near": {
+      "triangles": 1272,
+      "vertices": 2448,
+      "width_height_depth_m": [
+        219.0,
+        68.7,
+        162.0
+      ],
+      "footprint_radius_m": 132.16
+    },
+    "distance": {
+      "triangles": 220,
+      "vertices": 432,
+      "width_height_depth_m": [
+        219.0,
+        68.7,
+        162.0
+      ],
+      "footprint_radius_m": 132.16
+    }
+  },
+  "industrial": {
+    "title": "North-light processing works",
+    "near": {
+      "triangles": 944,
+      "vertices": 1506,
+      "width_height_depth_m": [
+        126.0,
+        52.1,
+        103.0
+      ],
+      "footprint_radius_m": 78.3
+    },
+    "distance": {
+      "triangles": 318,
+      "vertices": 428,
+      "width_height_depth_m": [
+        126.0,
+        52.1,
+        103.0
+      ],
+      "footprint_radius_m": 78.3
+    }
+  },
+  "outpost": {
+    "title": "Microwave relay depot",
+    "near": {
+      "triangles": 524,
+      "vertices": 876,
+      "width_height_depth_m": [
+        126.0,
+        48.9,
+        103.0
+      ],
+      "footprint_radius_m": 78.3
+    },
+    "distance": {
+      "triangles": 188,
+      "vertices": 306,
+      "width_height_depth_m": [
+        126.0,
+        48.9,
+        103.0
+      ],
+      "footprint_radius_m": 78.3
+    }
+  },
+  "solar": {
+    "title": "Photovoltaic field",
+    "near": {
+      "triangles": 664,
+      "vertices": 1320,
+      "width_height_depth_m": [
+        199.0,
+        12.3,
+        174.0
+      ],
+      "footprint_radius_m": 128.3
+    },
+    "distance": {
+      "triangles": 104,
+      "vertices": 200,
+      "width_height_depth_m": [
+        199.0,
+        12.3,
+        174.0
+      ],
+      "footprint_radius_m": 128.3
+    }
+  },
+  "stilt": {
+    "title": "Wetland field house",
+    "near": {
+      "triangles": 322,
+      "vertices": 598,
+      "width_height_depth_m": [
+        33.7,
+        28.3,
+        38.6
+      ],
+      "footprint_radius_m": 30.02
+    },
+    "distance": {
+      "triangles": 80,
+      "vertices": 130,
+      "width_height_depth_m": [
+        33.7,
+        28.3,
+        38.6
+      ],
+      "footprint_radius_m": 30.02
+    }
+  },
+  "oak": {
+    "title": "Spreading upland oak",
+    "near": {
+      "triangles": 11232,
+      "vertices": 24052,
+      "width_height_depth_m": [
+        37.9,
+        32.3,
+        33.8
+      ],
+      "footprint_radius_m": 19.99
+    },
+    "distance": {
+      "triangles": 406,
+      "vertices": 409,
+      "width_height_depth_m": [
+        37.9,
+        32.3,
+        33.8
+      ],
+      "footprint_radius_m": 19.83
+    }
+  },
+  "pine": {
+    "title": "Mountain spruce",
+    "near": {
+      "triangles": 5738,
+      "vertices": 12834,
+      "width_height_depth_m": [
+        20.0,
+        35.4,
+        19.1
+      ],
+      "footprint_radius_m": 10.46
+    },
+    "distance": {
+      "triangles": 150,
+      "vertices": 410,
+      "width_height_depth_m": [
+        20.0,
+        35.4,
+        19.1
+      ],
+      "footprint_radius_m": 10.62
+    }
+  },
+  "snowpine": {
+    "title": "Snow-loaded spruce",
+    "near": {
+      "triangles": 5738,
+      "vertices": 12834,
+      "width_height_depth_m": [
+        20.0,
+        35.4,
+        19.1
+      ],
+      "footprint_radius_m": 10.46
+    },
+    "distance": {
+      "triangles": 150,
+      "vertices": 410,
+      "width_height_depth_m": [
+        20.0,
+        35.4,
+        19.1
+      ],
+      "footprint_radius_m": 10.62
+    }
+  },
+  "mangrove": {
+    "title": "Prop-root mangrove",
+    "near": {
+      "triangles": 9444,
+      "vertices": 19768,
+      "width_height_depth_m": [
+        31.8,
+        23.8,
+        32.0
+      ],
+      "footprint_radius_m": 18.61
+    },
+    "distance": {
+      "triangles": 526,
+      "vertices": 569,
+      "width_height_depth_m": [
+        31.8,
+        23.8,
+        32.0
+      ],
+      "footprint_radius_m": 18.05
+    }
+  },
+  "palm": {
+    "title": "Feather palm",
+    "near": {
+      "triangles": 1224,
+      "vertices": 3284,
+      "width_height_depth_m": [
+        27.1,
+        49.9,
+        23.1
+      ],
+      "footprint_radius_m": 16.05
+    },
+    "distance": {
+      "triangles": 320,
+      "vertices": 576,
+      "width_height_depth_m": [
+        27.1,
+        49.9,
+        23.1
+      ],
+      "footprint_radius_m": 17.2
+    }
+  },
+  "scrub": {
+    "title": "Dryland scrub",
+    "near": {
+      "triangles": 656,
+      "vertices": 768,
+      "width_height_depth_m": [
+        11.6,
+        5.5,
+        11.0
+      ],
+      "footprint_radius_m": 7.23
+    },
+    "distance": {
+      "triangles": 208,
+      "vertices": 208,
+      "width_height_depth_m": [
+        11.6,
+        5.5,
+        11.0
+      ],
+      "footprint_radius_m": 6.53
+    }
+  },
+  "reeds": {
+    "title": "Cattail bed",
+    "near": {
+      "triangles": 896,
+      "vertices": 1586,
+      "width_height_depth_m": [
+        14.7,
+        9.2,
+        14.3
+      ],
+      "footprint_radius_m": 8.26
+    },
+    "distance": {
+      "triangles": 184,
+      "vertices": 272,
+      "width_height_depth_m": [
+        14.7,
+        9.2,
+        14.3
+      ],
+      "footprint_radius_m": 9.41
+    }
+  },
+  "cactus": {
+    "title": "Ribbed saguaro",
+    "near": {
+      "triangles": 820,
+      "vertices": 731,
+      "width_height_depth_m": [
+        10.0,
+        18.0,
+        3.5
+      ],
+      "footprint_radius_m": 5.01
+    },
+    "distance": {
+      "triangles": 140,
+      "vertices": 130,
+      "width_height_depth_m": [
+        10.0,
+        18.0,
+        3.5
+      ],
+      "footprint_radius_m": 5.13
+    }
+  },
+  "rock": {
+    "title": "Weathered outcrop",
+    "near": {
+      "triangles": 516,
+      "vertices": 1044,
+      "width_height_depth_m": [
+        33.0,
+        12.4,
+        20.9
+      ],
+      "footprint_radius_m": 18.22
+    },
+    "distance": {
+      "triangles": 96,
+      "vertices": 198,
+      "width_height_depth_m": [
+        33.0,
+        12.4,
+        20.9
+      ],
+      "footprint_radius_m": 20.25
+    }
+  },
+  "basalt": {
+    "title": "Columnar basalt",
+    "near": {
+      "triangles": 784,
+      "vertices": 1596,
+      "width_height_depth_m": [
+        57.1,
+        83.3,
+        54.8
+      ],
+      "footprint_radius_m": 31.84
+    },
+    "distance": {
+      "triangles": 264,
+      "vertices": 540,
+      "width_height_depth_m": [
+        57.1,
+        83.3,
+        54.8
+      ],
+      "footprint_radius_m": 35.93
+    }
+  }
+}

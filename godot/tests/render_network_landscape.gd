@@ -51,7 +51,7 @@ func _run() -> void:
 				for i in records.size():
 					var actual: Vector3 = batch.multimesh.get_instance_transform(i).origin
 					var local: Vector2 = records[i].p-Vector2(key)*v.landscape.TILE
-					anchor_error = maxf(anchor_error,actual.distance_to(Vector3(local.x,records[i].height,-local.y)))
+					anchor_error = maxf(anchor_error,actual.distance_to(Vector3(local.x,records[i].height + records[i].lift,-local.y)))
 		if anchor_error>0.01:
 			failures+=1
 			print("FAIL rendered prop anchor ",region[0]," error ",anchor_error)
