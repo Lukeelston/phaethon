@@ -1257,6 +1257,16 @@ func body_place(b, lift := 0.0) -> Vector3:
 		return flat
 	var i: int = clampi(P.hint, 1, R.N - 2)
 	var grade: float = (sim.net_height(P.path, float(i + 1)) - sim.net_height(P.path, float(i - 1))) / (2.0 * float(R.len[i]))
+	if R.deck and sim.deck_rule:
+		# Mount Hyperion's road: the slope is the deck's own under the pod, the one the cockpit is pitched by
+		# and _deck_place stands things on, not the pod's sample's. A sample's is one slope for 24 m of deck
+		# and then the next's: over the lip that is 4.6 degrees at a step, and _deck_place stands the engines
+		# off the pod's own slope by the difference over the pitch's cosine, which near the lip's foot is 30
+		# to 1. Crept over the lip the engines climbed over the nose through every sample and snapped back
+		# down at the next, by half a degree from the eye at first and by 40 at the last (Luke, flying it:
+		# "going over the edge slowly goes in chunks rather than just smoothly rolling over").
+		var s: float = sim.deck_sine(P.path, sim._road_f(P))
+		grade = s / sqrt(1.0 - s * s)
 	var steepness := smoothstep(0.15, 0.4, absf(grade))
 	if steepness <= 0.0:
 		return flat

@@ -44,15 +44,6 @@ def funnel_radius(gauge, d):
     return face_radius(ro) + (glass_radius(ro) - face_radius(ro)) * t
 
 
-def check():
-    """A tube may overlap its bigger neighbour's wall, never its dial or the inside of its tube."""
-    for big, small in ((0, 1), (0, 2), (1, 3), (2, 4)):
-        a, b = GAUGES[big], GAUGES[small]
-        apart = math.hypot(a[1] - b[1], a[2] - b[2])
-        assert apart - face_radius(b[3]) >= a[3] - .0005, (b[0], "dial under", a[0])
-        assert apart - b[3] >= funnel_radius(a, b[4]) + .0004, (b[0], "pokes into", a[0], apart - b[3], funnel_radius(a, b[4]))
-
-
 def to_panel(x, y, d):
     """Flat layout -> the panel's own frame (Godot axes: x right, y up, z toward the pilot)."""
     phi = x / R_ARC
@@ -64,6 +55,54 @@ def frame(x, y):
     phi = x / R_ARC
     return ((R_ARC * math.sin(phi), y, R_ARC - R_ARC * math.cos(phi)),
             (math.cos(phi), 0.0, math.sin(phi)), (0.0, 1.0, 0.0), (-math.sin(phi), 0.0, math.cos(phi)))
+
+
+# The tubes overlap: each smaller one stands partly under the wall of its bigger neighbour (gauge ->
+# the neighbour over it). In the flat layout the smaller tube stops short of the bigger one's bore, but
+# on the arc the tubes lean together (each is aimed at the arc's axis: neighbours are 7 to 9 degrees
+# apart), and a smaller tube's mouth came out through the inside of its neighbour: 8 mm of each thrust
+# dial's trim ring stood inside the centre tube beside the Mach dial, and 2 mm of each engine dial's
+# inside the thrust tubes (Luke, after the flight of 22 November: "the mach gauge mesh collides with
+# those on the sides of it"). So a tube is cut off inside its neighbour's wall: tools/art_gauges_hd.py
+# builds nothing of it nearer the neighbour's axis than the neighbour's outer radius less CUT. The
+# barrel's skin is WALL inside the outer radius, so the cut edge is under that skin with 1.5 mm to
+# spare, and 5 mm short of the bore.
+OVER = {1: 0, 2: 0, 3: 1, 4: 2}
+WALL = .002                        # a barrel's skin, inside the tube's outer radius (the trim ring's)
+CUT = .0035                        # where a tube under a neighbour stops, inside that neighbour's outer radius
+
+
+def off_axis(point, gauge):
+    """A point in the panel's frame as (how far it is from a tube's axis, how deep along it)."""
+    o, _, _, n = frame(gauge[1], gauge[2])
+    v = [point[i] - o[i] for i in range(3)]
+    d = sum(v[i] * n[i] for i in range(3))
+    return math.sqrt(max(sum(c * c for c in v) - d * d, 0.0)), d
+
+
+def on_tube(gauge, radius, depth, angle):
+    """A point of a tube, in the panel's frame: `radius` from its axis, `depth` along it, at `angle`
+    round it (radians anticlockwise from three o'clock, as the pilot sees it)."""
+    o, ux, uy, n = frame(gauge[1], gauge[2])
+    return tuple(o[i] + radius * (math.cos(angle) * ux[i] + math.sin(angle) * uy[i]) + depth * n[i] for i in range(3))
+
+
+def check():
+    """A tube may stand under its bigger neighbour's wall, never under its dial or inside its tube.
+    Measured on the arc: the neighbour's barrel is clear of the smaller tube's dial; where the smaller
+    tube meets the cut it is below the neighbour's glass, and so inside its wall; and the smaller
+    tube's own glass (the game's) stays out of the neighbour's bore."""
+    turn = [2 * math.pi * k / 720 for k in range(720)]
+    for small, big in OVER.items():
+        a, b = GAUGES[big], GAUGES[small]
+        face = b[4] - b[5]
+        dial = min(off_axis(on_tube(b, face_radius(b[3]), face + CHAPTER, t), a)[0] for t in turn)
+        assert dial >= a[3] - WALL + .0005, (b[0], "dial under", a[0], dial)
+        for depth in (b[4], b[4] - SEAT):
+            for radius, d in (off_axis(on_tube(b, b[3], depth, t), a) for t in turn):
+                assert radius > a[3] or d < a[4] - SEAT - .002, (b[0], "reaches over the glass of", a[0], radius, d)
+        for radius, d in (off_axis(on_tube(b, glass_radius(b[3]), b[4] - SEAT, t), a) for t in turn):
+            assert radius >= funnel_radius(a, d) + .002, (b[0], "glass inside", a[0], radius, d)
 
 
 # The two flat LCD strips under the outer tubes: centre x, centre y, half width, half height,

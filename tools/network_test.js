@@ -20,7 +20,8 @@
 //              on SPEEDCRAFT this autopilot can't get going) the autopilot gets you to the city
 //   deck       Mount Hyperion's road is sampled along its deck and flown at the speed along it: held at
 //              3,000 mph a craft takes each part of the mountain in the time that part's deck length says,
-//              up to an 88 degree wall and down one; its height is the road's own all the way
+//              up to an 88 degree wall and down one; its height is the road's own all the way, and over
+//              the lip (a quarter turn in 456 m of deck) it keeps to the circle the lip was designed as
 // Prints NETWORK OK.
 // Usage: node tools/network_test.js [sim-core.js]
 'use strict';
@@ -389,7 +390,11 @@ for (const name of ['SWash', 'SFrost', 'SReed', 'SRed', 'SNeedle', 'SHammer', 'S
   hold();
   const inp = { thrL: 0, thrR: 0, brkL: 0, brkR: 0, repair: false, reignite: true, handling: 'speed' };
   const at = {};   // sample -> the time the pod passed it
-  let t = 0, worstZ = 0, steepest = 0, onRoad = true, stayed = true;
+  let t = 0, worstZ = 0, steepest = 0, onRoad = true, stayed = true, offLip = 0;
+  // the lip: a circle from the summit's last sample (level) to where the pitch stops turning, its centre under that sample
+  let lipFoot = top1;
+  while (Math.abs(s.deckSine(id, lipFoot + 1) - s.deckSine(id, lipFoot)) > 1e-9) lipFoot++;
+  const lipR = (lipFoot - top1) * NET_STEP_M / Math.abs(Math.asin(s.deckSine(id, lipFoot))), lipAt = R.pts[top1];
   const marks = [foot, top0, top1, far];
   while (t < 400 && s.S.pod.hint < far + 40) {
     s.step(inp, DT);
@@ -400,15 +405,16 @@ for (const name of ['SWash', 'SFrost', 'SReed', 'SRed', 'SNeedle', 'SHammer', 'S
     while (k < R.N - 2 && (pod.x - R.pts[k + 1].x) * a.tx + (pod.y - R.pts[k + 1].y) * a.ty >= 0) k++;
     const f = k + Math.max(0, Math.min(1, ((pod.x - R.pts[k].x) * a.tx + (pod.y - R.pts[k].y) * a.ty) / R.pts[k].len));
     stayed = stayed && !pod.offRoad && pod.path === id;
-    worstZ = Math.max(worstZ, Math.abs(pod.z - (h(f) + s.P.rideH)));
+    worstZ = Math.max(worstZ, Math.abs(pod.z - (h(s.deckF(id, f)) + s.P.rideH)));   // (at its place along the deck: the heights' keys are laid along it, deckF)
+    if (f > top1 && f < lipFoot) offLip = Math.max(offLip, Math.abs(Math.hypot((pod.x - lipAt.x) * a.tx + (pod.y - lipAt.y) * a.ty, pod.z - s.P.rideH - (hi - lipR)) - lipR));
     steepest = Math.max(steepest, Math.abs(s.deckPitch(pod)));
     for (const m of marks) if (at[m] === undefined && f >= m) at[m] = t - (f - m) * NET_STEP_M / v;
   }
   const up = (top0 - foot) * NET_STEP_M, across = (top1 - top0) * NET_STEP_M, down = (far - top1) * NET_STEP_M;
   const tUp = at[top0] - at[foot], tAcross = at[top1] - at[top0], tDown = at[far] - at[top1];
-  check(`deck: SHyperion's mountain is samples ${foot}-${top0} up, ${top0}-${top1} across the summit (${hi.toFixed(0)} m), ${top1}-${far} down; at 3,000 mph held, the ${(up / 1000).toFixed(2)} km up takes ${tUp.toFixed(2)} s (its length says ${(up / v).toFixed(2)}), the summit ${tAcross.toFixed(2)} s (${(across / v).toFixed(2)}), the ${(down / 1000).toFixed(2)} km down ${tDown.toFixed(2)} s (${(down / v).toFixed(2)}); steepest ${(steepest * 180 / Math.PI).toFixed(1)} deg; the pod within ${worstZ.toFixed(3)} m of the road's height all the way`,
+  check(`deck: SHyperion's mountain is samples ${foot}-${top0} up, ${top0}-${top1} across the summit (${hi.toFixed(0)} m), ${top1}-${far} down; at 3,000 mph held, the ${(up / 1000).toFixed(2)} km up takes ${tUp.toFixed(2)} s (its length says ${(up / v).toFixed(2)}), the summit ${tAcross.toFixed(2)} s (${(across / v).toFixed(2)}), the ${(down / 1000).toFixed(2)} km down ${tDown.toFixed(2)} s (${(down / v).toFixed(2)}); steepest ${(steepest * 180 / Math.PI).toFixed(1)} deg; the pod within ${worstZ.toFixed(3)} m of the road's height all the way, and over the lip (samples ${top1}-${lipFoot}, ${lipR.toFixed(1)} m round) within ${offLip.toFixed(4)} m of its circle`,
     stayed && hi > 47999 && Math.abs(tUp - up / v) < 0.004 * up / v && Math.abs(tAcross - across / v) < 0.004 * across / v && Math.abs(tDown - down / v) < 0.004 * down / v &&
-    steepest > 87.5 * Math.PI / 180 && steepest < 88.5 * Math.PI / 180 && worstZ < 0.5);
+    steepest > 87.5 * Math.PI / 180 && steepest < 88.5 * Math.PI / 180 && worstZ < 0.5 && lipFoot - top1 === 19 && offLip < 0.01);
   // with the rule switched off (the sim as it was before there was a deck road) a craft weaving along E3 ends where
   // it does with it on, bit for bit
   const weave = (rule) => {

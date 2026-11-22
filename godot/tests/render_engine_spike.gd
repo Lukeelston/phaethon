@@ -78,8 +78,8 @@ const VIEWS := [
 	# the switch at GRIP: no slide), and its switch on the left console
 	["s1-seat-squeeze-right", 4.0, true, 1.2, "seat", 96.0, -8.0],
 	["s2-seat-squeeze-left", 4.0, true, 1.2, "seat", 96.0, -8.0],
-	["s3-slide-switch-from-the-seat", 1.0, false, 0.0, ["pod", Vector3(0.0, 0.12, 0.6), Vector3(-0.585, -0.17, 0.08)]],
-	["s4-slide-switch-close", 1.0, false, 0.0, ["pod", Vector3(-0.3, 0.08, 0.42), Vector3(-0.585, -0.17, 0.08)]],
+	["s3-slide-switch-from-the-seat", 1.0, false, 0.0, ["pod", Vector3(0.0, 0.12, 0.6), Vector3(-0.585, -0.17, 0.17)]],
+	["s4-slide-switch-close", 1.0, false, 0.0, ["pod", Vector3(-0.3, 0.08, 0.42), Vector3(-0.585, -0.17, 0.17)]],
 	["s5-both-switches-from-the-seat", 1.0, false, 0.0, "seat", 96.0, -30.0],
 	# the points counter with a feat just earned: settled, part way through rolling it in, and from the seat
 	["o1-points-counter-close", 2.0, false, 0.0, ["pod", Vector3(0.0, -0.12, 0.12), Vector3(0.0, -0.39, -0.35)]],

@@ -39,13 +39,15 @@ class Part:
         self.name, self.xyz, self.uv, self.faces = name, [], [], []
 
     def patch(self, area, length, width, points, along, across, out):
-        """points[row][col] in Godot metres; rows run `along` metres, columns `across`. The
-        middle of the patch faces `out` (a vector, or a function of the point there)."""
+        """points[row][col] in Godot metres; rows run `along` metres, columns `across` (one
+        list for every row, or a row of its own for each). The middle of the patch faces `out`
+        (a vector, or a function of the point there)."""
         points = np.asarray(points, float)
         rows, cols = points.shape[:2]
         start = len(self.xyz)
         self.xyz += [(p[0], -p[2], p[1]) for p in points.reshape(-1, 3)]      # Godot XYZ -> Blender
-        self.uv += [kit.uv_of(area, length, width, float(along[j]), float(across[i])) for j in range(rows) for i in range(cols)]
+        across = np.broadcast_to(np.asarray(across, float), (rows, cols))
+        self.uv += [kit.uv_of(area, length, width, float(along[j]), float(across[j, i])) for j in range(rows) for i in range(cols)]
         j, i = min(rows // 2, rows - 2), min(cols // 2, cols - 2)
         normal = np.cross(points[j, i + 1] - points[j, i], points[j + 1, i] - points[j, i])
         facing = np.asarray(out(points[j, i]) if callable(out) else out, float)
@@ -53,17 +55,83 @@ class Part:
         order = (0, 1, cols + 1, cols) if normal @ facing > 0 else (cols, cols + 1, 1, 0)
         self.faces += [tuple(start + r * cols + c + k for k in order) for r in range(rows - 1) for c in range(cols - 1)]
 
-    def lathe(self, area, profile, around, frame, hint):
-        """Turn (radius, depth) pairs round a fitting's axis; `hint` is how its first run faces."""
+    def lathe(self, area, profile, around, frame, hint, under=None):
+        """Turn (radius, depth) pairs round a fitting's axis; `hint` is how its first run faces.
+        `under` is a neighbouring tube this one stands partly under, as (a point on its axis, the
+        axis, a radius): nothing is built nearer that axis than the radius. Each row stops exactly
+        on that cylinder, and there is a row where the profile first touches it, so the cut edge
+        lies inside the neighbour's wall all the way."""
         prof = np.array(profile, float)
         arc = np.concatenate([[0], np.cumsum(np.hypot(np.diff(prof[:, 0]), np.diff(prof[:, 1])))])
         girth = 2 * math.pi * prof[:, 0].max()
-        phi = np.linspace(0, 2 * math.pi, around + 1)
         o, ux, uy, n = (np.array(v, float) for v in frame)
-        radial = np.cos(phi)[:, None] * ux + np.sin(phi)[:, None] * uy
-        points = o + prof[:, :1, None] * radial[None] + prof[:, 1:, None] * n
         across, depth = facing(prof, hint)
-        self.patch(area, arc[-1], girth, points, arc, phi / (2 * math.pi) * girth, across * radial[min((around + 1) // 2, around - 1)] + depth * n)
+        if under is None:
+            phi = np.linspace(0, 2 * math.pi, around + 1)
+            radial = np.cos(phi)[:, None] * ux + np.sin(phi)[:, None] * uy
+            points = o + prof[:, :1, None] * radial[None] + prof[:, 1:, None] * n
+            self.patch(area, arc[-1], girth, points, arc, phi / (2 * math.pi) * girth, across * radial[min((around + 1) // 2, around - 1)] + depth * n)
+            return arc, girth
+        centre, axis, limit = np.array(under[0], float), np.array(under[1], float), float(under[2])
+
+        def reach(row, phi):
+            """How far the row's points at these angles are from the neighbour's axis."""
+            phi = np.asarray(phi, float)
+            p = o + row[0] * (np.cos(phi)[..., None] * ux + np.sin(phi)[..., None] * uy) + row[1] * n - centre
+            return np.linalg.norm(p - (p @ axis)[..., None] * axis, axis=-1)
+
+        def nearest(row):
+            """The angle at which a row comes nearest the neighbour's axis, and how near."""
+            coarse = np.linspace(0, 2 * math.pi, 721)[:-1]
+            lo = coarse[np.argmin(reach(row, coarse))] - math.pi / 360
+            hi = lo + math.pi / 180
+            for _ in range(60):
+                m1, m2 = lo + (hi - lo) / 3, hi - (hi - lo) / 3
+                lo, hi = (lo, m2) if reach(row, m1) < reach(row, m2) else (m1, hi)
+            return (lo + hi) / 2, float(reach(row, (lo + hi) / 2))
+
+        def edge(row, inside, outside):
+            """The angle between these two at which the row crosses the cylinder."""
+            for _ in range(60):
+                mid = (inside + outside) / 2
+                inside, outside = (mid, outside) if reach(row, mid) < limit else (inside, mid)
+            return outside
+
+        # rows no more than 10 mm apart, and one wherever the profile first touches the cylinder
+        fine, fine_arc = [prof[0]], [arc[0]]
+        for k in range(len(prof) - 1):
+            steps = max(1, int(math.ceil((arc[k + 1] - arc[k]) / .010)))
+            for s in range(1, steps + 1):
+                row, at = prof[k] + (prof[k + 1] - prof[k]) * s / steps, arc[k] + (arc[k + 1] - arc[k]) * s / steps
+                before = fine[-1]
+                if (nearest(before)[1] < limit) != (nearest(row)[1] < limit):
+                    t0, t1 = 0.0, 1.0
+                    cut0 = nearest(before)[1] < limit
+                    for _ in range(50):
+                        tm = (t0 + t1) / 2
+                        t0, t1 = (tm, t1) if (nearest(before + (row - before) * tm)[1] < limit) == cut0 else (t0, tm)
+                    clear = t1 if cut0 else t0                                    # (the side that just clears it)
+                    fine_arc.append(fine_arc[-1] + (at - fine_arc[-1]) * clear)
+                    fine.append(before + (row - before) * clear)
+                fine.append(row)
+                fine_arc.append(at)
+        fine, fine_arc = np.array(fine), np.array(fine_arc)
+        toward = centre - o
+        toward = math.atan2(toward @ uy, toward @ ux)                             # the neighbour's side of this tube
+        points, wide, cut = [], [], 0
+        for row in fine:
+            at, least = nearest(row)
+            at = toward + (at - toward + math.pi) % (2 * math.pi) - math.pi      # (within half a turn of that side)
+            if least < limit:
+                phi = np.linspace(edge(row, at, at + math.pi), edge(row, at, at - math.pi) + 2 * math.pi, around + 1)
+                cut += 1
+            else:
+                phi = np.linspace(at, at + 2 * math.pi, around + 1)
+            points.append(o + row[0] * (np.cos(phi)[:, None] * ux + np.sin(phi)[:, None] * uy) + row[1] * n)
+            wide.append(np.clip(phi - toward, 0, 2 * math.pi) / (2 * math.pi) * girth)
+        far = math.cos(toward + math.pi) * ux + math.sin(toward + math.pi) * uy   # the middle column's side
+        self.patch(area, arc[-1], girth, np.array(points), fine_arc, np.array(wide), across * far + depth * n)
+        print("CUT", self.name, "%d of %d rows stop at the neighbour's wall" % (cut, len(fine)), flush=True)
         return arc, girth
 
     def mesh(self, material):
@@ -356,13 +424,19 @@ def binnacle():
         key, gx, gy, ro, mouth, recess = gauge
         frame = L.frame(gx, gy)
         rg, rf, face = L.glass_radius(ro), L.face_radius(ro), mouth - recess
-        arc, girth = part.lathe(barrels[index], [(ro - .002, -.006), (ro - .002, mouth - .016)], 96, frame, "out")
+        # a tube that stands under a bigger neighbour stops inside that neighbour's wall (L.OVER)
+        under = None
+        if index in L.OVER:
+            over = L.GAUGES[L.OVER[index]]
+            beside = L.frame(over[1], over[2])
+            under = (beside[0], beside[3], over[3] - L.CUT)
+        arc, girth = part.lathe(barrels[index], [(ro - L.WALL, -.006), (ro - L.WALL, mouth - .016)], 96, frame, "out", under)
         paint_barrel(barrels[index], float(arc[-1]), girth)
-        arc, girth = part.lathe(rings[index], [(ro - .002, mouth - .016), (ro, mouth - .014), (ro, mouth - .003), (ro - .003, mouth),
-                                               (rg + .0025, mouth), (rg, mouth - .0025), (rg, mouth - L.SEAT)], 128, frame, "out")
+        arc, girth = part.lathe(rings[index], [(ro - L.WALL, mouth - .016), (ro, mouth - .014), (ro, mouth - .003), (ro - .003, mouth),
+                                               (rg + .0025, mouth), (rg, mouth - .0025), (rg, mouth - L.SEAT)], 128, frame, "out", under)
         paint_ring(rings[index], arc, girth, 3.1 * index)
         arc, girth = part.lathe(funnels[index], [(rg, mouth - L.SEAT), (rg - .0025, mouth - L.SEAT - .001), (rf + .0015, face + .003),
-                                                 (rf, face + .0005), (rf, face - .002)], 128, frame, "in")
+                                                 (rf, face + .0005), (rf, face - .002)], 128, frame, "in", under)
         paint_funnel(funnels[index], float(arc[-1]), girth)
         rc = .19 * rf
         up = face + L.CAP_UP

@@ -282,9 +282,9 @@ func _run() -> void:
 		t += DT
 		var at := _pod_f(s, r)
 		stayed = stayed and not s.pod.off_road and int(s.pod.path) == r
-		worst_z = maxf(worst_z, absf(float(s.pod.z) - (s.net_height(r, at) + float(s.P.rideH))))
+		worst_z = maxf(worst_z, absf(float(s.pod.z) - (s.net_height(r, s.deck_f(r, at)) + float(s.P.rideH))))      # (its place along the deck: the heights' keys are laid along it, CraftSim.deck_f)
 		steepest = maxf(steepest, absf(rad_to_deg(s.deck_pitch(s.pod))))
-		view_pitch_err = maxf(view_pitch_err, absf(rad_to_deg(s.deck_pitch(s.pod)) - _pitch(s, r, s._road_f(s.pod))))
+		view_pitch_err = maxf(view_pitch_err, absf(rad_to_deg(s.deck_pitch(s.pod)) - _pitch(s, r, s.deck_f(r, s._road_f(s.pod)))))
 		for m in marks:
 			if not passed.has(m) and at >= float(m):
 				passed[m] = t - (at - float(m)) * step / speed
@@ -358,7 +358,7 @@ func _run() -> void:
 		snap = maxf(snap, absf(rad_to_deg(p_now - pitch_was)))
 		pitch_was = p_now
 		on_road = on_road and not s.pod.off_road and int(s.pod.path) == r
-		lip_z = maxf(lip_z, absf(float(s.pod.z) - (s.net_height(r, _pod_f(s, r)) + float(s.P.rideH))))
+		lip_z = maxf(lip_z, absf(float(s.pod.z) - (s.net_height(r, s.deck_f(r, _pod_f(s, r))) + float(s.P.rideH))))
 	_check("crept over the lip at %.0f mph the craft stays on the road: %.1f s from 12 samples short of it to 12 past its foot, its pitch turned to %.2f degrees down by at most %.4f degrees a step, %.3f m from the road's height at most" % [
 			creep, t, -rad_to_deg(pitch_was), snap, lip_z], on_road and rad_to_deg(pitch_was) < -87.5 and snap < 0.05 and lip_z < 0.05 and t > 20.0)
 	# flat out over the crest, the summit and the lip, the levers shut

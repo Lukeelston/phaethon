@@ -38,10 +38,21 @@ var _prev := {}            # controller -> its tip's previous panel-local positi
 var _cool := 0.0
 
 
+# The port console's switch stands this much further aft than the starboard one (Luke, after the flight
+# of 22 November: "The map is good but is sticking through the drift switch mesh"). At the mirrored place
+# the map's pod, hung over that console's nose, came down through the inboard half of the panel: its hood
+# between the guards, the panel's corner out through the screen, and from the seat the upper legend and
+# lamp behind it. Here the panel's back is 11 mm clear of the pod's lower corner and the whole face shows
+# beside it; its face meets the console's top 24 mm short of that console's first legend (tests/test_cockpit_clash.gd).
+const PORT_AFT := 0.09
+
+
 ## Where the panel sits in the cockpit rig (floor origin, forward -Z): on the front of the right
-## console, beside the right lever, angled up at the pilot.
+## console, beside the right lever, angled up at the pilot. (side -1: on the left console, PORT_AFT
+## further aft.)
 static func mount(side := 1.0) -> Transform3D:
-	return Transform3D(Basis(Vector3.RIGHT, -0.75), Vector3(0.585 * side, 0.43, 0.08))   # (side -1: the same place on the left console)
+	# (0.5825 out: at 0.585 the panel's upper outboard corner went through the coaming's outer skin, a 9 mm spur under the hull's lip where nothing saw it)
+	return Transform3D(Basis(Vector3.RIGHT, -0.75), Vector3(0.5825 * side, 0.43, 0.08 + (PORT_AFT if side < 0.0 else 0.0)))
 
 
 func build() -> void:

@@ -717,6 +717,8 @@
     // NET_CELL square, so a free body finds what's under it
     const hk = new Map(NET_HEIGHTS.map(([r, keys]) => [r, keys]));
     roads.forEach((R, k) => { R.hk = hk.get(k) || null; R.role = ''; R.open0 = true; R.open1 = true; });
+    // the deck roads' pitch at each sample: its sine (dsn) and the angle (dth), for deckSine and deckF (mirrors craft_sim.gd)
+    for (const r of NET_DECK) roads[r].pts.forEach((p, i) => { p.dsn = clamp(netSlope({ roads }, r, i) / NET_STEP, -0.9999, 0.9999); p.dth = Math.asin(p.dsn); });
     NET_JUMPS.forEach(([l, c]) => { roads[l].role = 'launch'; roads[c].role = 'catch'; });
     NET_ONRAMPS.forEach(([, r]) => { roads[r].role = 'on'; });
     // The shafts: flat in the sims, a paperclip whose bulb carries you round (kap: its curvature, which
@@ -847,9 +849,29 @@
   // of a deck road (+: climbing the way its samples run); 0 on any other road. Mirrors craft_sim.gd deck_sine.
   // (T.deckRule false: no road is treated as a deck road, and every body moves at its speed over the map as all
   // did before there was one. A test's switch, as craft_sim.gd's deck_rule.)
+  // BETWEEN two samples (Luke, 2026-11-22, creeping over the lip: "going over the edge slowly goes in chunks
+  // rather than just smoothly rolling over"): a body's f is its place over the MAP (roadF), the heights' keys
+  // are laid along the DECK, and where the pitch turns fast (the lip: 4.6 degrees a sample, its last sample
+  // 24 m of deck over 1.8 m of map) those are not the same. So between samples the deck is the arc it was
+  // designed as: the SINE of its pitch runs straight from one sample's to the next's with the distance over
+  // the map (a circle's does exactly), and deckF gives the place along the deck that goes with a place over
+  // the map; the height is the keys' at that place (roadH). Along the deck a body's speed is then the same
+  // all the way and its pitch turns at one rate. See craft_sim.gd deck_sine for what it did before.
   function deckSine(T, r, f) {
     if (T.deckRule === false || !T.roads[r].deck) return 0;
-    return clamp(netSlope(T, r, f) / NET_STEP, -0.9999, 0.9999);
+    const R = T.roads[r], i = clamp(Math.floor(f), 0, R.N - 2), a = R.pts[i], b = R.pts[i + 1];
+    return a.dsn + (b.dsn - a.dsn) * clamp(f - i, 0, 1);
+  }
+  // Where along its DECK (the sample, and how far through that sample's 24 m of deck) the place f over the
+  // MAP is on a deck road. f itself on any other road, at a sample, and where the pitch does not turn.
+  // Mirrors craft_sim.gd deck_f.
+  function deckF(T, r, f) {
+    if (T.deckRule === false || !T.roads[r].deck) return f;
+    const R = T.roads[r], i = Math.floor(f);
+    if (i < 0 || i > R.N - 2) return f;
+    const a = R.pts[i], b = R.pts[i + 1], turn = b.dth - a.dth;
+    if (Math.abs(turn) < 1e-7) return f;
+    return i + clamp((Math.asin(a.dsn + (b.dsn - a.dsn) * (f - i)) - a.dth) / turn, 0, 1);
   }
   // The Network's edges ramp up (Luke, 2026-10-20: "make the walls ramp up on the sides rather than a
   // hard stop? Let the craft drift a bit"): the outer EDGE_FRAC of each side (EDGE_MIN-EDGE_MAX m)
@@ -879,6 +901,7 @@
     const N = T.roads[r].N;
     if (f > N - 1) return netHeight(T, r, N - 1) + (f - (N - 1)) * (netHeight(T, r, N - 1) - netHeight(T, r, N - 1.01)) / 0.01;
     if (f < 0) return netHeight(T, r, 0) + f * (netHeight(T, r, 0.01) - netHeight(T, r, 0)) / 0.01;
+    if (T.roads[r].deck && T.deckRule !== false) return netHeight(T, r, deckF(T, r, f));   // (a deck road's heights are laid along its deck)
     return netHeight(T, r, f);
   }
   function nearestBranch(B, x, y, hint, win) {
@@ -1225,8 +1248,17 @@
     // caught (lock), it eases on: a critically damped spring, capped at LOCK_A.
     const LOCK_W = 6, LOCK_A = 30 * G;   // relative arrival cushioning; surface-following is separate
     function roadF(b, i = b.hint) {
-      const a = T.roads[b.path].pts[i];
-      return i + clamp(((b.x - a.x) * a.tx + (b.y - a.y) * a.ty) / a.len, -1, 2);
+      const R = T.roads[b.path], a = R.pts[i];
+      let u = ((b.x - a.x) * a.tx + (b.y - a.y) * a.ty) / a.len;
+      if (R.deck && T.deckRule !== false) {
+        // A deck road's samples are anything from 24 m of the map to under one, and the hint is the sample the
+        // body was over before it last moved: what lies past that sample's end is so much of the NEXT sample's
+        // own length, not of this one's. (Mirrors craft_sim.gd _road_f.)
+        let walked = 0;
+        while (u > 1 && i < R.N - 2 && walked < 8) { u = (u - 1) * R.pts[i].len / R.pts[i + 1].len; i++; walked++; }
+        while (u < 0 && i > 0 && walked < 8) { u = 1 + u * R.pts[i].len / R.pts[i - 1].len; i--; walked++; }
+      }
+      return i + clamp(u, -1, 2);
     }
     function railHover(b, dt, afterMove = false) {
       // Match the view's nearest segment after moving, without altering collision/routing's hint.
@@ -1236,9 +1268,12 @@
       const lat = (b.x - a.x) * a.nx + (b.y - a.y) * a.ny, vl = b.vx * a.nx + b.vy * a.ny;
       const next = T.roads[b.path].pts[Math.min(i + 1, T.roads[b.path].N - 1)], along = clamp(f - i, 0, 1);   // (for an open apron's width there: netLat)
       const h = roadH(T, b.path, f) + netEdge(a.w, netLat(a, next, along, lat))[0];
-      let vs = b.vx * a.tx + b.vy * a.ty;
-      if (T.roads[b.path].deck && T.deckRule !== false) vs *= Math.sqrt(1 - deckSine(T, b.path, f) ** 2);   // (a deck road: over the map, its speed along the deck by the cosine of the deck's pitch)
-      const dhdt = (roadH(T, b.path, f + vs * dt / a.len) + netEdge(a.w, netLat(a, next, along, lat + vl * dt))[0] - h) / dt;
+      let vs = b.vx * a.tx + b.vy * a.ty, run = a.len;
+      if (T.roads[b.path].deck && T.deckRule !== false) {   // (a deck road: over the map, its speed along the deck by the cosine of the deck's pitch)
+        vs *= Math.sqrt(1 - deckSine(T, b.path, f) ** 2);
+        run = T.roads[b.path].pts[clamp(Math.floor(f), 0, T.roads[b.path].N - 1)].len;   // (... and the sample it is over, which is not always the hint's: roadF)
+      }
+      const dhdt = (roadH(T, b.path, f + vs * dt / run) + netEdge(a.w, netLat(a, next, along, lat + vl * dt))[0] - h) / dt;
       if (b.lock) {
         if (!afterMove) {
           // The deck carries its own slope/curvature acceleration. Dampen only
@@ -1662,11 +1697,15 @@
       bodyPush(L, cL, Pd, cP); bodyPush(R, cR, Pd, cP); bodyPush(L, cL, R, cR);
 
       // On a deck road (Mount Hyperion's) the craft's speed is its speed along the deck: the cosine of the
-      // deck's pitch under the pod, before the move (mirrors craft_sim.gd)
+      // deck's pitch under the pod, half way through the step's move (mirrors craft_sim.gd: taken where the
+      // move begins, a craft went down the lip a little fast, and faster the faster it went)
       let deckCos = 1, deckAt = null;
       if (T.deckRule !== false && T.kind === 'network' && !Pd.offRoad && T.roads[Pd.path].deck) {
-        deckAt = T.roads[Pd.path].pts[Pd.hint];
-        deckCos = Math.sqrt(1 - deckSine(T, Pd.path, roadF(Pd)) ** 2);
+        const Rd = T.roads[Pd.path], f0 = roadF(Pd);
+        deckAt = Rd.pts[Pd.hint];
+        deckCos = Math.sqrt(1 - deckSine(T, Pd.path, f0) ** 2);
+        const half = 0.5 * (Pd.vx * deckAt.tx + Pd.vy * deckAt.ty) * dt * deckCos / Rd.pts[clamp(Math.floor(f0), 0, Rd.N - 1)].len;
+        deckCos = Math.sqrt(1 - deckSine(T, Pd.path, f0 + half) ** 2);
       }
       // the road under the pod, on a shaft (null off one): what carries the craft; and between its feet
       // (and a step's reach each side of them) the craft is moved together
@@ -1935,7 +1974,7 @@
     S.visited.add(0);
     return { S, P, T, step, respawn, respawnOn, restart, nearestOn, tLit, DEFAULTS, ground: (x, y) => ground(T, x, y),
       netHeight: (r, i) => netHeight(T, r, i), netNear, netEdge,
-      netSlope: (r, i) => netSlope(T, r, i), deckSine: (r, f) => deckSine(T, r, f),
+      netSlope: (r, i) => netSlope(T, r, i), deckSine: (r, f) => deckSine(T, r, f), deckF: (r, f) => deckF(T, r, f), roadF: (b) => roadF(b),
       // the deck's pitch under body b along its own heading, radians (+: nose up); 0 off the deck roads (mirrors craft_sim.gd deck_pitch)
       deckPitch: (b) => (T.kind !== 'network' || b.offRoad || !T.roads[b.path].deck) ? 0
         : Math.asin(deckSine(T, b.path, roadF(b)) * (Math.cos(b.th) * T.roads[b.path].pts[b.hint].tx + Math.sin(b.th) * T.roads[b.path].pts[b.hint].ty)),

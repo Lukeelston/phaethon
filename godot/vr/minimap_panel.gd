@@ -123,7 +123,8 @@ func _build_controls() -> void:
 	var back := MeshInstance3D.new()   # the strip they stand on, its bracket to the pod's side, the button's bezel
 	back.name = "controls"
 	back.mesh = Kit.compound([
-		[Finish.beveled_plate(Vector3(0.205, 0.012, 0.098), 0.003), Kit.at(Vector3(0.004, CONTROLS_Y, -0.016), turn), Color(0.105, 0.12, 0.14)],
+		# (its top edge 6 mm lower than its foot is deep: at full height its back corner stood 3 mm into the roof's port pillar, which passes behind it)
+		[Finish.beveled_plate(Vector3(0.205, 0.012, 0.092), 0.003), Kit.at(Vector3(0.004, CONTROLS_Y - 0.003, -0.016), turn), Color(0.105, 0.12, 0.14)],
 		[Kit.box(Vector3(0.09, 0.034, 0.012)), Kit.at(Vector3(0.0, CONTROLS_Y - 0.058, -0.02)), Color(0.09, 0.09, 0.1)],
 		[Kit.cyl(0.021, 0.021, 0.007, 28), Kit.at(BUTTON_AT + Vector3(0, 0, -0.0045), turn), Color(0.04, 0.052, 0.065)]])
 	back.material_override = Finish.powder_coat()

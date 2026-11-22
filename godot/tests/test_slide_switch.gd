@@ -48,8 +48,11 @@ func _run() -> void:
 		quit(1)
 		return
 	var other: Node3D = v.mode_switch
-	_check("it stands on the left console where the handling switch stands on the right: %s against %s" % [sw.position, other.position],
-		is_equal_approx(sw.position.x, -other.position.x) and is_equal_approx(sw.position.y, other.position.y) and is_equal_approx(sw.position.z, other.position.z) and sw.basis.is_equal_approx(other.basis))
+	# (as far out, as high and tilted the same; further aft by PORT_AFT, where it is clear of the map's pod:
+	# tests/test_cockpit_clash.gd holds the two apart)
+	_check("it stands on the left console as the handling switch stands on the right, %.0f mm further aft: %s against %s" % [Switch.PORT_AFT * 1000.0, sw.position, other.position],
+		is_equal_approx(sw.position.x, -other.position.x) and is_equal_approx(sw.position.y, other.position.y) and is_equal_approx(sw.position.z, other.position.z + Switch.PORT_AFT)
+		and Switch.PORT_AFT > 0.0 and Switch.PORT_AFT < 0.12 and sw.basis.is_equal_approx(other.basis))
 	var words := []
 	for label: Label3D in sw.find_children("*", "Label3D", true, false):
 		words.append(label.text)

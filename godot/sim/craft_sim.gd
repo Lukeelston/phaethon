@@ -580,6 +580,8 @@ class TrackPath:
 	var sh0 := 0                    # ... its feet: the pull-up sample and the landing sample
 	var sh1 := 0
 	var deck := false               # ... a deck road (NET_DECK): sampled every NET_STEP of its deck, flown at the speed along it
+	var dsn := PackedFloat64Array() # ... a deck road's: per sample, the sine of its deck's pitch there (+ climbing the way the samples run)
+	var dth := PackedFloat64Array() # ... and that pitch, radians (deck_sine, deck_f)
 	var apl := PackedFloat64Array() # ... per sample, its open apron on the left (NET_APRONS: m of level deck more before that side's ramp and wall; empty with none)
 	var apr := PackedFloat64Array() # ... and on the right
 
@@ -922,7 +924,21 @@ func _road_f(b: Body, i: int = -1) -> float:
 	var R: TrackPath = roads[b.path]
 	if i < 0:
 		i = b.hint
-	return float(i) + clampf(((b.x - R.px[i]) * R.tx[i] + (b.y - R.py[i]) * R.ty[i]) / R.len[i], -1.0, 2.0)
+	var u := ((b.x - R.px[i]) * R.tx[i] + (b.y - R.py[i]) * R.ty[i]) / R.len[i]
+	if R.deck and deck_rule:
+		# A deck road's samples are anything from 24 m of the map to under one (an 88 degree wall's), and the
+		# hint is the sample the body was over before it last moved: what lies past that sample's end is so
+		# much of the NEXT sample's own length, not of this one's. (Mirrors sim-core.js roadF.)
+		var walked := 0
+		while u > 1.0 and i < R.N - 2 and walked < 8:
+			u = (u - 1.0) * R.len[i] / R.len[i + 1]
+			i += 1
+			walked += 1
+		while u < 0.0 and i > 0 and walked < 8:
+			u = 1.0 + u * R.len[i] / R.len[i - 1]
+			i -= 1
+			walked += 1
+	return float(i) + clampf(u, -1.0, 2.0)
 
 
 func _rail_hover(b: Body, dt: float, after_move := false) -> void:
@@ -941,9 +957,11 @@ func _rail_hover(b: Body, dt: float, after_move := false) -> void:
 	var along := clampf(f - float(i), 0.0, 1.0)      # (for an open apron's width there: net_lat)
 	var h := road_h(b.path, f) + net_edge(R.w[i], net_lat(R, i, lat, along)).x
 	var vs := b.vx * R.tx[i] + b.vy * R.ty[i]
+	var run: float = R.len[i]
 	if R.deck and deck_rule:   # (a deck road: over the map, its speed along the deck by the cosine of the deck's pitch)
 		vs *= sqrt(1.0 - pow(deck_sine(b.path, f), 2.0))
-	var dhdt := (road_h(b.path, f + vs * dt / R.len[i]) + net_edge(R.w[i], net_lat(R, i, lat + vl * dt, along)).x - h) / dt
+		run = R.len[clampi(int(floor(f)), 0, R.N - 1)]      # (... and the sample it is over, which is not always the hint's: _road_f)
+	var dhdt := (road_h(b.path, f + vs * dt / run) + net_edge(R.w[i], net_lat(R, i, lat + vl * dt, along)).x - h) / dt
 	if b.lock:
 		if not after_move:
 			# Surface following carries the deck's slope/curvature acceleration;
@@ -1397,6 +1415,14 @@ func _build_network() -> void:
 		cities.append({"name": c[0], "biome": c[1], "cx": float(c[2]), "cy": float(c[3]), "road": int(c[4]), "i": int(c[5])})
 	for hk in NET_HEIGHTS:
 		_net_h[int(hk[0])] = hk[1]
+	# the deck roads' pitch at each sample (deck_sine, deck_f; mirroring sim-core.js)
+	for dk in NET_DECK:
+		var Rd: TrackPath = roads[int(dk)]
+		Rd.dsn.resize(Rd.N)
+		Rd.dth.resize(Rd.N)
+		for i in Rd.N:
+			Rd.dsn[i] = clampf(net_slope(int(dk), float(i)) / NET_STEP, -0.9999, 0.9999)
+			Rd.dth[i] = asin(Rd.dsn[i])
 	# Phase 3, mirroring sim-core.js: roles, open ends, the grid
 	jumps = NET_JUMPS.duplicate(true)
 	onramps = NET_ONRAMPS.duplicate(true)
@@ -1538,13 +1564,44 @@ func net_slope(road: int, i: float) -> float:
 ## climb a sample over the sample's length of deck. 0 on any other road.
 ## (deck_rule: off, no road is treated as a deck road and every body moves at its speed over the map, as
 ## all did before there was one. A test's switch: tests/test_hyperion.gd flies the same flight both ways.)
+## BETWEEN two samples (Luke, 2026-11-22, creeping over the lip: "going over the edge slowly goes in chunks
+## rather than just smoothly rolling over"). A body's f is its place over the MAP (_road_f: how far along
+## the sample's chord over the map it is), and the heights' keys are laid along the DECK. Where the pitch
+## turns fast those are not the same: the lip turns 4.6 degrees a sample, its last sample is 24 m of deck
+## over 1.8 m of map, and the first half of that 1.8 m is the first 9 m of the deck, not the first 12. Read
+## as if they were the same, a craft held to 20 mph crossed each sample of the lip fast and then slow (13.7
+## m/s down to 4.1 over the last), its pitch turning 2.7 degrees a second and then 0.8, and jumped back at the
+## next: the chunks. So between samples the deck is the arc it was designed as: the SINE of its pitch runs
+## straight from one sample's to the next's with the distance over the map (a circle's does exactly), and
+## deck_f gives the place along the deck that goes with a place over the map. The height is the keys' at
+## that place (road_h), the pitch its own, and over the map a body's speed is its speed along the deck
+## times the cosine of that pitch: so along the deck it is the same speed all the way, and the pitch turns
+## at one rate. At the samples themselves nothing has moved.
 var deck_rule := true
 
 
 func deck_sine(road: int, f: float) -> float:
 	if not deck_rule or not roads[road].deck:
 		return 0.0
-	return clampf(net_slope(road, f) / NET_STEP, -0.9999, 0.9999)
+	var R: TrackPath = roads[road]
+	var i := clampi(int(floor(f)), 0, R.N - 2)
+	return lerpf(R.dsn[i], R.dsn[i + 1], clampf(f - float(i), 0.0, 1.0))
+
+
+## Where along its DECK (the sample, and how far through that sample's 24 m of deck) the place f over the
+## MAP is on a deck road (the sample, and how far along its chord over the map). f itself on any other
+## road, at a sample, and where the pitch does not turn (a wall, a level stretch). Mirrors sim-core.js deckF.
+func deck_f(road: int, f: float) -> float:
+	if not deck_rule or not roads[road].deck:
+		return f
+	var R: TrackPath = roads[road]
+	var i := int(floor(f))
+	if i < 0 or i > R.N - 2:
+		return f
+	var turn: float = R.dth[i + 1] - R.dth[i]
+	if absf(turn) < 1e-7:
+		return f
+	return float(i) + clampf((asin(lerpf(R.dsn[i], R.dsn[i + 1], f - float(i))) - R.dth[i]) / turn, 0.0, 1.0)
 
 
 ## The deck's pitch under body b along b's own heading, radians (+: nose up): what the views pitch a
@@ -1603,6 +1660,8 @@ func road_h(road: int, f: float) -> float:
 		return net_height(road, float(N - 1)) + (f - float(N - 1)) * (net_height(road, float(N - 1)) - net_height(road, float(N) - 1.01)) / 0.01
 	if f < 0.0:
 		return net_height(road, 0.0) + f * (net_height(road, 0.01) - net_height(road, 0.0)) / 0.01
+	if roads[road].deck and deck_rule:      # (a deck road's heights are laid along its deck: deck_f)
+		return net_height(road, deck_f(road, f))
 	return net_height(road, f)
 
 
@@ -1956,7 +2015,7 @@ func surface_at(x: float, y: float, hint: int, path := 0) -> Vector2:
 		if not _deck_between(path, hint - 40, hint + 41):   # no flyover the search could reach: the ground,
 			return e                                       # without the search (~35 us; the view asks ~20 times a frame)
 		_nearest_on(path, x, y, hint, 40)
-		return Vector2(net_height(path, _n_i + _n_t) + e.x, e.y)
+		return Vector2(net_height(path, deck_f(path, _n_i + _n_t)) + e.x, e.y)
 	if path > 0:
 		_nearest_on(path, x, y, hint, 40)
 		return Vector2(branch_height(path, _n_i + _n_t), 0.0)
@@ -2812,14 +2871,19 @@ func step(inp: Dictionary, dt: float) -> void:
 	_body_push(L, cl, R, cr)
 
 	# On a deck road (Mount Hyperion's) the craft's speed is its speed along the deck: the cosine of the
-	# deck's pitch under the pod, before the move (mirroring sim-core.js)
+	# deck's pitch under the pod, half way through the step's move (mirroring sim-core.js). (Taken where
+	# the move begins, a craft went down the lip a little fast, and faster the faster it went: one step at
+	# 3,000 mph turns it half a degree, and near the lip's foot that is a fifth of the cosine.)
 	var deck_cos := 1.0
 	var deck_road: TrackPath = null
 	var deck_at := 0
 	if deck_rule and kind == "network" and not Pd.off_road and roads[Pd.path].deck:
 		deck_road = roads[Pd.path]
 		deck_at = Pd.hint
-		deck_cos = sqrt(1.0 - pow(deck_sine(Pd.path, _road_f(Pd)), 2.0))
+		var deck_f0 := _road_f(Pd)
+		deck_cos = sqrt(1.0 - pow(deck_sine(Pd.path, deck_f0), 2.0))
+		var half: float = 0.5 * (Pd.vx * deck_road.tx[deck_at] + Pd.vy * deck_road.ty[deck_at]) * dt * deck_cos / deck_road.len[clampi(int(floor(deck_f0)), 0, deck_road.N - 1)]
+		deck_cos = sqrt(1.0 - pow(deck_sine(Pd.path, deck_f0 + half), 2.0))
 	# the road under the pod, on a shaft (shaft_at -1 off one): what carries the craft; and between its
 	# feet (and a step's reach each side of them) the craft is moved together (mirroring sim-core.js)
 	var shaft_road: TrackPath = roads[Pd.path] if kind == "network" and not Pd.off_road and roads[Pd.path].shaft else null

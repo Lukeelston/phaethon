@@ -713,7 +713,8 @@ func _build_cockpit() -> void:
 	mode_switch.transform = ModeSwitchScript.mount()
 	mode_switch.build()
 	# The slide's own switch (Luke: "can you make the slide a physical thing in the cockpit?"): the same
-	# guarded toggle, on the front of the left console. Up is SLIDE, down is GRIP (no slide).
+	# guarded toggle, on the front of the left console (a little aft of the handling switch's place on the
+	# right, clear of the map's pod: ModeSwitch.PORT_AFT). Up is SLIDE, down is GRIP (no slide).
 	slide_switch = ModeSwitchScript.new()
 	slide_switch.name = "SlideSwitch"
 	slide_switch.legends = ["SLIDE", "GRIP"]
