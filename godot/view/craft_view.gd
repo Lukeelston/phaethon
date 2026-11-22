@@ -159,6 +159,10 @@ var net_found := {}          # the Network: the cities found (best_dir + network
 var net_best := {}           # the Network: "FROM>TO" -> best time, s
 var net_beaten := {}         # the Network: racer -> times you've beaten them
 var traffic_net: Node3D      # the Network: its traffic and racers (view/network_traffic.gd)
+var autopilot = preload("res://view/autopilot.gd").new()   # the Network's autopilot (Luke: "Add autopilot."): P here, the left stick across in the cockpit
+var _autopilot_let_go := false   # the hands have let go of what they held when it was taken: now a lever or a brake takes the craft back
+const AUTOPILOT_LET_GO := 0.1    # a lever or a brake under this is let go ...
+const AUTOPILOT_TAKE := 0.25     # ... and over this, after that, is the pilot taking her back
 var dawn: Node3D             # the emergency run: the dawn's front (view/dawn.gd)
 var stars: MeshInstance3D    # the emergency run: the night still over the twilight (view/stars.gdshader)
 var light_preset := "afternoon"   # "afternoon", or "twilight" on a job (the emergency run: before dawn)
@@ -551,6 +555,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		toggle_handling()
 	if event is InputEventKey and event.pressed and not event.echo and (event as InputEventKey).keycode == KEY_T:
 		net_cycle_target()
+	if event is InputEventKey and event.pressed and not event.echo and (event as InputEventKey).keycode == KEY_P:
+		set_autopilot(not autopilot.on)
 	if event is InputEventKey and event.pressed and not event.echo and (event as InputEventKey).keycode == KEY_G:
 		enter_city_gp()
 
@@ -851,6 +857,7 @@ func _flash(msg: String) -> void:
 ## Y: a fresh start. The range restarts the sprint at the start line, a circuit puts you back
 ## on the grid; both with whole engines (wall damage otherwise stays until you repair it).
 func _respawn() -> void:
+	set_autopilot(false, "RESTART")
 	# off the roads (a missed jump), the restart is the nearest start point: the nearest city you've
 	# found (Luke: "reset to the nearest start-point"); on them, the last city as ever
 	var near := -1
@@ -971,6 +978,7 @@ func _read_input(delta: float) -> void:
 		return
 	var p: Dictionary = levers.poll(delta)
 	inp = {"thrL": p.thrL, "thrR": p.thrR, "brkL": p.brkL, "brkR": p.brkR, "repair": p.repair, "reignite": p.reignite}
+	_autopilot_hands(maxf(p.thrL, p.thrR), maxf(p.brkL, p.brkR))
 	if p.arm:
 		sim.armed = not sim.armed
 	if p.respawn:
@@ -987,6 +995,8 @@ func _process(delta: float) -> void:
 		cpu.hud = 0.0
 		_capture_frame()
 		return   # Freeze traffic, partner, effects and audio too; XR tracking is native.
+	if autopilot.on and replay.is_empty() and cruise < 0.0:
+		_autopilot_frame(delta)
 	acc += minf(delta, 0.05)
 	var t_sim := Time.get_ticks_usec()
 	while acc >= DT:
@@ -1749,6 +1759,75 @@ func power_up(kind: String) -> void:
 	print("POWER-UP: %s at %.0f mph" % [kind, _kmh() / 1.609344])
 
 
+## The autopilot taken (true) or given back (view/autopilot.gd): P at a desk, the left stick flicked
+## across in the cockpit, the quick menu's OPTIONS page. -> whether it now has the craft. It flies
+## to the city the dash points at.
+func set_autopilot(want: bool, why := "") -> bool:
+	if not want:
+		if autopilot.on:
+			autopilot.disengage(why)
+			_flash("AUTOPILOT OFF" + (("  /  " + why) if why != "" else ""))
+			print("AUTOPILOT: off%s" % ((" (" + why + ")") if why != "" else ""))
+		return false
+	var city := -1
+	if sim.kind == "network":
+		city = net_target if net_target >= 0 else _net_next_target()
+	if not autopilot.engage(sim, city):
+		_flash("NO AUTOPILOT  /  " + String(autopilot.why_off))
+		print("AUTOPILOT: refused (%s)" % autopilot.why_off)
+		return false
+	_autopilot_let_go = false
+	var mph := roundi(float(autopilot.cruise) * 2.236936)
+	_flash("AUTOPILOT  /  TO %s AT %d MPH" % [String(sim.cities[autopilot.target].name).to_upper(), mph])
+	print("AUTOPILOT: on, to %s at %d mph (%s)" % [sim.cities[autopilot.target].name, mph, autopilot.next_text()])
+	return true
+
+
+## The hands while it flies: once they have let go of what they held when it was taken, a lever or
+## a brake moved takes the craft back.
+func _autopilot_hands(lever: float, brake: float) -> bool:
+	if not autopilot.on:
+		return false
+	if not _autopilot_let_go:
+		_autopilot_let_go = lever < AUTOPILOT_LET_GO and brake < AUTOPILOT_LET_GO
+		return false
+	if lever > AUTOPILOT_TAKE or brake > AUTOPILOT_TAKE:
+		set_autopilot(false, "YOU HAVE HER")
+		return true
+	return false
+
+
+## A frame of the autopilot: its levers and brakes in place of the hands', and the handling it wants
+## asked for as the MODE switch asks. If it has stopped flying the craft is the pilot's again.
+func _autopilot_frame(delta: float) -> void:
+	var cars: Array = traffic_net.cars if traffic_net and "cars" in traffic_net else []
+	var u: Dictionary = autopilot.fly(sim, net_target if net_target >= 0 else int(autopilot.target), cars, delta)
+	for e: String in autopilot.events:
+		if e == "arrived" or e == "replanned":
+			print("AUTOPILOT: %s, now to %s (%s)" % [e, sim.cities[autopilot.target].name if autopilot.target >= 0 else "?", autopilot.next_text()])
+	autopilot.events.clear()
+	if u.is_empty():
+		_flash("AUTOPILOT OFF  /  " + String(autopilot.why_off))
+		print("AUTOPILOT: gave the craft back (%s)" % autopilot.why_off)
+		_autopilot_given_back()
+		return
+	inp.thrL = u.thrL
+	inp.thrR = u.thrR
+	inp.brkL = u.brkL
+	inp.brkR = u.brkR
+	inp.burner = false
+	inp.boost = false
+	inp.reignite = true            # (an engine that goes out is relit: nobody's thumb is on A)
+	var have: String = handling_ask if handling_ask != "" else String(sim.hwant)
+	if String(u.handling) != have:
+		ask_handling(String(u.handling))
+
+
+## Overridable: it has given the craft back by itself (the route ended, a crash, off the road).
+func _autopilot_given_back() -> void:
+	pass
+
+
 ## What the boost is doing, for a readout: nothing, one stage (the ARM button held, or a gate's
 ## surge), or both at once.
 func boost_text() -> String:
@@ -2185,7 +2264,7 @@ func _update_hud() -> void:
 	if minimap_2d and minimap_2d.visible:
 		minimap_2d.show_frame(minimap.update(cam_th, get_process_delta_time()))
 	var mode_txt: String = {"ramjet": "RAMJET", "burner": "AFTERBURNER"}.get(sim.mode, "RAMJET ARMED" if sim.armed else "")
-	mode_txt += boost_text()
+	mode_txt += boost_text() + autopilot.suffix()
 	hud.text = "%4d mph   %s   %s\nTHR %.2f | %.2f   BRK %.2f | %.2f   HEAT %d%% | %d%%   HP %d%% | %d%%   BAT %d%%   %s\n%s" % [
 		_kmh() / 1.609344, cues.readout(), _hud_progress(false), inp.thrL, inp.thrR, inp.brkL, inp.brkR,
 		sim.eL.heat * 100, sim.eR.heat * 100, sim.eL.health * 100, sim.eR.health * 100, sim.battery * 100, mode_txt,

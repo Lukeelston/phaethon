@@ -76,6 +76,9 @@ Left harder         Steer left
 Both grip buttons   Air brakes; individual grips brake their own side
 Right stick up/down Speedcraft gears 1-4; Starfighter stays in its single gear
 Left stick up/down  Afterburner on/off; Starfighter or Speedcraft fourth gear
+Left stick across   Autopilot on / off (the Network): it flies to the city the dash
+                    points at. A trigger or a grip takes the craft back. While it
+                    flies, right stick up/down sets its speed.
 A                   Reignite engines
 B tap               Arm ramjet
 B hold              Boost: extra thrust while held

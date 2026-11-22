@@ -107,6 +107,21 @@ static var _options_loaded := false       # (both read once a run)
 # disarms the ramjet as it always has (on the way up now, not the way down); held past BOOST_HOLD it
 # is the sims' inp.boost for as long as it is held, and arms nothing.
 const BOOST_HOLD := 0.35
+# The autopilot (view/autopilot.gd; Luke: "Add autopilot."). Every button on the two controllers has a job
+# (X repairs, Y restarts and flips the handling, A relights and picks the target, B arms and boosts, the stick
+# clicks recentre, the menu button is the menu) and so have the sticks up and down (the burner, the gears). Across
+# is free: the LEFT stick flicked to either side takes the autopilot or gives the craft back, in the trigger
+# scheme. Engaged, a trigger or a grip pulled gives her back at once (CraftView.AUTOPILOT_TAKE, once the hands
+# have let go of what they held), the right stick's flicks nudge its speed in place of the gears, and it shifts
+# for itself. The quick menu's OPTIONS page has the same switch, for the other schemes.
+const AUTO_FLICK := 0.8              # the left stick this far across ...
+const AUTO_FLICK_UP := 0.45          # ... and no more than this up or down (that is the burner's)
+const AUTO_SHIFT_UP := 0.9           # it shifts up at these revs ...
+const AUTO_SHIFT_CRUISE := 0.5       # ... or, holding its speed, whenever the next gear would still turn this fast
+const AUTO_SHIFT_DOWN := 0.42        # ... and down when the revs sag under this (the pull builds over the first 40%)
+var _auto_flick := false             # the left stick is out from a flick: no more till it is back
+var _auto_nudge := false             # ... and the right, from a nudge
+var _auto_shift_t := 0.0             # s till it may shift again (its flick is seen to come back between)
 const BOOST_TICK := 0.12                  # s between the ticks in both hands while it burns
 var boosting := false                     # B is being held past BOOST_HOLD
 var _b_held := 0.0
@@ -865,6 +880,7 @@ func _read_input(delta: float) -> void:
 		# (the gearbox goes by the speed of the air the craft meets: half its ground speed on the Aurora Line)
 		"airspeed": sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy) / sim.line_speed(),
 		"sf": sim.hblend}
+	_autopilot_controls(c, l, r, delta)
 	var q: Dictionary = quest.update(c, delta)
 	if q.shift != 0:   # a shift: a click in the right hand (up firmer than down)
 		_buzz(r, 0.8 if q.shift > 0 else 0.5, 0.05 if q.shift > 0 else 0.03)
@@ -974,10 +990,93 @@ func _read_input(delta: float) -> void:
 				startup_work(String(hit[0]), int(hit[1]), hand)
 	startup.gears = quest.scheme == "triggers" and quest.gear >= 1      # (a gearbox to try in the run-up)
 	startup.step(delta, [inp.thrL, inp.thrR], quest.display_gear(), [l.get_float("grip"), r.get_float("grip")])
-	if coach.on and not coach.done:
+	if coach.on and not coach.done and not autopilot.on:
 		_coach_step(delta, [l.get_float("grip"), r.get_float("grip")])
 	_apply_startup(delta)
 	_diag(delta, l, r, p)
+
+
+## The autopilot's control and the hands' part while it flies, a frame (see AUTO_FLICK). `c` is the
+## controllers' snapshot before the control scheme reads it: engaged, the sticks and the triggers in
+## it are the autopilot's (its own gear shifts on the right stick, nothing else).
+func _autopilot_controls(c: Dictionary, l: XRController3D, r: XRController3D, delta: float) -> void:
+	var ls: Vector2 = c.ls
+	if absf(ls.x) < 0.3:
+		_auto_flick = false
+	elif quest.scheme == "triggers" and not _auto_flick and not _await_neutral_controls and absf(ls.x) > AUTO_FLICK and absf(ls.y) < AUTO_FLICK_UP:
+		_auto_flick = true
+		_autopilot_toggle(l, r)
+	if not autopilot.on:
+		return
+	if not startup.is_hot():       # the parking brake set, an engine shut down: she is not flying
+		set_autopilot(false, "PARKED")
+		_autopilot_given_back()
+		return
+	if _autopilot_hands(maxf(float(c.lt), float(c.rt)), maxf(float(c.lg), float(c.rg))):
+		_autopilot_given_back()
+		return
+	var rs: Vector2 = c.rs
+	if absf(rs.y) < QuestControlsScript.SHIFT_OFF:
+		_auto_nudge = false
+	elif not _auto_nudge and absf(rs.y) > QuestControlsScript.SHIFT_ON:
+		_auto_nudge = true
+		autopilot.nudge(1 if rs.y > 0.0 else -1)
+		if r:
+			_buzz(r, 0.5, 0.04)
+	c.ls = Vector2.ZERO
+	c.rs = Vector2(0.0, _autopilot_shift(float(c.airspeed), delta))
+	c.lt = 0.0
+	c.rt = 0.0
+	c.lg = 0.0
+	c.rg = 0.0
+
+
+## Take the autopilot or give the craft back, with the hands told: a chime and a tick for taken,
+## two taps for refused (cold on the pad, off the Network, off the road).
+func _autopilot_toggle(l: XRController3D, r: XRController3D) -> void:
+	if autopilot.on:
+		set_autopilot(false)
+		_autopilot_given_back()
+		return
+	var took: bool = startup.is_hot() and set_autopilot(true)
+	if took:
+		_sound("chime")
+	for hand in [l, r]:
+		if hand:
+			_buzz(hand, 0.7 if took else 0.4, 0.08 if took else 0.03)
+			if not took:
+				_buzz(hand, 0.4, 0.03, 0.08)
+	if not took and not startup.is_hot():
+		_flash("NO AUTOPILOT  /  START HER FIRST")
+
+
+## It has given the craft back (asked or not): the pilot is told in both hands.
+func _autopilot_given_back() -> void:
+	_sound("chime")
+	for side in ["left", "right"]:
+		if hands.has(side) and hands[side]:
+			_buzz(hands[side], 0.8, 0.12)
+
+
+## The gearbox under the autopilot: a flick of the right stick's worth (+1 up, -1 down, 0), as a
+## pilot shifts: up at the top of the revs, and once it is holding its speed up into the highest
+## gear that still pulls (so she cruises on a low note, not on the limiter); down when the revs sag.
+func _autopilot_shift(airspeed: float, delta: float) -> float:
+	_auto_shift_t = maxf(0.0, _auto_shift_t - delta)
+	if quest.gear < 1 or quest.starfighter or _auto_shift_t > 0.0:
+		return 0.0
+	var top: int = QuestControlsScript.GEARS.size() - 1
+	var up := false
+	if quest.gear < top:
+		var next_revs: float = airspeed / (float(QuestControlsScript.GEARS[quest.gear + 1][2]) * QuestControlsScript.V_TOP_SPEED)
+		up = quest.rpm >= AUTO_SHIFT_UP or (String(autopilot.status) == "HOLDING" and next_revs >= AUTO_SHIFT_CRUISE)
+	if up:
+		_auto_shift_t = 0.5
+		return 1.0
+	if quest.gear > 1 and quest.rpm < AUTO_SHIFT_DOWN:
+		_auto_shift_t = 0.5
+		return -1.0
+	return 0.0
 
 
 ## The ramjet ARM button, a frame: -> "arm" as a tap ends (it came up inside BOOST_HOLD), "boost"
@@ -1148,6 +1247,7 @@ func _menu_items() -> Array:
 		return [{"key": "consumables", "label": "HEAT AND ENERGY", "value": "ON" if consumables else "OFF"},
 			{"key": "powerups", "label": "POWER-UPS", "value": "ON" if power_ups_on else "OFF"},
 			{"key": "field", "label": "AVOIDANCE FIELD", "value": "ON" if avoid_on else "OFF"}] + _race_menu_items() + [
+			{"key": "autopilot", "label": "AUTOPILOT", "value": "ON" if autopilot.on else "OFF"},
 			# (NOSE came here from the first page, which is full at ten lines: an eleventh ran off its panel)
 			{"key": "nose", "label": "NOSE", "value": "CLOSED" if CraftModelScript.nose_closed else "OPEN"},
 			{"key": "back", "label": "BACK"}]
@@ -1271,6 +1371,13 @@ func menu_choose() -> bool:
 			var field_at: int = menu.at
 			menu.items = _menu_items()
 			menu.at = field_at
+			_menu_show()
+			return true
+		"autopilot":                 # the autopilot, from the moment the menu closes (in flight: the left stick flicked across)
+			_autopilot_toggle(hands.get("left"), hands.get("right"))
+			var at_auto: int = menu.at
+			menu.items = _menu_items()
+			menu.at = at_auto
 			_menu_show()
 			return true
 		"racers":      # the racing pilots, now and from now on (switched on mid-lap they start from the grid)
@@ -1533,6 +1640,11 @@ func _hud_progress(in_cockpit: bool) -> String:
 		if approach_display:
 			approach_display.set_message(page)
 		return coach.line()
+	page = autopilot.message()     # the autopilot has her: where it is taking her, and how to take her back
+	if page != "":
+		if approach_display:
+			approach_display.set_message(page)
+		return autopilot.line()
 	if sim.kind != "network":      # (the projector is under the roof on every course; only the Network has guidance for it,
 		if approach_display:        # and Eridanus its race: the pilot's place and the gaps)
 			approach_display.set_message(race.page() if race != null else "")
@@ -1897,7 +2009,7 @@ func _update_hud() -> void:
 		tow_meter.set_shader_parameter("loads", Vector2(craft.cable_strain[0], craft.cable_strain[1]))
 	_read_g()
 	dashboard.show_state({
-		"mph": kmh / 1.609344, "kmh": kmh, "mach": cues.mach, "backlight": lerpf(1.0, 0.5, maxf(1.0 if light_preset == "twilight" else 0.0, Outlook.darkness())), "mach_line": cues.readout() + boost_text(), "progress": progress,
+		"mph": kmh / 1.609344, "kmh": kmh, "mach": cues.mach, "backlight": lerpf(1.0, 0.5, maxf(1.0 if light_preset == "twilight" else 0.0, Outlook.darkness())), "mach_line": cues.readout() + boost_text() + autopilot.suffix(), "progress": progress,
 		"footer": "%s   /   %s" % [handling_text(), ctl],
 		"points": int(_skill_shown.get("points", 0)) if _skill_on else 0, "feat": String(_skill_shown.get("award", "")) if _skill_on else "", "feat_age": float(_skill_shown.get("age", 1e9)),
 		"thr": [inp.thrL * startup.engine_k(0), inp.thrR * startup.engine_k(1)],
