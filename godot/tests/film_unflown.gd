@@ -1,7 +1,7 @@
 ## A film of what has been built and not yet flown, for looking at without a headset: one scene a
 ## run, recorded by the engine's movie writer with the game's own sound. Run windowed:
 ## --xr-mode off --resolution 1280x720 --fixed-fps 60 --write-movie FILE.avi
-## -s res://tests/film_unflown.gd -- --out=DIR --scene=start|climb|snow|sweep|hyperion
+## -s res://tests/film_unflown.gd -- --out=DIR --scene=start|climb|snow|sweep|hyperion|shaft
 ## The world streams in before the scene begins: FILM_BEGIN and FILM_END give the seconds of the film
 ## to keep, FILM lines the captions and FILMT lines where the craft was, twice a second.
 ## start is worked through the start-up's own calls and then flown on the levers; climb is flown
@@ -11,6 +11,7 @@
 extends "res://tests/render_terminal_art.gd"
 
 const Sequence := preload("res://vr/startup_sequence.gd")
+const ShaftSim := preload("res://sim/craft_sim.gd")
 const Controls := preload("res://input/quest_controls.gd")
 const DT := 1.0 / 60.0
 const LEVEL := Vector3(3, 0, 0)
@@ -222,6 +223,8 @@ func _run() -> void:
 			ok = await _sweep()
 		"hyperion":
 			ok = await _hyperion()
+		"shaft":
+			ok = await _shaft()
 		_:
 			push_error("No such scene: " + scene)
 			ok = false
@@ -303,6 +306,57 @@ func _climb() -> bool:
 	await _fly_to(7262, 420.0, Vector3(58, 0, 0))
 	await _fly_to(7290, 420.0, LEVEL)
 	return true
+
+
+## A shaft (the vertical turnaround at a highway's end), hands off: slowly into its foot and up the wall,
+## then fast over the top and out. Both levers are the same the whole way; nothing steers. The captions
+## say how far the craft has moved across the road since it began, and how far its nose is off the road's
+## own direction.
+func _shaft() -> bool:
+	var road := -1
+	for r in ShaftSim.NET_SHAFTS.size():
+		if int(ShaftSim.NET_SHAFTS[r][0]) == 51:      # TE3-: the shortest
+			road = r
+	var foot := int(ShaftSim.NET_SHAFTS[road][1])
+	var landing := int(ShaftSim.NET_SHAFTS[road][2])
+	if not await _begin("TE3-@%d" % (foot - 45), false, false):
+		return false
+	await _roll(0.5)
+	print("FILM_BEGIN %.3f" % (frames * DT))
+	var began := _shaft_place()
+	_say("The shaft at E3's west end, hands off: both levers the same all the way, nothing steering.")
+	# (_fly_to's hand settles about 130 mph over what it is asked for)
+	await _fly_to(foot - 8, 170.0)
+	_say("Into its foot at 300 mph.")
+	await _fly_to(foot + 60, 170.0, null, 60.0)
+	_say("Up the wall at 300 mph: %s." % _shaft_moved(began))
+	await _fly_to(foot + 130, 170.0, null, 60.0)
+	_say("Now 4,000 mph, over the top upside down. So far %s." % _shaft_moved(began))
+	await _fly_to((foot + landing) / 2, 4000.0, null, 60.0)
+	_say("Down the far side, rolling upright: %s." % _shaft_moved(began))
+	await _fly_to(landing - 300, 4000.0, null, 60.0)
+	_say("Coming out: %s." % _shaft_moved(began))
+	await _fly_to(landing - 4, 4000.0, null, 30.0)      # (past the landing the road joins its highway: the pod's samples are the highway's from there)
+	_say("Out onto the highway the other way, untouched: %s." % _shaft_moved(began))
+	await _roll(2.5)
+	return true
+
+
+## Where the pod is across its road (m left of the middle, the way the samples run) and how far its nose
+## is off the road's own direction there (degrees).
+func _shaft_place() -> Vector2:
+	var sim = seat.sim
+	var P = sim.pod
+	var R = sim.roads[P.path]
+	sim._nearest_on(P.path, P.x, P.y, P.hint, 12)
+	var i: int = sim._n_i
+	var heading: float = atan2(R.ty[i], R.tx[i]) + (clampf(sim._n_t, 0.0, 1.0) - 0.5) * R.kap[i] * R.len[i]
+	return Vector2(sim._n_lat, rad_to_deg(ShaftSim.wrap_angle(P.th - heading)))
+
+
+func _shaft_moved(began: Vector2) -> String:
+	var now := _shaft_place()
+	return "%.0f m across the road from where it began, its nose %.1f degrees off the road" % [absf(now.x - began.x), absf(now.y)]
 
 
 ## Snow, and an exit's lane: a camera pass down the lane on a main road, through the exit's mouth and on

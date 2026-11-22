@@ -156,6 +156,8 @@ func _frame(a: float) -> Dictionary:
 	var j := int(f)
 	var u := f - j
 	var tangent := Vector2(R.tx[j], R.ty[j]).lerp(Vector2(R.tx[j + 1], R.ty[j + 1]), u).normalized()
+	if R.shaft:   # (a shaft's plan: a sample's chord is its arc's direction at the chord's middle, as NetworkShaft.plan_heading reads it)
+		tangent = Vector2(R.tx[j], R.ty[j]).rotated((u - 0.5) * R.kap[j] * R.len[j])
 	var lateral: float = ((P.x - R.px[i]) * R.nx[i] + (P.y - R.py[i]) * R.ny[i]) * direction
 	out = {"point": Vector2(R.px[j], R.py[j]) + Vector2(R.tx[j], R.ty[j]) * R.len[j] * u, "fw": tangent * direction, "lat": lateral, "width": R.w[j], "f": f, "dir": direction}
 	return out

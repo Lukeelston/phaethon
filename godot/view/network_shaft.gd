@@ -110,7 +110,8 @@ func _build(r: int, i0: int, i1: int, R: float, V: float) -> void:
 		var S := shape(d, R, V)
 		var u: float = S[0]
 		var w: float = S[1]
-		var ky := clampf((d - q) / (2.0 * q + 2.0 * V), 0.0, 1.0)
+		var across := 2.0 * q + 2.0 * V
+		var ky := clampf((d - q) / across, 0.0, 1.0)
 		var y := -OFF + 2.0 * OFF * ky * ky * (3.0 - 2.0 * ky)   # across from the way out's side to the way back's, over the top
 		xs.append(ox + ux * u + yx * y)
 		ys.append(oy + uy * u + yy * y)
@@ -127,6 +128,17 @@ func _build(r: int, i0: int, i1: int, R: float, V: float) -> void:
 			var l2 := l3 * cos(ro) + t3.cross(l3) * sin(ro)
 			n3 = n2
 			l3 = l2
+		# The road also crosses the highway's line on its way over, 200 m in all: the frame's forward is
+		# the centreline's own direction, that crossing included. (It was the shape's alone, so over the
+		# top the lanes ran up to 0.8 degrees across the nose of a craft flying dead straight, and at
+		# 4,000 mph the road slid 20 m/s sideways under it: Luke, "going fast makes it shift slightly".)
+		var slope := 2.0 * OFF * 6.0 * ky * (1.0 - ky) / across      # dy/dd
+		if slope != 0.0:
+			var axis := t3.cross(Vector3(0.0, 1.0, 0.0)).normalized()
+			var tilt := atan(slope)
+			t3 = t3.rotated(axis, tilt)
+			n3 = n3.rotated(axis, tilt)
+			l3 = l3.rotated(axis, tilt)
 		ts.append(_render(t3, ux, uy, yx, yy))
 		ls.append(_render(l3, ux, uy, yx, yy))
 		ns.append(_render(n3, ux, uy, yx, yy))
@@ -174,9 +186,23 @@ func frame(road: int, f: float) -> Basis:
 
 ## The rotation that takes an attitude worked out flat on the road (the sims' plane, render axes) onto
 ## the shaft at sample f.
-func carry(road: int, f: float) -> Basis:
+## `heading_at`: the sample whose plan direction the attitude is laid against, if not f's own (the
+## craft's engines: the pod's. CraftView.shaft_carry_body).
+func carry(road: int, f: float, heading_at := -1.0) -> Basis:
+	return frame(road, f) * Basis(Vector3.UP, plan_heading(road, heading_at if heading_at >= 0.0 else f) - PI / 2.0).inverse()
+
+
+## The plan road's own direction at sample f (radians). A shaft's plan is straights and arcs, and each
+## sample knows its own curvature (kap): its tangent is its chord's, which is the arc's direction at the
+## chord's middle, so along the chord the direction runs half the sample's turn either side of that. This
+## is the direction the sims turn the craft with (CraftSim.shaft_turn). (Read as the chord's at its
+## start, eased to the next chord's, a craft flying dead straight up a shaft was drawn half a sample's
+## turn off the road, 0.12 to 0.19 degrees, and swung through twice that where the plan's arcs change
+## hands.) Any other road: its samples' tangents, eased from one to the next, as before.
+func plan_heading(road: int, f: float) -> float:
 	var R = sim.roads[road]
 	var i := clampi(int(f), 0, R.N - 2)
 	var e := clampf(f - i, 0.0, 1.0)
-	var th := atan2(lerpf(R.ty[i], R.ty[i + 1], e), lerpf(R.tx[i], R.tx[i + 1], e))
-	return frame(road, f) * Basis(Vector3.UP, th - PI / 2.0).inverse()
+	if R.shaft:
+		return atan2(R.ty[i], R.tx[i]) + (e - 0.5) * R.kap[i] * R.len[i]
+	return atan2(lerpf(R.ty[i], R.ty[i + 1], e), lerpf(R.tx[i], R.tx[i + 1], e))

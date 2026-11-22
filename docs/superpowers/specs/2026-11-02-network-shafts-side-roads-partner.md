@@ -48,6 +48,9 @@ every jump now exists every way through its crossing.
 ## Limits, as built
 
 - The minimap shows a shaft's plan (a bulb), not its shape: read it as a marker with your arrow going round.
-- Hands off, the craft creeps sideways up to ~90 m on its way through a shaft (the tow bar's reaction to the
-  plan's bulb). It's inside the road and a touch corrects it; a slow pass can scrape the wall's forcefield.
+- ~~Hands off, the craft creeps sideways up to ~90 m on its way through a shaft (the tow bar's reaction to the
+  plan's bulb). It's inside the road and a touch corrects it; a slow pass can scrape the wall's forcefield.~~
+  Fixed 2026-11-22 (Luke: "enter and exit straight with no sideways or spin"): the bulb used to turn each body
+  by the road under itself, which bent the craft along the plan's arc; it carries the craft whole now, by the
+  road under the pod. Hands off it moves under 0.6 m across in a whole shaft, at 300 to 4,000 mph.
 - Far off, the shaft's silhouette is a flat ribbon; the hoops and lights come in with the chunks at 20 km.

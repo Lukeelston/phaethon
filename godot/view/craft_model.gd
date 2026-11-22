@@ -190,6 +190,7 @@ var bank := [0.0, 0.0, 0.0]          # current lean, radians, + = left side down
 var _lat := [0.0, 0.0, 0.0]          # smoothed lateral acceleration, g
 var roll_rate_peak := 0.0            # fastest pod roll so far, rad/s (tests read and reset it)
 var _prev_v := []                    # last frame's [vx, vy] per body
+var _prev_turn := 0.0                # ... and how far the shafts had turned the craft by then (CraftSim.carry_turn)
 
 
 func build(v) -> void:
@@ -1139,17 +1140,29 @@ static func ease_bank(bank_now: float, lat_s: float, lat_g: float, delta: float)
 
 func _update_bank(sim, delta: float) -> void:
 	var all := [sim.eL, sim.eR, sim.pod]
+	# A shaft's bulb turns the craft with its road: not a turn you lean into. The sim counts that turn
+	# (carry_turn), and the frame's share of it comes out of the velocity the frame began with before the
+	# load is read. (It was the curvature under each body times its speed squared: right while the
+	# curvature held, and a frame of up to 120 g where the plan's arcs change hands, which rocked the
+	# craft at the foot and over the top.)
+	var counted = sim.get("carry_turn")
+	var turn_now: float = float(counted) if counted != null else 0.0
 	if _prev_v.is_empty() or delta <= 0.0:
 		_prev_v = [[all[0].vx, all[0].vy], [all[1].vx, all[1].vy], [all[2].vx, all[2].vy]]
+		_prev_turn = turn_now
 		return
+	var turned := turn_now - _prev_turn
+	_prev_turn = turn_now
+	if absf(turned) > 1.0:   # (another sim's count)
+		turned = 0.0
+	var ct := cos(turned)
+	var st := sin(turned)
 	for k in 3:
 		var b = all[k]
-		var ax: float = (b.vx - _prev_v[k][0]) / delta
-		var ay: float = (b.vy - _prev_v[k][1]) / delta
+		var ax: float = (b.vx - (ct * _prev_v[k][0] - st * _prev_v[k][1])) / delta
+		var ay: float = (b.vy - (st * _prev_v[k][0] + ct * _prev_v[k][1])) / delta
 		_prev_v[k] = [b.vx, b.vy]
 		var lat_g: float = (-sin(b.th) * ax + cos(b.th) * ay) / 9.81
-		if sim.kind == "network" and not b.off_road and sim.roads[b.path].shaft:   # a shaft's bulb carries you: not a turn you lean into
-			lat_g -= sim.roads[b.path].kap[b.hint] * (b.vx * b.vx + b.vy * b.vy) / 9.81
 		if absf(lat_g) > 150.0 or sim.crash_t > 0.0:   # respawn / crash: not a turn
 			lat_g = 0.0
 		lat_g *= b.grip   # airborne: nothing to lean against
@@ -1206,7 +1219,9 @@ func sync(sim, inp: Dictionary, delta: float) -> void:
 		# the deck lock, the jumps)
 		var climb := 0.0 if sim.kind == "network" else slope_pitch(view, e.x, e.y, e.th, maxf(4.0, pitch_half(vh)))
 		var lean := clampf(bank[k] + view.surface(e.x, e.y).y, -ROLL_MAX, ROLL_MAX)   # lean, plus the track's banking
-		var Qe: Basis = view.shaft_carry_at(e.x, e.y) if sim.kind == "network" else Basis.IDENTITY
+		var Qe: Basis = Basis.IDENTITY
+		if sim.kind == "network":   # (its heading against the road's direction under the pod: the craft is carried whole)
+			Qe = view.shaft_carry_body(e.x, e.y) if view.has_method("shaft_carry_body") else view.shaft_carry_at(e.x, e.y)
 		if not Qe.is_equal_approx(Basis.IDENTITY):   # up a shaft: flat, carried onto its shape (its climb is the shape's)
 			eng.basis = Qe * Basis.from_euler(Vector3(0.0, e.th - PI / 2.0, lean))
 		elif sim.pod.path > 0 and sim.kind != "network":   # the shade line: flat, carried onto the twisted road

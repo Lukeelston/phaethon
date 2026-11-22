@@ -555,6 +555,8 @@ class TrackPath:
 	var kap := PackedFloat64Array() # the Network: per sample, a shaft's bulb's curvature (it turns a body with the road)
 	var gs := PackedFloat64Array()  # ... a shaft's slope along the climb (gravity pulls along it)
 	var shaft := false              # ... a shaft (NET_SHAFTS)
+	var sh0 := 0                    # ... its feet: the pull-up sample and the landing sample
+	var sh1 := 0
 	var deck := false               # ... a deck road (NET_DECK): sampled every NET_STEP of its deck, flown at the speed along it
 
 
@@ -694,6 +696,7 @@ var boost := 0            # the boost's stages this step: the held one, a power-
 # STARFIGHTER only engages below P.sfEngageV, then the handling keys blend over P.modeBlendT s.
 var hwant := "speed"
 var hblend := 0.0
+var carry_turn := 0.0      # the Network: how far the shafts' bulbs have turned the craft, radians, summed (the views take a frame's share out of what they call a turn)
 var _hk: Array = []      # the handling keys that blend (not given explicitly in the overrides)
 var _h0 := {}
 var _h1 := {}
@@ -1354,6 +1357,8 @@ func _build_network() -> void:
 	for sh in NET_SHAFTS:
 		var Rs: TrackPath = roads[int(sh[0])]
 		Rs.shaft = true
+		Rs.sh0 = int(sh[1])
+		Rs.sh1 = int(sh[2])
 		Rs.gs.resize(Rs.N)
 		for i in Rs.N:
 			if i < int(sh[1]) or i >= int(sh[2]):
@@ -1390,6 +1395,38 @@ static func net_cell(x: float, y: float) -> int:
 
 ## A road's height at (fractional) sample i: Hermite cubics between its keys [sample, m, slope] (zero
 ## slopes: a smoothstep), 0 off them. Real in the sims now (the deck lock), the view's decks too.
+## A shaft road's turn (radians, + to the left going up its samples) over ds m of its centreline, for a
+## body `off` m along sample i's chord and `lat` m left of it: the curvature is a sample's own (kap), so
+## a stretch that crosses samples takes each one's share. ds < 0 is down the samples. The body's place
+## along the chord is first read as a place on the centreline: off the road's middle its lane's arc is
+## shorter or longer than the centreline's, and meets the next sample's where the two chords' corner is
+## halved, not square to this chord. Mirrors sim-core.js's shaftTurn.
+func shaft_turn(Rd: TrackPath, i: int, off: float, lat: float, ds: float) -> float:
+	if Rd.kap[i] != 0.0:
+		off = Rd.len[i] / 2.0 + (off - Rd.len[i] / 2.0) / (1.0 - Rd.kap[i] * lat)
+	while off < 0.0 and i > 0:
+		i -= 1
+		off += Rd.len[i]
+	while off > Rd.len[i] and i < Rd.N - 1:
+		off -= Rd.len[i]
+		i += 1
+	var way := 1 if ds >= 0.0 else -1
+	var turn := 0.0
+	var left := absf(ds)
+	var guard := 0
+	while left > 0.0 and guard < 64:
+		guard += 1
+		var room: float = maxf(0.0, (Rd.len[i] - off) if way > 0 else off)
+		if left <= room or ((i >= Rd.N - 1) if way > 0 else (i <= 0)):
+			turn += Rd.kap[i] * left * way
+			break
+		turn += Rd.kap[i] * room * way
+		left -= room
+		i += way
+		off = 0.0 if way > 0 else Rd.len[i]
+	return turn
+
+
 func net_height(road: int, i: float) -> float:
 	var keys: Array = _net_h.get(road, [])
 	var count := keys.size()
@@ -2620,6 +2657,27 @@ func step(inp: Dictionary, dt: float) -> void:
 		deck_road = roads[Pd.path]
 		deck_at = Pd.hint
 		deck_cos = sqrt(1.0 - pow(deck_sine(Pd.path, _road_f(Pd)), 2.0))
+	# the road under the pod, on a shaft (shaft_at -1 off one): what carries the craft; and between its
+	# feet (and a step's reach each side of them) the craft is moved together (mirroring sim-core.js)
+	var shaft_road: TrackPath = roads[Pd.path] if kind == "network" and not Pd.off_road and roads[Pd.path].shaft else null
+	var shaft_at: int = Pd.hint if shaft_road != null else -1
+	var carrying: bool = shaft_road != null and Pd.hint >= shaft_road.sh0 - 2 and Pd.hint <= shaft_road.sh1 + 1
+	var carried: Array[Body] = []
+	# ... and the way its gravity pulls: along the road's own direction under the pod, which round the bulb
+	# is its arc's there, not its sample's chord's (mirroring sim-core.js)
+	var grav_x := 0.0
+	var grav_y := 0.0
+	if shaft_at >= 0 and shaft_road.gs[shaft_at] != 0.0:
+		grav_x = shaft_road.tx[shaft_at]
+		grav_y = shaft_road.ty[shaft_at]
+		if shaft_road.kap[shaft_at] != 0.0:
+			var g_off: float = (Pd.x - shaft_road.px[shaft_at]) * shaft_road.tx[shaft_at] + (Pd.y - shaft_road.py[shaft_at]) * shaft_road.ty[shaft_at]
+			var g_lat: float = (Pd.x - shaft_road.px[shaft_at]) * shaft_road.nx[shaft_at] + (Pd.y - shaft_road.py[shaft_at]) * shaft_road.ny[shaft_at]
+			var bend: float = (g_off - shaft_road.len[shaft_at] / 2.0) * shaft_road.kap[shaft_at] / (1.0 - shaft_road.kap[shaft_at] * g_lat)
+			var gc := cos(bend)
+			var gsn := sin(bend)
+			grav_x = gc * shaft_road.tx[shaft_at] - gsn * shaft_road.ty[shaft_at]
+			grav_y = gsn * shaft_road.tx[shaft_at] + gc * shaft_road.ty[shaft_at]
 	for b: Body in bodies:
 		# in the air (the Network, off the roads), the forces along its path act along it, mirroring
 		# sim-core.js: thrust minus drag scales its climb as it scales its speed (only gravity bends the line)
@@ -2627,14 +2685,25 @@ func step(inp: Dictionary, dt: float) -> void:
 			var vh := sqrt(b.vx * b.vx + b.vy * b.vy)
 			if vh > 50.0:
 				b.vz += (b.fx * b.vx + b.fy * b.vy) / (b.m * vh) * (b.vz / vh) * dt
-		# up a shaft: gravity along the climb; round its bulb the road turns the body with it (half the
-		# turn each side of the move). To the craft that stretch is straight, so the engines stay abreast:
-		# the same turn for both, and the plan's arc longer on its outside (reach), mirroring sim-core.js
+		# up a shaft: gravity along the climb, and round its bulb the road turns the craft with it. To the
+		# craft that stretch is straight (it's the shaft's, in the world), so the craft is carried WHOLE:
+		# one slope and one turn for all three bodies, the road's under the pod (shaft_at), and between
+		# the shaft's feet they are moved together, below. Carried a body at a time, each by the road
+		# under itself, the craft was bent along the plan's arc (the engines are 22 m up the road from
+		# the pod); the cables and the binder know only the plan, and steered it 1.2% further than the
+		# road turned (0.23 deg/s at 4,000 mph), so hands off it crept across to the wall and came out
+		# askew. (Luke: "enter and exit straight with no sideways or spin".) A body the pod is not
+		# with keeps the old rule. Mirrors sim-core.js.
 		var carry := 0.0
 		var reach := 0.0
 		var kh := -1
 		var Rs: TrackPath = null
-		if kind == "network" and not b.off_road and roads[b.path].shaft:
+		var whole: bool = shaft_at >= 0 and not b.off_road and b.path == Pd.path
+		if whole:
+			if shaft_road.gs[shaft_at] != 0.0:
+				b.fx -= b.m * G * shaft_road.gs[shaft_at] * grav_x
+				b.fy -= b.m * G * shaft_road.gs[shaft_at] * grav_y
+		elif kind == "network" and not b.off_road and roads[b.path].shaft:
 			Rs = roads[b.path]
 			var hs: int = b.hint
 			if Rs.gs[hs] != 0.0:
@@ -2648,6 +2717,9 @@ func step(inp: Dictionary, dt: float) -> void:
 		b.vy += b.fy / b.m * dt
 		b.w += b.t / b.inertia * dt
 		b.w *= 1.0 - 0.5 * dt
+		if whole and carrying:
+			carried.append(b)
+			continue
 		if carry != 0.0:
 			var cc := cos(carry / 2.0)
 			var cs := sin(carry / 2.0)
@@ -2673,6 +2745,43 @@ func step(inp: Dictionary, dt: float) -> void:
 		# contact onto the moved surface, never integrates it a second time.
 		if kind == "network" and not b.off_road:
 			_rail_hover(b, dt, true)
+	# Between a shaft's feet the craft moves as on a straight road, in a frame that turns with the road
+	# under the pod. The turn is the road's own over the stretch of its centreline the pod covers in the
+	# step (shaft_turn: taken from the one sample the step began in, each change of curvature left the
+	# craft up to 0.09 deg off the road at 4,000 mph, and 21 m across it by the far foot). The pod goes
+	# round its own lane of the plan's arc (half the turn each side of its move; the arc is longer on
+	# its outside: reach); the others keep their places from it, turned with it, so between themselves
+	# the bodies are exactly where a straight road would have them. Mirrors sim-core.js.
+	if not carried.is_empty():
+		var sa := shaft_at
+		var ds: float = (Pd.vx * shaft_road.tx[sa] + Pd.vy * shaft_road.ty[sa]) * dt
+		var lat_p: float = (Pd.x - shaft_road.px[sa]) * shaft_road.nx[sa] + (Pd.y - shaft_road.py[sa]) * shaft_road.ny[sa]
+		var turn := shaft_turn(shaft_road, Pd.hint, (Pd.x - shaft_road.px[sa]) * shaft_road.tx[sa] + (Pd.y - shaft_road.py[sa]) * shaft_road.ty[sa], lat_p, ds)
+		var reach_p: float = (-(turn / ds) * lat_p) if ds != 0.0 else 0.0
+		var ch := cos(turn / 2.0)
+		var sh := sin(turn / 2.0)
+		var ct := cos(turn)
+		var st := sin(turn)
+		var ox: float = Pd.x
+		var oy: float = Pd.y
+		var ovx: float = Pd.vx
+		var ovy: float = Pd.vy
+		var ux := ch * ovx - sh * ovy
+		var uy := sh * ovx + ch * ovy
+		var us: float = ux * shaft_road.tx[sa] + uy * shaft_road.ty[sa]
+		var px: float = ox + (ux + reach_p * us * shaft_road.tx[sa]) * dt
+		var py: float = oy + (uy + reach_p * us * shaft_road.ty[sa]) * dt
+		for b: Body in carried:
+			var rx: float = b.x - ox + (b.vx - ovx) * dt
+			var ry: float = b.y - oy + (b.vy - ovy) * dt
+			b.x = px + ct * rx - st * ry
+			b.y = py + st * rx + ct * ry
+			var cu: float = b.vx
+			b.vx = ct * cu - st * b.vy
+			b.vy = st * cu + ct * b.vy
+			b.th += b.w * dt + turn
+			_rail_hover(b, dt, true)
+		carry_turn += turn
 	# ... so over the map it has travelled that speed times the cosine. The whole craft is set back by
 	# what the pod's own move over-ran: one shift for all three bodies, so between themselves they move
 	# as on the flat (the views lay them along the slope from the pod: CraftView.body_place), and each

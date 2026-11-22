@@ -693,7 +693,7 @@
     roads.forEach((R) => { R.shaft = false; });
     NET_SHAFTS.forEach(([r, i0, i1]) => {
       const R = roads[r];
-      R.shaft = true;
+      R.shaft = true; R.sh0 = i0; R.sh1 = i1;
       for (let i = 0; i < R.N; i++) {
         const a = R.pts[i];
         if (i < i0 || i >= i1) { a.kap = 0; a.gs = 0; continue; }
@@ -761,6 +761,27 @@
   const netCell = (x, y) => Math.floor(x / NET_CELL) * 4096 + Math.floor(y / NET_CELL);
   // A road's height at (fractional) sample i: Hermite cubics between its keys [sample, m, slope]
   // (zero slopes: a smoothstep), 0 off them.
+  // A shaft road's turn (radians, + to the left going up its samples) over ds m of its centreline, for
+  // a body `off` m along sample i's chord and `lat` m left of it: the curvature is a sample's own (kap),
+  // so a stretch that crosses samples takes each one's share. ds < 0 is down the samples. The body's
+  // place along the chord is first read as a place on the centreline: off the road's middle its lane's
+  // arc is shorter or longer than the centreline's, and meets the next sample's where the two chords'
+  // corner is halved, not square to this chord (taken square, a lane 60 m out changed arcs 0.15 m early
+  // or late and came away 0.005 deg off the road each time).
+  function shaftTurn(R, i, off, lat, ds) {
+    { const a = R.pts[i]; if (a.kap !== 0) off = a.len / 2 + (off - a.len / 2) / (1 - a.kap * lat); }
+    while (off < 0 && i > 0) { i--; off += R.pts[i].len; }
+    while (off > R.pts[i].len && i < R.N - 1) { off -= R.pts[i].len; i++; }
+    const way = ds >= 0 ? 1 : -1;
+    let turn = 0, left = Math.abs(ds);
+    for (let guard = 0; left > 0 && guard < 64; guard++) {
+      const a = R.pts[i], room = Math.max(0, way > 0 ? a.len - off : off);
+      if (left <= room || (way > 0 ? i >= R.N - 1 : i <= 0)) { turn += a.kap * left * way; break; }
+      turn += a.kap * room * way; left -= room;
+      i += way; off = way > 0 ? 0 : R.pts[i].len;
+    }
+    return turn;
+  }
   function netHeight(T, r, i) {
     const K = T.roads[r].hk;
     if (!K) return 0;
@@ -863,7 +884,7 @@
     for (const k of HK) { H0[k] = k in HANDLING.speed ? HANDLING.speed[k] : DEFAULTS[k]; H1[k] = HANDLING.starfighter[k]; }
     const S = {
       P, T, eL: body(P.engineMass, eI), eR: body(P.engineMass, eI), pod: body(P.podMass, pI),
-      hwant: hname, hblend: hname === 'starfighter' ? 1 : 0,
+      hwant: hname, hblend: hname === 'starfighter' ? 1 : 0, carryTurn: 0,
       battery: 1, armed: false, mode: 'normal', boost: 0, binderBroken: false, crashT: 0, time: 0, towU: -1, towSwing: 0,
       lap: 0, lapStart: null, lastLap: null, bestLap: null, visited: new Set(), checkpoint: 0,
       progressI: 0, cables: [{ f: 0 }, { f: 0 }], events: [], rand: xorshift32(P.seed),
@@ -1558,6 +1579,25 @@
         deckAt = T.roads[Pd.path].pts[Pd.hint];
         deckCos = Math.sqrt(1 - deckSine(T, Pd.path, roadF(Pd)) ** 2);
       }
+      // the road under the pod, on a shaft (null off one): what carries the craft; and between its feet
+      // (and a step's reach each side of them) the craft is moved together
+      const shaftRoad = T.kind === 'network' && !Pd.offRoad && T.roads[Pd.path].shaft ? T.roads[Pd.path] : null;
+      const shaftAt = shaftRoad !== null ? shaftRoad.pts[Pd.hint] : null;
+      const carrying = shaftRoad !== null && Pd.hint >= shaftRoad.sh0 - 2 && Pd.hint <= shaftRoad.sh1 + 1;
+      const carried = [];
+      // ... and the way its gravity pulls: along the road's own direction under the pod, which round the
+      // bulb is its arc's there, not its sample's chord's (a chord's direction is the arc's only at its
+      // middle; a lane off the road's middle spends each sample off-centre, and 300 mph up a wall the
+      // difference carried it 3 m across)
+      let gravX = 0, gravY = 0;
+      if (shaftAt !== null && shaftAt.gs !== 0) {
+        gravX = shaftAt.tx; gravY = shaftAt.ty;
+        if (shaftAt.kap !== 0) {
+          const off = (Pd.x - shaftAt.x) * shaftAt.tx + (Pd.y - shaftAt.y) * shaftAt.ty, lat = (Pd.x - shaftAt.x) * shaftAt.nx + (Pd.y - shaftAt.y) * shaftAt.ny;
+          const bend = (off - shaftAt.len / 2) * shaftAt.kap / (1 - shaftAt.kap * lat), c = Math.cos(bend), s = Math.sin(bend);
+          gravX = c * shaftAt.tx - s * shaftAt.ty; gravY = s * shaftAt.tx + c * shaftAt.ty;
+        }
+      }
       for (const b of S.bodies) {
         // in the air (the Network, off the roads), the forces along its path act along it: thrust
         // minus drag scales its climb as it scales its speed, so only gravity bends the line (let
@@ -1566,19 +1606,27 @@
           const vh = Math.sqrt(b.vx * b.vx + b.vy * b.vy);
           if (vh > 50) b.vz += (b.fx * b.vx + b.fy * b.vy) / (b.m * vh) * (b.vz / vh) * dt;
         }
-        // up a shaft: gravity along the climb; round its bulb the road turns the body with it (half the
-        // turn each side of the move). To the craft that stretch is straight (it's the shaft's, in the
-        // world), so the two engines stay abreast: the same turn for both, and the plan's arc is longer
-        // on its outside (reach: a body goes that much further along it for the same speed), or the
-        // outer engine would fall behind and the pair yaw.
+        // up a shaft: gravity along the climb, and round its bulb the road turns the craft with it. To the
+        // craft that stretch is straight (it's the shaft's, in the world), so the craft is carried WHOLE:
+        // one slope and one turn for all three bodies, the road's under the pod (shaftAt), and between
+        // the shaft's feet they are moved together, below. Carried a body at a time, each by the road
+        // under itself, the craft was bent along the plan's arc (the engines are 22 m up the road from
+        // the pod); the cables and the binder know only the plan, and steered it 1.2% further than the
+        // road turned (0.23 deg/s at 4,000 mph), so hands off it crept across to the wall and came out
+        // askew. (Luke: "enter and exit straight with no sideways or spin".) A body the pod is not
+        // with keeps the old rule.
         let carry = 0, reach = 0, kt = null;
-        if (T.kind === 'network' && !b.offRoad && T.roads[b.path].shaft) {
+        const whole = shaftAt !== null && !b.offRoad && b.path === Pd.path;
+        if (whole) {
+          if (shaftAt.gs !== 0) { b.fx -= b.m * G * shaftAt.gs * gravX; b.fy -= b.m * G * shaftAt.gs * gravY; }
+        } else if (T.kind === 'network' && !b.offRoad && T.roads[b.path].shaft) {
           const a = T.roads[b.path].pts[b.hint];
           if (a.gs !== 0) { b.fx -= b.m * G * a.gs * a.tx; b.fy -= b.m * G * a.gs * a.ty; }
           if (a.kap !== 0) { carry = a.kap * (b.vx * a.tx + b.vy * a.ty) * dt; reach = -a.kap * ((b.x - a.x) * a.nx + (b.y - a.y) * a.ny); kt = a; }
         }
         b.vx += b.fx / b.m * dt; b.vy += b.fy / b.m * dt; b.w += b.t / b.I * dt;
         b.w *= 1 - 0.5 * dt;
+        if (whole && carrying) { carried.push(b); continue; }
         if (carry !== 0) { const c = Math.cos(carry / 2), s = Math.sin(carry / 2), u = b.vx; b.vx = c * u - s * b.vy; b.vy = s * u + c * b.vy; }
         b.x += b.vx * dt; b.y += b.vy * dt; b.th += b.w * dt + carry;
         if (kt) { const vs = b.vx * kt.tx + b.vy * kt.ty; b.x += reach * vs * kt.tx * dt; b.y += reach * vs * kt.ty * dt; }
@@ -1586,6 +1634,31 @@
         // Match the moved position: a pre-move deck height sinks a climbing craft by speed * dt.
         // Catch springs already advanced above; afterMove projects their contact only.
         if (T.kind === 'network' && !b.offRoad) railHover(b, dt, true);
+      }
+      // Between a shaft's feet the craft moves as on a straight road, in a frame that turns with the
+      // road under the pod. The turn is the road's own over the stretch of its centreline the pod covers
+      // in the step (shaftTurn: taken from the one sample the step began in, each change of curvature
+      // left the craft up to 0.09 deg off the road at 4,000 mph, and 21 m across it by the far foot).
+      // The pod goes round its own lane of the plan's arc (half the turn each side of its move; the arc
+      // is longer on its outside: reach); the others keep their places from it, turned with it, so
+      // between themselves the bodies are exactly where a straight road would have them.
+      if (carried.length) {
+        const a = shaftAt, ds = (Pd.vx * a.tx + Pd.vy * a.ty) * dt;
+        const lat = (Pd.x - a.x) * a.nx + (Pd.y - a.y) * a.ny;
+        const turn = shaftTurn(shaftRoad, Pd.hint, (Pd.x - a.x) * a.tx + (Pd.y - a.y) * a.ty, lat, ds);
+        const reach = ds !== 0 ? -(turn / ds) * lat : 0;
+        const ch = Math.cos(turn / 2), sh = Math.sin(turn / 2), c = Math.cos(turn), s = Math.sin(turn);
+        const ox = Pd.x, oy = Pd.y, ovx = Pd.vx, ovy = Pd.vy;
+        const ux = ch * ovx - sh * ovy, uy = sh * ovx + ch * ovy, us = ux * a.tx + uy * a.ty;
+        const px = ox + (ux + reach * us * a.tx) * dt, py = oy + (uy + reach * us * a.ty) * dt;
+        for (const b of carried) {
+          const rx = b.x - ox + (b.vx - ovx) * dt, ry = b.y - oy + (b.vy - ovy) * dt;
+          b.x = px + c * rx - s * ry; b.y = py + s * rx + c * ry;
+          const u = b.vx; b.vx = c * u - s * b.vy; b.vy = s * u + c * b.vy;
+          b.th += b.w * dt + turn;
+          railHover(b, dt, true);
+        }
+        S.carryTurn += turn;
       }
       // ... so over the map it has travelled that speed times the cosine. The whole craft is set back by what
       // the pod's own move over-ran: one shift for all three bodies, so between themselves they move as on

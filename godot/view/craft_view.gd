@@ -1164,6 +1164,22 @@ func shaft_carry_at(x: float, y: float) -> Basis:
 	return Basis.IDENTITY if f < 0.0 else network_world.shaft.carry(sim.pod.path, f)
 
 
+## The same for one of the craft's own bodies at plan point (x, y): its place on the shaft is its own,
+## its heading is laid against the road's direction under the POD. The sims carry the craft round a
+## shaft's bulb whole, turned with the road under the pod (CraftSim.step: `carried`), so that is the
+## direction an engine 22 m up the road still flies along. (Against the road's direction under itself an
+## engine flying dead straight was drawn a quarter of a degree toed across, and swung through half a
+## degree where the plan's arcs change hands.)
+func shaft_carry_body(x: float, y: float) -> Basis:
+	if sim.kind != "network" or sim.pod.path == CraftSimScript.NET_PRESSURE[0]:
+		return shaft_carry_at(x, y)
+	var f := _shaft_f(x, y)
+	if f < 0.0:
+		return Basis.IDENTITY
+	var at_pod := _shaft_f(sim.pod.x, sim.pod.y)
+	return network_world.shaft.carry(sim.pod.path, f, at_pod)
+
+
 ## Project on the sealed straight in double precision before moving into the
 ## floating-origin world. The same chart carries the engines, cables and eyes.
 func _pressure_station(x: float, y: float) -> float:

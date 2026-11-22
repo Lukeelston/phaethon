@@ -326,8 +326,10 @@ traffic and racers, jumps and the open ground, and the cities' GPs.
   4,000 mph. Nothing to steer, lit hoops every 190 m going past. Gravity's real along it: with the
   levers shut at 300 mph you stop about 2,000 ft up and slide back. **In the sims** a shaft is flat, as
   the shade line's corkscrews are: a paperclip in plan (its `T` road, out along the highway's right, a
-  3.6 km bulb, back along its left) whose bulb carries the bodies round (`kap`: nothing to steer, and it
-  holds the engines abreast) and whose height is the real altitude (`gs`: gravity along the slope);
+  3.6 km bulb, back along its left) whose bulb carries the craft round whole (`kap`: all three bodies
+  turn with the road under the pod, so hands off it keeps its place across the road and comes out
+  straight, at any speed; `tools/shaft_straight.js` and `tests/test_shaft_straight.gd` fly every shaft
+  that way) and whose height is the real altitude (`gs`: gravity along the slope);
   `NET_SHAFTS` says where, and `view/network_shaft.gd` draws the stretch between the feet as the shape
   above and takes the craft, the cockpit and traffic onto it. The minimap shows the plan's bulb, your
   arrow going round it. From 100 km down a straight highway you can see it standing at the end of the road.

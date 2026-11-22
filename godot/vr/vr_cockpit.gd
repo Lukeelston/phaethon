@@ -127,7 +127,7 @@ var g_along := 0.0                        # along the pod's nose, g: + speeding 
 var g_across := 0.0                       # across it, g: + a left turn
 var g_turn := 0.0                         # ... with a shaft's carrying taken out (it presses you into the seat, not across it): the slip bar
 var g_seat := 1.0                         # the 1 g the seat holds you up with: less as she leaves the ground, none in the air
-var _g_from := [0.0, 0.0, -1.0]           # the pod's velocity and the sim's clock at the last reading
+var _g_from := [0.0, 0.0, -1.0, 0.0]      # the pod's velocity, the sim's clock and its count of the shafts' turning at the last reading
 var _buzz_hold := {}   # controller -> seconds an event buzz still owns it (the shudder waits)
 const SHAKE_M := 0.004   # cockpit shake per unit of air-brake shudder, metres
 const GRAB_SHAKE_M := 0.007   # the gear's grab: the cockpit's jolt, metres (fore and aft, a little up)
@@ -1604,8 +1604,11 @@ func _read_g() -> void:
 			g_turn = 0.0
 			g_seat = p.grip
 		var turn := across
-		if sim.kind == "network" and not p.off_road and sim.roads[p.path].shaft:
-			turn -= sim.roads[p.path].kap[p.hint] * (p.vx * p.vx + p.vy * p.vy) / 9.81
+		var turned: float = _carried_turn() - float(_g_from[3])   # a shaft's bulb turned the craft this far since: not a turn (CraftModel._update_bank)
+		if turned != 0.0 and absf(turned) < 1.0:
+			var ux: float = cos(turned) * float(_g_from[0]) - sin(turned) * float(_g_from[1])
+			var uy: float = sin(turned) * float(_g_from[0]) + cos(turned) * float(_g_from[1])
+			turn = (-sin(p.th) * (p.vx - ux) + cos(p.th) * (p.vy - uy)) / dt / 9.81
 		var k := 1.0 - exp(-dt / G_TAU)
 		g_along += (along - g_along) * k
 		g_across += (across - g_across) * k
@@ -1616,7 +1619,13 @@ func _read_g() -> void:
 		g_across = 0.0
 		g_turn = 0.0
 		g_seat = p.grip
-	_g_from = [p.vx, p.vy, sim.time]
+	_g_from = [p.vx, p.vy, sim.time, _carried_turn()]
+
+
+## The sim's count of how far the shafts have turned the craft (CraftSim.carry_turn; 0 for a sim without one).
+func _carried_turn() -> float:
+	var counted = sim.get("carry_turn")
+	return float(counted) if counted != null else 0.0
 
 
 ## The whole load on the pilot, g: the seat's 1 g while the craft rides its hover (none of it once
