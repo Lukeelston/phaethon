@@ -25,6 +25,13 @@ extends "res://view/craft_view.gd"
 
 const SEAT := Vector3(0.0, 0.72, 0.6)  # eye point in pod space (pod forward = -Z): a little above the
                                         # cockpit rim (Luke: "sit a bit lower", then "view higher by default")
+# The cockpit's furniture is laid out round SEAT (the map's pod, the instruments' sight lines). The pilot
+# sits SEAT_RISE over it (Luke, flying the fourteenth: "the default seating position should be about 3/4
+# inches higher", and asked which he meant: "3 to 4 inches"; this is three and a half): EYE is where a
+# recentred pilot's eyes are, and where the headset's origin stands. The header rail is then 0.26 m over
+# the eye and 0.30 m ahead of it (it was 0.35 over), the hood's liner still clear of the head behind it.
+const SEAT_RISE := 0.089
+const EYE := SEAT + Vector3(0.0, SEAT_RISE, 0.0)
 const FLOOR_H := 0.7                    # pod floor above the ground
 const QuestControlsScript := preload("res://input/quest_controls.gd")
 const SeatFinish := preload("res://view/craft_materials.gd")
@@ -86,6 +93,9 @@ const SLIDE_SCRUB := 0.22                 # the scrub in your hands while it mov
 var _rim_flashing := false
 static var slide_feel := true             # the SLIDE / GRIP switch on the left console (false: the cockpit keeps the sim's heading exactly)
 static var _slide_loaded := false         # (its saved setting is read once a run, as the camera's)
+static var map_whole := true              # the map's GLOBAL / LOCAL switch, on its pod: the whole country (false: the roads round the craft, heading up)
+static var map_scheme := 0                # ... and its colour button: which of MinimapPanel.SCHEMES the screen is drawn in
+static var _map_loaded := false           # (both saved, and read once a run)
 var slide_switch                          # vr/mode_switch.gd again: SLIDE up, GRIP down
 var _slide := 0.0
 var _slide_rate := 0.0
@@ -188,6 +198,10 @@ func _ready() -> void:
 	if not _slide_loaded and prefs.has("slide"):
 		slide_feel = prefs.slide != "off"
 	_slide_loaded = true
+	if not _map_loaded:
+		map_whole = String(prefs.get("map", "global")) != "local"
+		map_scheme = maxi(0, MinimapPanelScript.scheme_named(String(prefs.get("map_scheme", ""))))
+	_map_loaded = true
 	if not _startup_loaded and prefs.has("startup"):
 		cold_start = prefs.startup != "hot"
 	_startup_loaded = true
@@ -204,8 +218,9 @@ func _ready() -> void:
 		startup_audio.setup(overhead.pods if overhead != null else {})   # a switch's sound comes from its pod
 	if cold and overhead != null and replay.is_empty() and cruise < 0.0:
 		startup.cold()
-		for k in 2:                       # parked: her air brakes were left out
+		for k in 2:                       # parked: her air brakes were left out, all of them
 			craft.flap_open[k] = 1.0
+			craft.front_open[k] = 1.0
 		craft.pod_flap_open = 1.0
 		print("STARTUP: parked, cold and dark")
 	_apply_startup(0.0)
@@ -256,7 +271,8 @@ func _save_prefs() -> void:
 	if f:
 		f.store_string(JSON.stringify({"scheme": quest.scheme, "handling": handling_ask if handling_ask != "" else sim.P.handling, "camera": camera,
 			"nose": "closed" if CraftModelScript.nose_closed else "open", "slide": "on" if slide_feel else "off",
-			"startup": "cold" if cold_start else "hot"}))
+			"startup": "cold" if cold_start else "hot",
+			"map": "global" if map_whole else "local", "map_scheme": String(MinimapPanelScript.SCHEMES[map_scheme].name)}))
 
 
 ## Thumbstick click (either stick): sit where you are. Recentres the view AND the height, so
@@ -389,7 +405,7 @@ func _make_view() -> void:
 	rig = Node3D.new()
 	add_child(rig)
 	origin = XROrigin3D.new()
-	origin.position = SEAT
+	origin.position = EYE
 	rig.add_child(origin)
 	var xr_cam := XRCamera3D.new()
 	xr_cam.far = 120000   # the backdrop peaks sit at 45-57 km; Eridanus' far ranges up to ~100 km away
@@ -674,6 +690,7 @@ func _build_cockpit() -> void:
 	shell.add_child(minimap_panel)
 	minimap_panel.transform = MinimapPanelScript.mount(SEAT)
 	minimap_panel.build()
+	minimap_panel.set_scheme(map_scheme, false)
 	minimap_panel.set_live(sim.kind == "circuit" or sim.kind == "network")
 	if ScreenReflectionScript.available():   # last: it takes its picture of everything the cockpit holds
 		screen_reflection = ScreenReflectionScript.new()
@@ -687,7 +704,7 @@ func _build_cockpit() -> void:
 	if origin:
 		origin.add_child(menu_panel)
 	else:   # (a cockpit built on its own, for the fittings' checks: there is no camera to hang it from)
-		menu_panel.position += SEAT
+		menu_panel.position += EYE
 		shell.add_child(menu_panel)
 	var back := MeshInstance3D.new()
 	var bq := QuadMesh.new()
@@ -742,9 +759,9 @@ func _build_chase_hud() -> void:
 ## (carried onto a shaft's shape where there is one) and `floor` the rig's floor point in the world.
 func _place_origin(level: Basis, floor_at: Vector3) -> void:
 	if camera == "cockpit" or not CAMERA_OFFSETS.has(camera):
-		origin.transform = Transform3D(Basis.IDENTITY, SEAT)
+		origin.transform = Transform3D(Basis.IDENTITY, EYE)
 	else:
-		origin.global_transform = global_transform * Transform3D(level, floor_at + level * (SEAT + CAMERA_OFFSETS[camera]))
+		origin.global_transform = global_transform * Transform3D(level, floor_at + level * (EYE + CAMERA_OFFSETS[camera]))
 	if chase_hud:
 		chase_hud.visible = camera != "cockpit"
 
@@ -890,6 +907,16 @@ func _read_input(delta: float) -> void:
 			if thrown != "":
 				set_slide(thrown == "slide")
 				_buzz(hand, 0.9, 0.06)
+	# the map's own switch and button, on its pod
+	if minimap_panel and hands_live and not _await_neutral_controls:
+		for hand in [l, r]:
+			var worked: String = minimap_panel.poke(hand, delta)
+			if worked == "global" or worked == "local":
+				set_map_whole(worked == "global")
+				_buzz(hand, 0.9, 0.06)
+			elif worked == "scheme":
+				set_map_scheme(map_scheme + 1)
+				_buzz(hand, 0.6, 0.04)
 	if _pressed_once("recenter", _button(l, "primary_click") or _button(r, "primary_click")):
 		recenter()
 	# the start panel: either hand can work it
@@ -1212,7 +1239,9 @@ func _startup_shake(delta: float) -> Vector3:
 
 
 ## The parking brake holds the air brakes out to their full extent: the flaps show it (Luke: "the
-## 'park' lever should also engage the airbrakes to full extents").
+## 'park' lever should also engage the airbrakes to full extents"), every one of them: the four round
+## each engine, the pod's, and the front speed brakes that otherwise only come out at speed (Luke:
+## "the parking brake should engage all flaps, not just the low speed ones").
 func _sync_craft(delta: float) -> void:
 	if not startup.park:
 		super(delta)
@@ -1220,6 +1249,7 @@ func _sync_craft(delta: float) -> void:
 	var shown := inp.duplicate()
 	shown.brkL = 1.0
 	shown.brkR = 1.0
+	shown.park = true
 	craft.sync(sim, shown, delta)
 
 
@@ -1362,6 +1392,23 @@ func g_load() -> float:
 	return sqrt(g_seat * g_seat + g_along * g_along + g_across * g_across)
 
 
+## The map's switch (Luke, flying the fourteenth: "a switch like the other 2, that switches from 'local'
+## to 'global' map"): the whole country north up, or the roads round the craft heading up. Remembered.
+func set_map_whole(on: bool) -> void:
+	map_whole = on
+	_save_prefs()
+	print("MAP: ", "global" if on else "local")
+
+
+## The map's colour button: scheme k of MinimapPanel.SCHEMES (it wraps), and remember it.
+func set_map_scheme(k: int) -> void:
+	map_scheme = posmod(k, MinimapPanelScript.SCHEMES.size())
+	if minimap_panel:
+		minimap_panel.set_scheme(map_scheme)
+	_save_prefs()
+	print("MAP: colours ", MinimapPanelScript.SCHEMES[map_scheme].name)
+
+
 ## Turn the slide on or off (the SLIDE / GRIP switch), and remember it.
 func set_slide(on: bool) -> void:
 	slide_feel = on
@@ -1403,7 +1450,7 @@ func _place_camera(_k: float) -> void:
 	var r := CraftModelScript.ride(self, sim, _ride, get_process_delta_time())
 	var roll := _ease_cockpit_roll(craft.bank[2] + r.z, get_process_delta_time())
 	var pitch := r.y   # up and down the banking
-	var head := SEAT + cam.position    # the seated head, whichever camera is up: the cockpit rolls about it
+	var head := EYE + cam.position   # the seated head, whichever camera is up: the cockpit rolls about it
 	if sim.pod.path > 0 and sim.kind != "network":
 		# the shade line: the cockpit worked out flat, then carried onto the twisted road, where the
 		# corkscrews roll it right over (CraftModel.onto_road: past 90 deg, upside down under the canopy)
@@ -1412,7 +1459,7 @@ func _place_camera(_k: float) -> void:
 		rig.transform = CraftModelScript.onto_road(sim, Transform3D(b_flat, floor_flat + b_yaw * head - b_flat * head), floor_flat,
 			_ride.roll, pitch, org_x, org_y)
 		# (on the corkscrews there is no level to hold: an outside camera rides the rig, turned over with it)
-		origin.transform = Transform3D(Basis.IDENTITY, SEAT + (CAMERA_OFFSETS.get(camera, Vector3.ZERO) as Vector3))
+		origin.transform = Transform3D(Basis.IDENTITY, EYE + (CAMERA_OFFSETS.get(camera, Vector3.ZERO) as Vector3))
 		if chase_hud:
 			chase_hud.visible = camera != "cockpit"
 	else:
@@ -1573,6 +1620,10 @@ func _update_hud() -> void:
 		minimap_panel.set_live(map_live)
 	_scheme_flash = maxf(0.0, _scheme_flash - get_process_delta_time())
 	var ctl: String = QuestControlsScript.HINTS[quest.scheme] if _scheme_flash > 0.0 else QuestControlsScript.NAMES[quest.scheme]
+	minimap.whole = map_whole
+	if minimap_panel.scheme != map_scheme:      # (the saved choice is read after the cabin is built)
+		minimap_panel.set_scheme(map_scheme, false)
+	minimap_panel.show_controls(not map_whole, startup.power)
 	if minimap_panel.live:
 		minimap_panel.show_frame(minimap.update(sim.pod.th, get_process_delta_time()))
 	if tow_meter:

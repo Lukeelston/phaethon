@@ -1138,7 +1138,10 @@ func sync(sim, inp: Dictionary, delta: float) -> void:
 		for i in flaps[k].size():
 			var hinge: Node3D = flaps[k][i]
 			hinge.rotation.x = -FLAP_OPEN*flap_open[k] - _flutter(_flap_phase[k], i, flap_open[k], pressure)
-		front_open[k] = move_toward(front_open[k], clampf(float(e.front), 0.0, 1.0), FLAP_RATE * delta)
+		# (parked, the front speed brakes stand out with the rest: Luke, flying the fourteenth, "the
+		# parking brake should engage all flaps, not just the low speed ones". `park` is the cockpit's.)
+		var front_ask: float = 1.0 if bool(inp.get("park", false)) else clampf(float(e.front), 0.0, 1.0)
+		front_open[k] = move_toward(front_open[k], front_ask, FLAP_RATE * delta)
 		for i in front_flaps[k].size():
 			var fh: Node3D = front_flaps[k][i]
 			var flex := 0.78 * _flutter(_flap_phase[k], i+4, front_open[k], pressure)

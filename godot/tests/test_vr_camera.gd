@@ -47,7 +47,10 @@ func _run() -> void:
 	_check("the quick menu has a CAMERA line, on COCKPIT: %s" % [keys], keys.has("camera") and v.menu.items[keys.find("camera")].value == "COCKPIT")
 	var seat_eye: Vector3 = v.cam.global_position
 	var seat_origin: Transform3D = v.origin.transform
-	_check("in the seat the origin is the eye point", seat_origin.is_equal_approx(Transform3D(Basis.IDENTITY, Cockpit.SEAT)))
+	_check("in the seat the origin is the eye point (%.0f mm over the point the cockpit is laid out round)" % (Cockpit.SEAT_RISE * 1000.0),
+		seat_origin.is_equal_approx(Transform3D(Basis.IDENTITY, Cockpit.EYE)) and Cockpit.SEAT_RISE > 0.0 and Cockpit.EYE.y > Cockpit.SEAT.y)
+	var mirror_eye: Vector3 = preload("res://view/screen_reflection.gd").EYE + Vector3(0.0, preload("res://view/craft_model.gd").POD_FRAME_UP, 0.0)
+	_check("the windscreen's reflection is taken for that same eye (%.3f m up; the cockpit's %.3f)" % [mirror_eye.y, Cockpit.EYE.y], mirror_eye.is_equal_approx(Cockpit.EYE))
 	await _shot("c1-cockpit.png")
 	v.menu.at = keys.find("camera")
 	var names := []

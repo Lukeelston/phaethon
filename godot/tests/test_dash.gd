@@ -34,6 +34,14 @@ func _check(label: String, passed: bool) -> void:
 	failures += int(not passed)
 
 
+var roll := PackedVector3Array()      # the coaming's own mesh, rig metres (the padded roll round the opening and its band)
+
+
+## Does a look land on the coaming (its roll round the opening's edge, or the band under it)?
+func _on_roll(from: Vector3, to: Vector3) -> bool:
+	return _hits(roll, from, to)
+
+
 func _hits(faces: PackedVector3Array, from: Vector3, to: Vector3) -> bool:
 	var along := (to - from).normalized()
 	var reach := from.distance_to(to)
@@ -57,6 +65,9 @@ func _run() -> void:
 		return
 	var faces: PackedVector3Array = dash.mesh.get_faces()      # rig metres: the interior sits at the shell's origin
 	var edging: PackedVector3Array = seal.mesh.get_faces()
+	var coaming := v.interior.get_node_or_null("SegmentedCoaming") as MeshInstance3D
+	if coaming != null and coaming.mesh != null:
+		roll = coaming.mesh.get_faces()
 	var box := dash.mesh.get_aabb()
 	_check("both sides, %d triangles and %d in the seal, from %.2f m ahead to %.2f m, %.2f to %.2f m up, out to %.2f m" % [faces.size() / 3, edging.size() / 3, -box.position.z, -box.end.z, box.position.y, box.end.y, box.end.x],
 		faces.size() / 3 > 3000 and edging.size() / 3 > 100 and absf(box.position.x + box.end.x) < 0.005 and box.position.z > -0.58 and box.end.z < 0.02 and box.position.y > 0.05)
@@ -89,11 +100,15 @@ func _run() -> void:
 
 	# closes: looks under the rim, round the front of the opening, from the seat and from a head moved about
 	var heads := {"seated": eye, "low": eye + Vector3(0, -0.12, 0), "leaning forward": eye + Vector3(0, 0.02, -0.3), "leaning left": eye + Vector3(-0.2, -0.03, -0.05),
-		"leaning right": eye + Vector3(0.2, -0.03, -0.05), "low and forward": eye + Vector3(0, -0.14, -0.25)}
+		"leaning right": eye + Vector3(0.2, -0.03, -0.05), "low and forward": eye + Vector3(0, -0.14, -0.25),
+		# (the pilot's own eye is SEAT_RISE over the point the cabin is laid out round: his looks too)
+		"the pilot's own": Cockpit.EYE, "his, leaning forward": Cockpit.EYE + Vector3(0, 0.02, -0.3), "his, leaning left": Cockpit.EYE + Vector3(-0.2, -0.03, -0.05),
+		"his, leaning right": Cockpit.EYE + Vector3(0.2, -0.03, -0.05)}
 	var consoles: Array[AABB] = []       # (as vr/cockpit_interior.gd has them: a look that enters one has landed on it)
 	for side_x in [-1.0, 1.0]:
 		consoles.append(AABB(Vector3(side_x * 0.615 - 0.065, 0.105, -0.055), Vector3(0.13, 0.29, 0.95)))
 	var looks := 0
+	var on_roll := 0
 	var open := []
 	for name in heads:
 		var from: Vector3 = heads[name]
@@ -109,8 +124,15 @@ func _run() -> void:
 				if consoles[0].intersects_segment(from, to) != null or consoles[1].intersects_segment(from, to) != null:
 					continue
 				if not _hits(faces, from, to) and not _hits(edging, from, to):
+					# (from the pilot's own height a look comes down steeper, and what it meets first is the coaming's
+					# padded roll round the opening: that has landed too. The six heads the cabin was laid out for must
+					# still land on the dashboard itself.)
+					if String(name).begins_with("his") or String(name) == "the pilot's own":
+						if _on_roll(from, to):
+							on_roll += 1
+							continue
 					open.append("%s, %d degrees round, %.3f m under the hull's top" % [name, k * 5, drop])
-	_check("a look under the rim lands on the dashboard: %d looks from %d heads, %d reach the nose%s" % [looks, heads.size(), open.size(), "" if open.is_empty() else " (" + "; ".join(open.slice(0, 8)) + ")"],
+	_check("a look under the rim lands on the dashboard: %d looks from %d heads (%d from the pilot's own height land on the coaming's roll first), %d reach the nose%s" % [looks, heads.size(), on_roll, open.size(), "" if open.is_empty() else " (" + "; ".join(open.slice(0, 16)) + ")"],
 		open.is_empty())
 
 	# clear of what moves and of the rim

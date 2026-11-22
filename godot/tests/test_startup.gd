@@ -483,10 +483,10 @@ func _run() -> void:
 		and not v.minimap_panel.live and v.approach_display.message == "")
 	var glass = v.approach_display
 	_check("... and none of the checklist's drawing is up or running (the sheet hidden, the projector idle)", not glass.sheet.visible and glass.checklist.is_empty() and not glass.is_processing())
-	_check("cold: both engines dark, the binder dead (no arc, its emitters and the cables unlit), the strobes out; parked: her air brakes out full (%.2f / %.2f, the pod's %.2f)" % [v.craft.flap_open[0], v.craft.flap_open[1], v.craft.pod_flap_open],
+	_check("cold: both engines dark, the binder dead (no arc, its emitters and the cables unlit), the strobes out; parked: her air brakes out full (%.2f / %.2f, the pod's %.2f, the front speed brakes %.2f / %.2f)" % [v.craft.flap_open[0], v.craft.flap_open[1], v.craft.pod_flap_open, v.craft.front_open[0], v.craft.front_open[1]],
 		v.craft.held[0] and v.craft.held[1] and v.craft.energised == 0.0 and (v.craft.binder_arc.mesh as ArrayMesh).get_surface_count() == 0
 		and v.craft.cable_mats[0].emission_energy_multiplier == 0.0 and v.craft.binder_mats[0].albedo_color.b == 0.0 and not v.craft.lights_on and not v.craft.strobes[0].visible
-		and v.craft.flap_open[0] > 0.99 and v.craft.flap_open[1] > 0.99 and v.craft.pod_flap_open > 0.99)
+		and v.craft.flap_open[0] > 0.99 and v.craft.flap_open[1] > 0.99 and v.craft.pod_flap_open > 0.99 and v.craft.front_open[0] > 0.99 and v.craft.front_open[1] > 0.99)
 	_check("the panel shows it: BATT and ENGINE down, PARK up, only the standby lamp alight",
 		v.overhead.swings.batt > 0.0 and v.overhead.swings.engine > 0.0 and v.overhead.swings.park < 0.0
 		and (v.overhead.lamps.standby as StandardMaterial3D).albedo_color.g > 0.0 and (v.overhead.lamps.batt as StandardMaterial3D).albedo_color == Color.BLACK
@@ -586,8 +586,9 @@ func _run() -> void:
 	_check("the run-up, the left lever alone: its dial reads it (%.2f, the right %.2f), its nozzle burns (%.2f) and its cable glows (%.1f), its hand rumbles (%.2f); the right engine idles" % [v.dashboard.values.thrL, v.dashboard.values.thrR, v.craft.shown_thrust[0], v.craft.cable_mats[0].emission_energy_multiplier, v.startup_rumble(0)],
 		v.dashboard.values.thrL > 0.9 and v.dashboard.values.thrR < 0.05 and v.craft.shown_thrust[0] > 0.9 and v.craft.shown_thrust[1] < 0.1 and v.craft.cable_mats[0].emission_energy_multiplier > 1.0
 		and v.startup_rumble(0) > 0.4 and v.startup_rumble(1) == 0.0 and s.checks.thrL and not s.checks.thrR)
-	_check("the brake holds both engines' air brakes out to their full extent: the flaps (%.2f / %.2f, the pod's %.2f), the brake needles (%.2f / %.2f), and what the sim is given (%.1f / %.1f) with no grip squeezed" % [v.craft.flap_open[0], v.craft.flap_open[1], v.craft.pod_flap_open, v.dashboard.values.brkL, v.dashboard.values.brkR, s.gate(v.inp).brkL, s.gate(v.inp).brkR],
-		v.craft.flap_open[0] > 0.99 and v.craft.flap_open[1] > 0.99 and v.craft.pod_flap_open > 0.99 and v.dashboard.values.brkL > 0.99 and v.dashboard.values.brkR > 0.99
+	_check("the brake holds every air brake out to its full extent: the flaps (%.2f / %.2f, the pod's %.2f, the front speed brakes %.2f / %.2f, standing still), the brake needles (%.2f / %.2f), and what the sim is given (%.1f / %.1f) with no grip squeezed" % [v.craft.flap_open[0], v.craft.flap_open[1], v.craft.pod_flap_open, v.craft.front_open[0], v.craft.front_open[1], v.dashboard.values.brkL, v.dashboard.values.brkR, s.gate(v.inp).brkL, s.gate(v.inp).brkR],
+		v.craft.flap_open[0] > 0.99 and v.craft.flap_open[1] > 0.99 and v.craft.pod_flap_open > 0.99 and v.craft.front_open[0] > 0.99 and v.craft.front_open[1] > 0.99
+		and v.dashboard.values.brkL > 0.99 and v.dashboard.values.brkR > 0.99
 		and v.inp.brkL == 0.0 and s.gate(v.inp).brkL == 1.0 and s.gate(v.inp).brkR == 1.0)
 	_fly(0.5, [0.0, 1.0])
 	_check("the run-up asks for a shift (first gear, trigger throttles): %s" % v.approach_display.message.split("\n")[1], s.gears and v.quest.display_gear() == 1 and s.checks.thrR and not s.checks.gear and v.approach_display.message.contains("GEAR --"))
@@ -607,8 +608,8 @@ func _run() -> void:
 	_check("levers back: the turbines wind down and their lamp goes out", not v._turbine_lamp and _lit(["turbines"]) == 0)
 	_check("a hand flicks 4 PARK down: \"%s\"" % _work(_flick("park", -1)), not s.park and s.is_hot())
 	_fly(2.0, [1.0, 1.0])
-	_check("and she flies: %.0f m/s after 2 s of full levers, the fire the sim's own again (%.2f), the air brakes stowed (%.2f / %.2f, needles %.2f / %.2f)" % [_speed(), v.craft.shown_thrust[0], v.craft.flap_open[0], v.craft.flap_open[1], v.dashboard.values.brkL, v.dashboard.values.brkR],
-		_speed() > 20.0 and s.cleared and v.craft.shown_thrust[0] < 0.0 and v.craft.flap_open[0] < 0.01 and v.craft.flap_open[1] < 0.01 and v.dashboard.values.brkL < 0.01)
+	_check("and she flies: %.0f m/s after 2 s of full levers, the fire the sim's own again (%.2f), the air brakes stowed (%.2f / %.2f, the front speed brakes %.2f / %.2f, needles %.2f / %.2f)" % [_speed(), v.craft.shown_thrust[0], v.craft.flap_open[0], v.craft.flap_open[1], v.craft.front_open[0], v.craft.front_open[1], v.dashboard.values.brkL, v.dashboard.values.brkR],
+		_speed() > 20.0 and s.cleared and v.craft.shown_thrust[0] < 0.0 and v.craft.flap_open[0] < 0.01 and v.craft.flap_open[1] < 0.01 and v.craft.front_open[0] < 0.01 and v.craft.front_open[1] < 0.01 and v.dashboard.values.brkL < 0.01)
 	_check("CLEARED is on the glass, landed at once and larger than it stays (now %.2f of its size, %.1f s on; it came in at %.2f), the rail lit along its length" % [glass.action.scale.x, glass.checklist.cleared, Projector.arrival(0.0)],
 		glass.action.text == "CLEARED" and glass.checklist.done == 5 and glass.checklist.cleared > 1.5 and glass.action.scale.x == 1.0 and Projector.arrival(0.0) > 1.2 and Projector.arrival(0.2) > 1.0
 		and float(glass.sheet_mat.get_shader_parameter("cleared")) > 1.5 and glass.sheet.visible)

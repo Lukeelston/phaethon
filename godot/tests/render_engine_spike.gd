@@ -95,6 +95,15 @@ const VIEWS := [
 	["d5-dash-leaning-forward", 1.0, false, 0.0, ["pod", Vector3(0.0, 0.2, 0.15), Vector3(0.0, -0.2, -0.5)]],
 	["d6-dash-through-the-nose", 1.0, false, 0.0, ["pod", Vector3(0.7, 0.25, -2.3), Vector3(0.0, -0.15, -0.4)]],
 	["d7-dash-foot-right", 1.0, false, 0.0, ["pod", Vector3(0.1, 0.0, 0.3), Vector3(0.5, -0.5, -0.25)]],
+	# The seat raised three and a half inches (vr_cockpit.gd SEAT_RISE: the eye at pod y 0.209) and the map's
+	# own controls: the map from the raised eye, the front rim leaning forward, under the rim by the shoulder.
+	["s1-raised-seat-the-map-and-its-controls", 1.0, false, 0.0, ["pod", Vector3(0.0, 0.209, 0.6), Vector3(-0.40, -0.06, -0.05)]],
+	["s2-raised-seat-leaning-forward-at-the-rim", 1.0, false, 0.0, ["pod", Vector3(0.0, 0.229, 0.3), Vector3(0.2, -0.03, -0.55)]],
+	["s3-raised-seat-under-the-rim-left", 1.0, false, 0.0, ["pod", Vector3(0.0, 0.209, 0.6), Vector3(-0.75, -0.18, 1.02)]],
+	["s4-raised-seat-ahead", 2.0, false, 0.0, "seat", 0.0, -6.0],
+	["s5-raised-seat-headset-field", 2.0, false, 0.0, "seat", 96.0, -12.0],
+	["s6-map-controls-close", 1.0, false, 0.0, ["pod", Vector3(-0.12, 0.12, 0.35), Vector3(-0.39, 0.02, -0.08)]],
+	["s7-the-seat-as-it-was-ahead", 2.0, false, 0.0, ["pod", Vector3(0.0, 0.12, 0.6), Vector3(0.0, 0.015, -0.4)]],     # (the eye at the point the cabin is laid out round: beside s4, what the rise changed)
 	# the paint (--paint=cobalt and the rest): the craft from outside, its engines, and what the pilot sees of it
 	["p1-paint-pod-from-outside", 1.0, false, 0.0, ["pod", Vector3(2.6, 1.3, -3.2), Vector3(0.0, 0.0, 0.2)]],
 	["p2-paint-engines-from-the-side", 2.5, false, 0.0, [9.0, 1.6, -1.5]],
