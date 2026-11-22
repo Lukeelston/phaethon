@@ -155,6 +155,8 @@ var cable_ends := [[Vector3.ZERO, Vector3.ZERO], [Vector3.ZERO, Vector3.ZERO]]  
 var cable_sag := [0.0, 0.0]          # how far each link's middle stands off the line between its pins, metres: nothing, it is rigid (tests read)
 var cable_strain := [0.0, 0.0]       # each link's tension / CABLE_F_MAX
 var link_parts := [[], []]           # each link's parts, pod end first: [swivel, barrel, rod, yoke]
+var link_boots: Array[MeshInstance3D] = []   # the boot at each barrel's mouth: it hangs on the barrel, and its length is the telescope's
+var link_boot := [0.0, 0.0]          # ... how long each stands, m (TowLink.boot_for)
 var link_rod := TowLink.ROD          # how long this craft's rods are (TowLink.rod_for its links' taut length)
 var _link_shown := [true, true]
 var link_span := [0.0, 0.0]          # each link, pin to pin, metres ...
@@ -535,10 +537,20 @@ func build(v) -> void:
 			c.set_surface_override_material(0, TowLink.metal())
 			if part[2]:
 				c.set_surface_override_material(1, cm)
+			if (part[1] as Mesh).get_surface_count() > 2:      # (the barrel's paint: its stencils, its conduit's sheath)
+				c.set_surface_override_material(2, TowLink.dress())
 			c.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 			add_child(c)
 			link_parts[k].append(c)
 		cables.append(link_parts[k][2])
+		var boot := MeshInstance3D.new()      # the gaiter over the rod at the barrel's mouth: on the barrel, so it goes where that goes
+		boot.name = "TowBoot%s" % ("L" if k == 0 else "R")
+		boot.mesh = TowLink.boot_mesh()
+		boot.material_override = TowLink.dress()
+		boot.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		boot.position = Vector3(0.0, 0.0, TowLink.BARREL)
+		(link_parts[k][1] as Node3D).add_child(boot)
+		link_boots.append(boot)
 	binder_arc = BinderArc.new()
 	arc = binder_arc.mesh
 	add_child(binder_arc)
@@ -570,15 +582,10 @@ static func _engine_body(out: float) -> ArrayMesh:
 		[Fairings.fin(PackedVector2Array([Vector2(0.49,0.65), Vector2(0.64,0.95), Vector2(0.59,1.45), Vector2(0.49,1.35)]), 0.075), Kit.at(Vector3(0, top, 0)), Livery.coat("engine")],
 		[Fairings.fin(PackedVector2Array([Vector2(0,-0.3),Vector2(1.05,0.95),Vector2(0.99,1.38),Vector2(0,1.05)]), 0.065), Kit.at(Vector3(out*side,-0.1,0), Vector3(0,0,-out*PI/2)), STEEL],
 		[Kit.rounded_box(Vector3(0.18, 0.72, 1.1), 5.0), Kit.at(Vector3(-out * (side - 0.02), 0.0, -2.9)), DARK.lightened(0.25)],   # binder housing
-		# the tow lug (view/tow_link.gd): a pad on the belly, two hanger plates down to the boss of the pin the link's yoke forks over
-		[Kit.rounded_box(Vector3(0.36, 0.09, 1.0), 5.0, 8), Kit.at(Vector3(0, -0.49, 3.15)), DARK.lightened(0.25)],      # (behind the lower brake flaps, as the pylon it replaces was)
-		[Fairings.fin(PackedVector2Array(LUG_PLATE), 0.035), Kit.at(Vector3(-0.085, 0, 0)), DARK.lightened(0.32)],
-		[Fairings.fin(PackedVector2Array(LUG_PLATE), 0.035), Kit.at(Vector3(0.085, 0, 0)), DARK.lightened(0.32)],
-		[Kit.cyl(0.026, 0.026, 0.24, 10), Kit.at(Vector3(0, -0.68, 3.2), Vector3(0, 0, PI / 2.0)), TowLink.BRIGHT],           # a spacer between the plates
-		[Kit.cyl(0.068, 0.068, 0.22, 18), Kit.at(ENGINE_EYE, Vector3(0, 0, PI / 2.0)), TowLink.BRIGHT],                       # the pin's boss
 		[Kit.box(Vector3(ENG_W - 0.2, 0.06, 0.4)), Kit.at(Vector3(0, 0.36, 4.0)), DARK.lightened(0.2)],          # nozzle lips
 		[Kit.box(Vector3(ENG_W - 0.2, 0.06, 0.4)), Kit.at(Vector3(0, -0.36, 4.0)), DARK.lightened(0.2)],
 	]
+	parts.append_array(_lug())
 	# access covers: raised panels on top and both sides, a dark seam round each, rivets at the corners
 	var cover := DARK.lightened(0.42)
 	var seam := Color(0.08, 0.08, 0.09)
@@ -936,33 +943,78 @@ static func pod_hull(shrike := false) -> ArrayMesh:
 	return mesh
 
 
+## The engine's tow lug (view/tow_link.gd): a pad bolted up into the belly, two hanger plates down from
+## it to the boss of the pin the link's yoke forks over, two spacers through the plates to hold them apart,
+## and a gusset from the pad down each plate's outer face. Parts for _engine_body's compound.
+static func _lug() -> Array:
+	var plate := DARK.lightened(0.32)
+	var parts := [
+		[Kit.rounded_box(Vector3(0.36, 0.09, 1.0), 5.0, 8), Kit.at(Vector3(0, -0.49, 3.15)), DARK.lightened(0.25)],      # (behind the lower brake flaps, as the pylon it replaces was)
+		[Fairings.fin(PackedVector2Array(LUG_PLATE), 0.035), Kit.at(Vector3(-0.085, 0, 0)), plate],
+		[Fairings.fin(PackedVector2Array(LUG_PLATE), 0.035), Kit.at(Vector3(0.085, 0, 0)), plate],
+		[Kit.cyl(0.068, 0.068, 0.22, 18), Kit.at(ENGINE_EYE, Vector3(0, 0, PI / 2.0)), TowLink.BRIGHT],                       # the pin's boss
+	]
+	var st := SurfaceTool.new()      # its fasteners and gussets: one part, in their own colours
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for at in [Vector2(-0.68, 3.2), Vector2(-0.63, 2.98)]:      # the spacers (y, z): a tube between the plates, a bolt through it, a head one side and a nut the other
+		TowLink._turn(st, [[-0.0675, 0.026, TowLink.BRIGHT], [0.0675, 0.026, TowLink.BRIGHT]], 8, Transform3D(TowLink.ABOUT_X, Vector3(0, at.x, at.y)))
+		for s in [-1.0, 1.0]:
+			TowLink._head(st, TowLink._along(Vector3(s, 0, 0), Vector3(0.1025 * s, at.x, at.y)), 0.03, 0.016, TowLink.BRIGHT, 6, true)
+	for s in [-1.0, 1.0]:
+		for z in [2.76, 3.02, 3.28, 3.54]:      # the pad's bolts, up into the belly's hard points
+			TowLink._head(st, TowLink._along(Vector3.DOWN, Vector3(0.142 * s, -0.52, z)), 0.017, 0.024, TowLink.BRIGHT, 6, true)
+		for z in [2.92, 3.4]:                   # a gusset from the pad down the plate's outer face
+			TowLink._web(st, Vector3(0.1025 * s, -0.525, z), Vector3(0.168 * s, -0.525, z), Vector3(0.1025 * s, -0.64, z), 0.014, plate)
+	st.index()
+	parts.append([st.commit(), Transform3D.IDENTITY, Color.WHITE, true])
+	return parts
+
+
 ## The bullring: what the tow links pull on (view/tow_link.gd). A forged hoop shrunk round the nose cap
 ## carries the load into the hull; a crown block across its top carries a swivel post either side of
 ## centre, where the sim anchors the links. (It was a bar across the nose with a disc on each end.)
+## Its fittings, in their own colours: each post a bearing pedestal (a bright race ring under the swivel's
+## thrust washer); the crown block bolted down between them, a rib along it; on the rib the tow-load
+## amplifier (what the Shrike's coaming reads its TOW windows from), a conduit from it to each post's load
+## cell through a bronze gland; and the clamps that hold the block's ends down onto the hoop.
 static func _bullring() -> Array:
 	var hoop := SurfaceTool.new()
 	hoop.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var ring: Array = []
-	for j in 67:      # from the keel round and a little past it, so the tube's ends meet out of sight
-		ring.append(cage_point(TowLink.RING_Z, -PI / 2.0 + TAU * j / 64.0, 0.0))
+	for j in 51:      # from the keel round and a little past it, so the tube's ends meet out of sight
+		ring.append(cage_point(TowLink.RING_Z, -PI / 2.0 + TAU * j / 48.0, 0.0))
 	_tube(hoop, ring, TowLink.RING_R, TowLink.FORGED, 10)
 	var z := -2.1                                   # the posts' station: the sim's anchors (_pod_anchor)
 	var seat := POD_EYE_H - TowLink.HUB - 0.012     # the posts' tops: the swivels' thrust washers sit on them
 	var mid := hull_top(0.0, z)
-	var parts := [
-		[hoop.commit(), Transform3D.IDENTITY, TowLink.FORGED],
-		[Finishes.beveled_plate(Vector3(0.19, 0.07, 0.15), 0.01), Kit.at(Vector3(0, mid - 0.012, z + 0.02)), TowLink.FORGED],      # the crown block, between the posts
-	]
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var top := mid + 0.023                          # the crown block's top face
+	TowLink._add(st, Finishes.beveled_plate(Vector3(0.21, 0.07, 0.15), 0.01), Kit.at(Vector3(0, mid - 0.012, z + 0.02)), TowLink.FORGED)      # the crown block, between the posts
+	TowLink._add(st, Finishes.beveled_plate(Vector3(0.084, 0.02, 0.126), 0.005), Kit.at(Vector3(0, top + 0.009, z + 0.02)), TowLink.GUNMETAL)  # its rib
+	TowLink._add(st, Finishes.beveled_plate(Vector3(0.05, 0.022, 0.058), 0.004), Kit.at(Vector3(0, top + 0.03, z + 0.024)), TowLink.BRIGHT)    # the tow-load amplifier
 	for s in [-1.0, 1.0]:
 		var x: float = 0.18 * s
 		var skin := hull_top(x, z)
-		parts.append([Kit.cyl(0.074, 0.088, seat - skin + 0.03, 20), Kit.at(Vector3(x, (seat + skin - 0.03) / 2.0, z)), TowLink.GUNMETAL])     # a post's foot, out of the skin
+		# a post: its foot out of the skin, then the bearing's race ring the swivel's washer sits in
+		TowLink._turn(st, [[skin - 0.03, 0.0, TowLink.GUNMETAL], [skin - 0.03, 0.09, TowLink.GUNMETAL], [seat - 0.012, 0.08, TowLink.GUNMETAL], [seat - 0.012, 0.0745, TowLink.BRIGHT],
+			[seat, 0.0745, TowLink.BRIGHT], [seat, 0.06, TowLink.BRIGHT]], 16, Transform3D(TowLink.ABOUT_Y, Vector3(x, 0.0, z)))
 		var out: float = 0.292 * s                                                                                                           # a clamp outboard of it, down onto the hoop
-		parts.append([Finishes.beveled_plate(Vector3(0.075, 0.07, 0.13), 0.01), Kit.at(Vector3(out, hull_top(out, z) - 0.005, z + 0.02)), TowLink.FORGED])
-		parts.append([Kit.cyl(0.015, 0.015, 0.012, 6), Kit.at(Vector3(out, hull_top(out, z) + 0.036, z + 0.02)), TowLink.BRIGHT])
-		for bolt in [Vector3(0.055 * s, mid + 0.029, z + 0.06), Vector3(0.055 * s, mid + 0.029, z - 0.02)]:
-			parts.append([Kit.cyl(0.014, 0.014, 0.012, 6), Kit.at(bolt), TowLink.BRIGHT])                                                       # the crown's bolts
-	return parts
+		var clamp_top := hull_top(out, z) + 0.03
+		TowLink._add(st, Finishes.beveled_plate(Vector3(0.075, 0.07, 0.13), 0.01), Kit.at(Vector3(out, clamp_top - 0.035, z + 0.02)), TowLink.FORGED)
+		for bz in [z + 0.058, z - 0.018]:
+			TowLink._head(st, Transform3D(TowLink.ABOUT_Y, Vector3(out, clamp_top, bz)), 0.015, 0.011, TowLink.BRIGHT, 6, true)
+			TowLink._head(st, Transform3D(TowLink.ABOUT_Y, Vector3(0.076 * s, top, bz)), 0.014, 0.011, TowLink.BRIGHT, 6, true)                 # the crown's bolts
+		# the amplifier's lead to this post's load cell: out of a gland on its side, over the block's end and down through the skin beside the post
+		var lead := Vector3(0.025 * s, top + 0.03, z + 0.024)
+		TowLink._head(st, TowLink._along(Vector3(s, 0, 0), lead), 0.0085, 0.012, TowLink.BRONZE, 6, true)
+		TowLink._pipe(st, [lead + Vector3(0.012 * s, 0, 0), Vector3(0.07 * s, top + 0.027, z + 0.032), Vector3(0.106 * s, top + 0.002, z + 0.05), Vector3(0.122 * s, seat - 0.018, z + 0.062)],
+			0.005, TowLink.FORGED, 4)
+	st.index()
+	return [
+		[hoop.commit(), Transform3D.IDENTITY, TowLink.FORGED],
+		[st.commit(), Transform3D.IDENTITY, Color.WHITE, true],
+	]
 
 
 ## The pod's hull in another livery than the craft's own (a patrol's black and white, say).
@@ -1588,6 +1640,8 @@ func sync_cables(sim, delta := 1.0 / 72.0) -> void:
 		link_span[k] = at.span
 		link_exposed[k] = at.exposed
 		link_angles[k] = at.angles
+		link_boot[k] = at.boot      # the boot's folds open and close with the telescope
+		link_boots[k].scale = Vector3(1.0, 1.0, link_boot[k] / TowLink.BOOT)
 		link_travel[k] = Vector2(c.ex - c.px, c.ey - c.py).length() - sim.P.cableLen
 		cable_sag[k] = 0.0
 		var f: float = c.get("f", 0.0)

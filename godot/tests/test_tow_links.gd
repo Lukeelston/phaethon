@@ -4,16 +4,22 @@
 ##              hole (the swivel on its post, the barrel on the swivel's pitch pin, the yoke on the
 ##              lug's pin, the rod's fork on the yoke's yaw pin, the rod down the barrel's bore), and
 ##              the joint that should take each motion is the one that moves; the rod runs in and
-##              out one for one with the span, and stays in the barrel
+##              out one for one with the span, and stays in the barrel; the boot at the barrel's
+##              mouth gives and takes with it; the stencils read the right way up from their own
+##              side; what both links and the bullring cost in triangles
 ##   flown      straight, a hard left, coasting: every pin in its hole on every frame, and the rod
-##              showing follows the sim's own span; then the sim closed up by hand, and the rods
-##              drawn in by what its spans closed
+##              showing follows the sim's own span; each boot stands as long as its telescope says;
+##              then the sim closed up by hand, and the rods drawn in by what its spans closed (and
+##              the boots folded solid); both links drawn in three kinds of material
 ## --headless --xr-mode off --audio-driver Dummy -s res://tests/test_tow_links.gd -- --track=range --mute
 ## Prints TOW LINKS PASS.
 extends SceneTree
 
 const FlatScript := preload("res://view/craft_view.gd")
 const TowLink := preload("res://view/tow_link.gd")
+const Model := preload("res://view/craft_model.gd")
+const Kit := preload("res://view/mesh_kit.gd")
+const CHECKS := 21
 var v
 var fails := 0
 var passed := 0
@@ -21,6 +27,9 @@ var rows: Array = []      # [sim time, [sim span, drawn span, rod showing] per l
 var parts_ok := true
 var worst_fit := 0.0
 var closed: Array = []    # the rows before and after the sim is closed up by hand
+var boot_fit := 0.0       # the worst a boot's drawn length was off what its telescope says
+var boot_ok := true
+var boot_run := [[INF, -INF], [INF, -INF]]   # how long each boot stood, least and most, over the flight
 
 
 func _initialize() -> void:
@@ -148,23 +157,70 @@ func _on_paper() -> void:
 		short_rod, shrike.buried, rest.buried, (s_closed.rod as Transform3D).basis.z.length() * 100.0, _fit(s_closed, s_eye + s_line * 3.0, Basis.IDENTITY, s_post, Basis.IDENTITY), TowLink.rod_mesh(short_rod).get_aabb().end.z],
 		absf(float(shrike.buried) - float(rest.buried)) < 0.25 and absf((s_closed.rod as Transform3D).basis.z.length() - 1.0) < 1e-6 and absf(float(shrike.exposed) - float(s_closed.exposed) - 3.0) < 0.01
 		and _fit(s_closed, s_eye + s_line * 3.0, Basis.IDENTITY, s_post, Basis.IDENTITY) < 1e-4 and absf(TowLink.rod_mesh(short_rod).get_aabb().end.z - short_rod) < 1e-3 and TowLink.rod_mesh(short_rod) != TowLink.rod_mesh())
-	# the parts themselves: made once, the lit ones in two surfaces
-	var meshes := {"swivel": TowLink.swivel_mesh(), "barrel": TowLink.barrel_mesh(), "rod": TowLink.rod_mesh(), "yoke": TowLink.yoke_mesh()}
+	# the boot at the barrel's mouth: one end on the gland's face, the other gripping the rod, so it gives
+	# and takes with the telescope one for one until its folds are closed solid or pulled out straight
+	var boot_rest: float = rest.boot
+	var gave := []
+	var boots_ok: bool = boot_rest > 0.45 and boot_rest < 0.75 and absf(boot_rest - (TowLink.BOOT_SEAT - float(rest.buried))) < 1e-6 \
+		and absf(float(shrike.boot) - (TowLink.BOOT_SEAT - float(shrike.buried))) < 1e-6 and boot_rest - 0.3 > TowLink.BOOT_MIN and boot_rest + 0.2 < TowLink.BOOT_MAX
+	for move in [-0.2, 0.1, 0.3]:      # m closer (negative: stretched)
+		var s: Dictionary = TowLink.solve(eye + line * move, Basis.IDENTITY, post, Basis.IDENTITY)
+		gave.append("%.1f: %.3f" % [move, boot_rest - float(s.boot)])
+		boots_ok = boots_ok and absf(boot_rest - float(s.boot) - move) < 0.01 and absf(float(s.boot) - TowLink.boot_for(s.exposed)) < 1e-6
+	var boot_mesh: ArrayMesh = TowLink.boot_mesh()
+	var boot_box: AABB = boot_mesh.get_aabb()
+	_check("the boot: taut it stands %.2f m (the Shrike's %.2f; %.1f as made), from the gland's face to its cuff on the rod %.1f m from the piston; it gives and takes with the telescope (m closer: m shorter; %s); closed up 6 m its folds are solid (%.2f m), pulled 1.5 m past taut they are straight (%.2f m); its mesh runs from the gland's face (%.3f) to its cuff (%.3f)" % [
+		boot_rest, shrike.boot, TowLink.BOOT, TowLink.BOOT_SEAT, ", ".join(gave), near.boot, far.boot, boot_box.position.z, boot_box.end.z],
+		boots_ok and float(near.boot) == TowLink.BOOT_MIN and float(far.boot) == TowLink.BOOT_MAX and float(wreck.boot) == TowLink.BOOT_MIN
+		and absf(boot_box.position.z) < 1e-4 and absf(boot_box.end.z - TowLink.BOOT) < 1e-4 and boot_box.size.x < 0.14)
+	# the parts themselves: made once, the lit ones in two surfaces, the barrel's paint in a third
+	var meshes := {"swivel": TowLink.swivel_mesh(), "barrel": TowLink.barrel_mesh(), "rod": TowLink.rod_mesh(), "yoke": TowLink.yoke_mesh(), "boot": boot_mesh}
 	var tris := 0
 	var sizes := []
 	for key in meshes:
-		var m: ArrayMesh = meshes[key]
-		var n := 0
-		for surface in m.get_surface_count():
-			var arr := m.surface_get_arrays(surface)
-			n += (arr[Mesh.ARRAY_INDEX] as PackedInt32Array).size() / 3
+		var n := _triangles(meshes[key])
 		tris += n
 		sizes.append("%s %d" % [key, n])
+	var ring := _triangles(Kit.compound(Model._bullring()))
 	var bb: AABB = (meshes.barrel as ArrayMesh).get_aabb()
 	var rb: AABB = (meshes.rod as ArrayMesh).get_aabb()
-	_check("the parts: %s triangles (%d a link); the barrel runs to its gland at %.2f m, the rod to its piston at %.2f m; the lit parts are their own surface; made once and shared" % [", ".join(sizes), tris, bb.end.z, rb.end.z],
-		tris > 1500 and tris < 6000 and absf(bb.end.z - TowLink.BARREL) < 1e-3 and absf(rb.end.z - TowLink.ROD) < 1e-3 and (meshes.barrel as ArrayMesh).get_surface_count() == 2
-		and (meshes.rod as ArrayMesh).get_surface_count() == 2 and (meshes.swivel as ArrayMesh).get_surface_count() == 1 and TowLink.barrel_mesh() == meshes.barrel)
+	# (12,000 for both links and the bullring: what the headset's frame, 1.8 ms of GPU to spare, was given for them)
+	_check("the parts: %s triangles (%d a link), the bullring %d: %d for both links and the bullring; the barrel runs to its gland at %.2f m, the rod to its piston at %.2f m; the lit parts are their own surface and the barrel's paint a third; made once and shared" % [
+		", ".join(sizes), tris, ring, 2 * tris + ring, bb.end.z, rb.end.z],
+		tris > 3000 and 2 * tris + ring < 12000 and absf(bb.end.z - TowLink.BARREL) < 1e-3 and absf(rb.end.z - TowLink.ROD) < 1e-3 and (meshes.barrel as ArrayMesh).get_surface_count() == 3
+		and (meshes.rod as ArrayMesh).get_surface_count() == 2 and (meshes.swivel as ArrayMesh).get_surface_count() == 1 and (meshes.yoke as ArrayMesh).get_surface_count() == 1
+		and boot_mesh.get_surface_count() == 1 and TowLink.barrel_mesh() == meshes.barrel)
+	# the stencils: lettering along the barrel on both flanks, each the right way up for someone standing on its own
+	# side with the barrel lying across in front of them (the pod's end on their right from the left, +x, flank)
+	var paint := (meshes.barrel as ArrayMesh).surface_get_arrays(2)
+	var at: PackedVector3Array = paint[Mesh.ARRAY_VERTEX]
+	var uv: PackedVector2Array = paint[Mesh.ARRAY_TEX_UV]
+	var cell := Rect2((TowLink.MARK.id as Rect2).position / TowLink.MARKS_SIZE, (TowLink.MARK.id as Rect2).size / TowLink.MARKS_SIZE).grow(1e-5)
+	var reads := []
+	var marks_ok: bool = TowLink.dress().albedo_texture != null
+	for flank in [1.0, -1.0]:
+		var first := Vector3.ZERO      # where the first letter's foot is, and the last letter's head
+		var last := Vector3.ZERO
+		var found := 0
+		for i in at.size():
+			if cell.has_point(uv[i]) and at[i].x * flank > 0.0:
+				found += 1
+				if uv[i].distance_to(Vector2(cell.position.x, cell.end.y)) < 1e-4:
+					first = at[i]
+				if uv[i].distance_to(Vector2(cell.end.x, cell.position.y)) < 1e-4:
+					last = at[i]
+		reads.append("%s flank: from z %.2f to %.2f, feet at y %.3f and heads at %.3f" % ["left" if flank > 0.0 else "right", first.z, last.z, first.y, last.y])
+		marks_ok = marks_ok and found >= 8 and last.y > first.y + 0.02 and (first.z - last.z) * flank > 0.2
+	_check("the stencils read the right way up from their own side (the link's number: %s)" % "; ".join(reads), marks_ok)
+
+
+static func _triangles(mesh: Mesh) -> int:
+	var n := 0
+	for surface in mesh.get_surface_count():
+		var arr := mesh.surface_get_arrays(surface)
+		var idx = arr[Mesh.ARRAY_INDEX]
+		n += ((idx as PackedInt32Array).size() if idx != null and not (idx as PackedInt32Array).is_empty() else (arr[Mesh.ARRAY_VERTEX] as PackedVector3Array).size()) / 3
+	return n
 
 
 func _process(_delta: float) -> bool:
@@ -192,11 +248,17 @@ func _process(_delta: float) -> bool:
 		var pod_basis: Basis = c.pod.transform.basis.orthonormalized()
 		worst_fit = maxf(worst_fit, _fit(at, c.cable_ends[k][0], c.engines[k].transform.basis.orthonormalized(), c.cable_ends[k][1], pod_basis))
 		parts_ok = parts_ok and c.cable_sag[k] == 0.0
+		var boot: MeshInstance3D = c.link_boots[k]      # on the barrel, at its gland's face, as long as the telescope says
+		boot_fit = maxf(boot_fit, absf(boot.scale.z * TowLink.BOOT - TowLink.boot_for(c.link_exposed[k], c.link_rod)))
+		boot_ok = boot_ok and boot.get_parent() == parts[1] and absf(boot.position.z - TowLink.BARREL) < 1e-6 and boot.is_visible_in_tree() \
+			and absf(boot.scale.z * TowLink.BOOT - c.link_boot[k]) < 1e-5
+		if closed.is_empty():
+			boot_run[k] = [minf(boot_run[k][0], c.link_boot[k]), maxf(boot_run[k][1], c.link_boot[k])]
 	if not closed.is_empty():      # the frame after the engines were set back
 		closed.append(row)
 		_flown()
 		v.queue_free()
-		var good: bool = fails == 0 and passed == 17
+		var good: bool = fails == 0 and passed == CHECKS
 		print("TOW LINKS ", "PASS" if good else "FAIL (%d failed, %d passed)" % [fails, passed])
 		quit(0 if good else 1)
 		return true
@@ -247,3 +309,20 @@ func _flown() -> void:
 		close_ok = close_ok and d_span < -0.8 and d_rod < 0.9 * d_span and d_rod > 1.02 * d_span
 	# (not quite one for one: the sim's span lies flat, and the link drawn slopes 7 degrees down to a lug 2 m below the post)
 	_check("the sim closed up by hand (both engines set back 1.5 m): the next frame's rods are drawn in by what the sim's spans closed, to within the link's slope (%s)" % "; ".join(seen), close_ok)
+	var c = v.craft
+	_check("flown, the boots: on every frame each hangs on its barrel's gland and stands as long as its telescope says (worst %.6f m off); over the flight the left ran %.2f to %.2f m and the right %.2f to %.2f m; closed up by hand both fold solid (%.2f, %.2f m)" % [
+		boot_fit, boot_run[0][0], boot_run[0][1], boot_run[1][0], boot_run[1][1], c.link_boot[0], c.link_boot[1]],
+		boot_ok and boot_fit < 1e-5 and float(boot_run[0][1]) - float(boot_run[0][0]) > 0.05 and float(boot_run[1][1]) - float(boot_run[1][0]) > 0.05
+		and float(boot_run[0][0]) >= TowLink.BOOT_MIN and float(boot_run[1][1]) <= TowLink.BOOT_MAX and c.link_boot[0] == TowLink.BOOT_MIN and c.link_boot[1] == TowLink.BOOT_MIN)
+	# what both links cost to draw: a surface a draw, in three kinds of material (the steel's, each link's own light, the paint and rubber's)
+	var surfaces := 0
+	var kinds := {}
+	for k in 2:
+		var drawn: Array = (c.link_parts[k] as Array).duplicate()
+		drawn.append(c.link_boots[k])
+		for part in drawn:
+			for surface in (part as MeshInstance3D).mesh.get_surface_count():
+				surfaces += 1
+				kinds[(part as MeshInstance3D).get_active_material(surface)] = true
+	_check("both links are %d surfaces in %d materials: the steel's, each link's own light, and one for paint and rubber" % [surfaces, kinds.size()],
+		surfaces == 16 and kinds.size() == 4 and kinds.has(TowLink.metal()) and kinds.has(TowLink.dress()) and kinds.has(c.cable_mats[0]) and kinds.has(c.cable_mats[1]))

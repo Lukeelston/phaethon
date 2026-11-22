@@ -14,7 +14,7 @@ extends "res://tests/render_terminal_art.gd"
 #   ["seat", field of view, degrees of head pitch]
 #   ["pod", eye, target]                          in the canopy's own frame
 #   ["engine", which, eye, target]                in that engine's frame
-#   ["link", which, m along it from the pod, m right, m up, m back toward the pod]
+#   ["link", which, m along it from the pod (negative: from the engine's end), m right, m up, m back toward the pod]
 const VIEWS := [
 	["a1-seat-at-rest", "rest", ["seat", 60.0, -7.0]],
 	["a2-seat-flat-out", "burner", ["seat", 60.0, -7.0]],
@@ -23,13 +23,22 @@ const VIEWS := [
 	["a5-seat-left-link-at-the-limit", "limit", ["seat", 60.0, -7.0]],
 	["a6-seat-headset-field", "cruise", ["seat", 96.0, -10.0]],
 	["a7-seat-looking-at-the-left-link", "cruise", ["seat", 28.0, -5.0, 6.0]],
+	["a8-seat-hard-left-looking-at-the-links", "left", ["seat", 30.0, -7.0, 0.0]],
+	["a9-seat-looking-at-the-bullring", "cruise", ["seat", 16.0, -11.0, 0.0]],
 	["b1-bullring-from-ahead", "cruise", ["pod", Vector3(0.75, 0.42, -3.1), Vector3(0.0, 0.0, -2.1)]],
 	["b2-bullring-from-above", "cruise", ["pod", Vector3(-0.35, 0.75, -1.55), Vector3(0.05, 0.0, -2.25)]],
 	["b3-bullring-in-a-hard-left", "left", ["pod", Vector3(0.75, 0.42, -3.1), Vector3(0.0, 0.0, -2.1)]],
+	["b4-swivel-close", "cruise", ["pod", Vector3(-0.56, 0.2, -2.52), Vector3(-0.2, 0.0, -2.2)]],
+	["b5-swivel-from-behind", "cruise", ["pod", Vector3(-0.05, 0.3, -1.72), Vector3(-0.2, -0.02, -2.25)]],
 	["c1-engine-lug", "cruise", ["engine", 0, Vector3(1.15, -0.7, 4.75), Vector3(0.0, -0.93, 3.6)]],
 	["c2-engine-lug-in-a-hard-left", "left", ["engine", 0, Vector3(1.15, -0.7, 4.75), Vector3(0.0, -0.93, 3.6)]],
+	["c3-yoke-close", "cruise", ["engine", 0, Vector3(0.52, -0.74, 4.02), Vector3(0.0, -0.95, 3.6)]],
+	["c4-rod-fork-and-coupler", "cruise", ["link", 0, -0.75, 0.85, 0.3, -0.25]],
+	["d0-barrel-root", "cruise", ["link", 0, 0.42, -0.62, 0.3, 0.1]],
 	["d1-barrel-mouth", "cruise", ["link", 0, 5.0, 1.0, 0.45, 0.9]],
 	["d2-barrel-mouth-right-link-slack", "slack", ["link", 1, 5.0, -1.0, 0.45, 0.9]],
+	["d3-barrel-middle", "cruise", ["link", 0, 2.4, -0.85, 0.4, 0.25]],
+	["d4-draft-gear-close", "cruise", ["link", 0, 4.45, -0.6, 0.28, 0.0]],
 	["e1-chase", "cruise", ["pod", Vector3(2.6, 2.4, 7.5), Vector3(0.0, -0.3, -9.0)]],
 	["e2-chase-hard-left", "left", ["pod", Vector3(2.6, 2.4, 7.5), Vector3(0.0, -0.3, -9.0)]],
 	["e3-from-the-side", "cruise", ["pod", Vector3(-12.0, 0.6, -10.0), Vector3(-1.5, -1.0, -10.0)]],
@@ -146,7 +155,7 @@ func _run() -> void:
 			var to: Vector3 = to_world * (ends[int(cam[1])][0] as Vector3)
 			var along := (to - from).normalized()
 			var right := along.cross(Vector3.UP).normalized()
-			var at := from + along * float(cam[2])
+			var at := (from if float(cam[2]) >= 0.0 else to) + along * float(cam[2])
 			seat.cam.global_position = at + right * float(cam[3]) + Vector3.UP * float(cam[4]) - along * float(cam[5])
 			seat.cam.look_at(at, Vector3.UP)
 			seat.cam.fov = 50.0

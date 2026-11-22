@@ -2,6 +2,7 @@
 ## of them), each part carrying its own vertex colour. Use with vertex_colors() as the material.
 ##   MeshKit.compound([[Mesh, Transform3D, Color], ...]) -> ArrayMesh
 ##   MeshKit.compound(parts, into)                        appends as a new surface of `into`
+##   [Mesh, Transform3D, Color, true]                     a part that keeps its own vertex colours
 ## Parts may be primitives (BoxMesh, CylinderMesh, ...) or ArrayMeshes (rounded_box()).
 ## Godot fronts are CLOCKWISE: for a front face, (p1 - p0).cross(p2 - p0) points INTO the surface.
 extends RefCounted
@@ -20,8 +21,9 @@ static func compound(parts: Array, into: ArrayMesh = null) -> ArrayMesh:
 		var idx = arr[Mesh.ARRAY_INDEX]
 		var order: Array = range(verts.size()) if idx == null or (idx as PackedInt32Array).is_empty() else Array(idx)
 		var nb := xf.basis.inverse().transposed()
+		var own = arr[Mesh.ARRAY_COLOR] if (p as Array).size() > 3 and p[3] else null      # (a part made of several colours)
 		for i in order:
-			st.set_color(col)
+			st.set_color(col if own == null else (own as PackedColorArray)[i])
 			st.set_normal((nb * norms[i]).normalized())
 			st.add_vertex(xf * verts[i])
 	return st.commit(into)
