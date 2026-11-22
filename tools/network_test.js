@@ -18,6 +18,9 @@
 //   ground     on the open ground the roads' walls hold you off from outside; an on-ramp's open
 //              start takes you in (on its road), and from it (rolling at 1,500 mph: from a standstill
 //              on SPEEDCRAFT this autopilot can't get going) the autopilot gets you to the city
+//   deck       Mount Hyperion's road is sampled along its deck and flown at the speed along it: held at
+//              3,000 mph a craft takes each part of the mountain in the time that part's deck length says,
+//              up to an 88 degree wall and down one; its height is the road's own all the way
 // Prints NETWORK OK.
 // Usage: node tools/network_test.js [sim-core.js]
 'use strict';
@@ -26,6 +29,7 @@ const NR = require('./net_route.js');
 const simPath = process.argv[2] || 'sim-core.js';
 const PS = NR.load(simPath);
 const { DT, SUB, MPH } = NR;
+const NET_STEP_M = 24;   // the roads' sampling (sim-core.js NET_STEP); a deck road's samples are this much of its deck
 const ASK = [undefined, 'speed', 'starfighter'];
 let ok = true;
 function check(msg, cond) { console.log(`${cond ? 'ok  ' : 'FAIL'} ${msg}`); ok = ok && !!cond; }
@@ -33,7 +37,7 @@ function check(msg, cond) { console.log(`${cond ? 'ok  ' : 'FAIL'} ${msg}`); ok 
 const sim = PS.makeSim({ track: 'network', handling: 'speed' });
 const { S, T } = sim;
 check(`build: kind ${T.kind}, ${T.roads ? T.roads.length : 0} roads, ${T.roads ? T.roads.reduce((a, R) => a + R.N, 0) : 0} samples, ${T.junctions ? T.junctions.length : 0} junctions, ${T.cities ? T.cities.length : 0} cities`,
-  T.kind === 'network' && T.roads.length === 128 && T.junctions.length === 197 && T.cities.length === 5 && T.jumps.length === 21 && T.shafts.length === 12);
+  T.kind === 'network' && T.roads.length === 129 && T.junctions.length === 199 && T.cities.length === 5 && T.jumps.length === 21 && T.shafts.length === 12);
 if (T.kind !== 'network') { console.log('NETWORK FAIL'); process.exit(1); }
 
 // zones: the child's centreline inside the parent's corridor (plus its own half width) through the zone
@@ -343,8 +347,9 @@ for (const [mph, deg] of [[4000, 2], [2500, 3], [1500, 3], [800, 3]]) {
 }
 
 // Drive the interior links and stunt bypasses through both highway junctions, in both directions.
-// (SHelios is 325 km, up a mountain, up the Face of its spire and across the plateau, 286 s of it: its time limit is its own.)
-for (const name of ['SWash', 'SFrost', 'SReed', 'SRed', 'SNeedle', 'SHammer', 'SAurora', 'SHelios']) {
+// (SHelios is 325 km, up a mountain, up the Face of its spire and across the plateau, 286 s of it: its time limit is its own.
+// SHyperion is 242 km of map and 310 km of deck, over a mountain 48 km high.)
+for (const name of ['SWash', 'SFrost', 'SReed', 'SRed', 'SNeedle', 'SHammer', 'SAurora', 'SHelios', 'SHyperion']) {
   const id = road(name), R = T.roads[id];
   const ends = R.jx.map(k => T.junctions[k]).sort((a, b) => a.b0 - b.b0);
   for (const dir of [1, -1]) {
@@ -354,13 +359,76 @@ for (const name of ['SWash', 'SFrost', 'SReed', 'SRed', 'SNeedle', 'SHammer', 'S
     const start = NR.across(entry, false, begin) - depart * 270;
     const finish = NR.across(exit, false, end) + arrive * 270;
     const trip = fly({ road: entry.a, i: start, dir: depart, mph: 1500 },
-      [{ road: id, i: Math.floor(R.N / 2) }, { road: exit.a, i: finish }], name === 'SAurora' ? 1000 : (name === 'SHelios' ? 600 : 420));
+      [{ road: id, i: Math.floor(R.N / 2) }, { road: exit.a, i: finish }], name === 'SAurora' ? 1000 : (name === 'SHelios' || name === 'SHyperion' ? 600 : 420));
     const changes = trip.changes.filter(c => c.bi === 2).map(c => c.to[0]);
     const pod = trip.s.S.pod;
     check(`signed road: ${T.roads[entry.a].name} > ${name} > ${T.roads[exit.a].name}, ${(trip.frames / 60).toFixed(1)} s, ${trip.scrapes} wall contacts`,
       !legal(trip.changes) && changes.length === 2 && changes[0] === id && changes[1] === exit.a &&
       pod.path === exit.a && (pod.hint - finish) * arrive >= 0 && !trip.events.some(e => e.type === 'crash'));
   }
+}
+
+// deck: Hyperion's mountain, part by part, at a speed held by hand (the sim's own drag and thrust left out of
+// it: the speed is put back each step, so the time is the kinematics' alone)
+{
+  const id = road('SHyperion'), R = T.roads[id];
+  const s = PS.makeSim({ track: 'network', handling: 'speed' });
+  const h = (i) => s.netHeight(id, i);
+  // the parts, found from the heights: the foot (the last level sample), the summit (level at the top), the far foot
+  let foot = 0, top0 = 0, top1 = 0, far = 0, hi = 0;
+  for (let i = 0; i < R.N; i++) hi = Math.max(hi, h(i));
+  for (let i = 1; i < R.N; i++) {
+    if (!foot && h(i) > 1e-6) foot = i - 1;
+    if (!top0 && h(i) > hi - 1e-6) top0 = i;
+    if (h(i) > hi - 1e-6) top1 = i;
+    if (foot && !far && i > top1 && top1 && h(i) < 1e-6) far = i;
+  }
+  const v = 3000 / MPH, a = R.pts[foot - 40];
+  s.respawnOn(id, foot - 40, 1);
+  const hold = () => { for (const b of s.S.bodies) { b.vx = v * a.tx; b.vy = v * a.ty; b.w = 0; b.th = Math.atan2(a.ty, a.tx); } };
+  hold();
+  const inp = { thrL: 0, thrR: 0, brkL: 0, brkR: 0, repair: false, reignite: true, handling: 'speed' };
+  const at = {};   // sample -> the time the pod passed it
+  let t = 0, worstZ = 0, steepest = 0, onRoad = true, stayed = true;
+  const marks = [foot, top0, top1, far];
+  while (t < 400 && s.S.pod.hint < far + 40) {
+    s.step(inp, DT);
+    hold();
+    t += DT;
+    const pod = s.S.pod;
+    let k = Math.max(0, pod.hint - 3);   // the sample the pod is over (its hint is the routing's, a sample or two behind at speed)
+    while (k < R.N - 2 && (pod.x - R.pts[k + 1].x) * a.tx + (pod.y - R.pts[k + 1].y) * a.ty >= 0) k++;
+    const f = k + Math.max(0, Math.min(1, ((pod.x - R.pts[k].x) * a.tx + (pod.y - R.pts[k].y) * a.ty) / R.pts[k].len));
+    stayed = stayed && !pod.offRoad && pod.path === id;
+    worstZ = Math.max(worstZ, Math.abs(pod.z - (h(f) + s.P.rideH)));
+    steepest = Math.max(steepest, Math.abs(s.deckPitch(pod)));
+    for (const m of marks) if (at[m] === undefined && f >= m) at[m] = t - (f - m) * NET_STEP_M / v;
+  }
+  const up = (top0 - foot) * NET_STEP_M, across = (top1 - top0) * NET_STEP_M, down = (far - top1) * NET_STEP_M;
+  const tUp = at[top0] - at[foot], tAcross = at[top1] - at[top0], tDown = at[far] - at[top1];
+  check(`deck: SHyperion's mountain is samples ${foot}-${top0} up, ${top0}-${top1} across the summit (${hi.toFixed(0)} m), ${top1}-${far} down; at 3,000 mph held, the ${(up / 1000).toFixed(2)} km up takes ${tUp.toFixed(2)} s (its length says ${(up / v).toFixed(2)}), the summit ${tAcross.toFixed(2)} s (${(across / v).toFixed(2)}), the ${(down / 1000).toFixed(2)} km down ${tDown.toFixed(2)} s (${(down / v).toFixed(2)}); steepest ${(steepest * 180 / Math.PI).toFixed(1)} deg; the pod within ${worstZ.toFixed(3)} m of the road's height all the way`,
+    stayed && hi > 47999 && Math.abs(tUp - up / v) < 0.004 * up / v && Math.abs(tAcross - across / v) < 0.004 * across / v && Math.abs(tDown - down / v) < 0.004 * down / v &&
+    steepest > 87.5 * Math.PI / 180 && steepest < 88.5 * Math.PI / 180 && worstZ < 0.5);
+  // with the rule switched off (the sim as it was before there was a deck road) a craft weaving along E3 ends where
+  // it does with it on, bit for bit
+  const weave = (rule) => {
+    const q = PS.makeSim({ track: 'network', handling: 'speed' });
+    q.T.deckRule = rule;
+    const e3 = road('E3'), p = q.T.roads[e3].pts[9000];
+    q.respawnOn(e3, 9000, 1);
+    for (const b of q.S.bodies) { b.vx = 3000 / MPH * p.tx; b.vy = 3000 / MPH * p.ty; }
+    for (let n = 1; n <= 20 * 480; n++) {
+      const tt = n * DT;
+      q.step({ thrL: 0.8 + 0.2 * Math.sin(tt * 1.3), thrR: 0.8 - 0.2 * Math.sin(tt * 1.3), brkL: 0, brkR: 0, repair: false, reignite: true, handling: 'speed' }, DT);
+    }
+    return q.S.bodies.map((b) => [b.x, b.y, b.z, b.vx, b.vy, b.vz, b.th, b.w]).flat();
+  };
+  const ruleOn = weave(true), ruleOff = weave(false);
+  check(`deck: with the rule switched off a craft weaving along E3 for 20 s ends where it does with it on, bit for bit (${ruleOn.filter((x, k) => x !== ruleOff[k]).length} of ${ruleOn.length} figures differ)`,
+    ruleOn.length === 24 && ruleOn.every((x, k) => x === ruleOff[k]));
+  // ... and on a road that is not a deck road nothing is asked of any of it
+  check(`deck: no other road is one (${T.roads.filter((Q) => Q.deck).map((Q) => Q.name).join(', ')}); E3's pitch reads ${s.deckSine(road('E3'), 9000.3)}, SHelios's wall ${s.deckSine(road('SHelios'), 7000.5)}`,
+    T.roads.filter((Q) => Q.deck).length === 1 && s.deckSine(road('E3'), 9000.3) === 0 && s.deckSine(road('SHelios'), 7000.5) === 0);
 }
 
 console.log(ok ? 'NETWORK OK' : 'NETWORK FAIL');

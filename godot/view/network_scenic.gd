@@ -30,7 +30,9 @@ const OFFS := [0.0, 14.0, 40.0, 110.0, 260.0, 520.0, 900.0, 1300.0, 1600.0, 1900
 const SAND := Color(0.74, 0.68, 0.52, 0.0)
 const STEP := 512.0          # the terrain's grid (NetworkLandscape.STEP)
 const Helios := preload("res://view/helios.gd")
+const Hyperion := preload("res://view/hyperion.gd")
 const MOUNTAIN := "SHelios"  # this road's land is the mountain's own surface (view/helios.gd), with the road a bench in it
+# (... and SHyperion's is Mount Hyperion's, view/hyperion.gd: _hill)
 const EASE := 220.0          # m from the deck's edge over which that bench's cut and fill meet the slope
 const SPAN := 512            # samples in each stretch a hint is looked for in (a multiple of 32, the samples a hint looks at)
 const LAP_SURE := 2800.0     # m: nearer the mountain's road than this, the lap found is the nearest there is (its laps lie 6 km apart)
@@ -47,8 +49,18 @@ var _cache := {}             # terrain vertex -> Vector2(weight, height)
 var _noise := FastNoiseLite.new()
 
 
+## The mountain a road's land is the surface of (its script: land, sag), or null: Helios's road, Hyperion's.
+static func _hill(road_name: String):
+	if road_name == MOUNTAIN:
+		return Helios
+	if road_name == Hyperion.ROAD and Hyperion.ready:
+		return Hyperion
+	return null
+
+
 func setup(s, heights := []) -> void:   # heights: the world's own per-sample heights, road by road (worked out again without them)
 	sim = s
+	Hyperion.setup(s)
 	_noise.seed = 9917
 	_noise.frequency = 1.0 / 900.0
 	_noise.fractal_octaves = 3
@@ -60,7 +72,8 @@ func setup(s, heights := []) -> void:   # heights: the world's own per-sample he
 		var st: Array = entry[2]
 		var first := int(st[0][0])
 		var last := int(st[st.size() - 1][0])
-		if String(R.name) == MOUNTAIN:
+		var hill = _hill(String(R.name))
+		if hill != null:
 			# (its rows are every sixty samples: the road is its own land from the very foot of the mountain to the
 			# other, or the last few dozen samples up the slope had the terrain's coarse grid for a deck's company)
 			while first > 1 and s.net_height(r, float(first - 1)) > 0.5:
@@ -69,8 +82,11 @@ func setup(s, heights := []) -> void:   # heights: the world's own per-sample he
 				last += 1
 		var n := last - first + 1
 		var D := {"first": first, "last": last, "sea": int(entry[1]), "hw": float(R.w[first]) / 2.0, "e": s.net_edge_span(float(R.w[first]))}
-		if String(R.name) == MOUNTAIN:
+		if hill != null:
 			D["mountain"] = true
+			D["hill"] = hill
+			if hill == Hyperion:
+				D["closed"] = true      # (its land is level with it either side, across the face: no edge of it is open)
 		for key in ["h", "tl", "rl", "tr", "rr", "gap"]:
 			var a := PackedFloat32Array()
 			a.resize(n)
@@ -162,6 +178,8 @@ func open(r: int, i: int, left: bool) -> bool:
 	if not on(r, i):
 		return false
 	var D: Dictionary = roads[r]
+	if D.has("closed"):
+		return false
 	var q := i - int(D.first)
 	return _sea_at(D, q, left) or (D.tl if left else D.tr)[q] < D.h[q] - 12.0
 
@@ -337,11 +355,13 @@ func _nearest_lap(r: int, p: Vector2, cell: Vector2i, best: int) -> int:
 ## it on the uphill side, on fill on the downhill. The grid lies under the deck and under the road's
 ## own land (row): at the hill's own height where that is the lower (under the fill), held under the
 ## deck for as far as one of its triangles could reach across it, and the mountain itself past FLANK.
-func _mountain_ground(h: float, hw: float, lat: float, d: float, p: Vector2) -> Vector2:
-	var hill := Helios.land(p)
+func _mountain_ground(h: float, hw: float, lat: float, d: float, p: Vector2, mountain = Helios) -> Vector2:
+	if mountain == Hyperion:
+		return Vector2.ZERO      # (the grid lies under all of Hyperion, by the landscape's own rule: Hyperion.ground. The road's land has no say in it)
+	var hill: float = mountain.land(p)
 	# (on the spire the grid's straight edges pass over the surface between its corners, by up to 300 m at the
-	# wall: under the road and its own land the corners are let down by that much more)
-	var sunk := SINK + Helios.sag(p)
+	# wall: under the road and its own land the corners are let down by that much more. Hyperion's: by kilometres)
+	var sunk: float = SINK + float(mountain.sag(p))
 	if d < 0.0:
 		return Vector2(1.0, minf(h - 1.0, hill) - sunk)
 	var y := minf(lerpf(h - 1.0, hill, smoothstep(0.0, EASE, d)), hill) - sunk * (1.0 - smoothstep(FLANK - 300.0, FLANK, d))
@@ -356,6 +376,8 @@ func fine(r: int, i: int) -> bool:
 	if not (roads.has(r) and roads[r].has("mountain")) or not on(r, i):
 		return false
 	var R = sim.roads[r]
+	if roads[r].hill != Helios:
+		return roads[r].hill.fine(i)      # (Hyperion's: over its lip)
 	return Helios.spire(Vector2(R.px[i], R.py[i]))
 
 
@@ -372,7 +394,7 @@ func climb(r: int, i: int) -> float:
 ## The height a point beside road r is known to stand at without asking the terrain (the mountain's
 ## road: the mountain's), or NAN.
 func known_height(r: int, p: Vector2) -> float:
-	return Helios.land(p) if roads.has(r) and roads[r].has("mountain") else NAN
+	return float(roads[r].hill.land(p)) if roads.has(r) and roads[r].has("mountain") else NAN
 
 
 ## What the terrain's vertex c (at p) stands at: Vector2(weight, height); weight 0 where no scenic
@@ -410,7 +432,7 @@ func land(c: Vector2i, _p: Vector2) -> Vector2:
 		var edge: float = float(D.hw) - (float(D.e) if is_open else -3.2)
 		var d := absf(lat) - edge
 		if D.has("mountain"):
-			out = _mountain_ground(D.h[q], float(D.hw), lat, d, p)
+			out = _mountain_ground(D.h[q], float(D.hw), lat, d, p, D.hill)
 		elif d < 0.0:   # under the deck: as low as the lower of its two sides, so no triangle from here stands out through a cliff
 			out = Vector2(1.0, minf(D.h[q] - 10.0, minf(_ground(D, q, true, 0.0).y, _ground(D, q, false, 0.0).y)))
 		else:
@@ -448,8 +470,8 @@ func row(r: int, i: int, left: bool) -> PackedFloat32Array:
 			var at := Vector2(R.px[i] + R.nx[i] * sgn * (edge + out_m), R.py[i] + R.ny[i] * sgn * (edge + out_m))
 			# (on the spire its outer half meets what the terrain's coarse grid shows there, which stands over the true
 			# surface between the grid's corners: or a ledge ran up the wall where the two met)
-			var surface := Helios.land(at)
-			if Helios.spire(at):
+			var surface: float = D.hill.land(at)
+			if D.hill == Helios and Helios.spire(at):
 				surface = lerpf(surface, Helios.grid(at), smoothstep(500.0, 1250.0, out_m))
 			var hill := lerpf(h - 1.0, surface, smoothstep(0.0, EASE, out_m))
 			if m == OFFS.size() - 1:

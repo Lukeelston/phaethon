@@ -1,7 +1,7 @@
 ## A film of what has been built and not yet flown, for looking at without a headset: one scene a
 ## run, recorded by the engine's movie writer with the game's own sound. Run windowed:
 ## --xr-mode off --resolution 1280x720 --fixed-fps 60 --write-movie FILE.avi
-## -s res://tests/film_unflown.gd -- --out=DIR --scene=start|climb|snow
+## -s res://tests/film_unflown.gd -- --out=DIR --scene=start|climb|snow|sweep|hyperion
 ## The world streams in before the scene begins: FILM_BEGIN and FILM_END give the seconds of the film
 ## to keep, FILM lines the captions and FILMT lines where the craft was, twice a second.
 ## start is worked through the start-up's own calls and then flown on the levers; climb is flown
@@ -19,6 +19,8 @@ var levers := [0.0, 0.0]
 var brakes := [0.0, 0.0]
 var caption: Label
 var frames := 0          # frames shown since the run began: the film's clock
+var _busiest := 0.0      # the road builder's longest frame since the last FILMT line (ms), and the most chunks it had waiting
+var _waiting := 0
 
 
 func _frame() -> void:
@@ -42,10 +44,15 @@ func _tick() -> void:
 	seat._apply_startup(DT)
 	seat._process(DT)
 	seat.approach_display._process(DT)
+	if seat.network_world != null:
+		_busiest = maxf(_busiest, float(seat.network_world.sync_ms))
+		_waiting = maxi(_waiting, int(seat.network_world.wanted))
 	if frames % 30 == 0:      # where the craft is, twice a second (for timing the scenes)
 		var b = seat.sim.pod
-		print("FILMT %.2f s: %s sample %d, deck %.0f m%s, %.0f mph, levers %.2f, brakes %.2f" % [frames * DT, seat.sim.roads[b.path].name, b.hint,
-			seat.sim.net_height(b.path, float(b.hint)), " (off the road)" if b.off_road else "", _mph(), levers[0], brakes[0]])
+		print("FILMT %.2f s: %s sample %d, deck %.0f m%s, %.0f mph, levers %.2f, brakes %.2f; roads %.1f ms a frame at most, %d chunks waiting" % [frames * DT, seat.sim.roads[b.path].name, b.hint,
+			seat.sim.net_height(b.path, float(b.hint)), " (off the road)" if b.off_road else "", _mph(), levers[0], brakes[0], _busiest, _waiting])
+		_busiest = 0.0
+		_waiting = 0
 	await _frame()
 
 
@@ -82,6 +89,27 @@ func _fly_to(sample: int, mph: float, look = null, limit := 40.0) -> void:
 			seat.cam.rotation_degrees = from.lerp(look, smoothstep(0.0, 1.0, minf(1.0, (f + 1) / TURN)))
 		await _tick()
 		f += 1
+
+
+## Fly on to a sample of the road the craft is on and stop there: a hand that holds the speed a steady
+## 25 m/s2 of braking would stop from in the distance left.
+func _stop_at(sample: int, look = null, limit := 40.0) -> void:
+	var from: Vector3 = seat.cam.rotation_degrees
+	var f := 0
+	while f < roundi(limit / DT):
+		var left: float = (float(sample) - float(seat.sim._road_f(seat.sim.pod))) * float(seat.sim.NET_STEP)
+		var v := _mph() * 0.44704
+		if left < 0.5 or (left < 6.0 and v < 0.5):
+			break
+		var want := sqrt(50.0 * maxf(left, 0.0))
+		levers = [clampf((want - v) / 20.0, 0.0, 0.5), clampf((want - v) / 20.0, 0.0, 0.5)]
+		brakes = [clampf((v - want) / 12.0, 0.0, 1.0), clampf((v - want) / 12.0, 0.0, 1.0)]
+		if look != null:
+			seat.cam.rotation_degrees = from.lerp(look, smoothstep(0.0, 1.0, minf(1.0, (f + 1) / TURN)))
+		await _tick()
+		f += 1
+	levers = [0.0, 0.0]
+	brakes = [1.0, 1.0]
 
 
 ## The camera carried along a road at a steady speed, `right` metres off its centre line (no flight:
@@ -192,6 +220,8 @@ func _run() -> void:
 			ok = await _snow()
 		"sweep":
 			ok = await _sweep()
+		"hyperion":
+			ok = await _hyperion()
 		_:
 			push_error("No such scene: " + scene)
 			ok = false
@@ -313,6 +343,69 @@ func _snow() -> bool:
 	await _glide(where, first + third, mouth, 1400.0, in_lane)
 	_say("The rails carry on along the exit itself: held, they take the craft off the highway.")
 	await _glide(exit_road, 0.0, 150.0, 1100.0, 0.0)
+	return true
+
+
+## Mount Hyperion, flown through the sim from 2 km short of its ramp: the ramp (its foot is sample 1,874
+## of its road, 30 degrees at 2,856, 45 at 3,347, 60 at 3,838, 75 at 4,329), the braking section (the wall
+## from 4,754, the crest from 4,824), the summit (5,016 to 5,216, the stop line at 5,116), the lip (to
+## 5,235; the stop line at 5,204, the brink's mark at 5,221), the wall down (to 6,580) and the run-out (to
+## 7,604). How long each takes is the point: the craft's speed is its speed along the deck there.
+func _hyperion() -> bool:
+	if not await _begin("SHyperion@1790", false, false):
+		return false
+	var out_left := Vector3(-4, 78, 0)
+	await _roll(0.5)
+	print("FILM_BEGIN %.3f" % (frames * DT))
+	_say("Mount Hyperion, 48 km high, from 2 km short of its ramp. The road goes straight over it.")
+	await _roll(3.0, Vector3(14, 0, 0))
+	await _fly_to(2100, 4600.0, LEVEL, 30.0)
+	_say("The ramp: 69 km of deck, its pitch rising by the same angle every metre, to 88 degrees.")
+	await _fly_to(2856, 4600.0, null, 40.0)
+	_say("30 degrees, 6 km up. The speed on the dial is the speed along the deck.")
+	await _fly_to(3200, 4600.0, null, 30.0)
+	_say("45 degrees, 13 km up. Out of the left side.")
+	await _fly_to(3520, 4600.0, out_left, 30.0)
+	await _fly_to(3838, 4600.0, LEVEL, 30.0)
+	_say("60 degrees, 22 km up.")
+	await _fly_to(4329, 4600.0, null, 30.0)
+	_say("75 degrees, 33 km up. The sky is black and the stars are out.")
+	await _fly_to(4560, 4600.0, Vector3(30, 0, 0), 30.0)
+	await _fly_to(4735, 4600.0, LEVEL, 30.0)
+	_say("The braking section: the last of the wall and the crest, 6.3 km. Boards count down to the summit.")
+	await _fly_to(4930, 1500.0, null, 30.0)
+	await _fly_to(5016, 600.0, null, 30.0)
+	_say("Over the crest onto the summit, 48 km up: 4.8 km of level road to the cliff.")
+	await _fly_to(5110, 700.0, null, 40.0)
+	await _stop_at(5203)
+	_say("The stop line, 290 m short of the cliff. Over the air the sky is black to a thin line of it.")
+	await _roll(3.5, Vector3(0, 80, 0))
+	_say("Out of the right side.")
+	await _roll(3.5, Vector3(0, -80, 0))
+	_say("Straight up.")
+	await _roll(3.0, Vector3(70, 0, 0))
+	brakes = [0.0, 0.0]
+	_say("Creeping on to the brink.")
+	await _fly_to(5212, 60.0, LEVEL, 40.0)
+	await _stop_at(5221)
+	_say("The brink, 24 degrees nose down on the lip: the country, 48 km below.")
+	await _roll(4.0)
+	_say("Out of the left side.")
+	await _roll(3.0, Vector3(-4, 80, 0))
+	await _roll(1.2, LEVEL)
+	brakes = [0.0, 0.0]
+	_say("Over the lip at 60 mph: a quarter turn in 460 m of deck.")
+	await _fly_to(5237, 60.0, null, 60.0)
+	_say("88 degrees down, and 47 km of wall under the nose.")
+	await _roll(2.0)
+	await _fly_to(5700, 4800.0, null, 40.0)
+	_say("The wall down: 32 km of it.")
+	await _fly_to(6100, 4800.0, out_left, 30.0)
+	await _fly_to(6580, 4800.0, LEVEL, 30.0)
+	_say("The run-out: 25 km to level.")
+	await _fly_to(7604, 4800.0, null, 40.0)
+	_say("Level again, and 114 km of straight to E3.")
+	await _fly_to(7800, 4000.0, null, 20.0)
 	return true
 
 

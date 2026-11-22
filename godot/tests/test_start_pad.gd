@@ -135,10 +135,12 @@ func _run() -> void:
 	var shapes := {}
 	var station_errors := []
 	var max_triangles := 0
+	var bays := 0   # the named start points (sixteen, and Mount Hyperion's two)
 	for entry in UI.INSERTIONS:
 		var spot: Array = View.start_spot(entry[2])
 		if spot.is_empty():
 			continue
+		bays += 1
 		var rd: int = sim.cities[spot[0]].road if spot.size() == 1 else int(spot[0])
 		var index: int = sim.cities[spot[0]].i if spot.size() == 1 else int(spot[1])
 		pad._move([rd, index, 1, Sim.net_pad_right(sim.roads[rd].w[index])])
@@ -156,8 +158,8 @@ func _run() -> void:
 		pad.show_startup(seq)
 		if pad.station != station_node or pad.station_id != entry[0] or pad.lines[0].text != String(entry[1]).to_upper() or shop == pad.station_sign.text:
 			station_errors.append(entry[0])
-	_check("one station node, %d distinct silhouettes at the named menu bays, two static draw surfaces, up to %d triangles, local shops acknowledge release (wrong: %s)" % [shapes.size(), max_triangles, station_errors],
-		shapes.size() == 16 and station_errors.is_empty() and max_triangles < 8000)
+	_check("one station node, %d distinct silhouettes at the %d named menu bays, two static draw surfaces, up to %d triangles, local shops acknowledge release (wrong: %s)" % [shapes.size(), bays, max_triangles, station_errors],
+		shapes.size() == bays and bays >= 18 and station_errors.is_empty() and max_triangles < 8000)
 	pad._move([int(there.road), int(there.i)+7, 1, 0.0])
 	_check("a debug roadside bay outside the named insertions clears the old station", not station_node.visible and station_node.mesh == null)
 	v.queue_free()

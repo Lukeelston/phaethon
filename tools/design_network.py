@@ -49,6 +49,13 @@ surface's own slopes); its land is the surface either side. Since 2026-11-21 ("a
 mountain to climb vertically ... and plateau over the top") the dome carries a spire, 16 km high: from a
 shoulder 9 km out its pitch grows to 75 degrees, then rolls over onto a plateau 6 km across; the road
 leaves its inner lap for the Face, straight up the spire, across the plateau and down the far side.
+Hyperion (Luke, 2026-11-21: "add another one ... 3 times - it should be inconceivable"): a second
+mountain, 48 km high, in the middle of the north-west cell (hyperion_z, which the views mirror), and
+SHyperion, one straight line from E2's north shoulder to E3's south that goes up its ramp (a quarter of
+a circle in profile, to 88 degrees), over its summit and down its cliff (add_hyperion). That road is a
+"deck road": from the ramp's foot to the run-out's end it is sampled every STEP of its deck, not of the
+map (the "V" and "W" segments), and the sims carry a craft along it at its speed along the deck; its
+width changes along it (200 m at its mouths, 800 m over the mountain).
 Roads are sampled exactly as the sims sample them (NET_STEP: straights in equal steps, arcs in
 exact chords, a last point at the end). Junction zones are found by walking: a road's end samples
 whose corridor overlaps its parent's (plus a margin), against the parent's nearest samples.
@@ -262,6 +269,33 @@ HELIOS_GRADE = 0.22                      # the spiral laps' steepest (the Face i
 HELIOS_LAND = (60, 30.0, 600.0)          # its land: a row every 60 samples while it's over 30 m up, each side's run (m)
 HELIOS_LAND_FIT = (4.0, 0.25)            # ... and more on the Face, so the views' blend between rows keeps each side within 4 m (or a quarter of its drop)
 
+# Hyperion (Luke, 2026-11-21, of Helios: "its still not what i was talking about. Keep it as it is, and add
+# another one, twice as tall. Maybe 3 times - it should be inconceivable. Then it should have a steadily
+# steepening ramp until it's basically straight up, then a braking section to crest over the top, enjoy the
+# view from the top, then creep over a cliff and scream down the other side. It should be wide and imposing.
+# The hill climb road to end all roads. Olympus mons, but bigger."). A second mountain, in the empty middle of
+# the north-west cell, and SHyperion: one straight line from E2 to E3 that goes over it. Along the road, in
+# order: the ramp (a quarter of a circle in profile: its pitch grows by the same angle with every metre
+# travelled, from level to the wall's), the wall, the crest (the braking section is the wall and the crest),
+# the summit (level), the lip, the wall down, the run-out. Each is a whole number of the road's samples, and
+# the two walls' pitches are whatever then makes the summit HYPERION_H exactly (hyperion_shape).
+# The road is sampled every STEP of its DECK from the ramp's foot to the run-out's end (the "V" and "W"
+# segments: walk), not every STEP of plan: at 88 degrees a sample of plan is 690 m of wall. The sims carry a
+# craft along such a road (NET_DECK) at its speed along the deck (craft_sim.gd / sim-core.js).
+HYPERION_H = 48000.0                     # the summit (m): three times Helios
+HYPERION_MOUTHS = ("E2", 132, "E3")      # off E2's north shoulder at km 132, travelling east; onto E3's south shoulder, travelling east
+HYPERION_HEADING = 60.0                  # the road's heading from one turn to the other, degrees north of east
+HYPERION_TURN = 12 * KM                  # the two turns' radius (second gear wants 5.9 km)
+HYPERION_APPROACH = 1350                 # samples of level straight before the ramp's foot (32.4 km)
+HYPERION_UP = (2880, 70, 192)            # samples: the ramp, the wall, the crest (69.1 km, 1.7 km, 4.6 km of deck)
+HYPERION_TOP = 200                       # ... the summit (4.8 km)
+HYPERION_DOWN = (19, 1345, 1024)         # ... the lip, the wall down, the run-out (0.46 km, 32.3 km, 24.6 km)
+HYPERION_W = (800.0, 20, 220)            # the deck's width from the approach to the far straight (the mouths are SC_W); it widens from so many samples past the first turn, over so many
+HYPERION_PLATEAU = (3000.0, 1200.0)      # the summit plateau: half its width across the road, its corners' radius (its length is the summit's)
+HYPERION_SKIRT = (10000.0, 8000.0)       # the mountain's sides: this much more run at the foot than the ramp's own, gone by this height
+HYPERION_KEY = (24, 6, 1)                # a height key every so many samples on the ramp and the run-out, on the crest, on the lip
+HYPERION_LAND = (60, 600.0)              # its land's rows: every so many samples on the mountain, each side's run (m)
+
 
 def helios_spire():
     """The spire's own figures, from HELIOS and HELIOS_SPIRE: the dome's height and pitch (rad) at the shoulder,
@@ -300,6 +334,98 @@ def helios_z(x, y):
     return top
 
 
+def _solve(f, lo, hi):
+    for _ in range(200):
+        mid = (lo + hi) / 2
+        if f(mid) > 0.0:
+            hi = mid
+        else:
+            lo = mid
+    return (lo + hi) / 2
+
+
+def hyperion_shape():
+    """Hyperion's own figures, from the constants: the walls' pitches up and down (rad) that put the summit at
+    HYPERION_H with every part a whole number of samples; the radii (the ramp's, the crest's, the lip's, the
+    run-out's) and the walls' lengths along the deck; the heights where the parts meet; each side's run."""
+    H = HYPERION_H
+    n1, nw, nc = HYPERION_UP
+    nl, nd, n2 = HYPERION_DOWN
+    tm = _solve(lambda t: STEP * (n1 + nc) * (1 - math.cos(t)) / t + STEP * nw * math.sin(t) - H, 1.3, 1.57)
+    td = _solve(lambda t: STEP * (nl + n2) * (1 - math.cos(t)) / t + STEP * nd * math.sin(t) - H, 1.3, 1.57)
+    S = dict(H=H, tm=tm, td=td, R1=STEP * n1 / tm, Lw=STEP * nw, Rc=STEP * nc / tm, Rl=STEP * nl / td, Ld=STEP * nd, R2=STEP * n2 / td,
+             top=STEP * HYPERION_TOP)
+    S["zc"] = H - S["Rc"] * (1 - math.cos(tm))    # the crest's foot: the top of the wall
+    S["zw"] = S["zc"] - S["Lw"] * math.sin(tm)    # ... and the wall's: the top of the ramp
+    S["zl"] = H - S["Rl"] * (1 - math.cos(td))    # the lip's foot: the top of the wall down
+    S["zo"] = S["zl"] - S["Ld"] * math.sin(td)    # ... and that wall's: the top of the run-out
+    S["front"] = S["Rc"] * math.sin(tm) + S["Lw"] * math.cos(tm) + S["R1"] * math.sin(tm)    # plan, from the plateau's edge to the ramp's foot
+    S["back"] = S["Rl"] * math.sin(td) + S["Ld"] * math.cos(td) + S["R2"] * math.sin(td)     # ... and to the run-out's end
+    assert abs(S["zw"] - S["R1"] * (1 - math.cos(tm))) < 1e-6 and abs(S["zo"] - S["R2"] * (1 - math.cos(td))) < 1e-6
+    return S
+
+
+def hyperion_out(S, z, c):
+    """How far out from the plateau's edge (m, in plan) the mountain stands z high, where the way out from the
+    plateau makes an angle with the way the road came whose cosine is c (1: the ramp's side, -1: the cliff's,
+    0: either flank). The ramp's side is the road's own profile up, the cliff's its profile down, a flank the
+    ramp's with HYPERION_SKIRT more run low down; between, each by the square of its part of the direction."""
+    z = min(max(z, 0.0), S["H"])
+    acos = lambda v: math.acos(min(1.0, max(-1.0, v)))
+    tm, td = S["tm"], S["td"]
+    if z >= S["zc"]:
+        front = S["Rc"] * math.sin(acos(1 - (S["H"] - z) / S["Rc"]))
+    elif z >= S["zw"]:
+        front = S["Rc"] * math.sin(tm) + (S["zc"] - z) / math.tan(tm)
+    else:
+        front = S["Rc"] * math.sin(tm) + S["Lw"] * math.cos(tm) + S["R1"] * (math.sin(tm) - math.sin(acos(1 - z / S["R1"])))
+    if c >= 1.0:
+        return front
+    if z >= S["zl"]:
+        back = S["Rl"] * math.sin(acos(1 - (S["H"] - z) / S["Rl"]))
+    elif z >= S["zo"]:
+        back = S["Rl"] * math.sin(td) + (S["zl"] - z) / math.tan(td)
+    else:
+        back = S["Rl"] * math.sin(td) + S["Ld"] * math.cos(td) + S["R2"] * (math.sin(td) - math.sin(acos(1 - z / S["R2"])))
+    more, by = HYPERION_SKIRT
+    side = front + (more * (1 - z / by) ** 2 if z < by else 0.0)
+    c2 = c * c
+    return (c2 * front if c > 0.0 else c2 * back) + (1 - c2) * side
+
+
+hyperion_at = {}   # the summit's centre and the road's way over it, set when the road is laid (add_hyperion): cx, cy, ux, uy
+
+
+def hyperion_z(x, y):
+    """The mountain: HYPERION_H on its plateau (a rounded rectangle about the summit's centre, as long as the
+    summit and HYPERION_PLATEAU wide), and round it the height at which hyperion_out, in the direction straight
+    out from the plateau's edge, is the distance out from that edge. The views mirror this exactly
+    (view/hyperion.gd). Ahead of and behind the plateau's straight ends the direction is the road's own, so
+    across the middle 3.6 km the mountain is the road's profile exactly: a face, not a ridge."""
+    S = hyperion_shape()
+    cx, cy, ux, uy = hyperion_at["cx"], hyperion_at["cy"], hyperion_at["ux"], hyperion_at["uy"]
+    half, corner = HYPERION_PLATEAU
+    u = (x - cx) * ux + (y - cy) * uy          # along the road
+    v = -(x - cx) * uy + (y - cy) * ux         # to its left
+    qu, qv = abs(u) - (S["top"] / 2 - corner), abs(v) - (half - corner)
+    mu, mv = max(qu, 0.0), max(qv, 0.0)
+    m = math.hypot(mu, mv)
+    out = m + min(max(qu, qv), 0.0) - corner
+    if out <= 0.0:
+        return S["H"]
+    c = -math.copysign(mu, u) / m if m > 0.0 else 0.0      # the cosine of the way out against the way the road came
+    if out >= hyperion_out(S, 0.0, c):
+        return 0.0
+    lo, hi = 0.0, S["H"]
+    for _ in range(60):
+        mid = (lo + hi) / 2
+        if hyperion_out(S, mid, c) > out:
+            lo = mid
+        else:
+            hi = mid
+    return (lo + hi) / 2
+
+
 def backroad_mouth(parent, station, side, direction):
     axis = parent.p[:, 0 if parent.name.startswith("E") else 1]
     i = int(np.argmin(abs(axis - station * KM)))
@@ -322,6 +448,26 @@ def walk(segs, x, y, h):
                 pts.append((x, y))
                 x += d * math.cos(h)
                 y += d * math.sin(h)
+        elif s[0] == "W":
+            # a wall: straight in plan, s[1] m of deck at a pitch of s[2] degrees, a sample every STEP of the deck
+            n = max(1, round(s[1] / STEP))
+            d = s[1] / n * math.cos(math.radians(s[2]))
+            for _ in range(n):
+                pts.append((x, y))
+                x += d * math.cos(h)
+                y += d * math.sin(h)
+        elif s[0] == "V":
+            # a vertical arc: straight in plan, the deck a circle of radius s[1] in profile from a pitch of s[2]
+            # degrees to one of s[4], a sample every STEP of the deck (each step's plan: its chord's)
+            a0, a1 = math.radians(s[2]), math.radians(s[4])
+            n = max(1, round(s[1] * abs(a1 - a0) / STEP))
+            da = (a1 - a0) / n
+            c = 2 * s[1] * math.sin(abs(da) / 2)
+            for k in range(n):
+                pts.append((x, y))
+                d = c * math.cos(a0 + (k + 0.5) * da)
+                x += d * math.cos(h)
+                y += d * math.sin(h)
         else:
             r, sn, ang = s[1], (1.0 if s[0] == "L" else -1.0), math.radians(s[2])
             n = max(1, math.ceil(r * ang / STEP))
@@ -334,6 +480,15 @@ def walk(segs, x, y, h):
                 h += sn * da
     pts.append((x, y))
     return pts, (x, y, h)
+
+
+def seg_samples(s):
+    """How many samples a segment is walked in (walk)."""
+    if s[0] == "W":
+        return max(1, round(s[1] / STEP))
+    if s[0] == "V":
+        return max(1, round(s[1] * abs(math.radians(s[4]) - math.radians(s[2])) / STEP))
+    return max(1, math.ceil((s[1] if s[0] == "S" else s[1] * math.radians(s[2])) / STEP))
 
 
 def hermite(keys, i):
@@ -369,10 +524,15 @@ class Road:
         self.mode = np.ones(self.N, dtype=int)
         i = 0
         for s in segs:
-            n = max(1, math.ceil((s[1] if s[0] == "S" else s[1] * math.radians(s[2])) / STEP))
+            n = seg_samples(s)
             if s[3] == "sf":
                 self.mode[i:i + n] = 0
             i += n
+        self.wid = None     # its width at every sample, where that isn't `width` all along (SHyperion)
+        self.deck = False   # sampled along its deck, and flown at the speed along it (SHyperion)
+
+    def w(self, i):
+        return self.width if self.wid is None else float(self.wid[i])
 
     def h(self, i):
         return hermite(self.keys, i)
@@ -885,6 +1045,125 @@ def helios_land(road):
     return rows
 
 
+def add_hyperion(roads, joins):
+    """SHyperion: off E2's north shoulder, one left turn, and a straight line over Mount Hyperion to a right
+    turn onto E3's south shoulder. The mountain is laid where the road puts it (hyperion_at)."""
+    S = hyperion_shape()
+    tm, td = math.degrees(S["tm"]), math.degrees(S["td"])
+    wide, w_from, w_over = HYPERION_W
+    p0 = next(i for i, R in enumerate(roads) if R.name == HYPERION_MOUTHS[0])
+    p1 = next(i for i, R in enumerate(roads) if R.name == HYPERION_MOUTHS[2])
+    assert roads[p0].hdeg == 0.0 and roads[p1].hdeg == 0.0
+    start = backroad_mouth(roads[p0], HYPERION_MOUTHS[1], 1, 1)
+
+    def plan(far):
+        return [("L", HYPERION_TURN, HYPERION_HEADING, "sp"), ("S", HYPERION_APPROACH * STEP, 0, "sp"),
+                ("V", S["R1"], 0.0, "sp", tm), ("W", S["Lw"], tm, "sp"), ("V", S["Rc"], tm, "sp", 0.0),
+                ("S", S["top"], 0, "sp"),
+                ("V", S["Rl"], 0.0, "sp", -td), ("W", S["Ld"], -td, "sp"), ("V", S["R2"], -td, "sp", 0.0),
+                ("S", far, 0, "sp"), ("R", HYPERION_TURN, HYPERION_HEADING, "sp")]
+    # the far straight is whatever lands the road on E3's shoulder: the walk's end moves a metre north for
+    # every 1 / sin(heading) of it
+    goal = roads[p1].y0 - OFF
+    far = 100 * KM
+    for _ in range(3):
+        _, end = walk(plan(far), start[0], start[1], math.radians(start[2]))
+        far += (goal - end[1]) / math.sin(math.radians(HYPERION_HEADING))
+    assert far > 20 * KM
+    road = Road("SHyperion", "scenic", *start, SC_W, plan(far))
+    assert abs(road.end[1] - goal) < 1e-3 and abs(math.sin(road.end[2])) < 1e-9, f"SHyperion misses {HYPERION_MOUTHS[2]} by {road.end[1] - goal:.4f} m"
+    road.deck = True
+    seg0 = [0]
+    for q in road.segs:
+        seg0.append(seg0[-1] + seg_samples(q))
+    assert seg0[-1] == road.N - 1
+    names = ["turn", "approach", "ramp", "wall", "crest", "summit", "lip", "drop", "runout", "far", "turn2"]
+    at = {name: seg0[k] for k, name in enumerate(names)}
+    at["end"] = at["far"]           # the run-out's end is the far straight's start
+    at["centre"] = (at["summit"] + at["lip"]) // 2
+    at["stop"] = at["centre"]
+    # the mountain, where the road puts it: the summit's middle sample, and the road's way over it
+    c = at["centre"]
+    assert (at["lip"] - at["summit"]) % 2 == 0
+    hyperion_at.update(cx=float(road.p[c, 0]), cy=float(road.p[c, 1]), ux=float(road.t[c, 0]), uy=float(road.t[c, 1]))
+    # its width: SC_W at each mouth and round each turn, HYPERION_W between
+    a, b = at["approach"] + w_from, at["turn2"] - w_from - w_over
+    assert a + w_over < at["ramp"] and b > at["far"]
+    road.wkeys = [[0, SC_W], [a, SC_W], [a + w_over, wide], [b, wide], [b + w_over, SC_W], [road.N - 1, SC_W]]
+    road.wid = np.interp(np.arange(road.N), [k[0] for k in road.wkeys], [k[1] for k in road.wkeys])
+    # Heights: along the deck, part by part. z and the deck's pitch at every sample of the mountain, exactly:
+    # a "V" turns the pitch evenly with the deck's length, a "W" holds it.
+    z = np.zeros(road.N)
+    pitch = np.zeros(road.N)
+    zi, k = 0.0, at["ramp"]
+    for q in road.segs[2:9]:
+        n = seg_samples(q)
+        if q[0] == "V":
+            a0, a1 = math.radians(q[2]), math.radians(q[4])
+            kap = (a1 - a0) / (q[1] * abs(a1 - a0))                 # the pitch gained per metre of deck
+            ds = q[1] * abs(a1 - a0) / n
+            for j in range(n):
+                pitch[k + j] = a0 + kap * ds * j
+                z[k + j] = zi + (math.cos(a0) - math.cos(a0 + kap * ds * j)) / kap
+            zi += (math.cos(a0) - math.cos(a1)) / kap
+        elif q[0] == "W":
+            a0 = math.radians(q[2])
+            for j in range(n):
+                pitch[k + j] = a0
+                z[k + j] = zi + q[1] / n * j * math.sin(a0)
+            zi += q[1] * math.sin(a0)
+        else:
+            assert abs(zi - S["H"]) < 1e-6, f"SHyperion's summit comes out at {zi:.4f} m"
+            zi = S["H"]
+            z[k:k + n] = zi
+        k += n
+    assert k == at["end"] and abs(zi) < 1e-6, f"SHyperion's run-out ends {zi:.6f} m up"
+    z[at["summit"]:at["lip"] + 1] = S["H"]
+    # every sample from the foot to the run-out's end is STEP of deck from the next (what the sims' deck rule rests on)
+    deck = np.hypot(road.len[at["ramp"]:at["end"]], np.diff(z[at["ramp"]:at["end"] + 1]))
+    assert abs(deck - STEP).max() < 0.25, f"SHyperion's deck samples are {deck.min():.2f}-{deck.max():.2f} m"
+
+    def key(i):
+        return [i, float(z[i]), float(math.sin(pitch[i]))]      # (the sims' Hermite counts every sample as STEP long: here STEP of deck)
+    every_big, every_crest, every_lip = HYPERION_KEY
+    must = {0, at["ramp"], at["end"], road.N - 1}
+    for name, nxt, every in [("ramp", "wall", every_big), ("wall", "crest", 10 ** 9), ("crest", "summit", every_crest), ("summit", "lip", 10 ** 9),
+                             ("lip", "drop", every_lip), ("drop", "runout", 10 ** 9), ("runout", "end", every_big)]:
+        must |= set(range(at[name], at[nxt], every)) | {at[nxt]}
+    road.keys = [key(i) for i in sorted(must)]
+    hs = hermite_all(road.keys, road.N)
+    off = float(np.abs(hs - z).max())
+    # ... and against the mountain itself, which is the same profile found another way (hyperion_z): at every
+    # sample, and under the middle of every chord (the deck is a chord between samples: on the lip's 297 m
+    # radius that stands a quarter of a metre inside the circle)
+    surf = max(abs(hyperion_z(*road.p[i]) - z[i]) for i in range(at["ramp"] - 40, at["end"] + 41))
+    half = max(abs(road.h(i + 0.5) - hyperion_z(*((road.p[i] + road.p[i + 1]) / 2))) * math.cos((pitch[i] + pitch[i + 1]) / 2) for i in range(at["ramp"], at["end"]))
+    assert off < 1e-3 and surf < 1e-3 and half < 0.3, f"SHyperion: {off:.6f} m off its own heights, {surf:.6f} m off the mountain at a sample, {half:.3f} m between"
+    assert abs(hs.max() - S["H"]) < 1e-6 and hs.min() > -1e-6
+    # the ramp's pitch grows at every sample from the foot to the wall, and falls at every one over the crest; the
+    # lip's falls and the run-out's rises; the summit is level
+    assert np.all(np.diff(pitch[at["ramp"]:at["wall"] + 1]) > 0) and np.all(np.diff(pitch[at["crest"]:at["summit"] + 1]) < 0)
+    assert np.all(np.diff(pitch[at["lip"]:at["drop"] + 1]) < 0) and np.all(np.diff(pitch[at["runout"]:at["end"] + 1]) > 0)
+    road.hyperion = dict(S=S, at=at, off=off, surf=surf, half=half, far=far, z=z, pitch=pitch,
+                         plan=float(road.len[at["ramp"]:at["end"]].sum()), deck=float(deck.sum()))
+    joins.extend([(len(roads), 0, p0), (len(roads), 1, p1)])
+    scenic_roads.append((len(roads), dict(name="SHyperion", sea=0)))
+    roads.append(road)
+
+
+def hyperion_land(road):
+    """SHyperion's NET_SCENIC rows. Its land is the mountain's own surface (the views ask view/hyperion.gd), level
+    with the deck either side across the face: a row every HYPERION_LAND[0] samples while it is on the mountain
+    (and one either side), each side's height the deck's own."""
+    every, run = HYPERION_LAND
+    at = road.hyperion["at"]
+    rows = []
+    for i in list(range(at["ramp"] - every, at["end"] + every, every)) + [at["end"] + every]:
+        h = round(max(-4.0, road.h(i)), 2) if at["ramp"] < i < at["end"] else -4.0
+        rows.append([i, h, run, h, run, 1])
+    return rows
+
+
 def build():
     roads = []
     ew, ns = [], []
@@ -1095,6 +1374,8 @@ def build():
     roads.append(tube)
     # Helios last of all: every road and junction before it keeps its index.
     add_helios(roads, joins)
+    # ... and Hyperion after it, for the same reason.
+    add_hyperion(roads, joins)
     return roads, joins, cities, ew, ns, jumps, onramps, shafts
 
 
@@ -1141,7 +1422,21 @@ def scenic_table(roads):
     # Helios is a bench cut into its mountain from foot to foot.
     r = next(i for i, road in enumerate(roads) if road.name == "SHelios")
     out.append([r, 0, helios_land(roads[r])])
+    # Hyperion's road is on its mountain from the ramp's foot to the run-out's end.
+    r = next(i for i, road in enumerate(roads) if road.name == "SHyperion")
+    out.append([r, 0, hyperion_land(roads[r])])
     return out
+
+
+def width_table(roads):
+    """[[road, [[sample, width m], ...]], ...]: the roads whose width changes along them (level between keys'
+    ends, a straight line from key to key)."""
+    return [[r, [[int(k[0]), float(k[1])] for k in R.wkeys]] for r, R in enumerate(roads) if R.wid is not None]
+
+
+def deck_table(roads):
+    """The roads sampled along their deck, which the sims fly at the speed along it."""
+    return [r for r, R in enumerate(roads) if R.deck]
 
 
 def junction(roads, c, end, p):
@@ -1300,7 +1595,7 @@ def check(roads, joins, J, cities, ew, ns, jumps=(), onramps=(), overlaps=()):
                 if rj <= ri:
                     continue
                 A, B = roads[ri], roads[rj]
-                d = math.hypot(A.p[i, 0] - B.p[j, 0], A.p[i, 1] - B.p[j, 1]) - (A.width + B.width) / 2
+                d = math.hypot(A.p[i, 0] - B.p[j, 0], A.p[i, 1] - B.p[j, 1]) - (A.w(i) + B.w(j)) / 2
                 if d >= GAP:
                     continue
                 if abs(A.h(i) - B.h(j)) > UP:
@@ -1322,8 +1617,8 @@ def check(roads, joins, J, cities, ew, ns, jumps=(), onramps=(), overlaps=()):
         bad(f"{roads[ri].name} and {roads[rj].name} {d:.0f} m apart at {at[0]:.1f},{at[1]:.1f} km (want {GAP:.0f})")
     # self-clearance of the turnarounds and city roads (non-adjacent parts)
     for R in roads:
-        if R.kind in ("highway", "turn"):
-            continue   # (a shaft's plan is a paperclip by design: its legs share a wall)
+        if R.kind in ("highway", "turn") or R.deck:
+            continue   # (a shaft's plan is a paperclip by design: its legs share a wall; Hyperion's road is one straight line, a wall's samples a metre apart in plan)
         q = R.p[::sub]
         for a in range(len(q)):
             d = np.hypot(q[a + 30:, 0] - q[a, 0], q[a + 30:, 1] - q[a, 1]) if a + 30 < len(q) else np.array([])
@@ -1380,7 +1675,7 @@ def check(roads, joins, J, cities, ew, ns, jumps=(), onramps=(), overlaps=()):
         hs = np.array([R.h(i) for i in range(R.N)])
         grade = np.diff(hs) / R.len[:-1]
         bend = np.diff(grade) / R.len[1:-1]
-        tight = min(q[1] for q in R.segs if q[0] != "S")
+        tight = min(q[1] for q in R.segs if q[0] in ("L", "R"))
         stretch = f"its stretch {R.segs[spec['stretch']][1] / KM:.1f} km, " if "stretch" in spec else ""
         print(f"  scenic {R.name}: {R.len[:-1].sum() / KM:.0f} km, x {R.p[:, 0].min() / KM:.1f}-{R.p[:, 0].max() / KM:.1f} km, "
               f"y {R.p[:, 1].min() / KM:.1f}-{R.p[:, 1].max() / KM:.1f} km, {hs.min():.0f}-{hs.max():.0f} m up, steepest {abs(grade).max() * 100:.1f}%, "
@@ -1395,6 +1690,16 @@ def check(roads, joins, J, cities, ew, ns, jumps=(), onramps=(), overlaps=()):
                   f"centre {F['centre']}, rim {F['rim2']}, wall {F['wall2']}, shoulder {F['shoulder2']}; steepest {wall * 100:.1f}% ({math.degrees(math.atan(wall)):.2f} deg) "
                   f"at sample {wall_at}; {(F['rim2'] - F['rim']) * STEP / KM:.1f} km level; tightest crest {crest:.0f} m (at the rim), tightest dip {dip:.0f} m (at the shoulder)")
             grade = np.concatenate([grade[:F["on"]], grade[F["off"]:]])   # (the Face's own limit is the wall's pitch: add_helios holds it)
+        if hasattr(R, "hyperion"):
+            Y = R.hyperion
+            S, at = Y["S"], Y["at"]
+            print(f"    {R.N} samples, {len(R.keys)} height keys within {Y['off'] * 1000:.3f} mm of its heights and {Y['surf'] * 1000:.3f} mm of the mountain at every sample ({Y['half'] * 1000:.0f} mm between: the chords); "
+                  f"summit {hs.max():.2f} m at {hyperion_at['cx'] / KM:.3f},{hyperion_at['cy'] / KM:.3f} km; its deck {Y['deck'] / KM:.2f} km over {Y['plan'] / KM:.2f} km of plan, a sample every {STEP:.0f} m of deck")
+            print(f"    up: ramp {at['ramp']}-{at['wall']} (radius {S['R1']:.1f} m, to {math.degrees(S['tm']):.3f} deg, top {S['zw']:.1f} m), wall to {at['crest']} ({S['Lw']:.0f} m), crest to {at['summit']} (radius {S['Rc']:.1f} m); "
+                  f"summit {at['summit']}-{at['lip']} ({S['top']:.0f} m, centre {at['centre']}); down: lip to {at['drop']} (radius {S['Rl']:.1f} m, to {math.degrees(S['td']):.3f} deg), wall to {at['runout']} ({S['Ld']:.0f} m), "
+                  f"run-out to {at['end']} (radius {S['R2']:.1f} m); far straight {Y['far'] / KM:.2f} km; the mountain's foot {S['front'] / KM:.2f} km before the plateau, {S['back'] / KM:.2f} km behind, {(S['front'] + HYPERION_SKIRT[0]) / KM:.2f} km to each side; "
+                  f"width {[(int(k[0]), int(k[1])) for k in R.wkeys]}")
+            grade = np.concatenate([grade[:at["ramp"]], grade[at["end"]:]])   # (the mountain's own pitch is its design: add_hyperion holds it)
         if hs.min() < -0.01:
             bad(f"{R.name} dips to {hs.min():.1f} m")
         if abs(grade).max() > 0.30:
@@ -1426,7 +1731,8 @@ def main():
     # (raised from 9,100 km and 380,000 samples for SHelios: about 370 km, 15,400 samples).
     tube_km = kinds["tube"][1]
     tube_samples = sum(r.N for r in roads if r.kind == "tube")
-    if km - tube_km > 9600 or N - tube_samples > 400000 or tube_km > 980 or tube_samples > 41000:
+    # (... and from 9,600 km and 400,000 samples for SHyperion: 242 km of plan, 12,900 samples)
+    if km - tube_km > 9900 or N - tube_samples > 420000 or tube_km > 980 or tube_samples > 41000:
         ok = False
         print(f"  BAD  too big: {km:.0f} km, {N} samples")
     print("NETWORK DESIGN OK" if ok else "NETWORK DESIGN NOT OK")

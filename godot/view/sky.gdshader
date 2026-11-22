@@ -9,6 +9,7 @@ shader_type sky;
 uniform vec3 zenith : source_color = vec3(0.30, 0.50, 0.80);
 uniform vec3 horizon : source_color = vec3(0.58, 0.68, 0.80);
 uniform vec3 ground : source_color = vec3(0.36, 0.44, 0.28);
+uniform float space = 0.0;   // 0 in the air, 1 over nearly all of it (view/outlook.gd: from 14 to 40 km up): the pale of the horizon draws down to a thin limb
 
 vec3 sun(vec3 dir, vec3 to_light, vec3 colour, float energy, float size) {
 	float angle = acos(clamp(dot(dir, to_light), -1.0, 1.0));
@@ -21,6 +22,8 @@ vec3 sun(vec3 dir, vec3 to_light, vec3 colour, float energy, float size) {
 void sky() {
 	vec3 dir = normalize(EYEDIR);
 	vec3 col = atmosphere(dir, zenith, horizon, 1.0);
+	// from over the air the sky is its zenith's own dark from a few degrees up: what is left of the pale is a limb along the horizon
+	col = mix(col, zenith * (1.0 + 0.14 * dot(dir, TO_SUN)), space * smoothstep(0.012, 0.16, max(dir.y, 0.0)));
 	// below the horizon: the haze, then the land's own colour (the ground plane covers most of it)
 	col = mix(col, ground, smoothstep(0.0, -0.3, dir.y));
 	if (LIGHT0_ENABLED) {

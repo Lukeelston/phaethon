@@ -115,6 +115,21 @@ var flash_until := -1.0
 var brake_point := -1.0    # metres before the box where this run's hard braking began
 var was_active := false
 var org_x := 0.0   # floating origin, in sim metres
+# High on Mount Hyperion (its summit is 48 km up) two things change, and nothing does below LIFT_OFF:
+#   lift    the whole world is drawn this far below its true height: this node is let down by it. A place
+#           is kept to a 4 mm step at 48,000 m, and the cockpit round the eye shivered by that as the craft
+#           climbed; let down, what is near the eye is near zero and drawn exactly. Heights read off the
+#           scene's own positions are true again with `lift` added (the shaders': the global world_lift).
+#   reach   how far the camera draws: 120 km on the ground, the whole country from 30 km up. The ground
+#           plane, the far roads, the cities' skylines and Helios are asked to reach as far (_aloft_world).
+const LIFT_FROM := 20000.0
+const LIFT_OFF := 16400.0      # (Helios's summit, 16,046 m, is never lifted)
+const LIFT_HOLD := 3072.0      # the craft climbs this far from the last lift before the next
+const REACH := 120000.0
+const REACH_ALOFT := 470000.0
+var lift := 0.0
+var reach := REACH
+var _lift_told := false
 var org_y := 0.0
 var top_kmh := 0.0
 
@@ -1037,6 +1052,35 @@ func _place_on_branch(j: int) -> void:
 		b.hint = mini(B.N - 1, j + roundi(al / 12.0))
 
 
+## The Network from high up: the world's lift and the camera's reach (see `lift`, above).
+func _aloft_world() -> void:
+	var h: float = sim.pod.z
+	var want := lift
+	if h < LIFT_OFF:
+		want = 0.0
+	elif h > LIFT_FROM and absf(h - lift) > LIFT_HOLD:
+		want = snappedf(h, 1024.0)
+	if want != lift or not _lift_told:
+		_lift_told = true
+		lift = want
+		position.y = -lift
+		RenderingServer.global_shader_parameter_set("world_lift", lift)
+		landscape.lift = lift
+	var eye := h      # the higher of the craft and the eye (an outside camera can stand well over it)
+	if cam != null and cam.is_inside_tree():
+		eye = maxf(eye, cam.global_position.y + lift)
+	var far_want := snappedf(lerpf(REACH, REACH_ALOFT, smoothstep(5000.0, 30000.0, eye)), 10000.0)
+	if far_want != reach:
+		reach = far_want
+		if cam != null:
+			cam.far = reach
+		if ground != null and ground.mesh is PlaneMesh:
+			(ground.mesh as PlaneMesh).size = Vector2.ONE * (60000.0 if reach <= REACH else reach * 2.0)
+		landscape.reach = reach
+		if network_world:
+			network_world.set_reach(reach)
+
+
 func _follow_origin() -> void:
 	org_x = sim.pod.x
 	org_y = sim.pod.y
@@ -1149,8 +1193,31 @@ func wz(x: float, y: float, z: float) -> Vector3:
 		var f := _shaft_f(x, y)
 		if f >= 0.0:
 			return network_world.shaft.point(sim.pod.path, f, sim._n_lat, z - sim.net_height(sim.pod.path, f), org_x, org_y)
+		if not sim.pod.off_road and sim.roads[sim.pod.path].deck:
+			return _deck_place(x, y, z)
 		return Vector3(x - org_x, z, -(y - org_y))
 	return w3(x, y, z)
+
+
+## On a deck road (Mount Hyperion's) what stands over the deck stands square to it. The sims' heights are
+## straight up: a pod rides 1.5 m over its road and the pilot's eye 2.7 m, and laid straight up on an 88
+## degree wall that eye is 9 cm off the wall: in the road. So a place's height over the deck (the deck
+## under the pod, carried along its own slope to that place) is laid along the deck's own up. Nothing
+## moves where the deck is level, or more than a few hundred metres from the pod.
+func _deck_place(x: float, y: float, z: float) -> Vector3:
+	var flat := Vector3(x - org_x, z, -(y - org_y))
+	var P = sim.pod
+	var s: float = sim.deck_sine(P.path, sim._road_f(P))
+	if s == 0.0:
+		return flat
+	var R = sim.roads[P.path]
+	var i: int = P.hint
+	var along: float = (x - P.x) * R.tx[i] + (y - P.y) * R.ty[i]
+	if absf(along) > 400.0 or absf((x - P.x) * R.nx[i] + (y - P.y) * R.ny[i]) > 900.0:
+		return flat
+	var c := sqrt(1.0 - s * s)
+	var over: float = z - ((P.z - sim.P.rideH) + along * s / c)
+	return flat + (Vector3(-s * R.tx[i], c, s * R.ty[i]) - Vector3.UP) * over
 
 
 ## Sim point -> render position, relative to the floating origin. On the shade line (the pod on a
@@ -1516,6 +1583,7 @@ func _sync_world() -> void:
 	if horizon:
 		horizon.sync(org_x, org_y)
 	if landscape:
+		_aloft_world()
 		landscape.sync(org_x, org_y)
 		Outlook.tick(self, get_process_delta_time())
 		ground_mat.set_shader_parameter("absolute_org", Vector2(org_x,org_y))

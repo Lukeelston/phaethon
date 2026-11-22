@@ -31,6 +31,9 @@ const LEGENDS := {
 	"gap": ["TIMING HUT", "BUILD SPEED", BONE],
 	"helios": ["BASE CAMP", "CLIMB AHEAD", OXIDE],
 	"summit": ["HIGH STATION", "RIM AHEAD", ICE],
+	# (Mount Hyperion's two bays, added when the mountain was: its foot and its summit)
+	"hyperion": ["RAMP WORKS", "POINT IT UP", SAFFRON],
+	"hyperion_summit": ["BRINK WATCH", "CREEP TO THE LIP", ICE],
 }
 
 var metal: Array = []
@@ -78,12 +81,51 @@ func make(id: String, pad_to_station: Transform3D, cart: Vector3, ahead: float) 
 			_route_relief()
 		"summit":
 			_radome()
+		"hyperion":
+			_ramp_profile()
+		"hyperion_summit":
+			_brink_gallows()
 	_service_deck(pad_to_station, cart, ahead, LEGENDS[id][2])
 	var mesh := Kit.compound(metal)
 	Kit.compound(enamel, mesh)
 	mesh.surface_set_material(0, Kit.vertex_colors())
 	mesh.surface_set_material(1, Kit.vertex_colors(true))
 	return mesh
+
+
+## Hyperion's foot: the ramp's own profile in rail, level at the shop floor and straight up at its
+## head, a marker a third of the way round where a craft would be, a mast under the vertical end.
+func _ramp_profile() -> void:
+	var foot := Vector3(-1.9, 1.3, 0)
+	var radius := 6.6
+	_tube(Vector3(foot.x, 0.36, 0), foot, 0.30, 0.22, IRON, 8)
+	var last := foot
+	for k in range(1, 9):
+		var a := (PI / 2.0) * k / 8.0
+		var p := foot + Vector3(sin(a) * radius * 0.55, (1.0 - cos(a)) * radius, 0)
+		_tube(last, p, 0.15, 0.15, BRASS, 8)
+		_box(p, Vector3(0.52, 0.10, 0.62), IRON, Vector3(0, 0, a))
+		if k == 3:
+			_box(p + Vector3(-0.10, 0.20, 0.36), Vector3(0.60, 0.24, 0.10), OXIDE, Vector3(0, 0, a), true)
+		last = p
+	_tube(Vector3(last.x, 0.36, 0), last, 0.14, 0.09, IRON, 6)
+	_tube(last, last + Vector3(0, 0.95, 0), 0.04, 0.04, BONE)
+	_box(last + Vector3(0.36, 0.72, 0), Vector3(0.70, 0.36, 0.05), SAFFRON)
+
+
+## Hyperion's summit: a watchman's lamp hung out over a block cut square like the brink itself,
+## a ring round the lamp to find it by against a black sky.
+func _brink_gallows() -> void:
+	_box(Vector3(0.95, 1.12, 0), Vector3(2.7, 1.52, 1.9), IRON)
+	_tube(Vector3(1.55, 1.88, 0), Vector3(1.55, 7.6, 0), 0.24, 0.16, INK, 8)
+	_tube(Vector3(1.55, 7.45, 0), Vector3(-1.75, 7.45, 0), 0.13, 0.10, INK, 8)
+	_tube(Vector3(1.55, 5.6, 0), Vector3(-0.2, 7.40, 0), 0.07, 0.07, IRON, 6)
+	var lamp := Vector3(-1.75, 6.05, 0)
+	_tube(Vector3(lamp.x, 7.40, 0), lamp + Vector3(0, 0.42, 0), 0.03, 0.03, BONE, 5)
+	_tube(lamp + Vector3(0, -0.42, 0), lamp + Vector3(0, 0.42, 0), 0.36, 0.22, LAMP, 10, true)
+	_hoop(lamp, 0.95, 0.06, ICE)
+	for k in 4:
+		_box(Vector3(-0.38 + 0.02 * k, 0.45 + 0.36 * k, 0), Vector3(0.09, 0.10, 1.9), SAFFRON, Vector3.ZERO, true)
 
 
 ## The shop marks its own power cart and paints a walking lane to the right engine.

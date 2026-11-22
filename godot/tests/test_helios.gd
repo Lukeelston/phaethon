@@ -241,6 +241,8 @@ func _run() -> void:
 			if world.shaft.on(k, float(i)) or world._deck_up(k, K, i) == Vector3.UP:
 				continue
 			if k != r:
+				if K.deck:
+					break      # (Mount Hyperion's road, since: steeper still, and its furniture stands square to its deck by the same rule. tests/test_hyperion.gd)
 				leaning.append("%s at %d" % [K.name, i])
 				break
 			var a := maxi(i - 1, 0)

@@ -16,6 +16,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 roads, J, cities, H, ok, jumps, onramps, shafts, overlaps, twists = dn.main()
 assert ok, "the design isn't OK: fix it before syncing"
 scenic = dn.scenic_table(roads)
+widths = dn.width_table(roads)
+decks = dn.deck_table(roads)
 tube = next((i, *r.tube_span) for i, r in enumerate(roads) if r.kind == "tube")
 
 
@@ -28,13 +30,20 @@ def num(v):
     return repr(float(v))
 
 
+def seg(s, q):
+    """A segment as both sims read it: [kind, length or radius, degrees, mode], and for a vertical arc ("V") the
+    pitch it ends at (q: the quote mark)."""
+    more = f", {num(s[4])}" if len(s) > 4 else ""
+    return f"[{q}{s[0]}{q}, {num(s[1])}, {num(s[2])}, {q}{s[3]}{q}{more}]"
+
+
 def js_block():
     out = ["  // <network> (tools/sync_network.py from tools/design_network.py: don't edit by hand)",
            f"  const NET_STEP = {num(dn.STEP)};",
            "  // [name, x, y, heading deg, width, [[kind, length or radius, deg, mode], ...]]",
            "  const NET_ROADS = ["]
     for R in roads:
-        segs = ", ".join(f"['{s[0]}', {num(s[1])}, {num(s[2])}, '{s[3]}']" for s in R.segs)
+        segs = ", ".join(seg(s, "'") for s in R.segs)
         out.append(f"    ['{R.name}', {num(R.x0)}, {num(R.y0)}, {num(R.hdeg)}, {num(R.width)}, [{segs}]],")
     out.append("  ];")
     out.append("  // [parent road, a0, a1, child road, b0, b1, sense]: the two roads are one through these samples")
@@ -67,6 +76,10 @@ def js_block():
     out.append("  const NET_SCENIC = [")
     out += scenic_rows("    ")
     out.append("  ];")
+    out.append("  // [road, [[sample, width m], ...]]: the roads whose width changes along them (a straight line from key to key)")
+    out.append("  const NET_WIDTHS = [" + ", ".join("[%d, [%s]]" % (r, ", ".join("[%d, %s]" % (k[0], num(k[1])) for k in keys)) for r, keys in widths) + "];")
+    out.append("  // the roads sampled every NET_STEP of their deck, flown at the speed along it (Mount Hyperion's)")
+    out.append("  const NET_DECK = [" + ", ".join(str(r) for r in decks) + "];")
     out.append("  // </network>")
     return "\n".join(out)
 
@@ -77,7 +90,7 @@ def gd_block():
            "# [name, x, y, heading deg, width, [[kind, length or radius, deg, mode], ...]]",
            "const NET_ROADS := ["]
     for R in roads:
-        segs = ", ".join(f'["{s[0]}", {num(s[1])}, {num(s[2])}, "{s[3]}"]' for s in R.segs)
+        segs = ", ".join(seg(s, '"') for s in R.segs)
         out.append(f'\t["{R.name}", {num(R.x0)}, {num(R.y0)}, {num(R.hdeg)}, {num(R.width)}, [{segs}]],')
     out.append("]")
     out.append("# [parent road, a0, a1, child road, b0, b1, sense]: the two roads are one through these samples")
@@ -110,6 +123,10 @@ def gd_block():
     out.append("const NET_SCENIC := [")
     out += scenic_rows("	")
     out.append("]")
+    out.append("# [road, [[sample, width m], ...]]: the roads whose width changes along them (a straight line from key to key)")
+    out.append("const NET_WIDTHS := [" + ", ".join("[%d, [%s]]" % (r, ", ".join("[%d, %s]" % (k[0], num(k[1])) for k in keys)) for r, keys in widths) + "]")
+    out.append("# the roads sampled every NET_STEP of their deck, flown at the speed along it (Mount Hyperion's)")
+    out.append("const NET_DECK := [" + ", ".join(str(r) for r in decks) + "]")
     out.append("# </network>")
     return "\n".join(out)
 

@@ -5,9 +5,19 @@ const BLOCK := 400 # ~9.6 km, bounded AABBs for renderer culling
 const UNDER_DECK := 8.0 # coarse chords stay below the detailed curves during handoff
 var pieces := []
 var vertex_count := 0
+var _material: ShaderMaterial
+## How far the camera draws (CraftView.reach): on the ground the ribbons fade out between 80 and 100 km,
+## as they did; from high up (Mount Hyperion's summit) they run on to the camera's reach.
+func set_reach(reach: float) -> void:
+	var far := maxf(110000.0, reach)
+	for piece in pieces:
+		(piece[0] as GeometryInstance3D).visibility_range_end = far
+	if _material != null:
+		_material.set_shader_parameter("fade", Vector2(80000.0, 100000.0) if reach <= 120000.0 else Vector2(reach - 70000.0, reach - 10000.0))
 func build(world) -> void:
 	var material := ShaderMaterial.new()
 	material.shader = preload("res://view/network_far_roads.gdshader")
+	_material = material
 	for r in world.sim.roads.size():
 		var road = world.sim.roads[r]
 		var pressure_route: bool = r == world.sim.NET_PRESSURE[0]

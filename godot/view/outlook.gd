@@ -66,6 +66,7 @@ static var _zenith_now := Color(0.19, 0.39, 0.78)
 static var _starlight_now := 0.0
 static var _grey_now := 0.0
 static var _aloft_was := -1.0
+static var _space_was := -1.0     # how far over the air the sky was last told the eye is (its `space`)
 static var _aloft_view := 0      # the flight whose sky _sky_mat is
 static var _applied := false     # apply() found and set this flight's sky (false: the world as built)
 static var aloft := 0.0          # how far over the air the eye is: 0 to 6 km, 0.6 at 10 km, 0.9 at 16 km
@@ -361,6 +362,7 @@ static func _aloft(view) -> void:
 	if _aloft_view != view.get_instance_id():      # a new flight: its own sky (the world as built is not recorded by apply)
 		_aloft_view = view.get_instance_id()
 		_aloft_was = -1.0
+		_space_was = -1.0
 		if not _applied:
 			_sky_mat = null
 			_starlight_now = 0.0
@@ -374,7 +376,12 @@ static func _aloft(view) -> void:
 				_sky_mat = null
 	if _sky_mat == null:
 		return
-	var height: float = (view.cam as Camera3D).global_position.y
+	var height: float = (view.cam as Camera3D).global_position.y + float(view.get("lift") if view.get("lift") != null else 0.0)
+	# (Mount Hyperion's summit is 48 km up, over nearly all the air: there the horizon's pale is a thin limb under a black sky)
+	var space := smoothstep(14000.0, 40000.0, height)
+	if absf(space - _space_was) > 0.004:
+		_space_was = space
+		_sky_mat.set_shader_parameter("space", space)
 	aloft = 1.0 - exp(-maxf(height - 6000.0, 0.0) / 4200.0)
 	if absf(aloft - _aloft_was) < 0.004:
 		return

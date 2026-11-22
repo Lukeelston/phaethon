@@ -8,6 +8,7 @@ render_mode fog_disabled, cull_disabled;
 
 global uniform vec3 sky_haze;
 global uniform float sky_haze_scale;
+global uniform float world_lift;       // m the whole world is drawn below its true height (view/craft_view.gd: 0 but high on Mount Hyperion)
 
 varying vec3 tint;
 varying float altitude;
@@ -24,7 +25,7 @@ void fragment() {
 	if (reveal <= fract(dot(floor(FRAGCOORD.xy), vec2(0.75487766, 0.56984029)))) {
 		discard;
 	}
-	float eye = CAMERA_POSITION_WORLD.y;
+	float eye = CAMERA_POSITION_WORLD.y + world_lift;
 	float thin = air_between(eye, altitude) / air_between(eye, 0.0);
 	float haze = 1.0 - exp(-d * 0.000045 * sky_haze_scale * thin);
 	ALBEDO = tint * (1.0 - haze);

@@ -66,3 +66,7 @@ sky_snow={
 "type": "float",
 "value": 0.0
 }
+world_lift={
+"type": "float",
+"value": 0.0
+}

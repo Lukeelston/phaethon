@@ -1423,8 +1423,16 @@ func _place_camera(_k: float) -> void:
 		var base := wz(sim.pod.x, sim.pod.y, sim.pod.z - 0.8 + CraftModelScript.POD_LIFT) + Q * Vector3.UP * (r.x - surface(sim.pod.x, sim.pod.y).x)   # floor 0.8 m below the pod body centre, lifted with the pod
 		var hitch := head + Vector3(0.0, 0.0, -SLIDE_ARM)    # ... about a point ahead of you, so the seat swings outward
 		rig.basis = b_full
-		rig.position = base + Q * (b_yaw * hitch + b_slid * (head - hitch)) - b_full * head
-		_place_origin(Q * b_yaw, base)                        # (an outside camera keeps the sim's heading, and watches the tail go)
+		var seat_at: Vector3 = Q * (b_yaw * hitch + b_slid * (head - hitch))      # from the floor to the head, the cockpit level
+		var outside: Basis = Q * b_yaw                        # (an outside camera keeps the sim's heading, and watches the tail go)
+		if sim.kind == "network" and not sim.pod.off_road and sim.roads[sim.pod.path].deck:
+			# Mount Hyperion's road: the cockpit pitches with the deck about its floor, not about the pilot's head
+			# (a head held straight over the floor's place is in an 88 degree wall, not 2.7 m off it), and an
+			# outside camera rides the deck's own slope (level, it stood in the mountain on the wall down)
+			seat_at = seat_at.rotated(((Q * b_slid) as Basis).x.normalized(), pitch)
+			outside = Q * Basis.from_euler(Vector3(pitch, yaw, 0.0))
+		rig.position = base + seat_at - b_full * head
+		_place_origin(outside, base)
 	var thr := [inp.thrL, inp.thrR]
 	for k in 2:
 		lever_pivots[k].rotation.x = deg_to_rad(lerpf(30.0, -30.0, thr[k]))

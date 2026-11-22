@@ -469,6 +469,8 @@ func _draw_it() -> void:
 	elif P.off_road or sim.kind == "network":
 		var sp := Vector2(P.vx, P.vy).length()
 		pitch = atan2(P.vz, maxf(sp, 1.0)) if sp > 5.0 else 0.0
+		if sim.kind == "network" and not P.off_road and sim.roads[P.path].deck:
+			pitch = sim.deck_pitch(P)      # (Mount Hyperion's road: the deck's own pitch)
 	var att: Basis = Q * Basis.from_euler(Vector3(pitch, th - PI / 2.0, bank))
 	_pod.transform = Transform3D(att, view.wz(x, y, z - 0.2 + CraftModelScript.POD_LIFT))
 	var bodies := [sim.eL, sim.eR]

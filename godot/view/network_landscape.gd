@@ -3,6 +3,7 @@
 extends Node3D
 const Outlook := preload("res://view/outlook.gd")      # the hour and weather: they thicken and colour the fog set here every frame
 const Helios := preload("res://view/helios.gd")        # the one giant mountain: it stands over whatever the regions make there
+const Hyperion := preload("res://view/hyperion.gd")    # ... and the other, three times its height: its own mesh, the grid under it
 const TILE := 8192.0
 const STEP := 512.0
 const GRID := 16
@@ -62,12 +63,17 @@ var _decor_job := {}
 var scenic = null            # the scenic roads' land (view/network_scenic.gd), when the world has any
 var far_helios: MeshInstance3D   # the mountain whole, for beyond the tiles (view/helios.gd far_mesh)
 var sun_gate: Node3D             # the armillary on its plateau (Helios.gate)
+var hyperion: MeshInstance3D     # Mount Hyperion, whole (view/hyperion.gd body_mesh); null where the sim has no such road
+var lift := 0.0                  # m the whole world is drawn below its true height (CraftView.lift: high on Mount Hyperion)
+var reach := 120000.0            # m the camera draws to (CraftView.reach: further from high up)
+var hyperion_summit: Node3D      # what stands on its summit (Hyperion.summit)
 var _scenic_tiles := {}   # coarse lookup for authored land, including interior mountain passes
 const PROP_CELL := 256.0
 
 func build(sim, world) -> void:
 	_sim = sim
 	_world = world
+	Hyperion.setup(sim)
 	world.scenery_ground_height = -4.0
 	world.landscape = self   # the road's banks take this land's colours and material
 	scenic = world.scenic
@@ -171,6 +177,20 @@ func build(sim, world) -> void:
 				road_way = Vector3(road.tx[i], 0.0, -road.ty[i]).normalized()
 	sun_gate = Helios.gate(road_way)
 	add_child(sun_gate)
+	# Mount Hyperion: the mountain's own mesh (the terrain's grid lies under it), and what stands on its summit
+	if Hyperion.ready:
+		hyperion = MeshInstance3D.new()
+		hyperion.name = "hyperion"
+		hyperion.mesh = Hyperion.body_mesh(self)
+		var body_material := ShaderMaterial.new()
+		body_material.shader = preload("res://view/hyperion.gdshader")
+		body_material.set_shader_parameter("terrain_detail", load("res://art/terrain/terrain_detail.png"))
+		hyperion.material_override = body_material
+		hyperion.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(hyperion)
+		hyperion_summit = Hyperion.summit(sim)
+		add_child(hyperion_summit)
+		cloud_material.set_shader_parameter("clearing2", Hyperion.CLEARING)
 
 func setup_ground(ground_material: ShaderMaterial) -> void:
 	var centers := PackedVector3Array()
@@ -234,6 +254,8 @@ func height_at(p: Vector2) -> float:
 ## The land with no scenic road's say: level by a road, the open country away from one; the mountain
 ## over either (no road but its own goes near it).
 func _country(p: Vector2, factor: float) -> float:
+	if Hyperion.on(p):
+		return Hyperion.ground(p)      # (under its own mesh, everywhere on it)
 	if factor == 0.0:
 		return maxf(-4.0, Helios.land(p)) if Helios.on(p) else -4.0
 	return _open_height(p, factor)
@@ -259,6 +281,7 @@ func _open_height(p: Vector2, factor: float) -> float:
 	h -= w[5] * 9.0
 	if h > 0.0:
 		h *= Helios.country(p)      # (the regions' relief gives way to the mountain round it)
+		h *= Hyperion.country(p)
 	h = lerpf(-4.0, h, factor)
 	if Helios.on(p):
 		h = maxf(h, Helios.land(p) + Helios.rough(p))
@@ -284,6 +307,8 @@ func color_at(p: Vector2, known_height := NAN) -> Color:
 	col.a = w[0] # grassland fraction for fixed geographic field patterns in the shader
 	if Helios.on(p):
 		col = Helios.colour(col, h, n, Helios.steep(p))
+	if Hyperion.on(p):
+		col = Hyperion.colour(col, h, n, Hyperion.steep(p))
 	# the coast: sand on the beach and the seabed, the sea's own colour under the water's edge
 	if scenic != null and h < 7.0 and p.x < scenic.coast_hi + 700.0 and p.x < scenic.coast_x(p.y) + 700.0:
 		col = (scenic.SAND as Color).lerp(col, smoothstep(4.0, 7.0, h))
@@ -375,6 +400,7 @@ func prop_records(key: Vector2i, first := 0, count := GROUPS) -> Array:
 			var p := anchor + Vector2(rng.randf_range(-240,240),rng.randf_range(-240,240))
 			var scale := rng.randf_range(0.75,1.8)
 			if scenic != null and (scenic.is_sea(p) or scenic.covered(p)): continue   # nothing in the sea, nothing under the road's own land
+			if Hyperion.on(p): continue   # nothing on Mount Hyperion: the grid there lies under its mesh
 			if region == "jungle" and kind == "oak": scale *= 1.7
 			var building := kind in ["urban","farm","industrial","outpost","stilt","service","solar","wind"]
 			var radius := (185.0 if kind == "urban" else (180.0 if kind in ["service","solar","wind"] else (90.0 if kind in ["farm","industrial","outpost","basalt"] else 35.0)))*scale
@@ -647,15 +673,19 @@ func sync(ox: float, oy: float) -> void:
 	far_helios.position = Vector3(Helios.CENTRE.x - ox, 0.0, oy - Helios.CENTRE.y)
 	clouds.material_override.set_shader_parameter("clearing_at", Vector2(far_helios.position.x, far_helios.position.z))
 	var to_helios := Vector2(ox, oy).distance_to(Helios.CENTRE)
-	far_helios.visible = to_helios < 160000.0
+	far_helios.visible = to_helios < maxf(160000.0, reach + 40000.0)      # (160 km, as it was, on the ground; from high on Hyperion, as far as the eye reaches)
 	sun_gate.position = Vector3(far_helios.position.x, Helios.HEIGHT, far_helios.position.z)
 	sun_gate.visible = far_helios.visible
 	# (from far off its lamp is a point of light on the summit: grown with distance so it stays a few pixels)
 	(sun_gate.get_node("sun") as Node3D).scale = Vector3.ONE * clampf(to_helios / 6000.0, 1.0, 14.0)
 	(sun_gate.get_node("light") as Node3D).visible = to_helios < 9000.0
+	if hyperion != null:
+		hyperion.position = Vector3(Hyperion.centre.x - ox, 0.0, oy - Hyperion.centre.y)
+		hyperion_summit.position = Vector3(hyperion.position.x, Hyperion.HEIGHT, hyperion.position.z)
+		clouds.material_override.set_shader_parameter("clearing2_at", Vector2(hyperion.position.x, hyperion.position.z))
 	# The air thins with height: from up the mountain the country below is seen through less of it.
 	var eye := get_viewport().get_camera_3d() if is_inside_tree() else null
-	var thin := Outlook.air_between(eye.global_position.y if eye != null else 0.0, 0.0)
+	var thin := Outlook.air_between((eye.global_position.y + lift) if eye != null else 0.0, 0.0)
 	Outlook.thin_air(thin)
 	if _environment != null:
 		var w := weights(Vector2(ox,oy))

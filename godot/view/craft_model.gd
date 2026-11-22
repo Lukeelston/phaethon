@@ -1094,12 +1094,18 @@ func sync(sim, inp: Dictionary, delta: float) -> void:
 		vane_angle = Jets.slew(vane_angle, Jets.command(steer, turn_g, 0.5 * (sim.eL.thrust + sim.eR.thrust)), delta)
 	for lights in light_meshes:
 		lights.visible = lights_on
+	# On a deck road (Mount Hyperion's) the craft's pitch is the deck's own under the pod, moving or stopped
+	# (its climb is not its vz over its speed there, and a craft stopped on an 80 degree wall is not level).
+	var on_deck: bool = sim.kind == "network" and not sim.pod.off_road and sim.roads[sim.pod.path].deck
+	var deck_pitch: float = sim.deck_pitch(sim.pod) if on_deck else 0.0
 	for k in 2:
 		var e = bodies[k]
 		var eng := engines[k]
 		eng.position = view.body_place(e, 0.1) if view.has_method("body_place") else view.wz(e.x, e.y, e.z + 0.1)
 		var vh: float = sqrt(e.vx * e.vx + e.vy * e.vy)
 		var pitch: float = atan2(e.vz, maxf(vh, 1.0)) if vh > 5.0 else 0.0
+		if on_deck:
+			pitch = deck_pitch
 		# nose follows the banking's rise and fall (on the Network the climb is in the body's own vz:
 		# the deck lock, the jumps)
 		var climb := 0.0 if sim.kind == "network" else slope_pitch(view, e.x, e.y, e.th, maxf(4.0, pitch_half(vh)))
@@ -1194,6 +1200,8 @@ func sync(sim, inp: Dictionary, delta: float) -> void:
 	pod.position = view.wz(sim.pod.x, sim.pod.y, sim.pod.z - 0.2 + POD_LIFT)
 	var pvh: float = sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy)
 	var pclimb := (atan2(sim.pod.vz, maxf(pvh, 1.0)) if pvh > 5.0 else 0.0) if sim.kind == "network" else slope_pitch(view, sim.pod.x, sim.pod.y, sim.pod.th, pitch_half(pvh))
+	if on_deck:
+		pclimb = deck_pitch
 	var plean := clampf(bank[2] + view.surface(sim.pod.x, sim.pod.y).y, -ROLL_MAX, ROLL_MAX)
 	var Qp: Basis = view.shaft_carry_at(sim.pod.x, sim.pod.y) if sim.kind == "network" else Basis.IDENTITY
 	if not Qp.is_equal_approx(Basis.IDENTITY):
@@ -1400,6 +1408,8 @@ static func ride(v, sim, st: Dictionary, delta: float) -> Vector3:
 		p = atan2(sim.pod.vz, maxf(spd, 1.0)) if spd > 5.0 else 0.0
 		if v.shaft_carry_at(sim.pod.x, sim.pod.y) != Basis.IDENTITY:
 			p = 0.0
+		elif not sim.pod.off_road and sim.roads[sim.pod.path].deck:
+			p = sim.deck_pitch(sim.pod)      # (Mount Hyperion's road: the deck's own pitch, moving or stopped)
 	var rr := pod_roll(sim)
 	if st.is_empty() or delta <= 0.0:
 		st.merge({"h": s.x, "p": p, "b": s.y, "roll": rr}, true)

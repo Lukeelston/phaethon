@@ -86,10 +86,11 @@ const SCENIC_NAMES := {
 	"SCoast": "COAST ROAD", "SDrop": "THE DROP", "SWash": "SIROCCO WASH",
 	"SFrost": "FROSTLINE PASS", "SReed": "REEDWATER CAUSEWAY", "SRed": "RED TABLE CUT",
 	"SNeedle": "NEEDLE ROLL", "SHammer": "HAMMERFALL", "SAurora": "AURORA LINE", "SHelios": "MOUNT HELIOS",
+	"SHyperion": "MOUNT HYPERION",
 }
 const SCENIC_ROUTES := {
 	"SCoast": "S12", "SDrop": "S13", "SWash": "S14", "SFrost": "S15", "SReed": "S16", "SRed": "S17",
-	"SNeedle": "S18", "SHammer": "S19", "SAurora": "S20", "SHelios": "S21",
+	"SNeedle": "S18", "SHammer": "S19", "SAurora": "S20", "SHelios": "S21", "SHyperion": "S22",
 }
 enum { PAVED, SAND, RED_GRAVEL, CAUSEWAY }
 # Dedicated stunt roads and their approach boards (deck fraction, direction, legend).
@@ -122,6 +123,7 @@ const LANE_ON := 40               # ... and they carry on along the exit itself,
 const BRAKE_MI := [4, 2, 1]       # braking boards, miles before a city's STARFIGHTER zone
 const MILE := 1609.344
 const Signs := preload("res://view/highway_signs.gd")
+const Hyperion := preload("res://view/hyperion.gd")   # Mount Hyperion: its road's boards
 const JUMP_W := 178.0
 const JUMP_H := 55.0
 const SIGN_FAR := 536             # samples (8 mi) before a jump's exit: time to choose at highway speed
@@ -313,6 +315,12 @@ func build(s, v) -> void:
 					height = (2.0 * u3 - 3.0 * u2 + 1.0) * float(a[1]) + (u3 - 2.0 * u2 + u) * span * float(a[2]) + (-2.0 * u3 + 3.0 * u2) * float(b[1]) + (u3 - u2) * span * float(b[2])
 			heights[i] = height
 			d += R.len[i]
+		if R.deck:   # a deck road's distance along is its deck's (Mount Hyperion's: the asphalt's grain goes by it, not by the map)
+			var along := 0.0
+			for i in R.N:
+				acc[i] = along
+				if i + 1 < R.N:
+					along += sqrt(R.len[i] * R.len[i] + (heights[i + 1] - heights[i]) * (heights[i + 1] - heights[i]))
 		_s.append(acc)
 		_heights.append(heights)
 		var k := 0
@@ -339,6 +347,7 @@ func build(s, v) -> void:
 						grid[key] = []
 					grid[key].append([r, k, cx, cy, rad])
 			k += 1
+	Hyperion.setup(sim)
 	if scenic_on:   # (after the heights: it takes the roads' from them)
 		scenic = preload("res://view/network_scenic.gd").new()
 		scenic.setup(sim, _heights)
@@ -397,6 +406,9 @@ func _prepare_traffic_paint() -> void:
 		if R.role == "" and R.w[0] >= 200.0:
 			# NetworkTraffic selects its four or eight lane centres by starting width.
 			rows.fill(2 if R.w[0] >= 300.0 else 1)
+			if R.deck:   # (Mount Hyperion's road widens along its way: each row by its own width)
+				for i in R.N:
+					rows[i] = 2 if R.w[i] >= 300.0 else 1
 			for i in _prepared_join_hints[r]: # includes the four-row padding on either side
 				rows[i] = 0
 			var exclusions: Array = _approaches.get(r, []).duplicate()
@@ -597,6 +609,17 @@ func sync(org_x: float, org_y: float) -> void:
 		stream_profile["build_us"] = t_build - t_scan
 		stream_profile["place_us"] = t_place - t_build
 		stream_profile["rest_us"] = Time.get_ticks_usec() - t_place
+
+
+## How far the camera draws (CraftView.reach: 120 km on the ground, the whole country from high on Mount
+## Hyperion): the far roads and the cities' skylines reach as far.
+func set_reach(reach: float) -> void:
+	if far_roads:
+		far_roads.set_reach(reach)
+	for sk in skylines:
+		for child in (sk[0] as Node3D).get_children():
+			if child is GeometryInstance3D:
+				(child as GeometryInstance3D).visibility_range_end = maxf(TOWER_VIS, reach)
 
 
 ## The deck's height at sample i of road r (0 but on a flyover).
@@ -2219,6 +2242,11 @@ func _plan_signs() -> void:
 					_add_sign(r, CraftSim.NET_PRESSURE[end] - way * 66, way, "stunt", ["PRESSURE LOCK", "360 WALL RIDE"])
 			for cue in STUNT_ROADS.get(sim.roads[r].name, []):
 				_add_sign(r, roundi(cue[0] * (sim.roads[r].N - 1)), cue[1], "stunt", [cue[2], cue[3]])
+	# Mount Hyperion's road: the ramp's pitch, the braking section's count down, the summit, the lip
+	if Hyperion.ready and Hyperion.road < sim.roads.size():
+		for board in Hyperion.boards():
+			if int(board[0]) > 0 and int(board[0]) < sim.roads[Hyperion.road].N - 1:
+				_add_sign(Hyperion.road, int(board[0]), int(board[1]), String(board[2]), board[3])
 
 
 ## Use the branch endpoint within its real junction overlap. Opposing ramps at
@@ -2716,6 +2744,8 @@ func _road_row(J: Dictionary, R: CraftSim.TrackPath, sec: Dictionary, s: int, h:
 		left = A[4]
 		up = A[5]
 		mid = Vector3(float(A[0]) - J.ox, A[2], -(float(A[1]) - J.oy)) + up * 0.02
+	elif R.deck:   # Mount Hyperion's road: the deck is lit, and its edges ramp up, square to itself (an 88 degree wall is no level ground)
+		up = _deck_up(int(J.r), R, s)
 	var u: float = J.u0 + _s[J.r][s]
 	var rv: PackedVector3Array = J.rv
 	var rn: PackedVector3Array = J.rn

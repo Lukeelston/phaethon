@@ -31,6 +31,8 @@ uniform float cirrus = 0.42;                       // how much of the high wisps
 // cloud. Under an overcast the cover is past what this takes off: the road climbs out through it.
 uniform vec2 clearing_at = vec2(0.0);              // the mountain's place in this plane's own space (m)
 uniform float clearing = 0.0;                      // how much cover it takes off at its middle
+uniform vec2 clearing2_at = vec2(0.0);             // ... and the second mountain's (Hyperion: three times as high, and as much wider)
+uniform float clearing2 = 0.0;
 
 const int STEPS = 20;
 const float TEXEL = 23.4;                          // m: one texel of the map at the heaps' scale
@@ -45,7 +47,8 @@ void fragment() {
 	vec3 ray = normalize(world - CAMERA_POSITION_WORLD);
 	vec2 q = world.xz + world_offset;
 	float weather = texture(cloud_cover, q / 384000.0).r;
-	float thinned = cover - clearing * (1.0 - smoothstep(46000.0, 92000.0, length(world.xz - clearing_at)));
+	float open2 = clearing2 * (1.0 - smoothstep(70000.0, 150000.0, length(world.xz - clearing2_at)));
+	float thinned = cover - clearing * (1.0 - smoothstep(46000.0, 92000.0, length(world.xz - clearing_at))) - open2;
 	float threshold = mix(0.84, 0.24, clamp(thinned + (weather - 0.5) * 1.3, 0.0, 1.0));
 	float through = pow(max(dot(ray, TO_SUN), 0.0), 5.0);
 	// the cumulus: up through the slab. Each reading of the map is smoothed to the distance one
@@ -115,6 +118,8 @@ void fragment() {
 	float wisps = smoothstep(0.50, 0.98, texture(cloud_cover, q2 / 128000.0).a + (texture(cloud_cover, q2 / 384000.0).r - 0.5) * 0.5);
 	// (from under the deck only, and thinning out as the eye climbs to it: there is no plane up there to draw it on from above)
 	float a_cirrus = above ? 0.0 : wisps * cirrus * (1.0 - smoothstep(-1500.0, -150.0, CAMERA_POSITION_WORLD.y - world.y));
+	// (round the second mountain the wisps thin with the heaps, where the line of sight meets them: it is 48 km high and they hid it whole)
+	a_cirrus *= 1.0 - min(1.0, 1.7 * clearing2) * (1.0 - smoothstep(70000.0, 150000.0, length(world.xz + ray.xz / max(ray.y, 0.03) * cirrus_above - clearing2_at)));
 	// near over far, then the air between here and there
 	float alpha = a_cumulus + a_cirrus * clear;
 	vec3 col = (lit + lit_col * (0.92 + 0.45 * through) * a_cirrus * clear) / max(alpha, 1e-4);

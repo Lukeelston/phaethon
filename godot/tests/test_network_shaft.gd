@@ -239,8 +239,9 @@ func _sides(sim) -> void:
 			# samples: left as designed until Luke has driven it.)
 			shifts = shifts and not gs.is_empty() and (not gs.has("GEAR 1") or r.name == "SHelios")
 	# (Codex's four backroads and two stunt roads are S roads too: long sweeps, one gear's worth of
-	# corners each. So is the Helios road, the twenty-first: counted, not asked for two. The twelve
-	# side roads, the coast road and the drop still want two.)
+	# corners each. So is the Helios road, the twenty-first: counted, not asked for two. So is Mount
+	# Hyperion's, the twenty-third S road: one straight line and two 12 km turns, second gear. The
+	# twelve side roads, the coast road and the drop still want two.)
 	var two := 0
 	var twisty := 0
 	for nm: String in gears:
@@ -249,7 +250,7 @@ func _sides(sim) -> void:
 		if first_built and gears[nm].size() >= 2:
 			two += 1
 	_check("sides: %d S roads, all with corner boards (%d); the %d side and scenic roads each with two gears' worth of corners (%d); none in first (%s); e.g. %s" % [n_side, roads.size(), twisty, two, shifts, gears.get("S0", {}).keys()],
-		n_side == 22 and roads.size() == 22 and twisty == 14 and two == 14 and shifts and W.gear_for(2100.0) == 2 and W.gear_for(3000.0) == 3)
+		n_side == 23 and roads.size() == 23 and twisty == 14 and two == 14 and shifts and W.gear_for(2100.0) == 2 and W.gear_for(3000.0) == 3)
 
 
 func _partner(sim) -> void:

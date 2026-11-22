@@ -42,6 +42,8 @@ const INSERTIONS := [
 	["gap", "Mesa Gap run-up", "N3@300"],     # N3 northbound, 55 km short of the ramp the launch forks from
 	["helios", "Helios, the foot", "SHelios@1540"],     # 2 km short of where the road meets the mountain
 	["summit", "Helios summit", "SHelios@7244"],   # the centre of the spire's plateau, 16 km up, facing the far rim 3 km on (the designer's Face "centre")
+	["hyperion", "Hyperion, the foot", "SHyperion@1790"],     # 2 km short of the ramp's foot, the mountain dead ahead
+	["hyperion_summit", "Hyperion summit", "SHyperion@5200"],   # 48 km up, 96 m short of the summit's stop line and 384 m short of the lip (the designer's "lip" less 16)
 ]
 
 static func course_index(id: String) -> int:

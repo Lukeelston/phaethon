@@ -144,8 +144,9 @@ func _process(_d: float) -> bool:
 		for spec in v.network_world._signs[key]:
 			if spec[2] == "stunt":
 				stunt_boards.append([sim.roads[key.x].name, spec[1], spec[3][0]])
-	# (six: the Aurora's two pressure locks are boarded as stunts too)
-	_check("stunt approaches warn in each direction (%d boards)" % stunt_boards.size(), stunt_boards.size() == 6
+	# (six: the Aurora's two pressure locks are boarded as stunts too; and Mount Hyperion's eight wide boards: its
+	# foot, its braking section, its summit, its cliff and its brink one way, three the other. tests/test_hyperion.gd)
+	_check("stunt approaches warn in each direction (%d boards)" % stunt_boards.size(), stunt_boards.size() == 14
 		and ["SAurora", 1, "PRESSURE LOCK"] in stunt_boards and ["SAurora", -1, "PRESSURE LOCK"] in stunt_boards
 		and ["SNeedle", 1, "FULL ROLL"] in stunt_boards and ["SNeedle", -1, "FULL ROLL"] in stunt_boards
 		and ["SHammer", 1, "STEEP DROP"] in stunt_boards and ["SHammer", -1, "STEEP CLIMB"] in stunt_boards)

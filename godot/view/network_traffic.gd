@@ -356,7 +356,8 @@ func _pod_as_car() -> Car:
 
 
 static func _public_road(road: Simulation.TrackPath) -> bool:
-	return road.role == "" and road.name != "SAurora" and not RoadWorld.STUNT_ROADS.has(road.name)
+	# (not Mount Hyperion's road either: traffic goes by the map, and up an 88 degree wall that is 29 times the speed along it)
+	return road.role == "" and road.name != "SAurora" and not road.deck and not RoadWorld.STUNT_ROADS.has(road.name)
 
 
 func _spawn(px: float, py: float, first: bool) -> void:
