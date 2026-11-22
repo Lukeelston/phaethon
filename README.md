@@ -611,6 +611,7 @@ Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/tes
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_energy.gd   # coasting into walls never gains energy; steering and coast-down untouched
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_cables.gd -- --track=range --mute   # tow links on their hardpoints, rigid, jointed, lit
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_tow_links.gd -- --track=range --mute   # tow links: every pin in its hole, the telescope follows the sim's span
+Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_shrike_fins.gd -- --mute   # the Shrike's engine fins: on their hinges with the speed, each moved by a hydraulic ram whose pins stay in their holes
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_dashboard.gd           # instrument panel
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_route.gd -- --track=range --mute   # overpasses + landmarks placement
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_scenery.gd -- --track=range --mute   # mountains, light, ground, asphalt, props, streaming budget

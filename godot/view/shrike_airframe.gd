@@ -28,16 +28,68 @@ static func part(id: StringName) -> Mesh:
 	return meshes[id]
 
 
+## The fin's tip as it was authored (at FIN_CANT), engine-local. It moves now: see fin_solve().
 static func fin_tip(out: float) -> Vector3:
-	return Vector3(out * (0.77 + 1.62*sin(0.76)), 0.25 + 1.62*cos(0.76), 1.98)
+	return Vector3(out * (0.77 + 1.62*sin(FIN_CANT)), 0.25 + 1.62*cos(FIN_CANT), 1.98)
 
 
+## The engine's fixed lamps (the fin's own tip lamp rides the fin: fin_lamp()).
 static func lights(out: float) -> ArrayMesh:
 	return Kit.compound([
-		[Kit.ball(0.057, 10), Kit.at(fin_tip(out) + Vector3(-0.08*out, -0.09, 0.09)),
-			Color("#ef413b") if out < 0 else Color("#49dc91")],
 		[Kit.box(Vector3(0.44, 0.04, 0.035)), Kit.at(Vector3(0, 0.39, 4.0)), Color("#e84432")],
 		[Kit.box(Vector3(0.09, 0.045, 0.08)), Kit.at(Vector3(out * 0.81, -0.39, -3.92)), IVORY]])
+
+
+# ---- the engine fins ----
+# Each engine's fin turns on a hinge along its root, moved by one hydraulic ram (Luke: "find a way to
+# animate its engine fins with speed - they should angle via a hydraulic arm"). Standing tall parked and
+# slow, it lays out as the craft gathers speed: FIN_REST from upright at rest, the angle it was drawn at
+# at half FIN_FAST_MPH, FIN_FAST from FIN_FAST_MPH up, eased at both ends, and never faster than the
+# ram can stroke. The parts are authored about their pins (tools/art_shrike_airframe.py, which holds
+# these same numbers): the fin about its hinge line, the ram's cylinder about the bracket's pin on the
+# nacelle's back, its rod about the pin in the fin's lug. Both pins and the hinge lie along the engine,
+# so the ram works in one plane across it: a crank and a slider.
+const FIN_CANT := 0.76                 # rad from upright, leaning outboard: as the fin was authored
+const FIN_REST := 0.48                 # standing tall
+const FIN_FAST := 1.04                 # laid out
+const FIN_FAST_MPH := 5000.0           # (Luke's flying, 2026-11-21: median 2,800 to 3,400 mph, 90% under 5,300: mid-travel where he
+                                       # mostly is, laid right out on the fast straights, standing up as he brakes for a corner)
+const FIN_SLEW := 0.30                 # rad/s: the ram's own speed (the whole travel in under two seconds)
+const FIN_HINGE := Vector3(0.9353, 0.4240, 0.0)    # engine-local, outboard +x: where the fin's line leaves the skin
+const RAM_PIN := Vector3(0.2323, 0.4690, 0.80)     # the lug's pin, in the fin's frame (outboard +x)
+const RAM_BASE := Vector3(0.30, 0.5907, 0.80)      # the bracket's pin, engine-local (outboard +x)
+const RAM_BARREL := 0.52               # the cylinder, pin to gland
+const RAM_ROD := 0.65                  # the rod, pin to piston
+
+
+## Where the fin stands at a speed: rad from upright.
+static func fin_cant(mph: float) -> float:
+	return lerpf(FIN_REST, FIN_FAST, smoothstep(0.0, FIN_FAST_MPH, mph))
+
+
+## One engine's fin and ram at a cant, engine-local (out: -1 the port engine, 1 the starboard):
+## {fin, barrel, rod: Transform3D; hinge, pin, base: Vector3; span: the ram pin to pin; showing: the rod
+## out of the gland; piston: the piston's place up the barrel from the bracket's pin}.
+static func fin_solve(out: float, cant: float) -> Dictionary:
+	var hinge := Vector3(out * FIN_HINGE.x, FIN_HINGE.y, FIN_HINGE.z)
+	var fin := Transform3D(Basis(Vector3.BACK, -out * (cant - FIN_CANT)), hinge)
+	var pin: Vector3 = fin * Vector3(out * RAM_PIN.x, RAM_PIN.y, RAM_PIN.z)
+	var base := Vector3(out * RAM_BASE.x, RAM_BASE.y, RAM_BASE.z)
+	var span := pin.distance_to(base)
+	var y := (pin - base) / span           # along the ram, bracket to lug
+	var x := y.cross(Vector3.BACK)
+	return {"fin": fin, "barrel": Transform3D(Basis(x, y, Vector3.BACK), base), "rod": Transform3D(Basis(-x, -y, Vector3.BACK), pin),
+		"hinge": hinge, "pin": pin, "base": base, "span": span, "showing": span - RAM_BARREL, "piston": span - RAM_ROD}
+
+
+## The fin's tip in its own frame (about its hinge), and the nav lamp that rides there.
+static func fin_tip_local(out: float) -> Vector3:
+	return fin_tip(out) - Vector3(out * FIN_HINGE.x, FIN_HINGE.y, FIN_HINGE.z)
+
+
+static func fin_lamp(out: float) -> ArrayMesh:
+	return Kit.compound([[Kit.ball(0.057, 10), Kit.at(fin_tip_local(out) + Vector3(-0.08*out, -0.09, 0.09)),
+		Color("#ef413b") if out < 0 else Color("#49dc91")]])
 
 
 static func dress_pod(hull: MeshInstance3D) -> void:
@@ -68,6 +120,13 @@ static func fit_seat(parent: Node3D, offset := Vector3.ZERO) -> void:
 		parent.add_child(piece)
 
 
+# The HD coaming's colour map carries the Phaethon's own nameplate on its facing (tools/art_coaming_hd.py
+# paints it there; the Shrike's map is that one re-enamelled). In the cabin it is this rectangle, found by
+# following the map's texels through the model: 183 by 46 mm, upright. The Shrike's badge goes over it.
+const NAMEPLATE := [Vector3(-0.0915, 0.5331, -0.5002), Vector3(0.0915, 0.5795, -0.5002)]
+const COAMING_Y := 0.558               # the badge's and the tow-load windows' height on the HD coaming
+
+
 static func dress_coaming(coaming: MeshInstance3D, hd: bool) -> ShaderMaterial:
 	if hd:
 		var original := coaming.mesh.surface_get_material(0) as BaseMaterial3D
@@ -76,7 +135,14 @@ static func dress_coaming(coaming: MeshInstance3D, hd: bool) -> ShaderMaterial:
 		coaming.set_surface_override_material(0, livery)
 	var plate := MeshInstance3D.new()
 	plate.name = "ShrikePlate"
-	plate.position = Vector3(0, 0.578, -0.911)
+	# The HD coaming follows the shorter, egg-shaped opening. The original
+	# flight-deck mesh still has the longer nose and its nearly upright face.
+	if hd:
+		# (16 mm lower than first remounted: there it left the bottom third of the map's own PHAETHON
+		# nameplate showing under its edge, NAMEPLATE below. tests/test_shrike_preflight.gd looks.)
+		plate.transform = Kit.at(Vector3(0, COAMING_Y, -0.496), Vector3(-0.22, 0, 0))
+	else:
+		plate.position = Vector3(0, 0.578, -0.911)
 	plate.mesh = Kit.compound([
 		[Finish.beveled_plate(Vector3(0.216, 0.057, 0.014), 0.003), Transform3D.IDENTITY, ALLOY],
 		[Finish.beveled_plate(Vector3(0.211, 0.052, 0.008), 0.002), Kit.at(Vector3(0, 0, 0.006)), CARBON],
@@ -101,6 +167,8 @@ static func dress_coaming(coaming: MeshInstance3D, hd: bool) -> ShaderMaterial:
 	var housings := []
 	for side in [-1.0, 1.0]:
 		var mount := Kit.at(Vector3(side*0.180, 0.578, -0.888), Vector3(0, -side*0.34, 0))
+		if hd:
+			mount = Kit.at(Vector3(side*0.180, COAMING_Y, -0.476), Vector3(-0.22, -side*0.29, 0))
 		housings.append([Finish.beveled_plate(Vector3(0.139,0.048,0.012),0.003), mount, CARBON])
 		var legend := Label3D.new()
 		legend.text = "L  TOW" if side < 0.0 else "TOW  R"

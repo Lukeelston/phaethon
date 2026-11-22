@@ -54,6 +54,7 @@ const NetworkWorldScript := preload("res://view/network_world.gd")
 const TerminalLighting := preload("res://view/terminal_lighting.gd")
 const NetworkTrafficScript := preload("res://view/network_traffic.gd")
 const DrivingPartnerScript := preload("res://view/driving_partner.gd")
+const RacePilotsScript := preload("res://view/race_pilots.gd")
 const MainMenuScript := preload("res://view/main_menu.gd")
 const DT := 1.0 / 480.0
 const HAZE := Color(0.78, 0.66, 0.52)
@@ -167,6 +168,7 @@ var verdant_world: Node3D    # ... and the green valley round it (view/verdant_w
 var dust: Node3D
 var partner: Node3D          # the driving partner (view/driving_partner.gd), null when it's off
 var partner_on := false      # common release preference, overridden by launch flags
+var race: Node3D             # Eridanus: the racing pilots (view/race_pilots.gd), null when there are none
 var chase: Node3D            # chase mode on the Network (view/network_chase.gd), null when it's off
 var pad: Node3D              # the starting pad (view/start_pad.gd), when the flight began on one
 const StartPadScript := preload("res://view/start_pad.gd")
@@ -329,6 +331,8 @@ func _ready() -> void:
 	_follow_origin()
 	_place_camera(1.0)
 	set_partner(partner_on)
+	if RacePilotsScript.available(sim) and replay.is_empty() and RacePilotsScript.wanted(OS.get_cmdline_user_args()):
+		set_racers(true)
 	Outlook.apply(self)      # the world is built for a fair afternoon: turn it to the hour and weather chosen (the Network's only)
 	if ChaseScript.craft == "patrol":
 		if craft and craft.canopy:
@@ -870,6 +874,28 @@ func set_partner(on: bool, save := false) -> void:
 		partner = null
 	if save:
 		GameSettings.set_driving_partner(on)
+
+
+## The racing pilots (Eridanus: view/race_pilots.gd) on or off, now and, from a menu, from now on.
+func set_racers(yes: bool, save := false) -> void:
+	if yes and race == null and RacePilotsScript.available(sim):
+		race = RacePilotsScript.new()
+		add_child(race)
+		race.build(self)
+	elif not yes and race != null:
+		race.queue_free()
+		race = null
+		sim.obstacles = []
+		if minimap:
+			minimap.marks = []
+	if save:
+		RacePilotsScript.save_wanted(yes)
+
+
+## Overridable: the racing pilots' line under the lap's (a flat screen's HUD; the VR cockpit puts
+## their page on its glass instead).
+func _race_suffix() -> String:
+	return "" if race == null or race.line() == "" else "\n" + race.line()
 
 
 ## Overridable: the menu's items.
@@ -1615,6 +1641,10 @@ func _sync_world() -> void:
 			course_audio.net_halls = network_world.halls
 	if partner:
 		partner.update(get_process_delta_time())
+	if race:
+		race.update(get_process_delta_time())
+		if minimap:
+			minimap.marks = race.marks()
 	if traffic_net:
 		traffic_net.update(get_process_delta_time())
 		if traffic_audio:   # the whooshes: the vehicles within 3 km going by
@@ -2029,7 +2059,7 @@ func _progress_text() -> String:
 		var rec := "--" if best_saved < 0.0 else "%.2f" % best_saved
 		if sim.time < flash_until:
 			return "%s   RECORD %s" % [flash_msg, rec]
-		return "LAP %d  %.2fs   LAST %s   RECORD %s" % [sim.lap + 1, cur, "--" if sim.last_lap < 0.0 else "%.2f" % sim.last_lap, rec]
+		return "LAP %d  %.2fs   LAST %s   RECORD %s" % [sim.lap + 1, cur, "--" if sim.last_lap < 0.0 else "%.2f" % sim.last_lap, rec] + _race_suffix()
 	return "LAP %d  %.2fs   LAST %s  BEST %s" % [sim.lap + 1, cur,
 		"--" if sim.last_lap < 0.0 else "%.2f" % sim.last_lap, "--" if sim.best_lap < 0.0 else "%.2f" % sim.best_lap]
 

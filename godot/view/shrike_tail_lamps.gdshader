@@ -2,6 +2,7 @@ shader_type spatial;
 
 // Each lamp has eight separate molded lens segments. Vertex positions are pod-local.
 uniform vec2 brakes = vec2(0.0);
+uniform bool powered = true;
 varying float port;
 
 void vertex() {
@@ -14,5 +15,5 @@ void fragment() {
 	ALBEDO = lens;
 	ROUGHNESS = 0.23;
 	METALLIC = 0.08;
-	EMISSION = lens * (0.30 + 4.2 * load);
+	EMISSION = powered ? lens * (0.30 + 4.2 * load) : vec3(0.0);
 }

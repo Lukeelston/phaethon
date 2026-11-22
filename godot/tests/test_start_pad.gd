@@ -94,7 +94,7 @@ func _run() -> void:
 	var meshes: int = pad.find_children("*", "MeshInstance3D", true, false).size() if pad else 0
 	var words: int = pad.find_children("*", "Label3D", true, false).size() if pad else 0
 	_check("it is %d meshes and %d lines of lettering; its board reads %s" % [meshes, words, [pad.lines[0].text, pad.lines[1].text, pad.lines[2].text] if pad else []],
-		meshes <= 16 and words == 8 and pad.lines[0].text == "GLACIER" and pad.lines[1].text.begins_with("PAD") and pad.lines[2].text.contains("PHAETHON"))
+		meshes <= 16 and words == 8 and pad.lines[0].text == "GLACIER" and pad.lines[1].text.begins_with("PAD") and pad.lines[2].text.contains("SHRIKE RS" if String(sim.P.get("vehicle", "")) == "shrike" else "PHAETHON"))      # (run with --vehicle=shrike it is the Shrike's own board)
 
 	# back
 	sim.pod.x += 400.0

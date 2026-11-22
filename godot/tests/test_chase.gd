@@ -147,8 +147,9 @@ func _run() -> void:
 	chase = v.chase
 	T = v.traffic_net
 	var hull_is_patrols := false
+	var patrol_hull := CM.pod_hull_in("police", v.sim.P.vehicle == "shrike")
 	for part: MeshInstance3D in v.find_children("*", "MeshInstance3D", true, false):
-		hull_is_patrols = hull_is_patrols or part.mesh == CM.pod_hull_in("police")
+		hull_is_patrols = hull_is_patrols or part.mesh == patrol_hull
 	var rim_before: Color = v.interior.rim_mat.albedo_color
 	_check("in the patrol craft: black and white (%s, hull %s), a light bar on each model of its roof (%d), dark until a pursuit; the pursuit's role" % [Livery.current, hull_is_patrols, v.light_bars.size()],
 		Livery.current == "police" and hull_is_patrols and v.light_bars.size() == 2 and chase.role == "pursuit" and chase.bar == null and not v.pursuing()

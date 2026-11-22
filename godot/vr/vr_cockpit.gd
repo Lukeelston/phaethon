@@ -1129,8 +1129,9 @@ static func _outlook_name(rows: Array, id: String) -> String:
 
 func _menu_items() -> Array:
 	if _menu_page == "options":      # the second page: the gameplay switches
+		# (RACING PILOTS is here too, on the Eridanus track: it was built as an eleventh line of the first page)
 		return [{"key": "consumables", "label": "HEAT AND ENERGY", "value": "ON" if consumables else "OFF"},
-			{"key": "powerups", "label": "POWER-UPS", "value": "ON" if power_ups_on else "OFF"},
+			{"key": "powerups", "label": "POWER-UPS", "value": "ON" if power_ups_on else "OFF"}] + _race_menu_items() + [
 			# (NOSE came here from the first page, which is full at ten lines: an eleventh ran off its panel)
 			{"key": "nose", "label": "NOSE", "value": "CLOSED" if CraftModelScript.nose_closed else "OPEN"},
 			{"key": "back", "label": "BACK"}]
@@ -1144,6 +1145,18 @@ func _menu_items() -> Array:
 		{"key": "options", "label": "OPTIONS"},
 		{"key": "maps", "label": "CHOOSE MAP"},
 		{"key": "resume", "label": "RESUME"}]
+
+
+## The quick menu's RACING PILOTS line, where there are any to have (the Eridanus track).
+func _race_menu_items() -> Array:
+	if not RacePilotsScript.available(sim):
+		return []
+	return [{"key": "racers", "label": "RACING PILOTS", "value": "ON" if race != null else "OFF"}]
+
+
+## The glass carries the race, not the dash's strip.
+func _race_suffix() -> String:
+	return ""
 
 
 func menu_choose() -> bool:
@@ -1233,6 +1246,14 @@ func menu_choose() -> bool:
 			var at: int = menu.at
 			menu.items = _menu_items()
 			menu.at = at
+			_menu_show()
+			return true
+		"racers":      # the racing pilots, now and from now on (switched on mid-lap they start from the grid)
+			set_racers(race == null, true)
+			print("RACE: pilots ", "on" if race != null else "off")
+			var race_at: int = menu.at
+			menu.items = _menu_items()
+			menu.at = race_at
 			_menu_show()
 			return true
 		"maps":
@@ -1487,9 +1508,9 @@ func _hud_progress(in_cockpit: bool) -> String:
 		if approach_display:
 			approach_display.set_message(page)
 		return coach.line()
-	if sim.kind != "network":      # (the projector is under the roof on every course; only the Network has guidance for it)
-		if approach_display:
-			approach_display.set_message("")
+	if sim.kind != "network":      # (the projector is under the roof on every course; only the Network has guidance for it,
+		if approach_display:        # and Eridanus its race: the pilot's place and the gaps)
+			approach_display.set_message(race.page() if race != null else "")
 		return _progress_text()
 	return super(in_cockpit)
 

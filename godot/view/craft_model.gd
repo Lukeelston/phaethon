@@ -113,6 +113,9 @@ var jets: Array = []                 # per engine: its nozzle and its gas (view/
 var nozzle_flaps := [[], []]         # per engine: its upper and lower flaps' hinges (they open and shut with the power)
 var metal_mats: Array[ShaderMaterial] = []   # per engine: the liner, the vanes and the flaps' faces (they glow when hot)
 var strobes: Array[Node3D] = []      # the fin-tip strobes (double flash)
+var fin_parts: Array = []            # the Shrike's: per engine [fin, ram cylinder, ram rod] (view/shrike_airframe.gd)
+var fin_cant := Shrike.FIN_REST      # ... where its fins stand now, rad from upright: tall at rest, laid out at speed
+var fin_ram := [0.0, 0.0]            # ... and how much rod each ram shows, m (tests read it)
 var binder_mats: Array[StandardMaterial3D] = []   # the binder emitters' glowing cores
 const FlameShader := preload("res://view/flame.gdshader")
 const FlowTexture := preload("res://art/engine/jet_flow.png")
@@ -143,6 +146,7 @@ const CanopyScript := preload("res://view/canopy.gd")
 var pod_flaps: Array[Node3D] = []
 var tail_lights: MeshInstance3D
 var _brake_signal := Vector2.ZERO
+var _tail_powered := true
 var pod_flap_open := 0.0
 # The tow links (view/tow_link.gd). They keep the names the ropes had, which the cockpit and the tests read.
 var cables: Array[MeshInstance3D] = []          # each link's rod (the long lit member)
@@ -233,6 +237,32 @@ func build(v) -> void:
 		lights.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		eng.add_child(lights)
 		light_meshes.append(lights)
+		var fin: MeshInstance3D = null
+		if shrike:
+			# The fin on its hinge, the ram that moves it, and the nav lamp at its tip (view/shrike_airframe.gd:
+			# sync() stands the fin up or lays it out with the speed).
+			fin = MeshInstance3D.new()
+			fin.name = "ShrikeFin"
+			fin.mesh = Shrike.part(&"PortFin" if k == 0 else &"StarboardFin")
+			eng.add_child(fin)
+			var ram := MeshInstance3D.new()
+			ram.name = "FinRam"
+			ram.mesh = Shrike.part(&"FinRam")
+			eng.add_child(ram)
+			var rod := MeshInstance3D.new()
+			rod.name = "FinRamRod"
+			rod.mesh = Shrike.part(&"FinRamRod")
+			rod.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			eng.add_child(rod)
+			var tip_lamp := MeshInstance3D.new()
+			tip_lamp.name = "FinLamp"
+			tip_lamp.mesh = Shrike.fin_lamp(out)
+			tip_lamp.material_override = lit_mat
+			tip_lamp.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			fin.add_child(tip_lamp)
+			light_meshes.append(tip_lamp)
+			fin_parts.append([fin, ram, rod])
+			_place_fin(k, fin_cant)
 		# hot section: its own material, coloured by heat
 		var hot := MeshInstance3D.new()
 		hot.mesh = hot_mesh      # (its tail is open: the tailpipe runs up inside it)
@@ -376,9 +406,12 @@ func build(v) -> void:
 		var strobe := MeshInstance3D.new()
 		strobe.mesh = Kit.ball(0.08, 10)
 		strobe.material_override = view._mat(Color(1.0, 1.0, 1.0), true)
-		strobe.position = Shrike.fin_tip(out) if shrike else Vector3(0, 1.08, 1.35)
+		strobe.position = Shrike.fin_tip_local(out) if shrike else Vector3(0, 1.08, 1.35)
 		strobe.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		eng.add_child(strobe)
+		if shrike:
+			fin.add_child(strobe)      # (it rides the fin's tip)
+		else:
+			eng.add_child(strobe)
 		strobes.append(strobe)
 		# the upgraded binder emitter on the inboard face: a ring round a glowing core, facing across
 		var em := Node3D.new()
@@ -1128,6 +1161,15 @@ func _update_bank(sim, delta: float) -> void:
 			roll_rate_peak = maxf(roll_rate_peak, absf(bank[k] - was) / delta)
 
 
+## One of the Shrike's fins stood at a cant, its ram's cylinder and rod with it (Shrike.fin_solve).
+func _place_fin(k: int, cant: float) -> void:
+	var at: Dictionary = Shrike.fin_solve(-1.0 if k == 0 else 1.0, cant)
+	(fin_parts[k][0] as Node3D).transform = at.fin
+	(fin_parts[k][1] as Node3D).transform = at.barrel
+	(fin_parts[k][2] as Node3D).transform = at.rod
+	fin_ram[k] = at.showing
+
+
 func sync(sim, inp: Dictionary, delta: float) -> void:
 	_update_bank(sim, delta)
 	var bodies := [sim.eL, sim.eR]
@@ -1141,6 +1183,13 @@ func sync(sim, inp: Dictionary, delta: float) -> void:
 		vane_angle = Jets.slew(vane_angle, Jets.command(steer, turn_g, 0.5 * (sim.eL.thrust + sim.eR.thrust)), delta)
 	for lights in light_meshes:
 		lights.visible = lights_on
+	if not fin_parts.is_empty():      # the Shrike's fins: with the craft's speed, no faster than their rams
+		var mph: float = 0.5 * (Vector2(sim.eL.vx, sim.eL.vy).length() + Vector2(sim.eR.vx, sim.eR.vy).length()) * 2.2369363
+		var want: float = Shrike.fin_cant(mph)
+		if want != fin_cant:
+			fin_cant = want if delta <= 0.0 else move_toward(fin_cant, want, Shrike.FIN_SLEW * delta)
+			for k in fin_parts.size():
+				_place_fin(k, fin_cant)
 	# On a deck road (Mount Hyperion's) the craft's pitch is the deck's own under the pod, moving or stopped
 	# (its climb is not its vz over its speed there, and a craft stopped on an 80 degree wall is not level).
 	var on_deck: bool = sim.kind == "network" and not sim.pod.off_road and sim.roads[sim.pod.path].deck
@@ -1261,9 +1310,13 @@ func sync(sim, inp: Dictionary, delta: float) -> void:
 	else:
 		pod.rotation = Vector3(pclimb, sim.pod.th - PI / 2.0, plean)
 	if tail_lights:
+		var lens := tail_lights.material_override as ShaderMaterial
+		if lights_on != _tail_powered:
+			lens.set_shader_parameter("powered", lights_on)
+			_tail_powered = lights_on
 		var signal_level := Vector2(inp.brkL, inp.brkR).clamp(Vector2.ZERO, Vector2.ONE)
 		if signal_level != _brake_signal:
-			(tail_lights.material_override as ShaderMaterial).set_shader_parameter("brakes", signal_level)
+			lens.set_shader_parameter("brakes", signal_level)
 			_brake_signal = signal_level
 	pod_flap_open = move_toward(pod_flap_open, clampf(minf(inp.brkL, inp.brkR), 0.0, 1.0), FLAP_RATE * delta)
 	for i in 2:

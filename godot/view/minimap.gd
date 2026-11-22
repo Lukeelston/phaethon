@@ -173,6 +173,11 @@ func update(heading: float, delta: float) -> Dictionary:
 				bd = d
 				nxt = {"dist": d, "mode": mode_at(c), "at": _local(c, fx, fy)}
 	var f := {"pts": pts, "modes": modes, "ahead": ahead, "next": nxt}
+	if not marks.is_empty():      # a course's other craft (Eridanus's racing pilots: view/race_pilots.gd), as the Network's racer is marked
+		var mk := []
+		for m in marks:
+			mk.append([_local_xy(m[0], m[1], fx, fy), int(m[2])])
+		f["marks"] = mk
 	var J: Dictionary = sim.job if "job" in sim else {}
 	if not J.is_empty() and J.stage in ["out", "drop", "home"]:
 		var t: float = 0.0 if J.t0 == null else sim.time - float(J.t0)

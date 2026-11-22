@@ -158,6 +158,147 @@ def aerofoil(mesh, base, side, span, cant, sweep, chord, region="fin"):
     mesh.grid(14, 1, lambda u, t: point(u, 1, 2 * t - 1), "bronze", reverse=True)
 
 
+# The engine fin turns on a hinge along its root, moved by one hydraulic ram (Luke: "animate its engine
+# fins with speed - they should angle via a hydraulic arm"). It is its own part, drawn about its hinge
+# line; the engine carries the hinge's saddles and the ram's bracket. view/shrike_airframe.gd holds the
+# same numbers (FIN_*, RAM_*) and tests/test_shrike_fins.gd checks the two against these meshes.
+FIN_ROOT = (0.77, 0.25, -0.54)  # the root's leading edge, engine-local, on the outboard side
+FIN_SPAN, FIN_CANT, FIN_SWEEP, FIN_CHORD = 1.62, 0.76, 2.46, 2.05
+FIN_HINGE_UP = 0.24  # m up the fin's own line from its root: where it leaves the nacelle's skin
+RAM_Z = 0.80  # the ram's plane, across the engine
+RAM_REACH = 0.50  # m up the fin from its hinge to the ram's lug ...
+RAM_STAND = 0.078  # ... whose pin stands this far off the fin's inboard face
+RAM_BASE_X = 0.30  # the bracket on the nacelle's back, outboard of its middle ...
+RAM_BASE_UP = 0.10  # ... its pin this far over the skin
+RAM_BARREL = 0.52  # the cylinder, pin to gland
+RAM_ROD = 0.65  # the rod, pin to piston
+RAM_EYE = 0.040  # half the width of an eye between its clevis's cheeks
+NACELLE = [(-0.72, 1.11, 0.535), (0, 1.13, 0.54), (0.7, 1.17, 0.501), (1.2, 1.16, 0.470), (1.72, 1.085, 0.454)]
+
+
+def nacelle_top(x, z):
+    """The nacelle's skin over x at station z (engine()'s own stations, its superellipse)."""
+    table = np.asarray(NACELLE)
+    w = np.interp(z, table[:, 0], table[:, 1])
+    h = np.interp(z, table[:, 0], table[:, 2])
+    return h * (1 - min(1.0, abs(x) / w) ** (2 / 0.72)) ** 0.36
+
+
+def fin_hinge(side):
+    return vec(
+        side * (FIN_ROOT[0] + FIN_HINGE_UP * math.sin(FIN_CANT)), FIN_ROOT[1] + FIN_HINGE_UP * math.cos(FIN_CANT), 0
+    )
+
+
+def fin_frame(side):
+    """Along the fin from its hinge, and out of its inboard (upper) face, as authored."""
+    return vec(side * math.sin(FIN_CANT), math.cos(FIN_CANT), 0), vec(-side * math.cos(FIN_CANT), math.sin(FIN_CANT), 0)
+
+
+def fin_thickness(reach, z):
+    """Half the foil's thickness `reach` up from the hinge at station z (aerofoil()'s own law)."""
+    v = (FIN_HINGE_UP + reach) / FIN_SPAN
+    u = (z - (FIN_ROOT[2] + FIN_SWEEP * v**1.18)) / (FIN_CHORD * (1 - 0.74 * v))
+    assert 0.02 < u < 0.98, u
+    return (0.11 * (1 - v) + 0.022 * v) * math.sin(math.pi * math.sqrt(u)) ** 0.80 + 0.007
+
+
+def ram_pin(side):
+    """The ram's pin on the fin, in the fin's own frame (about its hinge)."""
+    along, inboard = fin_frame(side)
+    return along * RAM_REACH + inboard * (fin_thickness(RAM_REACH, RAM_Z) + RAM_STAND) + vec(0, 0, RAM_Z)
+
+
+def ram_base(side):
+    """The ram's pin on the nacelle, engine-local."""
+    x = side * RAM_BASE_X
+    return vec(x, nacelle_top(x, RAM_Z) + RAM_BASE_UP, RAM_Z)
+
+
+def clevis(mesh, pin, feet, region="carbon", cheek=0.018):
+    """Two cheeks either side of a pin along z, each a plate from its feet up round the pin."""
+    pin = np.asarray(pin)
+    a, b = (np.asarray(f) for f in feet)
+    up = unit(pin - (a + b) / 2)
+    across = unit(b - a)
+    outline = [a, b, pin + across * 0.058 - up * 0.012, pin + across * 0.038 + up * 0.05, pin - across * 0.038 + up * 0.05, pin - across * 0.058 - up * 0.012]
+    for z in (-RAM_EYE - 0.004 - cheek, RAM_EYE + 0.004):
+        mesh.panel([p + vec(0, 0, z) for p in outline], (0, 0, 1), region, cheek, "metal")
+    reach = RAM_EYE + 0.004 + cheek + 0.012
+    mesh.pipe(pin - vec(0, 0, reach), pin + vec(0, 0, reach), 0.026, "metal", 12)
+    for z in (-reach, reach - 0.008):
+        mesh.pipe(pin + vec(0, 0, z), pin + vec(0, 0, z + 0.008), 0.038, "bronze", 6)
+
+
+def fin(side):
+    """The engine's fin about its hinge line: the foil as it was, a hinge tube through its root, and the
+    ram's lug on its inboard face."""
+    m = Mesh()
+    hinge = fin_hinge(side)
+    aerofoil(m, vec(side * FIN_ROOT[0], FIN_ROOT[1], FIN_ROOT[2]) - hinge, side, FIN_SPAN, FIN_CANT, FIN_SWEEP, FIN_CHORD)
+    m.pipe((0, 0, -0.50), (0, 0, 1.47), 0.058, "metal", 14)
+    for z0, z1 in [(-0.38, -0.12), (0.30, 0.74), (0.86, 1.30)]:  # its own knuckles, between the saddles
+        m.pipe((0, 0, z0), (0, 0, z1), 0.074, "bronze", 14)
+    along, inboard = fin_frame(side)
+    face = fin_thickness(RAM_REACH, RAM_Z) - 0.012
+    feet = [along * (RAM_REACH + k) + inboard * face + vec(0, 0, RAM_Z) for k in (-0.12, 0.12)]
+    clevis(m, ram_pin(side), feet)
+    pad = [along * (RAM_REACH + k) + inboard * (face + 0.004) + vec(0, 0, RAM_Z + dz) for k, dz in [(-0.17, -0.12), (0.17, -0.12), (0.17, 0.12), (-0.17, 0.12)]]
+    m.panel(pad, inboard, "metal", 0.012)
+    return m
+
+
+def fin_fittings(m, side):
+    """What the fin and its ram stand on, fixed to the nacelle: three hinge saddles and the ram's bracket."""
+    hinge = fin_hinge(side)
+    for z in (-0.47, 0.09, 0.80, 1.38):
+        m.pipe(hinge + vec(0, 0, z - 0.05), hinge + vec(0, 0, z + 0.05), 0.088, "carbon", 16)
+        foot = vec(hinge[0] - side * 0.05, nacelle_top(hinge[0] - side * 0.05, z) - 0.03, z)
+        m.pipe(hinge + vec(0, 0, z), foot, 0.062, "carbon", 10, 0.085)
+    # a doubler plate on the skin round the fin's root: the foil works in and out of it as it turns
+    x0, x1 = sorted((hinge[0] - side * 0.30, hinge[0] + side * 0.11))
+
+    def doubler(u, v):
+        z = -0.62 + 2.24 * u
+        x = x0 + (x1 - x0) * v
+        return vec(x, nacelle_top(x, z) + 0.012, z)
+
+    m.grid(12, 8, doubler, "carbon")
+    base = ram_base(side)
+    feet = [vec(base[0] + k, nacelle_top(base[0] + k, RAM_Z) - 0.012, RAM_Z) for k in (-0.105, 0.105)]
+    clevis(m, base, feet)
+    plate = [vec(base[0] + kx, nacelle_top(base[0] + kx, RAM_Z + kz) + 0.002, RAM_Z + kz) for kx, kz in [(-0.15, -0.12), (0.15, -0.12), (0.15, 0.12), (-0.15, 0.12)]]
+    m.panel(plate, (0, 1, 0), "metal", 0.014)
+    # the ram's two hydraulic lines, from the bracket forward into the skin
+    for dz in (-0.03, 0.03):
+        x = base[0] - side * 0.10
+        m.pipe((x, nacelle_top(x, RAM_Z + dz) + 0.02, RAM_Z + dz), (x, nacelle_top(x, RAM_Z - 0.42) - 0.01, RAM_Z - 0.42), 0.011, "bronze", 6)
+
+
+def ram_barrel():
+    """The ram's cylinder: its eye on the bracket's pin (along z) at the origin, the barrel along +y."""
+    m = Mesh()
+    m.pipe((0, 0, -RAM_EYE), (0, 0, RAM_EYE), 0.050, "metal", 14)
+    m.pipe((0, 0.02, 0), (0, 0.080, 0), 0.042, "metal", 12, 0.070)
+    m.pipe((0, 0.080, 0), (0, 0.125, 0), 0.078, "metal", 18)
+    m.pipe((0, 0.125, 0), (0, RAM_BARREL - 0.055, 0), 0.068, "carbon", 18)
+    m.pipe((0, RAM_BARREL - 0.055, 0), (0, RAM_BARREL, 0), 0.078, "bronze", 18)
+    for y in (0.155, RAM_BARREL - 0.105):  # its two ports
+        m.pipe((0.06, y, 0), (0.098, y, 0), 0.016, "bronze", 6)
+    m.pipe((0.092, 0.155, 0), (0.092, RAM_BARREL - 0.105, 0), 0.009, "bronze", 6)
+    return m
+
+
+def ram_rod():
+    """The ram's rod: its eye on the fin's pin (along z) at the origin, the rod along +y to its piston."""
+    m = Mesh()
+    m.pipe((0, 0, -RAM_EYE), (0, 0, RAM_EYE), 0.048, "metal", 14)
+    m.pipe((0, 0.02, 0), (0, 0.085, 0), 0.042, "metal", 12, 0.034)
+    m.pipe((0, 0.075, 0), (0, RAM_ROD - 0.03, 0), 0.030, "metal", 14)
+    m.pipe((0, RAM_ROD - 0.03, 0), (0, RAM_ROD, 0), 0.060, "carbon", 12)
+    return m
+
+
 def brake(front):
     m = Mesh()
     width, length = (0.93, 1.30) if front else (0.95, 1.19)
@@ -357,7 +498,7 @@ def engine(side):
                 port(1.117, -0.11, z + 0.056),
             ]
             m.panel(r, (flank, 0, 0), "carbon", 0.032)
-    aerofoil(m, (side * 0.77, 0.25, -0.54), side, 1.62, 0.76, 2.46, 2.05)
+    fin_fittings(m, side)  # (the fin itself is PortFin / StarboardFin: it moves)
     # Forked tow yoke encloses the same eye to which the simulated cable attaches.
     for x in (-0.16, 0.16):
         m.pipe((x, -0.24, 2.63), (x * 0.32, -0.91, 3.41), 0.093, "carbon", 10, 0.061)
@@ -829,6 +970,10 @@ if __name__ == "__main__":
         {
             "Port": engine(-1),
             "Starboard": engine(1),
+            "PortFin": fin(-1),
+            "StarboardFin": fin(1),
+            "FinRam": ram_barrel(),
+            "FinRamRod": ram_rod(),
             "Compressor": impeller(),
             "ForwardBrake": brake(True),
             "AftBrake": brake(False),
