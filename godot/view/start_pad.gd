@@ -165,8 +165,12 @@ func build(v) -> void:
 
 
 ## Where the mast stands: ahead of the engines and toward the wall.
+## The mast's post: at the apron's far right corner. (It stood 1.3 m further in until the seat was
+## raised three and a half inches: from there the glass's image lies some five degrees lower against
+## the world, and its right corner came down over the mast's lamps. The post went out to the edge and
+## the head hangs to the right of it: _build_head.)
 func _mast() -> Vector3:
-	return Vector3(LEFT + WIDE - 1.6, 0.0, -(ahead + 13.0))
+	return Vector3(LEFT + WIDE - 0.3, 0.0, -(ahead + 13.0))
 
 
 func _cart() -> Vector3:
@@ -205,6 +209,7 @@ func _build_head() -> void:
 	head.position = _mast()
 	head.rotation.y = atan2(-head.position.x, -head.position.z)      # its face (+z) to the pod
 	head.position += head.basis.z * 0.43  # fastened in front of the square post; keep it out of the lettering
+	head.position += head.basis.x * 1.5   # ... and hung to the right of it, as the pilot sees it: clear of the glass's image (_mast)
 	add_child(head)
 	var panel := MeshInstance3D.new()
 	panel.mesh = Kit.compound([

@@ -177,6 +177,8 @@ static var school := true            # FLIGHT SCHOOL (the quick menu's, saved): 
 static var _school_loaded := false
 static var cold_on_entry := false    # set by the menu as it launches a flight: this one begins cold, if the pilot's choice allows
 var startup = StartupScript.new()    # (running, until _ready says otherwise)
+var coach = preload("res://vr/flight_coach.gd").new()   # the first minute of a taught flight, a line at a time on the glass (off until a taught run-up's brake comes off)
+var _coach_armed := false            # this flight began with the school on: the coach takes over when the brake comes off
 var overhead                         # vr/overhead_panel.gd; null without the roof (there is no header to hang it from: no cold start then)
 var startup_audio                    # audio/startup_audio.gd; null when muted
 var _turbine_lamp := false           # the run-up's turbine test has the TURBINES lamp lit
@@ -224,6 +226,7 @@ func _ready() -> void:
 	_school_loaded = true
 	if cold and overhead != null and replay.is_empty() and cruise < 0.0:
 		startup.school = school and quest.scheme == "triggers"      # (the lessons are the trigger throttles')
+		_coach_armed = startup.school
 		startup.cold()
 		for k in 2:                       # parked: her air brakes were left out, all of them
 			craft.flap_open[k] = 1.0
@@ -933,6 +936,8 @@ func _read_input(delta: float) -> void:
 				startup_work(String(hit[0]), int(hit[1]), hand)
 	startup.gears = quest.scheme == "triggers" and quest.gear >= 1      # (a gearbox to try in the run-up)
 	startup.step(delta, [inp.thrL, inp.thrR], quest.display_gear(), [l.get_float("grip"), r.get_float("grip")])
+	if coach.on and not coach.done:
+		_coach_step(delta, [l.get_float("grip"), r.get_float("grip")])
 	_apply_startup(delta)
 	_diag(delta, l, r, p)
 
@@ -1225,6 +1230,10 @@ func _startup_event(e: String) -> void:
 				_buzz(hands[side], 0.3, 0.03)
 		"cleared":
 			print("STARTUP: cleared, %.1f s into the flight" % sim.time)
+			if _coach_armed:             # a taught flight: the coach has the glass for its first minute
+				_coach_armed = false
+				coach.begin()
+				print("COACH: on")
 		"schooled":                  # every lesson passed and flown away from: the next cold start is the plain one
 			school = false
 			_save_prefs()
@@ -1290,6 +1299,39 @@ func _shown_brakes() -> Array:
 	return [1.0, 1.0] if startup.park else [inp.brkL, inp.brkR]
 
 
+## Where the craft is across its road, for the coach: -1 at the wall on the pilot's left .. 1 at the
+## one on his right, 0 where that means nothing (off the Network, in the Aurora tube's bore, on a deck road).
+func _across_road() -> float:
+	if sim.kind != "network" or sim.pod.off_road:
+		return 0.0
+	var road: int = sim.pod.path
+	var R = sim.roads[road]
+	if road == int(sim.NET_PRESSURE[0]) or R.deck:
+		return 0.0
+	var i: int = clampi(int(sim.pod.hint), 0, int(R.N) - 1)
+	var to_left: float = (sim.pod.x - R.px[i]) * R.nx[i] + (sim.pod.y - R.py[i]) * R.ny[i]        # m left of the road's middle, as its samples run
+	var way: float = signf(cos(sim.pod.th) * R.tx[i] + sin(sim.pod.th) * R.ty[i])                   # (the pilot may be flying it the other way)
+	return clampf(-to_left * (way if way != 0.0 else 1.0) / maxf(1.0, 0.5 * float(R.w[i])), -1.5, 1.5)
+
+
+## A frame of the coach (vr/flight_coach.gd): what the craft and the hands are doing, and a chime
+## and a tick in the hands when the pilot does what its line asked.
+func _coach_step(delta: float, grips: Array) -> void:
+	var top: bool = quest.gear < 1 or quest.gear >= QuestControlsScript.GEARS.size() - 1
+	coach.step(delta, {"mph": _kmh() / 1.609344, "thr": [inp.thrL, inp.thrR], "grip": grips, "gear": quest.display_gear(), "top": top,
+		"gears": quest.scheme == "triggers" and quest.gear >= 1, "rpm": quest.rpm, "edge": _across_road(), "crashed": sim.crash_t > 0.0})
+	for e: String in coach.events:
+		match e:
+			"tip_ok":
+				_sound("chime")
+				for side in ["left", "right"]:
+					if hands.has(side):
+						_buzz(hands[side], 0.3, 0.03)
+			"coached":
+				print("COACH: done after %.0f s of flying (%d shifts asked for and made, %d walls steered off)" % [coach.flown, coach.shifts, coach.steers])
+	coach.events.clear()
+
+
 ## In the run-up the engines rev to the levers: a gearbox would hold a craft that is standing still
 ## near idle whatever they asked.
 func _engine_inp() -> Dictionary:
@@ -1312,6 +1354,11 @@ func _hud_progress(in_cockpit: bool) -> String:
 		if approach_display:
 			approach_display.set_message(page)
 		return startup.line()
+	page = coach.message()         # a taught flight's first minute: the coach's line, when it has one
+	if page != "":
+		if approach_display:
+			approach_display.set_message(page)
+		return coach.line()
 	if sim.kind != "network":      # (the projector is under the roof on every course; only the Network has guidance for it)
 		if approach_display:
 			approach_display.set_message("")
