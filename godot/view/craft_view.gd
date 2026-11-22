@@ -1787,6 +1787,8 @@ func set_autopilot(want: bool, why := "") -> bool:
 		print("AUTOPILOT: refused (%s)" % autopilot.why_off)
 		return false
 	_autopilot_let_go = false
+	# (it takes the levers where the pilot's hands have them, and moves them on from there)
+	autopilot.hands(float(inp.get("thrL", 0.0)), float(inp.get("thrR", 0.0)), float(inp.get("brkL", 0.0)), float(inp.get("brkR", 0.0)))
 	var mph := roundi(float(autopilot.cruise) * 2.236936)
 	_flash("AUTOPILOT  /  TO %s AT %d MPH" % [String(sim.cities[autopilot.target].name).to_upper(), mph])
 	print("AUTOPILOT: on, to %s at %d mph (%s)" % [sim.cities[autopilot.target].name, mph, autopilot.next_text()])
@@ -1811,6 +1813,8 @@ func _autopilot_hands(lever: float, brake: float) -> bool:
 ## asked for as the MODE switch asks. If it has stopped flying the craft is the pilot's again.
 func _autopilot_frame(delta: float) -> void:
 	var cars: Array = traffic_net.cars if traffic_net and "cars" in traffic_net else []
+	autopilot.pull = float(inp.get("thrMul", 1.0))           # (the cockpit's gearbox, if there is one: what a lever is worth)
+	autopilot.overdrive = bool(inp.get("gearOverdrive", false))
 	var u: Dictionary = autopilot.fly(sim, net_target if net_target >= 0 else int(autopilot.target), cars, delta)
 	for e: String in autopilot.events:
 		if e == "arrived" or e == "replanned":

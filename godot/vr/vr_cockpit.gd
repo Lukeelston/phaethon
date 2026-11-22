@@ -1089,7 +1089,7 @@ func _autopilot_given_back() -> void:
 ## gear that still pulls (so she cruises on a low note, not on the limiter); down when the revs sag.
 func _autopilot_shift(airspeed: float, delta: float) -> float:
 	_auto_shift_t = maxf(0.0, _auto_shift_t - delta)
-	if quest.gear < 1 or quest.starfighter or _auto_shift_t > 0.0:
+	if quest.gear < 1 or quest.starfighter or _auto_shift_t > 0.0 or handling_ask == "starfighter":   # (asked to be a STARFIGHTER and slowing to become one: that has one gear, and shifting down to meet it was two clutches thrown in the half second before)
 		return 0.0
 	var top: int = QuestControlsScript.GEARS.size() - 1
 	var up := false

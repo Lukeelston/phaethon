@@ -7,10 +7,25 @@
 ## more than the road ahead allows: each bend's grip, the towns' STARFIGHTER zones, the braking
 ## distance), moves over for traffic it would hit and slows behind what it cannot pass, and on
 ## arriving carries on to the next city the dash picks.
-## The route finder, the speed plan and the pilot are tools/net_route.js's (the pilot that drives
-## Eridanus to Glacier for the recorded replay, tools/record_network.js), carried over line for
-## line: with no cruise cap and no traffic this flies that drive's own inputs
+## The route finder and the speed plan are tools/net_route.js's (the pilot that drives Eridanus to
+## Glacier for the recorded replay, tools/record_network.js), carried over line for line, and so is
+## that pilot, pilot(): with like_recorded set it flies that drive's own inputs
 ## (tests/test_autopilot.gd holds it to them).
+## What flies the craft is _hand(): the same route, plan and aim, with a hand on the controls (Luke,
+## after flying the first one: "Autopilot works, but definitely runs like a computer running it -
+## very jumpy."). The recorded pilot's law is a relay: full lever under its speed and a cut lever
+## over it, a brake that goes from nothing to everything across 55 mph, a lever shut the moment a
+## brake is on. Each is a jump, and held at a speed it sits on one and flips every frame or two (at
+## 1,200 mph: both brakes full on and the levers 0 / 0.69 / 0, 30 times a second; in a town it hung
+## at 1,262 mph, too fast ever to become a STARFIGHTER, the same way). The hand asks for an
+## acceleration instead (the one that has her on the plan a half, one and two seconds on), works out
+## from the sim's own figures the lever that gives it, holds a speed on the levers and uses the air
+## brakes only for what lifting them cannot give, and moves each control no faster than a hand does.
+## In traffic it picks a lane for a real gain and keeps it, moves over to it as a hand would steer
+## there, and slows for a vehicle no harder than it takes to sit behind it.
+## What it is held to: tests/test_autopilot.gd HANDS (a lever's and a brake's fastest move, turns
+## back a minute, jerk at the seat, the nose's wag), measured by tests/hand_meter.gd;
+## tests/probe_autopilot_hands.gd flies the same drives in the cockpit's frames and logs them.
 ## The logic alone: no nodes. The view calls it once a frame and applies what it returns.
 ##   var a := Autopilot.new()
 ##   a.engage(sim, city)          -> true if it has the craft (false: why_off says why not)
@@ -58,6 +73,56 @@ const FOLLOW_SLOWEST := 100.0        # m/s: the look reaches far enough to slow 
 const FOLLOW_UNDER := 55.0           # m/s: how far under that speed it asks, far out (see _traffic)
 const TRIM_RATE := 0.4               # the cruise hold's trim: m/s of ask taken off per m/s over, a second ...
 const TRIM_MOST := 90.0              # ... to this much at most (m/s)
+# Its hands (_hand). The speed: an acceleration asked, and the lever and brake that give it.
+# The acceleration asked is the one that has her on the plan at each of these looks ahead (s), the least of
+# them: the far look begins a slowing two seconds before the plan does and takes the levers off early when she
+# is climbing toward a plan that is coming down; the near one keeps her on it to the bottom. (Asked from her
+# speed's error where she is, she climbed flat out into each braking point and went from 20 g on to 14 g off
+# in a fifth of a second.)
+const HAND_LOOKS := [0.5, 1.0, 2.0]
+const HAND_KI := 0.1                 # m/s^2 per m/s she is off, held for a second: a trim, while she holds a speed ...
+const HAND_TRIM := 2.0 * G           # ... to this much at most
+const HAND_HOLD := 8.0               # m/s: within this of her speed she is holding it (the trim works)
+const HAND_SLOW := 20.0 * G          # the hardest it slows her for its plan (the plan itself brakes at 14 g) ...
+const HAND_STOP := 45.0 * G          # ... and when she is far over what the road or the traffic allows
+const BEND_FROM := 300.0             # m ahead: from here a vehicle is placed by the route's own line where it is
+const ACROSS := 0.8                  # a vehicle heading less along the route than this (the cosine: 37 degrees off) is crossing it
+# Slowing for a vehicle in her lane: no harder than it takes to be at its speed a following gap behind it (her
+# closing speed squared over twice the room), and this much to spare. (The speed she may hold behind one,
+# _behind(), is a drag law's, and far under her own when a vehicle changes into her lane a mile ahead at 4,000
+# mph: asked for by her speed's error alone that was all the brakes she had, 45 g and 86 at the seat, for the
+# half second till she found another lane, where 11 g would have done.)
+const FOLLOW_SPARE := 1.3
+const FOLLOW_EASY := 2.0 * G
+const KEEP := 0.25                   # "the throttle stays on while braking": the lever kept, at most ...
+const KEEP_SHARE := 0.6              # ... and never more than this share of the lever that holds the speed asked
+const STEER_FULL := 0.8              # the two levers' difference at full steering (the recorded pilot's, at its cruise lever)
+const BRAKE_IN := 0.02               # a brake goes on when this much is wanted ...
+const BRAKE_OUT := 0.004             # ... and comes off under this: no brushing on and off
+# ... and how a hand moves them: no faster than this, easing in to where it is going, and not at all for less
+# than HAND_STILL. (A finger takes a trigger's whole travel in about a quarter of a second at its quickest; the
+# cockpit's own levers come up at 0.77 a second under Luke's hands, QuestControls.RAMP_UP.)
+const LEVER_UP := 1.5                # a second: both levers together, up ...
+const LEVER_DOWN := 2.0              # ... and down
+const STEER_RATE := 2.0              # ... and their difference
+const BRAKE_ON := 0.6                # a brake going on (0.15, the plan's 14 g at speed, in a quarter of a second) ...
+const BRAKE_OFF := 1.2               # ... and coming off: a hand lets go quicker than it squeezes. (At 0.6 the brakes she
+                                     # comes into a town on, near full under 1,750 mph where the flaps fade, were still half
+                                     # out a second after she had become a STARFIGHTER and the levers had gone to full.)
+const HAND_EASE := 0.08              # s: the easing (QuestControls.SPLIT_TAU)
+const HAND_STILL := 0.004
+const LANE_EASE := 1.5               # rad/s: the lane it holds moves over as a damped spring this stiff (90% over in 2.6 s) ...
+const LANE_HURRY := 4.0              # ... or, for a vehicle it has less than LANE_HURRY_S to, up to this stiff (90% over in a second)
+const LANE_HURRY_S := 4.5
+const LANE_DWELL := 2.0              # s in a lane before it comes back toward the middle
+# Choosing a lane. (In the Network's own traffic at 3,200 mph it chose five in fourteen seconds, one of them three
+# lanes across the road and given up 0.9 s later, before she had moved a lane's width: each lane is scored by the
+# seconds to the first vehicle she is closing on in it, the scores of two poor lanes pass each other from frame to
+# frame, and the lane held had 0.75 s in hand.)
+const LANE_GAIN := 2.0               # s: another lane has to be this much clearer than the one it holds ...
+const LANE_FAR := 1.0                # ... and this much more for each lane further off it is
+const LANE_COMMIT := 3.0             # s: a lane just chosen is kept this long ...
+const LANE_PRESSED := 2.0            # ... unless a vehicle in it is nearer than this (s)
 
 var on := false
 var why_off := ""                    # why it gave the craft back, or would not take it
@@ -67,6 +132,7 @@ var events: Array[String] = []       # "engaged", "replanned", "arrived", "lane"
 var status := ""                     # HOLDING, SLOWING, CLIMBING, TRAFFIC
 var lane := 0.0                      # m left (+) of the road's middle it is holding
 var lane_cap := INF                  # m/s: what traffic it cannot pass holds it to
+var lane_need := 0.0                 # m/s^2: the slowing that has her at that traffic's speed a gap behind it
 # the route, a sample at a time: where, which way, how long, the road's mode, which road and sample
 var rx := PackedFloat64Array()
 var ry := PackedFloat64Array()
@@ -85,6 +151,21 @@ var at := 0                          # the route sample the pod is at
 var _sim
 var _dt := 1.0 / 60.0                # the frame it is flying (s)
 var _trim := 0.0                     # m/s taken off the ask while it holds its cruise speed (pilot())
+# its hands (_hand): where they have the controls now
+var pull := 1.0                      # the gearbox's pull, if there is one (the view's, a frame: the sims' inp.thrMul) ...
+var overdrive := false               # ... and whether it is in top gear, whose drag the sims shape (inp.gearOverdrive)
+var _pull := 1.0                     # (the pull with the clutch's dip and grab eased out of it)
+var _mean := 0.0                     # the two levers' mean ...
+var _dif := 0.0                      # ... and their difference, right less left (+: a left turn)
+var _brk_l := 0.0
+var _brk_r := 0.0
+var _braking := false                # the brakes are on (see BRAKE_IN)
+var _a_trim := 0.0                   # m/s^2: the speed hold's trim
+var _lane_now := 0.0                 # m left of the road's middle it is aiming, on its way to `lane` ...
+var _lane_v := 0.0                   # ... and how fast that is moving (m/s)
+var _lane_t := 0.0                   # s since it last chose another lane
+var _lane_w := LANE_EASE             # ... and how stiffly it is moving over to it (rad/s)
+var _ask := 1                        # the handling it asks for (1 SPEEDCRAFT, 2 STARFIGHTER), held (see _hand)
 
 
 static func _wrap(a: float) -> float:
@@ -300,7 +381,24 @@ func engage(sim, city: int) -> bool:
 	on = true
 	status = "HOLDING"
 	events.append("engaged")
+	hands(0.0, 0.0, 0.0, 0.0)
+	_a_trim = 0.0
+	_lane_now = 0.0
+	_lane_v = 0.0
+	_lane_t = LANE_COMMIT
+	_lane_w = LANE_EASE
+	_ask = 2 if sim.hblend >= 0.5 else 1
 	return true
+
+
+## Where the controls are as it takes them (the view's: the pilot's own levers and brakes that frame):
+## it moves them on from there, as the next hand on them would, and does not drop them first.
+func hands(thr_l: float, thr_r: float, brk_l: float, brk_r: float) -> void:
+	_mean = clampf((thr_l + thr_r) / 2.0, 0.0, TOP_LEVER)
+	_dif = clampf(thr_r - thr_l, -2.0 * _mean, 2.0 * _mean)
+	_brk_l = clampf(brk_l, 0.0, 1.0)
+	_brk_r = clampf(brk_r, 0.0, 1.0)
+	_braking = maxf(_brk_l, _brk_r) > BRAKE_OUT
 
 
 func disengage(why := "") -> void:
@@ -388,6 +486,153 @@ func pilot(sim) -> Array:
 		_r4(minf(1.0, maxf(brk, (k - 0.6) * 2.0 if k > 0.6 else 0.0))), _r4(minf(1.0, maxf(brk, (-k - 0.6) * 2.0 if k < -0.6 else 0.0))), h]
 
 
+## A value part way between a route's samples.
+static func _between(a: PackedFloat64Array, f: float) -> float:
+	var last := a.size() - 1
+	if f <= 0.0:
+		return a[0]
+	if f >= float(last):
+		return a[last]
+	var k := int(f)
+	return lerpf(a[k], a[k + 1], f - k)
+
+
+## A control moved as a hand moves it: toward `to` no faster than `up` or `down` a second, easing in
+## as it gets there, and left where it is for less than HAND_STILL (a control at rest stays at rest;
+## one asked right off goes right off).
+func _move(x: float, to: float, up: float, down: float) -> float:
+	var d := to - x
+	if absf(d) < HAND_STILL and to != 0.0:
+		return x
+	d = clampf(d * (1.0 - exp(-_dt / HAND_EASE)), -down * _dt, up * _dt)
+	if absf(to - x - d) < 1e-4:
+		return to
+	return x + d
+
+
+## The craft's own figures (the sim's P and its bodies, read, not changed): N of thrust a unit of
+## lever, N of drag at v, N of braking a unit of brake at v. As sim/craft_sim.gd step() has them.
+func _figures(sim, v: float) -> Vector3:
+	var P: Dictionary = sim.P
+	var fs: float = P.forceScale
+	var line := 1.0 / pow(float(sim.line_speed()), 2.0)      # (the Aurora Line's air goes along with her)
+	var cd: float = (2.0 * P.engineCd + P.podCd) * line
+	var thrust: float = 2.0 * P.thrustMax / P.gate * (0.45 + 0.55 * (sim.eL.health + sim.eR.health) / 2.0) * _pull * fs
+	var drag := cd * v * v
+	if overdrive:      # top gear: the drag is shaped toward the full lever's thrust
+		var nominal: float = 2.0 * P.thrustMax * (0.87 / P.gate) * _pull
+		var ref := sqrt(maxf(1.0, nominal / cd))
+		drag = lerpf(drag, nominal * (1.0 - exp(-v / (0.65 * ref))), smoothstep(0.6, 0.8, v / ref))
+	var flap: float = P.frontBrakeCd
+	if P.frontBrakeMaxG > 0.0:
+		flap = minf(flap, sim.eL.m * P.frontBrakeMaxG * G / maxf(v * v, 1.0))
+	flap *= smoothstep(P.frontBrakeV0, P.frontBrakeV1, v) if P.frontBrakeCd > 0.0 else 0.0
+	var brake: float = (2.0 * (P.brakeCd + flap) + 0.5 * P.brakeCd) * v * v + 2.5 * (P.brakeLin * v + P.brakeConst)
+	return Vector3(thrust, drag * fs, brake * fs)
+
+
+## The frame, flown by hand: the route, the plan and the aim are pilot()'s; the levers and the brakes
+## are worked as a pilot's hands work them (see the header). [thrL, thrR, brkL, brkR, handling], or []
+## at the route's end.
+func _hand(sim) -> Array:
+	var n := rx.size()
+	if n < 3:
+		return []
+	var sp := maxf(1.0, rlen[0])
+	var px: float = sim.pod.x
+	var py: float = sim.pod.y
+	var v := Vector2(sim.pod.vx, sim.pod.vy).length()
+	var bd := INF
+	var bi := at
+	for k in range(maxi(0, at - 10), mini(n, at + 60)):
+		var dd := (rx[k] - px) * (rx[k] - px) + (ry[k] - py) * (ry[k] - py)
+		if dd < bd:
+			bd = dd
+			bi = k
+	at = bi
+	var i := bi
+	if i >= n - 2:
+		return []   # the route's end
+	# where she is along it, to a part of a sample: nothing it reads from the route steps as she crosses one
+	var fi := float(i) + clampf(((px - rx[i]) * rtx[i] + (py - ry[i]) * rty[i]) / maxf(1.0, rlen[i]), -0.5, 0.5)
+	var sf: float = sim.hblend      # 0 a SPEEDCRAFT, 1 a STARFIGHTER, between while she changes
+
+	# ---- her speed ----
+	var plan := _between(vplan, fi + v * float(HAND_LOOKS[0]) / sp)
+	var want := minf(plan, lane_cap)
+	var off := want - v
+	var a := INF
+	for look: float in HAND_LOOKS:
+		a = minf(a, (_between(vplan, fi + v * look / sp) - v) / look)
+	if lane_cap < INF:      # the traffic: see FOLLOW_SPARE
+		var far: float = HAND_LOOKS[HAND_LOOKS.size() - 1]
+		a = minf(a, maxf((lane_cap - v) / (float(HAND_LOOKS[0]) if lane_cap < v else far), -(FOLLOW_SPARE * lane_need + FOLLOW_EASY)))
+	_pull += (clampf(pull, 0.5, 2.0) - _pull) * (1.0 - exp(-_dt / 0.5))
+	var mass: float = sim.eL.m + sim.eR.m + sim.pod.m
+	var now := _figures(sim, v)
+	# (a STARFIGHTER flat out in a town is short of the town's speed and gaining nothing: that is holding it)
+	var gaining: bool = (now.x * TOP_LEVER - now.y) / mass > 1.0
+	status = "TRAFFIC" if lane_cap < plan else ("SLOWING" if v > want + 12.0 or a < -2.0 * G else ("CLIMBING" if v < want - 25.0 and gaining else "HOLDING"))
+	if absf(off) < HAND_HOLD and a > -G:
+		_a_trim = clampf(_a_trim + HAND_KI * off * _dt, -HAND_TRIM, HAND_TRIM)
+	a = clampf(a + _a_trim, -lerpf(HAND_SLOW, HAND_STOP, smoothstep(60.0, 250.0, -off)), 40.0 * G)
+	var need := mass * a + now.y                               # N of thrust it takes
+	var holds := clampf(_figures(sim, want).y / now.x, 0.0, TOP_LEVER)      # the lever that holds the speed asked
+	var lever := clampf(need / now.x, KEEP_SHARE * minf(KEEP, holds), TOP_LEVER)
+
+	# ---- her line ----
+	_lane_v += (_lane_w * _lane_w * (lane - _lane_now) - 2.0 * _lane_w * _lane_v) * _dt
+	_lane_now += _lane_v * _dt
+	if absf(lane - _lane_now) < 0.05 and absf(_lane_v) < 0.05:
+		_lane_now = lane
+		_lane_v = 0.0
+	var fa := fi + (60.0 + v * lerpf(0.5, 0.36, sf)) / sp
+	var tx := _between(rtx, fa)
+	var ty := _between(rty, fa)
+	var tl := maxf(1e-6, sqrt(tx * tx + ty * ty))
+	var aim_x := _between(rx, fa) - ty / tl * _lane_now
+	var aim_y := _between(ry, fa) + tx / tl * _lane_now
+	var mx: float = (sim.eL.x + sim.eR.x) / 2.0
+	var my: float = (sim.eL.y + sim.eR.y) / 2.0
+	# (a SPEEDCRAFT is steered by where it is going, a STARFIGHTER by where it points, and standing either by her
+	# facing: one into the other as she changes, not a jump on the frame she does)
+	var course := lerp_angle(atan2(sim.pod.vy, sim.pod.vx), float(sim.pair_th), sf)
+	var facing := atan2(sin(sim.eL.th) + sin(sim.eR.th), cos(sim.eL.th) + cos(sim.eR.th))
+	course = lerp_angle(facing, course, smoothstep(0.75 * SLOW_V, 1.25 * SLOW_V, v))
+	var err := _wrap(atan2(aim_y - my, aim_x - mx) - course)
+	var k := clampf(err * lerpf(3.0, 5.0, sf), -1.0, 1.0)
+	_dif = _move(_dif, STEER_FULL * k, STEER_RATE, STEER_RATE)
+	# the two levers about their mean: the mean gives way to the difference (a turn is never lost to the speed;
+	# the brakes take up what the higher lever adds)
+	var half := absf(_dif) / 2.0
+	lever = clampf(lever, half, maxf(half, TOP_LEVER - half))
+	_mean = clampf(_move(_mean, lever, LEVER_UP, LEVER_DOWN), half, maxf(half, TOP_LEVER - half))
+
+	# ---- the air brakes: what the levers, where they can go, do not give ----
+	var brake := clampf((now.x * lever - need) / maxf(now.z, 1.0), 0.0, 1.0)
+	if _braking:
+		_braking = brake > BRAKE_OUT
+	else:
+		_braking = brake > BRAKE_IN
+	if not _braking:
+		brake = 0.0
+	# (a SPEEDCRAFT's brakes cost her grip: eased off in a turn, unless she is far over her speed)
+	brake *= 1.0 - 0.8 * minf(1.0, absf(k) / 0.4) * (1.0 - sf) * (1.0 - smoothstep(30.0, 60.0, -off))
+	_brk_l = _move(_brk_l, maxf(brake, (k - 0.6) * 2.0 if k > 0.6 else 0.0), BRAKE_ON, BRAKE_OFF)
+	_brk_r = _move(_brk_r, maxf(brake, (-k - 0.6) * 2.0 if k < -0.6 else 0.0), BRAKE_ON, BRAKE_OFF)
+
+	# (the handling goes by what the road allows two seconds on, not by a cruise speed that happens to be a town's;
+	# and once asked for it is kept till the road is well clear of the other's: slowing, the sample two seconds on
+	# comes back toward her, and at a town's edge the ask went STARFIGHTER, SPEEDCRAFT, STARFIGHTER in three frames)
+	var ahead := vroad[mini(n - 1, i + ceili(v * 2.0 / sp))]
+	if _ask == 2:
+		if rmode[i] != 0 and ahead > SWITCH_V * 1.2:
+			_ask = 1
+	elif rmode[i] == 0 or ahead <= SWITCH_V * 1.05:
+		_ask = 2
+	return [_r4(clampf(_mean - _dif / 2.0, 0.0, 1.0)), _r4(clampf(_mean + _dif / 2.0, 0.0, 1.0)), _r4(_brk_l), _r4(_brk_r), _ask]
+
+
 ## Traffic in its way: the vehicles ahead on its road, each [m ahead along the route, m left of the
 ## route's line, m/s along it]. It moves a lane over for one it is closing on (the clearest lane,
 ## the nearest the middle on a tie), comes back to the middle when that is clear, and where there is
@@ -395,11 +640,18 @@ func pilot(sim) -> Array:
 ## cars: the view's (NetworkTraffic.cars: x, y, v, hx, hy).
 func _traffic(sim, cars: Array) -> void:
 	lane_cap = INF
+	lane_need = 0.0
 	if cars.is_empty() or rx.size() < 3:
 		lane = move_toward(lane, 0.0, 0.5)
 		return
 	var v := Vector2(sim.pod.vx, sim.pod.vy).length()
 	var reach := maxf(maxf(LOOK_MIN, v * LOOK_S), log(maxf(v, FOLLOW_SLOWEST) / FOLLOW_SLOWEST) / FOLLOW_K + FOLLOW_GAP_S * FOLLOW_SLOWEST + FOLLOW_ROOM)
+	# (What it slows for is looked for further than that. Sat behind a slow vehicle she settles where that
+	# vehicle's speed is all she may hold, and that is the look's own edge: the vehicle went out of it and came
+	# back with each mph, the whole road's speed asked for in the frames it was out.)
+	var far := reach * 1.25 + 300.0
+	var n := rx.size()
+	var sp := maxf(1.0, rlen[0])
 	var i := at
 	var ox := rx[i]
 	var oy := ry[i]
@@ -413,23 +665,52 @@ func _traffic(sim, cars: Array) -> void:
 	for c in cars:
 		var dx: float = c.x - ox
 		var dy: float = c.y - oy
-		if absf(dx) > reach or absf(dy) > reach:
+		if absf(dx) > far or absf(dy) > far:
 			continue
-		# (the route is taken as straight over the look: the roads bend over tens of kilometres)
 		var along: float = dx * tx + dy * ty - here
-		if along < -40.0 or along > reach:
+		if along < -40.0 or along > far:
 			continue
 		var left: float = -dx * ty + dy * tx
+		var cx := tx
+		var cy := ty
+		if along > BEND_FROM:
+			# By the route's own line where the vehicle is. (It was this sample's line carried on straight, "the
+			# roads bend over tens of kilometres": on a highway's bend, 44 km round at its speed, that puts a
+			# vehicle 6 km ahead 400 m to one side of where it is, and one in its lane was not seen there till
+			# it was a kilometre off: a second and a half to move over or stop in.)
+			var j := clampi(i + roundi((along + here) / sp), 0, n - 1)
+			j = clampi(j + roundi(((c.x - rx[j]) * rtx[j] + (c.y - ry[j]) * rty[j]) / maxf(1.0, rlen[j])), 0, n - 1)
+			var ex: float = c.x - rx[j]
+			var ey: float = c.y - ry[j]
+			cx = rtx[j]
+			cy = rty[j]
+			left = -ex * cy + ey * cx
+			along = rs[j] - rs[i] + ex * cx + ey * cy - here
 		if absf(left) > half + 10.0:
 			continue   # not on this road
-		seen.append([along, left, float(c.v) * (float(c.hx) * tx + float(c.hy) * ty)])
+		# Nor is one going across it: the Network's roads meet by running together, and where one crosses another
+		# it is over it or under it. (Such a vehicle has no speed along the route, and read as one standing in her
+		# lane: at 4,250 mph a ramp's traffic passing under the highway had the brakes out for 43 mph, 90 g at
+		# the seat, for the 0.4 s it took to cross.)
+		var its: float = float(c.hx) * cx + float(c.hy) * cy
+		if absf(its) < ACROSS:
+			continue
+		seen.append([along, left, float(c.v) * its])
 	if seen.is_empty():
 		lane = move_toward(lane, 0.0, lane_step) if absf(lane) > 0.5 else 0.0
 		return
 	var edge := floorf(half * LANE_EDGE / lane_step) * lane_step
+	# Coming up to a change of road (within the look) it moves no further out, only back toward the middle: the
+	# two roads' lanes do not line up (a highway's are 45 m apart, a ramp's 50, on half the width), and the
+	# middle, the gap between the two middle lanes, is the one line that is clear on both. (A lane picked from
+	# the highway's as she came to an exit, 90 m out, was off the side of the ramp she was turning onto.) The
+	# same when the lane it holds is further out than this road has room for: it has just come off a wider one.
+	var turning := (rnext[i] < n - 1 and rs[rnext[i]] - rs[i] < maxf(LOOK_MIN, v * LOOK_S)) or absf(lane) > edge + 0.5
 	var lanes: Array = [lane]
 	for step in [1, -1, 2, -2, 3, -3]:
 		var cand := clampf(roundf(lane / lane_step) * lane_step + step * lane_step, -edge, edge)
+		if turning and absf(cand) >= absf(lane):
+			continue
 		if not lanes.has(cand):
 			lanes.append(cand)
 	if not lanes.has(0.0):
@@ -437,13 +718,12 @@ func _traffic(sim, cars: Array) -> void:
 	var best_lane := lane
 	var best_score := -INF
 	var gap := INF            # the nearest it is closing on in the lane it holds: how far ahead ...
-	var gap_t := INF          # ... how many seconds off ...
-	var gap_v := 0.0          # ... and its speed
+	var gap_t := INF          # ... and how many seconds off
 	for cand in lanes:
 		var held := is_equal_approx(float(cand), lane)
 		var t := INF
 		for s in seen:
-			if absf(float(s[1]) - float(cand)) > CAR_HALF + (0.0 if held else 8.0):
+			if absf(float(s[1]) - float(cand)) > CAR_HALF + (0.0 if held else 8.0) or float(s[0]) > reach:
 				continue
 			var closing: float = v - float(s[2])
 			if not held and float(s[0]) < 60.0:
@@ -453,31 +733,52 @@ func _traffic(sim, cars: Array) -> void:
 				if held and float(s[0]) < gap:
 					gap = float(s[0])
 					gap_t = float(s[0]) / closing
-					gap_v = float(s[2])
-		var score := minf(t, LOOK_FAR_S) + (0.75 if held else 0.0) - absf(float(cand)) * 0.002
+		var score := minf(t, LOOK_FAR_S) + (LANE_GAIN if held else -LANE_FAR * absf(float(cand) - lane) / lane_step) - absf(float(cand)) * 0.002
 		if score > best_score:
 			best_score = score
 			best_lane = cand
-	if gap < INF and not is_equal_approx(best_lane, lane):
+	_lane_t += _dt
+	if gap < INF and not is_equal_approx(best_lane, lane) and (_lane_t >= LANE_COMMIT or gap_t < LANE_PRESSED):
 		lane = best_lane       # a clearer lane: over, now (it takes seconds to get there)
+		_lane_t = 0.0
+		_lane_w = clampf(LANE_EASE * LANE_HURRY_S / maxf(gap_t, 0.1), LANE_EASE, LANE_HURRY)
 		events.append("lane")
 		return
-	if gap_t >= LOOK_S and absf(lane) > 0.5:
-		# nothing in its way: back toward the middle, a lane at a time, when that is clear too
+	if gap_t >= LOOK_S and absf(lane) > 0.5 and _lane_t >= LANE_DWELL:
+		# nothing in its way: back toward the middle, a lane at a time, when that is clear too. Clear of whatever
+		# it would move over for again: it used to look 3 s ahead for this and 6 s to move over, and for a vehicle
+		# between the two it changed lane every frame, over and back (132 times in the 2.2 s a 300 mph vehicle
+		# took to come from the one to the other at 2,400).
 		var back := move_toward(lane, 0.0, lane_step)
 		var clear := true
 		for s in seen:
-			if absf(float(s[1]) - back) <= CAR_HALF + 8.0 and float(s[0]) > -60.0 and float(s[0]) < maxf(LOOK_MIN, v * 3.0):
+			if absf(float(s[1]) - back) > CAR_HALF + 8.0 or float(s[0]) <= -60.0 or float(s[0]) > reach:
+				continue
+			if float(s[0]) < maxf(LOOK_MIN, v * 3.0) or v - float(s[2]) > 1.0:
 				clear = false
 		if clear:
 			lane = back
-	if gap < INF:
-		# nowhere to go: no faster than still lets it slow to that vehicle's speed a gap behind it
-		var room := gap - FOLLOW_GAP_S * gap_v - FOLLOW_ROOM
-		lane_cap = maxf(gap_v, 20.0) * exp(FOLLOW_K * maxf(0.0, room)) if gap > FOLLOW_ROOM else maxf(0.0, gap_v - 15.0)
-		# (the pilot's law brakes in proportion and keeps a quarter lever on within 110 mph of its ask: asked for
-		# less than it may hold, by up to that, it has the brakes full out and the levers shut while there is far to go)
-		lane_cap = maxf(maxf(gap_v - 15.0, 0.0), lane_cap - minf(FOLLOW_UNDER, 0.02 * maxf(room, 0.0)))
+			_lane_t = 0.0
+			_lane_w = LANE_EASE
+	# No faster than the vehicles ahead in the lane it holds allow. Every one of them, closing on it or not: it
+	# was the nearest it was closing on by more than 1 m/s, and matched to a vehicle's speed that came and went
+	# with each mph, the whole road's speed asked for in the frames between.
+	for s in seen:
+		if float(s[0]) > 0.0 and absf(float(s[1]) - lane) <= CAR_HALF:
+			lane_cap = minf(lane_cap, _behind(float(s[0]), float(s[2])))
+			var closing: float = v - float(s[2])
+			if closing > 0.0:
+				lane_need = maxf(lane_need, closing * closing / (2.0 * maxf(30.0, float(s[0]) - FOLLOW_GAP_S * maxf(float(s[2]), 0.0) - FOLLOW_ROOM)))
+
+
+## The speed it may hold `gap` m behind a vehicle doing `its` m/s along the route: no faster than
+## still lets it slow to that vehicle's speed a following gap behind it.
+static func _behind(gap: float, its: float) -> float:
+	var room := gap - FOLLOW_GAP_S * its - FOLLOW_ROOM
+	var most := maxf(its, 20.0) * exp(FOLLOW_K * maxf(0.0, room)) if gap > FOLLOW_ROOM else maxf(0.0, its - 15.0)
+	# (the recorded pilot's law brakes in proportion and keeps a quarter lever on within 110 mph of its ask: asked
+	# for less than it may hold, by up to that, it has the brakes full out and the levers shut while there is far to go)
+	return maxf(maxf(its - 15.0, 0.0), most - minf(FOLLOW_UNDER, 0.02 * maxf(room, 0.0)))
 
 
 ## A frame: the levers for it. `city` is where the dash points now (it follows a change, and the next
@@ -500,14 +801,14 @@ func fly(sim, city: int, cars: Array = [], dt := 1.0 / 60.0) -> Dictionary:
 			return {}
 		events.append("arrived" if was >= 0 and _near_city(sim, was) else "replanned")
 	_traffic(sim, cars)
-	var u := pilot(sim)
+	var u := pilot(sim) if like_recorded else _hand(sim)
 	var strayed := rx.size() >= 3 and Vector2(rx[at] - sim.pod.x, ry[at] - sim.pod.y).length() > STRAY + absf(lane)
 	if u.is_empty() or strayed:
 		if not plan_to(sim, city if city >= 0 else target):
 			disengage("NO ROAD THERE FROM HERE")
 			return {}
 		events.append("replanned")
-		u = pilot(sim)
+		u = pilot(sim) if like_recorded else _hand(sim)
 		if u.is_empty():
 			disengage("ARRIVED")
 			return {}

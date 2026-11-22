@@ -11,6 +11,9 @@
 ##   traffic      a slow vehicle in its lane: it moves over and passes; a wall of them: it slows
 ##   the view     in a CraftView: engaged, it has the levers; a lever moved gives the craft back;
 ##                off, the frame's inputs are the pilot's own
+##   its hands    (Luke, after flying it: "Autopilot works, but definitely runs like a computer
+##                running it - very jumpy.") over each of those drives what it gives the sim moves
+##                as a hand moves it and she rides smoothly: tests/hand_meter.gd, held to HANDS
 ## --headless --xr-mode off --audio-driver Dummy -s res://tests/test_autopilot.gd -- --mute
 ## Prints AUTOPILOT PASS.
 extends SceneTree
@@ -23,6 +26,21 @@ const DT := 1.0 / 480.0
 const SUB := 8
 const MPH := 2.236936
 const ASK := ["", "speed", "starfighter"]
+const HandMeter := preload("res://tests/hand_meter.gd")
+## What its hands are held to over a drive. (The first autopilot, on these same drives: a lever moved at up to
+## 52 a second and turned back 700 to 1,800 times a minute, nearly all within a quarter second of the last turn;
+## a brake at 60 a second; 95% of the frames' jerk was under 150 g/s sideways and 490 fore and aft on the routed
+## drive, 770 fore and aft holding 1,200 mph; the nose swung 11 times in 10 s. In the headset, flight 18: up to
+## 148 swings in 10 s. Luke's own hands: 0 to 10.)
+const HANDS := {
+	"lever_rate": 3.5,      # a second: the most a lever moves (its whole travel in a quarter of a second, a finger's quickest)
+	"brake_rate": 1.5,      # a second: the most a brake moves
+	"turns": 20.0,          # a minute: a lever, a brake or the steer (the sides' difference) turning back after moving 0.02 or more
+	"quick": 2.0,           # a minute: such turns within a quarter of a second of the one before
+	"lat_jerk95": 25.0,     # g/s sideways at the seat, 95% of the frames at speed
+	"lon_jerk95": 25.0,     # g/s fore and aft, the same
+	"wag10": 3.0,           # the nose's swings in 10 s (vr/wag_meter.gd)
+}
 var failures := 0
 var checks := 0
 
@@ -47,11 +65,23 @@ func _city(sim, name: String) -> int:
 	return -1
 
 
+## A drive's meter against HANDS -> [within them, what it read].
+func _hands(m) -> Array:
+	var s: Dictionary = m.stats()
+	var turns: float = maxf(maxf(s.lever_rev, s.brake_rev), s.steer_rev)
+	var quick: float = maxf(maxf(s.lever_quick, s.brake_quick), s.steer_quick)
+	var ok: bool = s.lever_rate <= HANDS.lever_rate and s.brake_rate <= HANDS.brake_rate and turns <= HANDS.turns and quick <= HANDS.quick \
+		and s.lat_jerk95 <= HANDS.lat_jerk95 and s.lon_jerk95 <= HANDS.lon_jerk95 and s.wag10 <= HANDS.wag10
+	return [ok, "a lever moved at most %.1f a second (the limit %.1f) and a brake %.1f (%.1f); the control that turned back most did so %.1f times a minute (%.0f), %.1f of them within a quarter second of the last (%.0f); 95%% of the frames' jerk was under %.1f g/s sideways (%.0f) and %.1f fore and aft (%.0f); the nose swung %.1f times in 10 s (%.0f)" % [
+		s.lever_rate, HANDS.lever_rate, s.brake_rate, HANDS.brake_rate, turns, HANDS.turns, quick, HANDS.quick,
+		s.lat_jerk95, HANDS.lat_jerk95, s.lon_jerk95, HANDS.lon_jerk95, s.wag10, HANDS.wag10]]
+
+
 ## Fly `sim` under `a` for `seconds`, the pilot asked every SUB steps as the recorder asks it.
 ## -> {hits, scrapes, arrivals: [[city, t]], mph: [least, most] once `settle` s have passed,
-## off: the most the pod was from its road's middle (m), given_back}
+## off: the most the pod was from its road's middle (m), given_back, meter: its hands over it}
 func _fly(sim, a, seconds: float, city: int, cars: Array = [], settle := 30.0) -> Dictionary:
-	var out := {"hits": 0, "scrapes": 0, "arrivals": [], "mph": [INF, 0.0], "off": 0.0, "given_back": false, "smash": 0}
+	var out := {"hits": 0, "scrapes": 0, "arrivals": [], "mph": [INF, 0.0], "off": 0.0, "given_back": false, "smash": 0, "meter": HandMeter.new()}
 	var frames := int(seconds / (SUB * DT))
 	for f in frames:
 		var u: Dictionary = a.fly(sim, city, cars)
@@ -73,6 +103,7 @@ func _fly(sim, a, seconds: float, city: int, cars: Array = [], settle := 30.0) -
 						out.arrivals.append([int(e.city), float(e.t)])
 						city = _next_city(sim, int(e.city))
 			sim.events.clear()
+		out.meter.add(SUB * DT, u.thrL, u.thrR, u.brkL, u.brkR, sim)
 		if f * SUB * DT >= settle:
 			var mph := Vector2(sim.pod.vx, sim.pod.vy).length() * MPH
 			out.mph = [minf(out.mph[0], mph), maxf(out.mph[1], mph)]
@@ -211,6 +242,8 @@ func _holds() -> void:
 		_check("engaged on N3 for %d mph, three minutes hands off: it flew %.0f to %.0f mph once up to speed, never more than %.1f m from its road's middle, %d wall contacts, the craft still its own (%s)" % [
 			int(mph), out.mph[0], out.mph[1], out.off, out.hits + out.scrapes, a.status],
 			took and not out.given_back and float(out.mph[1]) <= mph + 40.0 and float(out.mph[0]) >= 250.0 and float(out.off) < 40.0 and out.hits + out.scrapes == 0)
+		var hands := _hands(out.meter)
+		_check("its hands over those three minutes at %d mph: %s" % [int(mph), hands[1]], hands[0])
 
 
 func _route() -> void:
@@ -234,6 +267,8 @@ func _route() -> void:
 		page.replace("\n", " / "), roundi(a.cruise * MPH), " ".join(roads.keys()), names, sim.cities[int(out.city)].name if int(out.city) >= 0 else "nowhere", out.hits + out.scrapes],
 		took and page.begins_with("AUTOPILOT  2,500 MPH") and roundi(a.cruise * MPH) == 4250 and out.arrivals.size() >= 1 and int(out.arrivals[0][0]) == city and not out.given_back
 		and out.hits + out.scrapes == 0 and int(out.city) != city)
+	var hands := _hands(out.meter)
+	_check("its hands over those seven minutes (a town, its ramps, a highway's bends flat out, a town, and out again): %s" % hands[1], hands[0])
 
 
 func _traffic() -> void:
@@ -259,14 +294,20 @@ func _traffic() -> void:
 		var passed := false
 		var moved := 0.0
 		var least_mph := INF
+		var meter = HandMeter.new()
+		var lane_was: float = a.lane
+		var lanes_changed := 0
 		for f in int((90.0 if wall else 40.0) / (SUB * DT)):
 			var u: Dictionary = a.fly(sim, city, cars)
 			if u.is_empty():
 				break
+			lanes_changed += int(absf(a.lane - lane_was) > 10.0)
+			lane_was = a.lane
 			var inp := {"thrL": u.thrL, "thrR": u.thrR, "brkL": u.brkL, "brkR": u.brkR, "repair": false, "reignite": true, "handling": u.handling}
 			for s in SUB:
 				sim.step(inp, DT)
 			sim.events.clear()
+			meter.add(SUB * DT, u.thrL, u.thrR, u.brkL, u.brkR, sim)
 			for c in cars:
 				c.x += c.v * c.hx * SUB * DT
 				c.y += c.v * c.hy * SUB * DT
@@ -279,9 +320,13 @@ func _traffic() -> void:
 			var end_mph := Vector2(sim.pod.vx, sim.pod.vy).length() * MPH
 			_check("a wall of vehicles at 300 mph across its road, 14 km off, at 2,000: it slows in time and is settling behind them, at %.0f mph after a minute and a half (\"%s\"), never nearer than %.0f m, and does not go through" % [end_mph, a.status, nearest],
 				not passed and end_mph < 450.0 and end_mph > 250.0 and nearest > 60.0 and a.status == "TRAFFIC")
+			var hands := _hands(meter)
+			_check("its hands slowing for that wall and sitting behind it: %s" % hands[1], hands[0])
 		else:
 			_check("a vehicle at 300 mph on its line, at 2,400: it moves over (%.0f m: the next gap between lanes) and passes, never nearer than %.0f m, never under %.0f mph, and comes back to the middle (%.0f m)" % [moved, nearest, least_mph, a.lane],
 				passed and is_equal_approx(moved, 45.0) and nearest > 30.0 and least_mph > 2300.0 and absf(a.lane) < 0.5)
+			var hands := _hands(meter)
+			_check("it chose another lane %d times for that one vehicle (over, and back: 2); its hands meanwhile: %s" % [lanes_changed, hands[1]], lanes_changed == 2 and hands[0])
 
 
 ## Leaving Dunes the wrong way the only road on is the highway's end and its shaft: up it, over and back.
@@ -478,12 +523,18 @@ func _views() -> void:
 	c.quest.set_gear(1)
 	c._auto_shift_t = 0.0
 	var gears := {}
+	var meter = HandMeter.new()
+	var clock: float = c.sim.time
 	for k in int(20.0 / dt):
 		c._process(dt)
 		gears[c.quest.gear] = true
+		meter.add(float(c.sim.time) - clock, c.inp.thrL, c.inp.thrR, c.inp.brkL, c.inp.brkR, c.sim)
+		clock = c.sim.time
 	var mph := Vector2(c.sim.pod.vx, c.sim.pod.vy).length() * MPH
 	_check("twenty seconds of whole frames with nobody's hands on her: she is at %.0f mph, the autopilot still has her (%s), it has been through gears %s, the gearbox's pull is in the sim's input (%s)" % [
 		mph, c.autopilot.status, gears.keys(), c.inp.has("thrMul")], c.autopilot.on and mph > 600.0 and gears.size() >= 2 and c.inp.has("thrMul"))
+	var hands := _hands(meter)
+	_check("its hands over those twenty seconds, from standing, in the cockpit's own frames: %s" % hands[1], hands[0])
 	c.startup.flick("park", 1)
 	c._autopilot_controls(_snap(c), null, null, dt)
 	_check("the parking brake set under it: the craft is given back (\"%s\")" % c.flash_msg, not c.autopilot.on and String(c.flash_msg).contains("PARKED"))
