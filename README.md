@@ -153,7 +153,7 @@ The lap starts with a 2.8 km main straight into the T1-T2 braking drop (~510 mph
 - livery band and pinstripe;
 - a heat-coloured hot section and slot-nozzle glow;
 - an exhaust plume shader (`godot/view/flame.gdshader`) shaped to the slot nozzle. On dry thrust it's a short, faint core, which is about what a real jet looks like in daylight. On the burner it runs long and translucent: blue-white at the nozzle, then yellow-orange, fading to red, with shock diamonds as bright knots and dimmer gaps. It flickers and ripples, and a flickering nozzle light spills onto the track. It brightens when you look down it from the cockpit, as a real plume does, instead of vanishing. The ramjet runs it hotter and violet, and 30% longer;
-- dorsal fin, outboard stabiliser, and the cable lug and eye;
+- dorsal fin, outboard stabiliser, and the tow lug under the tail: a hanger and the pin the tow link's yoke forks over. The links themselves (`godot/view/tow_link.gd`) are telescoping drawbars, not ropes: a swivel on the pod's bullring, a barrel with its draft gear, a rod that runs in and out with the sim's span, a yoke on the lug. Two crossed pins at each end, no sag. They keep the cables' light: their engine's thrust glow, amber then red with strain;
 - the four air brakes, now two on top and two underneath.
 
 New: thrust-vectoring vanes in the nozzle that swing with your steering, side intake louvres, top exhaust ports, coolant louvres, raised access covers with rivets, lights (red and green nav lights, a double-flash fin strobe, tail and landing lights, cyan repulsor underglow), and an upgraded energy binder: ring emitters on the inner faces, with a core beam and three crackling strands that shift toward violet as the binder strains. They bank and pitch with the turns and the track.
@@ -609,7 +609,8 @@ Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/tes
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_shudder.gd -- --track=range   # air-brake shudder: that side only, cockpit shakes, head doesn't
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_xr_focus.gd -- --mute   # session unfocused: the controllers let go, the keyboard still flies
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_energy.gd   # coasting into walls never gains energy; steering and coast-down untouched
-Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_cables.gd -- --track=range --mute   # cables on their hardpoints
+Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_cables.gd -- --track=range --mute   # tow links on their hardpoints, rigid, jointed, lit
+Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_tow_links.gd -- --track=range --mute   # tow links: every pin in its hole, the telescope follows the sim's span
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_dashboard.gd           # instrument panel
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_route.gd -- --track=range --mute   # overpasses + landmarks placement
 Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_scenery.gd -- --track=range --mute   # mountains, light, ground, asphalt, props, streaming budget

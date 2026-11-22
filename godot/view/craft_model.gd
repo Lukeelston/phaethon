@@ -15,10 +15,11 @@
 ## Engines and pod list into turns like aircraft: each banks by its own lateral g (smoothed,
 ## easing toward BANK_MAX, roll rate capped so it builds rather than snaps), and the VR cockpit
 ## rolls with the pod. Visual only: the sim is flat.
-## Steel cables run from an eye under each engine's tail to two hardpoint eyes on the pod's
-## nose, exactly where the sim anchors them (the nose ring, either side of centre); the binder
-## arc crackles between the engines. In VR the pod is hidden (you sit in it), so the view hands
-## over its cockpit frame (pod_frame), which carries its own nose and eyes. Each engine ends in a
+## A tow link runs from the lug under each engine's tail to the bullring on the pod's nose, where
+## the sim anchors it (either side of centre): a telescoping drawbar, jointed at both ends
+## (view/tow_link.gd; they were ropes that sagged and twanged). The binder arc crackles between the
+## engines. In VR the pod is hidden (you sit in it), so the view hands over its cockpit frame
+## (pod_frame), which carries the same hull, nose and bullring. Each engine ends in a
 ## tailpipe you can see up, a nozzle whose flaps open and shut with the power, and three vanes that
 ## steer the jet; the jet is a volume of gas (view/flame.gdshader) on a centre line traced here
 ## (_trace_plume). What they do, and what in real engines each part of that rests on, is
@@ -30,6 +31,7 @@ extends Node3D
 const Kit := preload("res://view/mesh_kit.gd")
 const Fairings := preload("res://view/craft_fairings.gd")
 const Finishes := preload("res://view/craft_materials.gd")
+const TowLink := preload("res://view/tow_link.gd")
 const STEEL := Color(0.60, 0.65, 0.70)
 const HOT := Color(1.0, 0.54, 0.16)
 const WHITE := Color(1.0, 0.96, 0.86)
@@ -142,14 +144,19 @@ var pod_flaps: Array[Node3D] = []
 var tail_lights: MeshInstance3D
 var _brake_signal := Vector2.ZERO
 var pod_flap_open := 0.0
-var cables: Array[MeshInstance3D] = []
-var cable_mats: Array[StandardMaterial3D] = []
-var cable_ends := [[Vector3.ZERO, Vector3.ZERO], [Vector3.ZERO, Vector3.ZERO]]   # [engine eye, pod hardpoint] (tests read)
-var cable_sag := [0.0, 0.0]          # each cable's current mid-span offset, metres (tests read)
-var cable_strain := [0.0, 0.0]       # each cable's tension / CABLE_F_MAX
-var _wob := [Vector3.ZERO, Vector3.ZERO]     # each cable's flex: offset of its middle ...
-var _wob_v := [Vector3.ZERO, Vector3.ZERO]   # ... and how fast it's moving
-var _prev_f := [0.0, 0.0]
+# The tow links (view/tow_link.gd). They keep the names the ropes had, which the cockpit and the tests read.
+var cables: Array[MeshInstance3D] = []          # each link's rod (the long lit member)
+var cable_mats: Array[StandardMaterial3D] = []  # what each link's lit parts are made of: its thrust glow and strain colour
+var cable_ends := [[Vector3.ZERO, Vector3.ZERO], [Vector3.ZERO, Vector3.ZERO]]   # [the engine's lug pin, the pod's swivel post] (tests read)
+var cable_sag := [0.0, 0.0]          # how far each link's middle stands off the line between its pins, metres: nothing, it is rigid (tests read)
+var cable_strain := [0.0, 0.0]       # each link's tension / CABLE_F_MAX
+var link_parts := [[], []]           # each link's parts, pod end first: [swivel, barrel, rod, yoke]
+var link_rod := TowLink.ROD          # how long this craft's rods are (TowLink.rod_for its links' taut length)
+var _link_shown := [true, true]
+var link_span := [0.0, 0.0]          # each link, pin to pin, metres ...
+var link_exposed := [0.0, 0.0]       # ... and how much of its rod shows outside the barrel's gland
+var link_travel := [0.0, 0.0]        # the sim's own span less the link's taut length: + stretched into the draft gear, - closed up
+var link_angles := [[0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0]]   # each link's joints, radians: [swivel yaw, barrel pitch, yoke pitch, rod yaw]
 const BinderArc := preload("res://view/binder_arc.gd")
 var arc: Mesh   # (the binder arc's mesh: an ArrayMesh rebuilt each frame)
 var binder_arc: MeshInstance3D
@@ -169,8 +176,11 @@ const POD_LIFT := 1.3                 # the pod rides this much higher than the 
                                       # Luke wanted it "sitting a bit higher up entirely", then "higher than
                                       # the engines just a little bit more - a few feet": 0.4 -> 1.3 m, +3 ft;
                                       # in VR your eye rides up with it, over the engines)
-const POD_EYE_H := -0.05              # hardpoint height on the nose, pod-local
-const ENGINE_EYE := Vector3(0, -0.95, 3.45)   # engine-local: the eye at the tail of the lug
+const POD_EYE_H := 0.0                # the swivels' middles on the bullring's posts, pod-local (it was -0.05, on the skin:
+                                      # a jointed fitting needs room under it to turn. No higher than it must be: from the
+                                      # seat the swivels stand in front of the engines)
+const ENGINE_EYE := Vector3(0, -0.95, 3.45)   # engine-local: the middle of the lug's pin, under the tail
+const LUG_PLATE := [Vector2(-0.47, 3.6), Vector2(-0.93, 3.56), Vector2(-1.04, 3.45), Vector2(-0.97, 3.34), Vector2(-0.47, 2.65)]   # a hanger plate of the lug, (y, z), round the pin
 var _fan_w := [0.0, 0.0]
 var bank := [0.0, 0.0, 0.0]          # current lean, radians, + = left side down: eL, eR, pod (VR reads [2])
 var _lat := [0.0, 0.0, 0.0]          # smoothed lateral acceleration, g
@@ -477,18 +487,24 @@ func build(v) -> void:
 		hinge.add_child(pm)
 		pod_flaps.append(hinge)
 
-	for k in 2:
-		var c := MeshInstance3D.new()
-		c.mesh = ArrayMesh.new()   # rebuilt each frame along its flexing curve (sync_cables)
-		var cm: StandardMaterial3D = view._mat(Color(0.15, 0.16, 0.18))
-		cm.emission_enabled = true   # energized: glows with its engine's thrust (cable_glow)
+	link_rod = TowLink.rod_for(sim.P.cableLen)
+	for k in 2:      # the tow links: four rigid parts each, placed every frame (sync_cables), their meshes made once
+		var cm: StandardMaterial3D = TowLink.lit(view._mat(Color(0.2, 0.21, 0.23)))   # energized: glows with its engine's thrust (cable_glow)
+		cm.cull_mode = BaseMaterial3D.CULL_BACK
 		cm.emission = CABLE_COOL
-		cm.emission_energy_multiplier = 0.0
-		c.material_override = cm
-		c.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		add_child(c)
-		cables.append(c)
 		cable_mats.append(cm)
+		for part in [["TowSwivel", TowLink.swivel_mesh(), false], ["TowBarrel", TowLink.barrel_mesh(), true],
+				["TowRod", TowLink.rod_mesh(link_rod), true], ["TowYoke", TowLink.yoke_mesh(), false]]:
+			var c := MeshInstance3D.new()
+			c.name = "%s%s" % [part[0], "L" if k == 0 else "R"]
+			c.mesh = part[1]
+			c.set_surface_override_material(0, TowLink.metal())
+			if part[2]:
+				c.set_surface_override_material(1, cm)
+			c.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			add_child(c)
+			link_parts[k].append(c)
+		cables.append(link_parts[k][2])
 	binder_arc = BinderArc.new()
 	arc = binder_arc.mesh
 	add_child(binder_arc)
@@ -520,8 +536,12 @@ static func _engine_body(out: float) -> ArrayMesh:
 		[Fairings.fin(PackedVector2Array([Vector2(0.49,0.65), Vector2(0.64,0.95), Vector2(0.59,1.45), Vector2(0.49,1.35)]), 0.075), Kit.at(Vector3(0, top, 0)), Livery.coat("engine")],
 		[Fairings.fin(PackedVector2Array([Vector2(0,-0.3),Vector2(1.05,0.95),Vector2(0.99,1.38),Vector2(0,1.05)]), 0.065), Kit.at(Vector3(out*side,-0.1,0), Vector3(0,0,-out*PI/2)), STEEL],
 		[Kit.rounded_box(Vector3(0.18, 0.72, 1.1), 5.0), Kit.at(Vector3(-out * (side - 0.02), 0.0, -2.9)), DARK.lightened(0.25)],   # binder housing
-		[Kit.box(Vector3(0.3, 0.5, 0.7)), Kit.at(Vector3(0, -0.66, 3.0)), DARK.lightened(0.25)],                  # cable lug pylon
-		[Kit.cyl(0.11, 0.11, 0.08, 10), Kit.at(Vector3(0, -0.95, 3.4), Vector3(0, 0, PI / 2.0)), Color(0.75, 0.77, 0.8)],   # cable eye
+		# the tow lug (view/tow_link.gd): a pad on the belly, two hanger plates down to the boss of the pin the link's yoke forks over
+		[Kit.rounded_box(Vector3(0.36, 0.09, 1.0), 5.0, 8), Kit.at(Vector3(0, -0.49, 3.15)), DARK.lightened(0.25)],      # (behind the lower brake flaps, as the pylon it replaces was)
+		[Fairings.fin(PackedVector2Array(LUG_PLATE), 0.035), Kit.at(Vector3(-0.085, 0, 0)), DARK.lightened(0.32)],
+		[Fairings.fin(PackedVector2Array(LUG_PLATE), 0.035), Kit.at(Vector3(0.085, 0, 0)), DARK.lightened(0.32)],
+		[Kit.cyl(0.026, 0.026, 0.24, 10), Kit.at(Vector3(0, -0.68, 3.2), Vector3(0, 0, PI / 2.0)), TowLink.BRIGHT],           # a spacer between the plates
+		[Kit.cyl(0.068, 0.068, 0.22, 18), Kit.at(ENGINE_EYE, Vector3(0, 0, PI / 2.0)), TowLink.BRIGHT],                       # the pin's boss
 		[Kit.box(Vector3(ENG_W - 0.2, 0.06, 0.4)), Kit.at(Vector3(0, 0.36, 4.0)), DARK.lightened(0.2)],          # nozzle lips
 		[Kit.box(Vector3(ENG_W - 0.2, 0.06, 0.4)), Kit.at(Vector3(0, -0.36, 4.0)), DARK.lightened(0.2)],
 	]
@@ -774,10 +794,8 @@ static func pod_hull(shrike := false) -> ArrayMesh:
 
 	# fittings
 	var hardware := [
-		[Kit.cyl(0.035, 0.035, 0.56, 10), Kit.at(Vector3(0, -0.05, -2.06), Vector3(0, 0, PI / 2.0)), DARK.lightened(0.2)],   # nose ring bar
-		[Kit.cyl(0.07, 0.07, 0.06, 14), Kit.at(Vector3(-0.18, -0.05, -2.1), Vector3(0, 0, PI / 2.0)), Color(0.75, 0.77, 0.8)],   # hardpoint eyes
-		[Kit.cyl(0.07, 0.07, 0.06, 14), Kit.at(Vector3(0.18, -0.05, -2.1), Vector3(0, 0, PI / 2.0)), Color(0.75, 0.77, 0.8)],
 	]
+	hardware.append_array(_bullring())
 	if not shrike:
 		hardware.append_array([
 			[Kit.rounded_box(Vector3(0.07, 0.62, 0.85), 4.0), Kit.at(Vector3(0, 0.42, 1.6), Vector3(-0.35, 0, 0)), Livery.coat("paint")],   # raked fin, painted
@@ -882,6 +900,35 @@ static func pod_hull(shrike := false) -> ArrayMesh:
 	mesh.set_meta(&"livery", Livery.current)
 	_hulls[which] = mesh
 	return mesh
+
+
+## The bullring: what the tow links pull on (view/tow_link.gd). A forged hoop shrunk round the nose cap
+## carries the load into the hull; a crown block across its top carries a swivel post either side of
+## centre, where the sim anchors the links. (It was a bar across the nose with a disc on each end.)
+static func _bullring() -> Array:
+	var hoop := SurfaceTool.new()
+	hoop.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var ring: Array = []
+	for j in 67:      # from the keel round and a little past it, so the tube's ends meet out of sight
+		ring.append(cage_point(TowLink.RING_Z, -PI / 2.0 + TAU * j / 64.0, 0.0))
+	_tube(hoop, ring, TowLink.RING_R, TowLink.FORGED, 10)
+	var z := -2.1                                   # the posts' station: the sim's anchors (_pod_anchor)
+	var seat := POD_EYE_H - TowLink.HUB - 0.012     # the posts' tops: the swivels' thrust washers sit on them
+	var mid := hull_top(0.0, z)
+	var parts := [
+		[hoop.commit(), Transform3D.IDENTITY, TowLink.FORGED],
+		[Finishes.beveled_plate(Vector3(0.19, 0.07, 0.15), 0.01), Kit.at(Vector3(0, mid - 0.012, z + 0.02)), TowLink.FORGED],      # the crown block, between the posts
+	]
+	for s in [-1.0, 1.0]:
+		var x: float = 0.18 * s
+		var skin := hull_top(x, z)
+		parts.append([Kit.cyl(0.074, 0.088, seat - skin + 0.03, 20), Kit.at(Vector3(x, (seat + skin - 0.03) / 2.0, z)), TowLink.GUNMETAL])     # a post's foot, out of the skin
+		var out: float = 0.292 * s                                                                                                           # a clamp outboard of it, down onto the hoop
+		parts.append([Finishes.beveled_plate(Vector3(0.075, 0.07, 0.13), 0.01), Kit.at(Vector3(out, hull_top(out, z) - 0.005, z + 0.02)), TowLink.FORGED])
+		parts.append([Kit.cyl(0.015, 0.015, 0.012, 6), Kit.at(Vector3(out, hull_top(out, z) + 0.036, z + 0.02)), TowLink.BRIGHT])
+		for bolt in [Vector3(0.055 * s, mid + 0.029, z + 0.06), Vector3(0.055 * s, mid + 0.029, z - 0.02)]:
+			parts.append([Kit.cyl(0.014, 0.014, 0.012, 6), Kit.at(bolt), TowLink.BRIGHT])                                                       # the crown's bolts
+	return parts
 
 
 ## The pod's hull in another livery than the craft's own (a patrol's black and white, say).
@@ -1270,14 +1317,14 @@ func update_jet_clearance() -> void:
 			EffectExclusion.apply(view, flame_mats[k])
 
 
-## Where cable k hooks to the drawn pod: the sim's nose-ring anchor (podLen/2 ahead, podAnchorW
-## of the half-width to that side; eL's cable on the left), from the pod's CURRENT pose. Not the
+## Where link k hooks to the drawn pod (the middle of its swivel post on the bullring): the sim's anchor
+## (podLen/2 ahead, podAnchorW of the half-width to that side; eL's link on the left), from the pod's CURRENT pose. Not the
 ## sim's cables[k].px/py: those are taken mid-step, before integration, so they trail the pod
 ## by a step (half a metre at 500 mph, metres flat out). Out through the banked pod, or the VR
 ## cockpit frame standing in for it.
 func _pod_anchor(sim, k: int) -> Vector3:
 	var left: float = (1.0 if k == 0 else -1.0) * sim.P.podAnchorW * sim.P.podWidth / 2.0
-	var local := Vector3(-left, POD_EYE_H, -sim.P.podLen / 2.0 - 0.1)   # onto the eye, just ahead of the nose
+	var local := Vector3(-left, POD_EYE_H, -sim.P.podLen / 2.0 - 0.1)   # onto the post, just ahead of the sim's nose
 	if pod_frame:
 		return pod_frame.transform * (local + Vector3(0, POD_FRAME_UP, 0))
 	return pod.transform * local
@@ -1303,60 +1350,9 @@ static func cable_glow(thrust: float, sf := 0.0) -> Array:
 	return [energy, base.lerp(CABLE_HOT, clampf((g - 0.85) / 0.6, 0.0, 1.0))]   # the mode's colour until the burner
 
 
-const CABLE_R := 0.035
 const CABLE_F_MAX := 120000.0                 # tension (N) that reads as "at the limit": red
 const STRAIN_AMBER := Color(1.0, 0.55, 0.1)
 const STRAIN_RED := Color(1.0, 0.12, 0.05)
-const FLEX_HZ := 2.2                          # the cables' sway: a lightly damped twang ...
-const FLEX_ZETA := 0.18
-
-
-static var _tube_index := PackedInt32Array()   # the cable tube's triangles: the same every frame
-
-
-## A cable: a six-sided tube along the curve from a to b bowed through m, as one indexed surface
-## (rings of shared vertices; it was 504 loose vertices, two calls into an ImmediateMesh each).
-static func _tube_curve(into: ArrayMesh, a: Vector3, b: Vector3, m: Vector3) -> void:
-	var segs := 14
-	var sides := 6
-	if _tube_index.is_empty():
-		for i in segs:
-			for k in sides:
-				var k2 := (k + 1) % sides
-				_tube_index.append_array(PackedInt32Array([i * sides + k, (i + 1) * sides + k, (i + 1) * sides + k2,
-					i * sides + k, (i + 1) * sides + k2, i * sides + k2]))
-	var pts := PackedVector3Array()
-	for i in segs + 1:
-		var t := float(i) / segs
-		pts.append(a * (1.0 - t) * (1.0 - t) + m * 2.0 * (1.0 - t) * t + b * t * t)
-	var verts := PackedVector3Array()
-	var normals := PackedVector3Array()
-	var nrm := Vector3.ZERO
-	for i in segs + 1:
-		var tg: Vector3 = (pts[mini(i + 1, segs)] - pts[maxi(i - 1, 0)]).normalized()
-		if i == 0:
-			nrm = tg.cross(Vector3.UP)
-			if nrm.length() < 0.1:
-				nrm = tg.cross(Vector3.RIGHT)
-		nrm = (nrm - tg * nrm.dot(tg)).normalized()
-		var bn := tg.cross(nrm)
-		for k in sides:
-			var ang := TAU * k / sides
-			var r := nrm * cos(ang) + bn * sin(ang)
-			normals.append(r)
-			verts.append(pts[i] + r * CABLE_R)
-	var arrays := []
-	arrays.resize(Mesh.ARRAY_MAX)
-	arrays[Mesh.ARRAY_VERTEX] = verts
-	arrays[Mesh.ARRAY_NORMAL] = normals
-	arrays[Mesh.ARRAY_INDEX] = _tube_index
-	into.clear_surfaces()
-	into.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
-
-## Rope sag (m) at the middle of a cable of rest length `rest` hung across `span` (parabola).
-static func cable_sag_for(span: float, rest: float) -> float:
-	var slack := maxf(0.0, rest - span)
-	return minf(3.0, sqrt(3.0 * maxf(span, 1.0) * slack / 8.0)) + 0.05
 
 
 ## The cable's colour for its strain (tension / CABLE_F_MAX) on top of its thrust glow colour:
@@ -1495,42 +1491,38 @@ static func slope_pitch(v, x: float, y: float, th: float, half: float) -> float:
 	return atan2(hf - hb, 2.0 * half)
 
 
-## Cables and the binder arc. Call after the camera / cockpit rig has moved this frame: the
-## pod end rides the rig in VR, and a frame of lag is 30 m at full speed. Each cable is a tube
-## along a curve (Luke: "add flex and color to the cables"): it sags with its slack, sways and
-## twangs when its tension jumps, and shifts from its thrust glow to amber then red with strain.
+## The tow links and the binder arc. Call after the camera / cockpit rig has moved this frame: the
+## pod end rides the rig in VR, and a frame of lag is 30 m at full speed. Each link is rigid parts on
+## pins (view/tow_link.gd), placed from the engine's lug and the pod's swivel post as they are drawn:
+## its joints turn with the engines' and pod's attitudes, and its rod runs in and out of its barrel
+## with the distance between them, which is the sim's span. (Luke: "more mechanical than loose
+## swinging cable". They sagged with their slack and twanged at 2.2 Hz; a drawbar does neither.)
+## Their lit parts keep the ropes' light: the thrust glow, amber then red with strain.
 func sync_cables(sim, delta := 1.0 / 72.0) -> void:
-	var dt := clampf(delta, 0.001, 0.05)
+	var pod_basis: Basis = (pod_frame.transform.basis if pod_frame else pod.transform.basis).orthonormalized()
 	for k in 2:
 		var c: Dictionary = sim.cables[k] if k < sim.cables.size() else {}
-		cables[k].visible = c.has("ex")
-		if not cables[k].visible:
-			continue
 		var a: Vector3 = engines[k].transform * ENGINE_EYE
 		var b := _pod_anchor(sim, k)
-		var d := b - a
-		var span := d.length()
-		if span < 0.01:
-			cables[k].visible = false
+		var shown: bool = c.has("ex") and a.distance_to(b) > 0.7
+		if shown != _link_shown[k]:      # (told only when it changes: a part hidden by hand, to time the frame without it, stays hidden)
+			_link_shown[k] = shown
+			for part in link_parts[k]:
+				(part as MeshInstance3D).visible = shown
+		if not shown:
 			continue
-		var yb := d / span
 		cable_ends[k] = [a, b]
-		# flex: hang toward the ground by the rope's sag, sway about it like a plucked string
-		var sim_span: float = Vector2(c.ex - c.px, c.ey - c.py).length()
-		var target := Vector3.DOWN * cable_sag_for(sim_span, sim.P.cableLen)
+		var at: Dictionary = TowLink.solve(a, engines[k].transform.basis.orthonormalized(), b, pod_basis, link_rod)
+		(link_parts[k][0] as MeshInstance3D).transform = at.swivel
+		(link_parts[k][1] as MeshInstance3D).transform = at.barrel
+		(link_parts[k][2] as MeshInstance3D).transform = at.rod
+		(link_parts[k][3] as MeshInstance3D).transform = at.yoke
+		link_span[k] = at.span
+		link_exposed[k] = at.exposed
+		link_angles[k] = at.angles
+		link_travel[k] = Vector2(c.ex - c.px, c.ey - c.py).length() - sim.P.cableLen
+		cable_sag[k] = 0.0
 		var f: float = c.get("f", 0.0)
-		var side := yb.cross(Vector3.UP).normalized()
-		_wob_v[k] += side * clampf((f - _prev_f[k]) / CABLE_F_MAX, -1.0, 1.0) * 1.6   # a tension jump twangs it
-		_prev_f[k] = f
-		var w := TAU * FLEX_HZ
-		_wob_v[k] += ((target - _wob[k]) * w * w - _wob_v[k] * 2.0 * FLEX_ZETA * w) * dt
-		_wob[k] += _wob_v[k] * dt
-		_wob[k] = _wob[k] - yb * _wob[k].dot(yb)   # sideways and down only, never along the cable
-		if _wob[k].length() > span * 0.25:
-			_wob[k] = _wob[k].normalized() * span * 0.25
-		cable_sag[k] = _wob[k].length()
-		_tube_curve(cables[k].mesh as ArrayMesh, a, b, (a + b) / 2.0 + _wob[k] * 2.0)
-		cable_mats[k].albedo_color = Color(0.4, 0.4, 0.42) if c.slack else Color(0.15, 0.16, 0.18)
 		# colour: its engine's thrust glow, turning amber then red as the tension nears its limit
 		var eng = sim.eL if k == 0 else sim.eR
 		var thrust: float = 0.0 if held[k] else (shown_thrust[k] if shown_thrust[k] >= 0.0 else eng.thrust)

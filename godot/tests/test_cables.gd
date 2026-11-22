@@ -1,11 +1,13 @@
-## Cable gate: both cables hook to real hardware at both ends, in a hard banked turn, in the
-## flat view (the drawn pod's nose eyes) and in the VR cockpit (its own nose eyes, the pod
-## being hidden). Prints CABLES PASS when every check passes.
+## Cable gate: both tow links (view/tow_link.gd; they were cables) hook to real hardware at both
+## ends, in a hard banked turn, in the flat view (the drawn pod's bullring) and in the VR cockpit
+## (its own, the pod being hidden); they are rigid, jointed and telescoping, and keep the cables'
+## light. Prints CABLES PASS when every check passes.
 ## Run: Godot_v4.7.1-stable_win64_console.exe --headless --path godot -s res://tests/test_cables.gd -- --track=range --mute
 extends SceneTree
 
 const FlatScript := preload("res://view/craft_view.gd")
 const VRScript := preload("res://vr/vr_cockpit.gd")
+const TowLink := preload("res://view/tow_link.gd")
 const TOL := 0.03   # metres
 var v
 var t := 0.0
@@ -40,7 +42,7 @@ func _process(_delta: float) -> bool:
 	if phase == 1:
 		_start(VRScript)
 		return false
-	var good: bool = fails == 0 and passed == 11
+	var good: bool = fails == 0 and passed == 13
 	print("CABLES ", "PASS" if good else "FAIL (%d failed, %d passed)" % [fails, passed])
 	quit(0 if good else 1)
 	return true
@@ -65,25 +67,46 @@ func _measure(label: String) -> void:
 	_check("%s: cables glow with their own engine's thrust (left off: %.2f, strain %.2f; right at %.2f thrust %.2f; idle %.1f, full %.1f, burner %.1f)" % [
 		label, gl, sl, v.sim.eR.thrust, gr, g_idle, g_full, g_burn],
 		left_ok and gr > 0.8 and g_idle == 0.0 and g_full > 3.0 and g_burn > g_full)
-	# flex and colour: a slack cable hangs by rope geometry, a taut one runs nearly straight;
-	# strain turns its glow amber then red; the live sway stays sane
+	# rigid, and telescoping (they were ropes: a slack one hung 2 m, and they swayed): a link stands
+	# straight between its pins and its rod runs in and out of its barrel with the span; strain
+	# turns its glow amber then red
 	var CMs = c.get_script()
-	var sag_slack: float = CMs.cable_sag_for(14.0, 16.0)
-	var sag_taut: float = CMs.cable_sag_for(16.2, 16.0)
+	var closed: float = TowLink.exposed_for(16.0) - TowLink.exposed_for(14.0)
+	var stretched: float = TowLink.exposed_for(16.2) - TowLink.exposed_for(16.0)
 	var glow := Color(0.25, 0.65, 1.0)
 	var amber: Color = CMs.strain_color(glow, 0.8)
 	var red: Color = CMs.strain_color(glow, 1.15)
-	var live_ok: bool = c.cable_sag[0] <= 0.25 * 16.5 and c.cable_sag[1] <= 0.25 * 16.5
-	_check("%s: cables flex (2 m of slack sags %.2f m, taut %.2f m; live sway %.2f / %.2f m) and colour with strain (glow at 0.3, amber at 0.8 %s, red at 1.15 %s)" % [
-		label, sag_slack, sag_taut, c.cable_sag[0], c.cable_sag[1], amber.to_html(false), red.to_html(false)],
-		sag_slack > 1.5 and sag_taut < 0.1 and live_ok and CMs.strain_color(glow, 0.3) == glow and amber.r > 0.85 and amber.b < 0.3 and red.g < 0.2)
+	var live_ok := true
+	for k in 2:
+		live_ok = live_ok and c.cable_sag[k] == 0.0 and absf(c.link_exposed[k] - (c.link_span[k] - TowLink.BARREL)) < 1e-4 and c.link_exposed[k] > 6.0
+	_check("%s: the links are rigid (their middles %.2f / %.2f m off the line) and telescope (2 m closed up draws the rod in %.2f m, 0.2 m of stretch draws it out %.2f m; live, %.2f / %.2f m of rod showing on spans of %.2f / %.2f m) and colour with strain (glow at 0.3, amber at 0.8 %s, red at 1.15 %s)" % [
+		label, c.cable_sag[0], c.cable_sag[1], closed, stretched, c.link_exposed[0], c.link_exposed[1], c.link_span[0], c.link_span[1], amber.to_html(false), red.to_html(false)],
+		absf(closed - 2.0) < 1e-4 and absf(stretched - 0.2) < 1e-4 and live_ok and CMs.strain_color(glow, 0.3) == glow and amber.r > 0.85 and amber.b < 0.3 and red.g < 0.2)
 	var eyes: Array[Vector3] = []
+	var pod_up: Vector3
 	if c.pod_frame:
 		for n in ["hardpoint_l", "hardpoint_r"]:
 			eyes.append((c.pod_frame.get_node(n) as Node3D).transform.origin)
 		eyes = [c.pod_frame.transform * eyes[0], c.pod_frame.transform * eyes[1]]
+		pod_up = c.pod_frame.transform.basis.y.normalized()
 	else:
-		eyes = [c.pod.transform * Vector3(-0.18, -0.05, -2.1), c.pod.transform * Vector3(0.18, -0.05, -2.1)]
+		eyes = [c.pod.transform * Vector3(-0.18, c.POD_EYE_H, -2.1), c.pod.transform * Vector3(0.18, c.POD_EYE_H, -2.1)]
+		pod_up = c.pod.transform.basis.y.normalized()
+	# jointed: each swivel stands on its post along the pod's own up (banked over with it), each yoke's
+	# pin lies along its engine's, and both have turned to the link (tests/test_tow_links.gd has the rest)
+	var worst_post := 0.0
+	var worst_lug := 0.0
+	var turned := 0.0
+	var all_shown := true
+	for k in 2:
+		var parts: Array = c.link_parts[k]
+		for part in parts:
+			all_shown = all_shown and (part as Node3D).visible
+		worst_post = maxf(worst_post, maxf((parts[0] as Node3D).transform.origin.distance_to(c.cable_ends[k][1]), 1.0 - (parts[0] as Node3D).transform.basis.y.dot(pod_up)))
+		worst_lug = maxf(worst_lug, maxf((parts[3] as Node3D).transform.origin.distance_to(c.cable_ends[k][0]), 1.0 - absf((parts[3] as Node3D).transform.basis.x.dot(c.engines[k].transform.basis.x.normalized()))))
+		turned = maxf(turned, maxf(absf(c.link_angles[k][0]), absf(c.link_angles[k][3])))
+	_check("%s: the links are jointed: each swivel on its post along the pod's up (worst %.4f), each yoke on its engine's lug pin (worst %.4f), turned to their links (up to %.0f deg in this turn)" % [label, worst_post, worst_lug, rad_to_deg(turned)],
+		all_shown and worst_post < 1e-3 and worst_lug < 1e-3 and turned > deg_to_rad(5.0))
 	var worst_pod := 0.0
 	var worst_eng := 0.0
 	var both := {}
