@@ -31,7 +31,17 @@ window/stretch/mode="canvas_items"
 openxr/enabled=false
 openxr/enabled.pcvr=true
 openxr/reference_space=0
+; Request foveation-capable Vulkan swapchains before OpenXR starts. The flight menu sets the live level.
+openxr/foveation_level.questflight=2
+openxr/foveation_dynamic.questflight=false
+openxr/foveation_eye_tracked.questflight=false
+openxr/foveation_with_subsampled_images.questflight=false
+openxr/extensions/meta/dynamic_resolution.questflight=false
 shaders/enabled=true
+
+[rendering]
+
+renderer/rendering_method.questflight="mobile"
 
 [shader_globals]
 

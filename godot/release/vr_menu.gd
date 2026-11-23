@@ -222,7 +222,8 @@ func start_selected() -> void:
 	View.pad_start = true             # ... and, on the Network, on its starting pad at the roadside
 	start_button.text = "Loading " + title.text + "…"
 	print("VR MENU: starting ", selected_course)
-	get_tree().call_deferred("change_scene_to_file", "res://vr.tscn")
+	var flight_scene := "res://vr/quest_flight.tscn" if OS.has_feature("questflight") else "res://vr.tscn"
+	get_tree().call_deferred("change_scene_to_file", flight_scene)
 
 func consume_controller(axis: float, confirm: bool, focused: bool) -> void:
 	if not focused:
