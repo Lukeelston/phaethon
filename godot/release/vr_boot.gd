@@ -27,6 +27,7 @@ func _start() -> void:
 	print("PCVR BOOT: feature=", OS.has_feature("pcvr"), " main=", ProjectSettings.get_setting_with_override("application/run/main_scene"), " data=", OS.get_user_data_dir(), " xr_ready=", xr_ready)
 	var args := OS.get_cmdline_user_args()
 	var route := startup_route(xr_ready, args)
+	preload("res://vr/flight_diagnostics.gd").log_headset(xr as OpenXRInterface)
 	print("PCVR STARTUP: ", route)
 	if route == "setup":
 		_show_setup("--verify-vr-release" in args)

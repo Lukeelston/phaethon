@@ -65,6 +65,7 @@ const MinimapPanelScript := preload("res://vr/minimap_panel.gd")
 const ScreenReflectionScript := preload("res://view/screen_reflection.gd")
 const Kit := preload("res://view/mesh_kit.gd")
 const BrakeDiagnosticsScript := preload("res://vr/brake_diagnostics.gd")
+const FlightDiagnostics := preload("res://vr/flight_diagnostics.gd")
 const StartupScript := preload("res://vr/startup_sequence.gd")
 const OverheadPanelScript := preload("res://vr/overhead_panel.gd")
 const StartupAudioScript := preload("res://audio/startup_audio.gd")
@@ -216,6 +217,7 @@ var fade_v := 0.0
 var edges := {}
 var frame_ms := PackedFloat32Array()
 var report_t := 0.0
+var _memory_t := 0.0
 # the report's window: each frame's main-thread work (_process, ms), its parts summed, and the
 # renderer's measured CPU and GPU time for the view (both eyes): the split between CPU and GPU
 var _w_cpu := PackedFloat32Array()
@@ -523,6 +525,7 @@ func _make_view() -> void:
 		print("OPENXR: initialized, MSAA 4x")
 	else:
 		print("OPENXR: NOT initialized, running flat (is the Quest on and in Link mode?)")
+	FlightDiagnostics.log_headset(xr as OpenXRInterface)
 	# the renderer's own timing of the view, for the report's CPU line (render cpu, gpu: both eyes)
 	RenderingServer.viewport_set_measure_render_time(get_viewport().get_viewport_rid(), true)
 
@@ -568,6 +571,7 @@ func _on_xr_event(sig: String) -> void:
 	if sig != "pose_recentered":
 		_set_hands(sig == "session_focussed")
 	if sig == "session_focussed":
+		FlightDiagnostics.log_headset(xr as OpenXRInterface)
 		XRServer.center_on_hmd(XRServer.RESET_BUT_KEEP_TILT, true)
 		var trackers := XRServer.get_trackers(XRServer.TRACKER_CONTROLLER)
 		for name in trackers:
@@ -628,6 +632,7 @@ func _release_menu_controls() -> void:
 
 
 var _diag_t := 0.0
+var _diag_autopilot := false
 
 # Once a second: every boundary of the input chain, so a dead control shows where it dies.
 func _diag(delta: float, l: XRController3D, r: XRController3D, p: Dictionary) -> void:
@@ -635,6 +640,7 @@ func _diag(delta: float, l: XRController3D, r: XRController3D, p: Dictionary) ->
 	if _diag_t < 1.0:
 		return
 	_diag_t = 0.0
+	_diag_autopilot = autopilot.on
 	var pads := []
 	for d in Input.get_connected_joypads():
 		pads.append("%d:%s known=%s ax0=%.2f ax1=%.2f" % [d, Input.get_joy_name(d), Input.is_joy_known(d),
@@ -653,6 +659,15 @@ func _diag(delta: float, l: XRController3D, r: XRController3D, p: Dictionary) ->
 		l.is_button_pressed("ax_button"), l.is_button_pressed("by_button"), r.is_button_pressed("ax_button"), r.is_button_pressed("by_button")])
 	if sim.boost > 0 or sim.P.limits or (power_ups != null and power_ups.took > 0):
 		print("DIAG systems: boost=%d held=%s surge=%.1f limits=%s gates=%d" % [sim.boost, boosting, maxf(0.0, surge), sim.P.limits, power_ups.took if power_ups != null else 0])
+
+
+func _autopilot_frame(delta: float) -> void:
+	super(delta)
+	if _diag_autopilot:
+		_diag_autopilot = false
+		if autopilot.on:
+			# _diag logged the pilot's inputs. The autopilot has now written this frame's commands.
+			print("DIAG autopilot: levers=%.2f/%.2f brakes=%.2f/%.2f" % [inp.thrL, inp.thrR, inp.brkL, inp.brkR])
 
 
 func _box(parent: Node3D, size: Vector3, pos: Vector3, c: Color, rot_x := 0.0) -> MeshInstance3D:
@@ -2049,6 +2064,10 @@ func _sync_rush(delta: float) -> void:
 func _process(delta: float) -> void:
 	var t_in := Time.get_ticks_usec()
 	super(delta)
+	_memory_t += delta
+	if _memory_t >= 60.0:
+		_memory_t = fmod(_memory_t, 60.0)
+		FlightDiagnostics.log_memory()
 	if menu.open:
 		return   # OpenXR still updates the tracked camera and controllers while flight waits.
 	if _brake_trace:
