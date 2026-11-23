@@ -7,12 +7,14 @@
 ## 4,000 mph), the loop in SPEEDCRAFT blue and the towns in STARFIGHTER magenta, a bar where the
 ## next mode change is and a readout of how far ("STARFIGHTER  12.4 km"). Circuits and the Network
 ## only; on the range the screen is dark (set_live).
+## With the pod's HUD switch up the same drawing is shown in the windscreen too (view/minimap_glass.gd).
 ## Panel-local: x across, y up, the face looks down +z at the pilot.
 ##   var mp := MinimapPanel.new(); shell.add_child(mp); mp.transform = MinimapPanel.mount(eye); mp.build()
 ##   mp.show_frame(minimap.update(heading, delta))      every frame
 extends Node3D
 
 const MiniMap := preload("res://view/minimap.gd")
+const MapGlass := preload("res://view/minimap_glass.gd")
 const Interior := preload("res://vr/cockpit_interior.gd")
 const Finish := preload("res://view/craft_materials.gd")
 const Kit := preload("res://view/mesh_kit.gd")
@@ -54,13 +56,21 @@ const SCHEMES := [
 # the screen's colours, its ring showing the one that is up. On top, in plain sight against the coaming
 # from the seat: down the inboard edge the pod's own hood hid half of them and anything larger covered
 # the left gauge, and under the outboard edge stands the SLIDE switch, which a hand going to one would throw.
+# Between the two, a second toggle of the same kind (Luke, 2026-11-22: "Will you please add a switch to
+# the map that projects it via the hud?"): up HUD, and the map is in the windscreen as well as here
+# (view/minimap_glass.gd); down OFF. For it the strip grew outboard to the pod's own side (its inboard end,
+# which has the roof's pillar 4 mm behind it, is where it was), the GLOBAL / LOCAL toggle went out to that
+# end and the button 17 mm toward the other; each toggle's box is 80 mm wide (it was 90), so that a hand
+# throwing one is in neither the other's nor the button's.
 const CONTROLS_Y := 0.182           # the strip's middle, over the screen's (panel units; the screen's half-height is 0.11)
-const SWITCH_X := -0.05             # the toggle, left of the middle ...
+const STRIP_X := Vector2(-0.1335, 0.1065)   # the strip's ends: the pod's outboard side, and where its inboard end was
+const SWITCH_X := -0.098            # the GLOBAL / LOCAL toggle, at the outboard end ...
+const HUD_X := 0.0                  # ... the HUD toggle in the middle ...
 const SWITCH_SCALE := 0.55
-const BUTTON_AT := Vector3(0.06, CONTROLS_Y + 0.008, 0.004)   # ... and the button's face, right of it
+const BUTTON_AT := Vector3(0.08, CONTROLS_Y + 0.008, 0.004)   # ... and the button's face, inboard of both
 const BUTTON_REACH := 0.03          # how near its axis a tip has to be to press it (panel units, as PRESS_Z)
 const PRESS_Z := 0.024              # pressed: a tip this near the face, having come from further out
-const SWITCH_ZONE := Vector3(0.045, 0.06, 0.13)   # m: half-size of the box in front of the toggle where a tip can throw it (short of the button)
+const SWITCH_ZONE := Vector3(0.04, 0.06, 0.13)   # m: half-size of the box in front of a toggle where a tip can throw it (short of its neighbours)
 const SWITCH_COOL_MS := 800
 
 static var enclosure := true   # false before the cockpit is built: the heads-up panel instead
@@ -74,11 +84,15 @@ var _roads: MeshInstance3D   # the whole country's roads, drawn once (the Networ
 var _c := PackedColorArray()
 var scheme := 0              # which of SCHEMES the screen is drawn in (set_scheme)
 var map_switch: ModeSwitch   # GLOBAL / LOCAL, on the pod (null on the heads-up panel)
+var hud_switch: ModeSwitch   # HUD / OFF, beside it: the map in the windscreen too
+var glass: Node3D            # view/minimap_glass.gd: made when the HUD switch is first thrown up (null until then)
+var _canopy: Node3D          # where it goes: the roofed canopy (null without the roof: then the HUD switch does nothing)
 var button: MeshInstance3D   # the colour button's cap
 var _glass: StandardMaterial3D
 var _ring: StandardMaterial3D
 var _tips := {}              # controller -> [its tip in the switch's frame (m), from the button's face (panel units)], last frame
 var _thrown_at := -100000    # ms: when the switch was last thrown, the button last pressed
+var _hud_thrown_at := -100000
 var _pressed_at := -100000
 var _named_until := 0        # ms: until then the readout names the scheme just chosen
 
@@ -124,7 +138,7 @@ func _build_controls() -> void:
 	back.name = "controls"
 	back.mesh = Kit.compound([
 		# (its top edge 6 mm lower than its foot is deep: at full height its back corner stood 3 mm into the roof's port pillar, which passes behind it)
-		[Finish.beveled_plate(Vector3(0.205, 0.012, 0.092), 0.003), Kit.at(Vector3(0.004, CONTROLS_Y - 0.003, -0.016), turn), Color(0.105, 0.12, 0.14)],
+		[Finish.beveled_plate(Vector3(STRIP_X.y - STRIP_X.x, 0.012, 0.092), 0.003), Kit.at(Vector3((STRIP_X.x + STRIP_X.y) / 2.0, CONTROLS_Y - 0.003, -0.016), turn), Color(0.105, 0.12, 0.14)],
 		[Kit.box(Vector3(0.09, 0.034, 0.012)), Kit.at(Vector3(0.0, CONTROLS_Y - 0.058, -0.02)), Color(0.09, 0.09, 0.1)],
 		[Kit.cyl(0.021, 0.021, 0.007, 28), Kit.at(BUTTON_AT + Vector3(0, 0, -0.0045), turn), Color(0.04, 0.052, 0.065)]])
 	back.material_override = Finish.powder_coat()
@@ -137,6 +151,14 @@ func _build_controls() -> void:
 	map_switch.transform = Transform3D(Basis.from_scale(Vector3.ONE * SWITCH_SCALE), Vector3(SWITCH_X, CONTROLS_Y, -0.002))
 	add_child(map_switch)
 	map_switch.build()
+	hud_switch = ModeSwitch.new()
+	hud_switch.name = "HudSwitch"
+	hud_switch.legends = ["HUD", "OFF"]
+	hud_switch.colours = [Color(0.55, 0.95, 1.0), Color(0.16, 0.17, 0.19)]      # the projector's own light; OFF is a lamp barely lit
+	hud_switch.throws = ["hud_on", "hud_off"]
+	hud_switch.transform = Transform3D(Basis.from_scale(Vector3.ONE * SWITCH_SCALE), Vector3(HUD_X, CONTROLS_Y, -0.002))
+	add_child(hud_switch)
+	hud_switch.build()
 	button = MeshInstance3D.new()
 	button.name = "SchemeButton"
 	button.mesh = Kit.compound([[Kit.cyl(0.014, 0.0155, 0.01, 28), Kit.at(Vector3(0, 0, 0.001), turn), Color(0.82, 0.84, 0.88)]])
@@ -163,32 +185,35 @@ func _build_controls() -> void:
 	show_controls(false, 1.0)
 
 
-## A controller at the map's controls: "global" or "local" when this push throws the switch, "scheme"
-## when it presses the button, else "". The switch is thrown as the MODE and SLIDE switches are (a tip
-## moving up or down through the box in front of it; in metres, whatever the pod's scale); the button
-## as the START button is (a tip coming in to its face).
+## A controller at the map's controls: "global" or "local" when this push throws the map's switch,
+## "hud_on" or "hud_off" when it throws the HUD's, "scheme" when it presses the button, else "". The
+## switches are thrown as the MODE and SLIDE switches are (a tip moving up or down through the box in
+## front of one; in metres, whatever the pod's scale); the button as the START button is (a tip coming
+## in to its face).
 func poke(ctrl: Node3D, delta: float) -> String:
 	if map_switch == null or not live:
 		return ""
 	var now := Time.get_ticks_msec()
 	var at: Vector3 = ctrl.global_transform * ModeSwitch.TIP
 	var tip: Vector3 = map_switch.global_transform.orthonormalized().affine_inverse() * at
+	var hud_tip: Vector3 = hud_switch.global_transform.orthonormalized().affine_inverse() * at
 	var press: Vector3 = global_transform.affine_inverse() * at - BUTTON_AT
 	var was: Variant = _tips.get(ctrl)
-	_tips[ctrl] = [tip, press]
+	_tips[ctrl] = [tip, press, hud_tip]
 	if was == null or delta <= 0.0:
 		return ""
-	if now - _thrown_at >= SWITCH_COOL_MS and absf(tip.x) < SWITCH_ZONE.x and absf(tip.y) < SWITCH_ZONE.y and tip.z > -0.01 and tip.z < SWITCH_ZONE.z:
-		var vy: float = (tip.y - ((was as Array)[0] as Vector3).y) / delta
-		if absf(vy) <= 4.0:   # (faster is a tracking jump, not a push)
-			if vy < -ModeSwitch.THROW_V and not map_switch.down:
-				map_switch.down = true
-				_thrown_at = now
-				return "local"
-			if vy > ModeSwitch.THROW_V and map_switch.down:
-				map_switch.down = false
-				_thrown_at = now
-				return "global"
+	if now - _thrown_at >= SWITCH_COOL_MS:
+		var way := _thrown(map_switch, tip, (was as Array)[0], delta)
+		if way != 0:
+			map_switch.down = way < 0
+			_thrown_at = now
+			return "local" if way < 0 else "global"
+	if now - _hud_thrown_at >= SWITCH_COOL_MS and _canopy != null:
+		var way := _thrown(hud_switch, hud_tip, (was as Array)[2], delta)
+		if way != 0:
+			hud_switch.down = way < 0
+			_hud_thrown_at = now
+			return "hud_off" if way < 0 else "hud_on"
 	var before: Vector3 = (was as Array)[1]
 	if now - _pressed_at >= 500 and Vector2(press.x, press.y).length() < BUTTON_REACH and press.z < PRESS_Z and press.z > -0.03 \
 			and before.z >= PRESS_Z and absf(press.z - before.z) / delta < 4.0:
@@ -197,12 +222,28 @@ func poke(ctrl: Node3D, delta: float) -> String:
 	return ""
 
 
-## Each frame: the switch's position (local: down), its lamps and the button's ring at the battery's level.
-func show_controls(local: bool, power: float) -> void:
+## Which way a tip throws one of the strip's toggles, if it does: -1 down, 1 up, 0 not at all. `tip`
+## and `was` are the tip in that toggle's frame (m), now and a frame ago.
+func _thrown(toggle: ModeSwitch, tip: Vector3, was: Vector3, delta: float) -> int:
+	if absf(tip.x) < SWITCH_ZONE.x and absf(tip.y) < SWITCH_ZONE.y and tip.z > -0.01 and tip.z < SWITCH_ZONE.z:
+		var vy: float = (tip.y - was.y) / delta
+		if absf(vy) <= 4.0:   # (faster is a tracking jump, not a push)
+			if vy < -ModeSwitch.THROW_V and not toggle.down:
+				return -1
+			if vy > ModeSwitch.THROW_V and toggle.down:
+				return 1
+	return 0
+
+
+## Each frame: the switches' positions (local: the map's is down; hud: the HUD's is up), their lamps
+## and the button's ring at the battery's level.
+func show_controls(local: bool, power: float, hud := false) -> void:
 	if map_switch == null:
 		return
 	map_switch.power = power
 	map_switch.show_state(local, 1.0 if local else 0.0, false)
+	hud_switch.power = power
+	hud_switch.show_state(not hud, 0.0 if hud else 1.0, false)
 	button.position = BUTTON_AT + Vector3(0, 0, -0.004 if Time.get_ticks_msec() - _pressed_at < 180 else 0.0)
 	_ring.albedo_color = tone("speed").lerp(tone("target"), 0.15) * (0.3 + 1.5 * power) * power
 
@@ -216,6 +257,24 @@ static func mount(eye: Vector3) -> Transform3D:
 
 static func housed() -> bool:
 	return enclosure and Finish.hd and ResourceLoader.exists(POD)
+
+
+## Where the HUD switch's map is shown: the cockpit's canopy (after build()). Nothing is made yet.
+func fit_glass(canopy: Node3D) -> void:
+	_canopy = canopy if _housed and Canopy.roof_available() else null
+
+
+## Each frame, after show_frame: with `on` (the HUD switch up) and the screen lit, the windscreen shows
+## what the screen does; `dark` is 0 by day .. 1 at night. The glass's own parts are made the first time
+## it is on; until then, and whenever it is off, there is nothing of it to draw or to run.
+func show_glass(on: bool, dark: float, delta: float) -> void:
+	on = on and live and _canopy != null
+	if glass == null:
+		if not on:
+			return
+		glass = MapGlass.new()
+		glass.build(_canopy)
+	glass.show_map(on, lines, _roads.mesh if _roads != null and _roads.visible else null, dark, delta)
 
 
 ## The screen shows a map, or (in its pod) sits dark; the heads-up panel just goes away.

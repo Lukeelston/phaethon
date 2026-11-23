@@ -17,6 +17,10 @@
 ## instead, north up: every road (`lines_w`, built once: panels draw them once), the jumps, the
 ## cities' GPs, the cities and their on-ramps (`marks_w`), the target, and the craft where it is,
 ## pointing its way. whole_layout fits it; layout hands a whole frame to it.
+## The Network's local map (the pod's LOCAL) reaches LOCAL_WIDER times as far as a course's map does
+## at the same speed (Luke, 2026-11-22: "I think the 'local' switch should zoom out a bit"): 2.25 km
+## from the craft to the map's top edge standing still, 16 km at 2,000 mph, 37.5 km from 4,660 mph up
+## (it was 1.5, 10.7 and 25 km), and as much more to each side and behind. local_reach(v) says it.
 extends RefCounted
 
 const LOOK_S := 12.0          # seconds of track ahead at the current speed
@@ -26,6 +30,7 @@ const BEHIND := 0.18          # this share of `ahead` shows behind the craft
 const POINTS := 140           # path points per frame
 const EASE_T := 0.8           # s: the zoom's time constant
 const CRAFT_Y := 0.2          # the craft sits this far up the panel (share of its height)
+const LOCAL_WIDER := 1.5      # the Network's local map: this many times `ahead`, at every speed
 const DAWN_HALF := 200000.0   # m each way along the dawn's front: its chord always spans the map
 const DAWN_COL := Color(1.0, 0.78, 0.4)
 const PAD_COL := Color(1.0, 0.18, 0.12)   # the medical pad's red cross
@@ -41,6 +46,7 @@ var marks: Array = []               # the Network: [[x, y, kind], ...] traffic a
 var _ngrid := {}                    # the Network: Vector2i(cell) -> [[road, i0, i1], ...]: runs of road in it
 const NCELL := 8000.0
 var whole := true                   # the Network: the whole country (else the roads near the craft, heading up)
+var local_wider := LOCAL_WIDER      # (looking at it: 1.0 is the local map as it was)
 var gp_cities: Array = []           # the cities with a GP (names; the view sets it): marked on the whole map
 var _w_lines := []                  # the whole map's roads: [[points (m, from W_MID, north up), modes], ...]
 var _w_marks := []                  # ... its marks: [[at, kind], ...] ("jump", "gp", "city", "ramp")
@@ -75,6 +81,12 @@ func setup(sm) -> void:
 
 static func target_ahead(v: float) -> float:
 	return clampf(v * LOOK_S, MIN_AHEAD, MAX_AHEAD)
+
+
+## The Network's local map at speed v (m/s): metres from the craft to the map's top edge, once the
+## zoom has settled.
+static func local_reach(v: float) -> float:
+	return target_ahead(v) * LOCAL_WIDER
 
 
 func mode_at(i: int) -> int:
@@ -209,13 +221,17 @@ const VIS_R := 1.1
 func _net_update(heading: float) -> Dictionary:
 	var fx := cos(heading)
 	var fy := sin(heading)
-	var step := maxi(4, int(ahead / 60.0 / 24.0))
+	var reach := ahead * local_wider   # from the craft to the map's top edge
+	# (a point every 60th of the old reach still: over the wider map that is 40 to its height, 3.5 mm apart on
+	# the pod's screen under a line 4.8 mm wide, and about as many points in all as the old map drew; at 60 to
+	# the wider map's height it was half as many again, and 0.2 to 0.3 ms more of every frame at speed)
+	var step := maxi(4, int(reach / (60.0 / local_wider) / 24.0))
 	var lines := []
 	var ox: float = sim.pod.x
 	var oy: float = sim.pod.y
-	var cx := ox + fx * ahead * 0.35   # the map's middle
-	var cy := oy + fy * ahead * 0.35
-	var rad := ahead * VIS_R + 200.0
+	var cx := ox + fx * reach * 0.35   # the map's middle
+	var cy := oy + fy * reach * 0.35
+	var rad := reach * VIS_R + 200.0
 	var lo := Vector2i(int(floor((cx - rad) / NCELL)), int(floor((cy - rad) / NCELL)))
 	var hi := Vector2i(int(floor((cx + rad) / NCELL)), int(floor((cy + rad) / NCELL)))
 	for gx in range(lo.x, hi.x + 1):
@@ -243,7 +259,7 @@ func _net_update(heading: float) -> Dictionary:
 						break
 					i = mini(i + step, i1)
 				lines.append([pts, modes])
-	var f := {"pts": PackedVector2Array(), "modes": PackedByteArray(), "ahead": ahead, "next": {}, "lines": lines}
+	var f := {"pts": PackedVector2Array(), "modes": PackedByteArray(), "ahead": reach, "next": {}, "lines": lines}
 	var mk := []
 	for m in marks:
 		mk.append([_local_xy(m[0], m[1], fx, fy), int(m[2])])

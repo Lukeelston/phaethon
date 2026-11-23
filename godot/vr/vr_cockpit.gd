@@ -96,7 +96,8 @@ static var slide_feel := true             # the SLIDE / GRIP switch on the left 
 static var _slide_loaded := false         # (its saved setting is read once a run, as the camera's)
 static var map_whole := true              # the map's GLOBAL / LOCAL switch, on its pod: the whole country (false: the roads round the craft, heading up)
 static var map_scheme := 0                # ... and its colour button: which of MinimapPanel.SCHEMES the screen is drawn in
-static var _map_loaded := false           # (both saved, and read once a run)
+static var map_hud := false               # ... and its HUD switch: the map in the windscreen too (view/minimap_glass.gd)
+static var _map_loaded := false           # (all three saved, and read once a run)
 # The quick menu's OPTIONS page (Luke, 2026-11-22: "bring back heat and energy as optional consumables.
 # I also think we need power-ups in some way"): the gameplay switches, saved as the others are.
 #   consumables   HEAT AND ENERGY: the sims' `limits` (the battery the burner and the boost spend, the
@@ -255,6 +256,7 @@ func _ready() -> void:
 	if not _map_loaded:
 		map_whole = String(prefs.get("map", "global")) != "local"
 		map_scheme = maxi(0, MinimapPanelScript.scheme_named(String(prefs.get("map_scheme", ""))))
+		map_hud = String(prefs.get("map_hud", "off")) == "on"
 	_map_loaded = true
 	if not _startup_loaded and prefs.has("startup"):
 		cold_start = prefs.startup != "hot"
@@ -341,7 +343,8 @@ func _save_prefs() -> void:
 			"startup": "cold" if cold_start else "hot", "school": "on" if school else "done",
 			"consumables": "on" if consumables else "off", "powerups": "on" if power_ups_on else "off",
 			"field": "on" if avoid_on else "off", "rush": "on" if speed_rush else "off",
-			"map": "global" if map_whole else "local", "map_scheme": String(MinimapPanelScript.SCHEMES[map_scheme].name)}))
+			"map": "global" if map_whole else "local", "map_scheme": String(MinimapPanelScript.SCHEMES[map_scheme].name),
+			"map_hud": "on" if map_hud else "off"}))
 
 
 ## Thumbstick click (either stick): sit where you are. Recentres the view AND the height, so
@@ -779,6 +782,7 @@ func _build_cockpit() -> void:
 	minimap_panel.build()
 	minimap_panel.set_scheme(map_scheme, false)
 	minimap_panel.set_live(sim.kind == "circuit" or sim.kind == "network")
+	minimap_panel.fit_glass(canopy)        # (its HUD switch shows the map in the windscreen)
 	if ScreenReflectionScript.available():   # last: it takes its picture of everything the cockpit holds
 		screen_reflection = ScreenReflectionScript.new()
 		# what the glass is to show, besides the coaming along its foot: the instruments and the map
@@ -1011,6 +1015,9 @@ func _read_input(delta: float) -> void:
 			var worked: String = minimap_panel.poke(hand, delta)
 			if worked == "global" or worked == "local":
 				set_map_whole(worked == "global")
+				_buzz(hand, 0.9, 0.06)
+			elif worked == "hud_on" or worked == "hud_off":
+				set_map_hud(worked == "hud_on")
 				_buzz(hand, 0.9, 0.06)
 			elif worked == "scheme":
 				set_map_scheme(map_scheme + 1)
@@ -1831,6 +1838,14 @@ func set_map_whole(on: bool) -> void:
 	print("MAP: ", "global" if on else "local")
 
 
+## The map's HUD switch (Luke, 2026-11-22: "add a switch to the map that projects it via the hud"):
+## the map in the windscreen as well as in its pod. Remembered.
+func set_map_hud(on: bool) -> void:
+	map_hud = on
+	_save_prefs()
+	print("MAP: hud ", "on" if on else "off")
+
+
 ## The map's colour button: scheme k of MinimapPanel.SCHEMES (it wraps), and remember it.
 func set_map_scheme(k: int) -> void:
 	map_scheme = posmod(k, MinimapPanelScript.SCHEMES.size())
@@ -2085,9 +2100,10 @@ func _update_hud() -> void:
 	minimap.whole = map_whole
 	if minimap_panel.scheme != map_scheme:      # (the saved choice is read after the cabin is built)
 		minimap_panel.set_scheme(map_scheme, false)
-	minimap_panel.show_controls(not map_whole, startup.power)
+	minimap_panel.show_controls(not map_whole, startup.power, map_hud)
 	if minimap_panel.live:
 		minimap_panel.show_frame(minimap.update(sim.pod.th, get_process_delta_time()))
+	minimap_panel.show_glass(map_hud, maxf(1.0 if light_preset == "twilight" else 0.0, Outlook.darkness()), get_process_delta_time())
 	if tow_meter:
 		tow_meter.set_shader_parameter("loads", Vector2(craft.cable_strain[0], craft.cable_strain[1]))
 	_read_g()
