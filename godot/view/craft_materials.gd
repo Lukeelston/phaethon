@@ -29,6 +29,17 @@ static func webbing() -> StandardMaterial3D:
 	return _finish("webbing", 0.0, 0.85, 0.12)
 
 
+## The longitudinal walnut cut repeats along the boards. The finer finishes use a
+## square tile so the weave and casting marks retain their scale around corners.
+static func deck_finish(key: String) -> StandardMaterial3D:
+	match key:
+		"carbon": return _finish(key, 0.15, 0.40, 0.10)
+		"walnut": return _finish(key, 0.0, 0.42, 0.12)
+		"casting": return _finish(key, 0.08, 0.56, 0.14)
+		"porcelain": return _finish(key, 0.0, 0.25, 0.02)
+	return painted_metal()
+
+
 ## A finish in one flat colour, for parts that carry no vertex colours of their own.
 static func tinted(key: String, colour: Color) -> StandardMaterial3D:
 	var id := "%s:%s" % [key, colour.to_html()]
@@ -37,6 +48,7 @@ static func tinted(key: String, colour: Color) -> StandardMaterial3D:
 		match key:
 			"powder": base = powder_coat()
 			"leather": base = leather()
+			"carbon", "walnut", "casting", "porcelain": base = deck_finish(key)
 			"webbing": base = webbing()
 			"satin": base = satin()
 			"machined": base = machined()
@@ -85,6 +97,10 @@ static func _finish(key: String, metal: float, rough: float, contrast: float) ->
 		mat.uv1_triplanar = true
 		mat.uv1_triplanar_sharpness = 4.0
 		mat.uv1_scale = Vector3.ONE / 0.128
+		match key:
+			"walnut": mat.uv1_scale = Vector3(4, 3, 1.3)
+			"carbon": mat.uv1_scale = Vector3.ONE * 11.0
+			"casting": mat.uv1_scale = Vector3.ONE * 6.0
 		mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
 		_finishes[key] = mat
 		return mat

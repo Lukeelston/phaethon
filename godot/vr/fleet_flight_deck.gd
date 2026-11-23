@@ -58,6 +58,8 @@ var id: String
 var paint: Color
 var accent: Color
 var upholstery: Color
+const DECK_MATERIAL := {P.SHRIKE: "carbon", P.ORRERY: "walnut", P.KILN: "casting", P.VESPER: "porcelain"}
+var facing := []
 var panels := []
 var trim := []
 
@@ -83,7 +85,7 @@ func dial_layout() -> Array:
 
 func _batched_mesh() -> ArrayMesh:
 	var mesh := ArrayMesh.new()
-	for group in [[panels, Finish.powder_coat()], [trim, Finish.satin()]]:
+	for group in [[panels, Finish.powder_coat()], [trim, Finish.satin()], [facing, Finish.deck_finish(DECK_MATERIAL[id])]]:
 		var pieces: Array = group[0]
 		if not pieces.is_empty():
 			Kit.compound(pieces, mesh)
@@ -138,7 +140,10 @@ func _profile(stations: Array, depth: float, colour: Color, thickness := .032) -
 					st, ring[0], ring[i], ring[i + 1], Vector3.LEFT if previous.is_empty() else Vector3.RIGHT
 				)
 		previous = ring
-	panels.append([st.commit(), Transform3D.IDENTITY, colour])
+	if id == P.ORRERY:
+		panels.append([st.commit(), Transform3D.IDENTITY, colour])
+	else:
+		facing.append([st.commit(), Transform3D.IDENTITY, colour])
 
 
 func _line(stations: Array, z: float, radius: float, colour: Color) -> void:
@@ -344,7 +349,7 @@ func _floor() -> ArrayMesh:
 				for j in 5:
 					var z := -.348 + j * .174
 					for dx in [-.074, .074]:
-						panels.append([bay, Kit.at(Vector3(cx + dx, .145, z)), Color("#596169")])
+						trim.append([bay, Kit.at(Vector3(cx + dx, .145, z)), Color("#596169")])
 					panels.append([Kit.box(Vector3(.277, .003, .008)), Kit.at(Vector3(cx, .154, z + .064)), DARK])
 				trim.append(
 					[Kit.box(Vector3(.007, .005, .84)), Kit.at(Vector3(cx + .158 * side, .147, 0)), accent]
@@ -354,7 +359,7 @@ func _floor() -> ArrayMesh:
 				for j in 5:
 					var x := cx + (j - 2) * .067
 					var colour := Color("#805a3d").lerp(Color("#af8154"), float((j * 3) % 5) * .14)
-					panels.append(
+					facing.append(
 						[Finish.beveled_plate(Vector3(.063, .008, .954)), Kit.at(Vector3(x, .148, 0)), colour]
 					)
 				for z in [-.449, .449]:
@@ -366,7 +371,7 @@ func _floor() -> ArrayMesh:
 						[Kit.box(Vector3(.008, .007, .915)), Kit.at(Vector3(cx + (j - 2) * .072, .147, 0)), STEEL]
 					)
 				for j in 15:
-					panels.append(
+					trim.append(
 						[
 							Finish.beveled_plate(Vector3(.337, .008, .023)),
 							Kit.at(Vector3(cx, .152, -.441 + .063 * j)),
@@ -433,8 +438,8 @@ func fit_cabin(interior: Node3D) -> void:
 		var panel := interior.get_node_or_null(part) as MeshInstance3D
 		if panel:
 			panel.material_override = Finish.tinted(
-				"leather" if part == "SeatTub" else "powder",
-				upholstery if part == "SeatTub" else paint.darkened(.26)
+				("webbing" if id == P.SHRIKE else "leather") if part == "SeatTub" else DECK_MATERIAL[id],
+				upholstery if part == "SeatTub" else (Color("#966743") if id == P.ORRERY else paint.darkened(.26))
 			)
 	for s in [-1.0, 1.0]:
 		match id:
