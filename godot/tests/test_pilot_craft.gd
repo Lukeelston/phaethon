@@ -91,6 +91,79 @@ func check_pod_controls(game, vr: bool) -> void:
 	game.inp = previous
 
 
+func check_fleet(game, id: String, vr: bool) -> void:
+	var model = game.craft
+	var art = model.fleet
+	check(id + " has the selected airframe", art != null and art.id == id)
+	if not art:
+		return
+	var hull: MeshInstance3D = game.shell.get_node("PodHull") if vr else model.pod
+	check(id + " shows its own cab, seat and roof", hull.is_visible_in_tree() and hull.mesh == art.part(&"Cab")
+			and hull.get_node("FleetSeat").mesh == art.part(&"Seat")
+			and (game.canopy if vr else model.canopy).get_node("roof").mesh == art.part(&"Roof"))
+	if vr:
+		check_sight_lines(game, hull)
+	var closed: bool = model.nose_closed
+	model.set_nose_closed(not closed, game)
+	check(id + " service bonnet follows the nose switch", hull.get_node("ServiceBonnet").visible != closed)
+	model.set_nose_closed(closed, game)
+	var previous: Dictionary = game.inp.duplicate()
+	var started := float(game.sim.pod.x)
+	game.inp = LEVERS.duplicate()
+	for frame in 180:
+		game.sim.step(game.inp, 1.0 / 120.0)
+		game._sync_craft(1.0 / 120.0)
+	game._place_camera(1.0)
+	model.sync_cables(game.sim)
+	check(id + " tows the cab under its own power", absf(game.sim.pod.x - started) > 1.0 and not game.sim.binder_broken)
+	for k in 2:
+		var engine: Node3D = model.engines[k]
+		var fairing: MeshInstance3D = engine.get_node_or_null("FleetFairing")
+		check(id + " carries the correct engine " + str(k), fairing != null and fairing.mesh == art.part(&"Port" if k == 0 else &"Starboard"))
+		var bore := fairing.mesh.generate_triangle_mesh()
+		var open := true
+		for x in [-0.70, -0.35, 0.0, 0.35, 0.70]:
+			var hit := bore.intersect_ray(Vector3(x, 0, 4.71), Vector3.FORWARD)
+			open = open and (hit.is_empty() or hit.position.z <= model.Jets.PIPE_Z)
+		check(id + " nozzle has an open exhaust path " + str(k), open and model.flames[k].visible)
+		var ends: Array = model.cable_ends[k]
+		check(id + " drawbar meets both hardpoints " + str(k), ends.size() == 2
+				and ends[0].distance_to(engine.transform * model.ENGINE_EYE) < 0.002
+				and ends[1].distance_to(model._pod_anchor(game.sim, k)) < 0.002 and model.link_span[k] > 2.0)
+	game.inp.brkL = 0.84
+	game.inp.brkR = 0.30
+	game._sync_craft(1.0)
+	var loads: Vector2 = model.tail_lights.material_override.get_shader_parameter("brakes")
+	check(id + " left and right brakes work independently", loads.is_equal_approx(Vector2(0.84, 0.30)) and model.flap_open[0] > model.flap_open[1])
+	check(id + " cab brake doors and lamps travel with the visible cab", model.tail_lights.get_parent() == hull and model.pod_flaps[0].get_parent() == hull)
+	var hinge: Vector3 = model.pod_flaps[1].position
+	var skin := hull.mesh.generate_triangle_mesh().intersect_ray(hinge + Vector3.RIGHT, Vector3.LEFT)
+	check(id + " cab brake hinge sits on the outside of its armour", not skin.is_empty()
+			and hinge.x > skin.position.x and hinge.x - skin.position.x < 0.012)
+	game.inp = previous
+
+
+func check_sight_lines(game, hull: MeshInstance3D) -> void:
+	# Both eyes at seated height and a slightly lower head must see all five dials
+	# through the full authored cab, including the optional service cover.
+	var seen := true
+	var obstacles := [hull, hull.get_node("FleetSeat"), hull.get_node("ServiceBonnet"),
+			game.canopy.get_node("roof"), game.interior.get_node("SegmentedCoaming")]
+	for fitting: MeshInstance3D in obstacles:
+		var surface := fitting.mesh.generate_triangle_mesh()
+		for eye_x in [-0.033, 0.033]:
+			for drop in [0.0, 0.04]:
+				var eye := fitting.to_local(game.shell.to_global(game.EYE + Vector3(eye_x, -drop, 0)))
+				for dial_x in [-0.212, -0.116, 0.0, 0.116, 0.212]:
+					for dial_y in [0.0, 0.046]:
+						var dial := fitting.to_local(game.dashboard.to_global(Vector3(dial_x, dial_y, 0.01)))
+						var hit := surface.intersect_ray(eye, eye.direction_to(dial))
+						if hit and eye.distance_to(hit.position) < eye.distance_to(dial) - 0.002:
+							seen = false
+							print("Sight line blocked ", game.sim.P.vehicle, " ", fitting.name, " dial ", dial_x, " ", dial_y)
+	check(game.sim.P.vehicle + " left and right eye can see all five dials", seen)
+
+
 func _run() -> void:
 	var prefs_existed := FileAccess.file_exists(Settings.PREFS)
 	var previous := FileAccess.get_file_as_bytes(Settings.PREFS) if prefs_existed else PackedByteArray()
@@ -100,6 +173,10 @@ func _run() -> void:
 	config.save(Settings.PREFS)
 	check("malformed preference recovers to original", Settings.selected_craft() == "phaethon")
 	check("direct launch accepts the explicit vehicle", Sim.PilotCraft.resolve(["--vehicle=shrike"], "phaethon") == "shrike")
+	for id in ["orrery", "kiln", "vesper"]:
+		var result := trial(id)
+		check(id + " reaches 1,000 mph and turns under differential thrust", result.x < 10.0 and result.y > 0)
+		print(id, " 1000 mph seconds / split-lever yaw degrees ", result)
 	var stock := trial("phaethon")
 	var shrike := trial("shrike")
 	print("1000 mph, then degrees after 0.5 s at 350 mph: Phaethon ", stock, ", Shrike ", shrike)
@@ -111,7 +188,7 @@ func _run() -> void:
 	preload("res://vr/vr_cockpit.gd")._startup_loaded = true      # (... whatever the saved choice says)
 	for vr in [false, true]:
 		var scene := "res://release/vr_menu.tscn" if vr else "res://release/menu.tscn"
-		for id in ["shrike", "phaethon"]:
+		for id in ["shrike", "orrery", "kiln", "vesper", "phaethon"]:
 			change_scene_to_file(scene)
 			await scene_changed
 			var menu = current_scene
@@ -136,6 +213,8 @@ func _run() -> void:
 			if is_shrike:
 				check_airframe(game.craft)
 				check_pod_controls(game, vr)
+			if game.craft.Fleet.supports(id):
+				check_fleet(game, id, vr)
 			if vr:
 				check("the pilot sees the selected cabin", (game.shell.find_child("ShrikePlate", true, false) != null) == is_shrike)
 				check("tow instrument matches the selection", (game.tow_meter != null) == is_shrike)

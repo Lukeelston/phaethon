@@ -100,8 +100,10 @@ func _run() -> void:
 		var menu = get_tree().current_scene
 		var collisions := case_index % 2 == 1
 		var partner_enabled := case_index % 2 == 0
-		var pilot_craft := "shrike" if case_index % 2 == 0 else "phaethon"
-		if menu.craft_selector.selected != pilot_craft:
+		var pilot_craft: String = Settings.Craft.ORDER[(case_index + 1) % Settings.Craft.ORDER.size()]
+		for press in menu.craft_selector.Craft.ORDER.size():
+			if menu.craft_selector.selected == pilot_craft:
+				break
 			menu.craft_selector.button.pressed.emit()
 		case_index += 1
 		menu.collision_checkbox.button_pressed = collisions
@@ -130,6 +132,9 @@ func _run() -> void:
 		check(course + " opens its selected mission", not view.sim.job.is_empty() if course == "emergency" else view.sim.job.is_empty())
 		check(course + " launch respects obstacle collisions", view.sim.P.obstacleCollisions == collisions)
 		check(course + " launches " + pilot_craft, view.sim.P.vehicle == pilot_craft and view.craft.engines[0].has_node("ShrikeFairing") == (pilot_craft == "shrike"))
+		if view.craft.Fleet.supports(pilot_craft):
+			check(course + " loads the packed engine and cab", view.craft.engines[0].get_node("FleetFairing").mesh == view.craft.fleet.part(&"Port")
+					and view.craft.pod.mesh == view.craft.fleet.part(&"Cab"))
 		check(course + " launch builds the selected partner state", view.partner_on == partner_enabled and (view.partner != null) == partner_enabled)
 		check(course + " skill tracker and audio loaded", view.skill_score != null and view.skill_audio != null)
 		if course == "gp":
@@ -177,6 +182,7 @@ func _run() -> void:
 		if course == "network":
 			var before_camera: Vector3 = view.cam.position
 			var before_hull: Mesh = view.craft.pod.mesh
+			var before_nose: bool = view.craft.nose_closed
 			var before_hour: String = View.Outlook.time
 			var before_weather: String = View.Outlook.weather
 			overlay.find_child("Camera", true, false).pressed.emit()
@@ -184,7 +190,7 @@ func _run() -> void:
 			overlay.find_child("Hour", true, false).pressed.emit()
 			overlay.find_child("Weather", true, false).pressed.emit()
 			check("Network pause moves the live chase camera", before_camera.distance_to(view.cam.position) > 1.0)
-			check("Network pause changes the actual hull", view.craft.pod.mesh != before_hull)
+			check("Network pause changes the actual hull", view.craft.pod.get_node("ServiceBonnet").visible != before_nose if view.craft.fleet else view.craft.pod.mesh != before_hull)
 			check("Network pause changes the current hour", View.Outlook.time != before_hour and View.Outlook.time == Settings.choice("time", View.Outlook.ids(View.Outlook.TIMES)))
 			check("Network pause changes the current weather", View.Outlook.weather != before_weather and View.Outlook.weather == Settings.choice("weather", View.Outlook.ids(View.Outlook.WEATHERS)))
 			check("Network pause applies the selected sky to this flight", View.Outlook._applied and View.Outlook._aloft_view == view.get_instance_id())

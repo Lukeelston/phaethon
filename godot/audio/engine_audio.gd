@@ -195,6 +195,14 @@ const TUNE := {
 }
 
 var sim
+# Relative layer gain and pitch at the shared lever demand. The surveyor leans
+# on its rotor, the recovery tractor on the low bank, the racer on its turbine.
+const FLEET_VOICES := {
+	"orrery": {"rotor": Vector2(1.16, 0.79), "turbine": Vector2(1.15, 0.86), "v8": Vector2(0.63, 0.98)},
+	"kiln": {"v8": Vector2(1.12, 0.82), "v12": Vector2(0.84, 0.93), "turbine": Vector2(0.72, 0.96)},
+	"vesper": {"v8": Vector2(0.69, 1.06), "v12": Vector2(1.06, 1.12), "turbine": Vector2(1.17, 1.21)},
+}
+var fleet_voice := {}
 var short_intakes := false
 var solo := ""   # "v8", "v12", "turbine" or "burner": hear one layer alone (tests, tuning)
 var flat := false   # tests: every gain held at 1 and the low-pass open, so only crossfades move the level
@@ -227,6 +235,7 @@ var test_stage := 0.0
 func setup(craft_sim) -> void:
 	sim = craft_sim
 	short_intakes = sim.P.get("vehicle", "") == "shrike"
+	fleet_voice = FLEET_VOICES.get(sim.P.get("vehicle", ""), {})
 	_load_streams()
 	# Engines and Wind each limit their own bus to -1 dB, but their sum lands on Master unlimited:
 	# with both peaking together it could clip (engines + wind measured -0.05 dBFS on Master).
@@ -623,6 +632,10 @@ func update(inp: Dictionary, delta: float) -> void:
 					at = layer_at(layer, s) * (1.0 if flat else lerpf(TUNE.turbine_start, 1.0, _wind))
 				_:
 					at = layer_at(layer, s)
+			if not flat and fleet_voice.has(layer):
+				var trim: Vector2 = fleet_voice[layer]
+				g *= trim.x
+				at *= trim.y
 			v.at[layer] = at
 			if layer in RAM_LAYERS:
 				# unlit and died away, the ramjet's loops are paused: nothing of them is mixed, and nothing is sent them

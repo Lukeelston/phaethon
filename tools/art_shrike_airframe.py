@@ -910,7 +910,7 @@ def seat_back():
     return m
 
 
-def write_glb(parts):
+def write_glb(parts, destination=ART / "bodywork.glb", generator="Phaethon Shrike tooling"):
     blob = bytearray()
     views, accessors, meshes, nodes = [], [], [], []
 
@@ -944,7 +944,7 @@ def write_glb(parts):
         print(name, len(m.indices) // 3, "triangles")
     blob.extend(b"\0" * ((-len(blob)) % 4))
     doc = {
-        "asset": {"version": "2.0", "generator": "Phaethon Shrike tooling"},
+        "asset": {"version": "2.0", "generator": generator},
         "scene": 0,
         "scenes": [{"nodes": list(range(len(nodes)))}],
         "nodes": nodes,
@@ -955,7 +955,7 @@ def write_glb(parts):
     }
     js = json.dumps(doc, separators=(",", ":")).encode()
     js += b" " * ((-len(js)) % 4)
-    (ART / "bodywork.glb").write_bytes(
+    destination.write_bytes(
         struct.pack("<4sII", b"glTF", 2, 28 + len(js) + len(blob))
         + struct.pack("<I4s", len(js), b"JSON")
         + js

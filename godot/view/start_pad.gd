@@ -25,6 +25,7 @@ extends Node3D
 
 const Kit := preload("res://view/mesh_kit.gd")
 const Livery := preload("res://view/livery.gd")
+const PilotCraft := preload("res://sim/pilot_craft.gd")
 const Stations := preload("res://view/pad_stations.gd")
 const PadAudio := preload("res://audio/pad_audio.gd")
 const Release := preload("res://release/release_config.gd")
@@ -370,7 +371,7 @@ func _move(h: Array) -> void:
 		lines[0].text = _set_station(road, i)
 		_fit_line(lines[0], 0.76)
 		lines[1].text = "PAD   %s m" % _thousands(roundi(_at.z))
-		var machine := "SHRIKE RS" if String(sim.P.get("vehicle", "")) == "shrike" else "PHAETHON"
+		var machine := String(PilotCraft.NAMES[PilotCraft.known(sim.P.get("vehicle"))]).to_upper()
 		lines[2].text = "%s  %s" % [machine, Livery.current.to_upper()]
 		_fit_line(lines[2], 0.43)
 
