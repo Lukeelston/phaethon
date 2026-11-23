@@ -8,7 +8,7 @@
 extends RefCounted
 
 
-static func compound(parts: Array, into: ArrayMesh = null) -> ArrayMesh:
+static func compound(parts: Array, into: ArrayMesh = null, indexed := false) -> ArrayMesh:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	for p in parts:
@@ -26,6 +26,8 @@ static func compound(parts: Array, into: ArrayMesh = null) -> ArrayMesh:
 			st.set_color(col if own == null else (own as PackedColorArray)[i])
 			st.set_normal((nb * norms[i]).normalized())
 			st.add_vertex(xf * verts[i])
+	if indexed:
+		st.index()
 	return st.commit(into)
 
 

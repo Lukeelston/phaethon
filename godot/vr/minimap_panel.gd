@@ -118,7 +118,7 @@ func _name_flash() -> void:
 		label.modulate = tone("craft")
 
 
-func _build_controls() -> void:
+func _build_controls(fleet_cockpit: bool) -> void:
 	var turn := Vector3(PI / 2.0, 0, 0)
 	var back := MeshInstance3D.new()   # the strip they stand on, its bracket to the pod's side, the button's bezel
 	back.name = "controls"
@@ -136,7 +136,7 @@ func _build_controls() -> void:
 	map_switch.throws = ["global", "local"]
 	map_switch.transform = Transform3D(Basis.from_scale(Vector3.ONE * SWITCH_SCALE), Vector3(SWITCH_X, CONTROLS_Y, -0.002))
 	add_child(map_switch)
-	map_switch.build()
+	map_switch.build(fleet_cockpit)
 	button = MeshInstance3D.new()
 	button.name = "SchemeButton"
 	button.mesh = Kit.compound([[Kit.cyl(0.014, 0.0155, 0.01, 28), Kit.at(Vector3(0, 0, 0.001), turn), Color(0.82, 0.84, 0.88)]])
@@ -230,7 +230,7 @@ func set_live(on: bool) -> void:
 		visible = on
 
 
-func build() -> void:
+func build(fleet_cockpit := false) -> void:
 	_housed = housed()
 	var back := MeshInstance3D.new()
 	back.name = "backing"
@@ -249,7 +249,7 @@ func build() -> void:
 		pod.mesh = Interior._hd_mesh(POD, "MapPod")
 		Interior.Accent.dress(pod)
 		add_child(pod)
-		_arm()
+		_arm(fleet_cockpit)
 	else:
 		var bm := _hud_mat(PRIORITY)
 		bm.vertex_color_use_as_albedo = false
@@ -276,19 +276,19 @@ func build() -> void:
 	label.position = Vector3(0, H / 2.0 - MARGIN - TOP / 2.0, 0.002)
 	add_child(label)
 	if _housed:
-		_build_controls()
+		_build_controls(fleet_cockpit)
 	show_frame({"pts": PackedVector2Array(), "modes": PackedByteArray(), "ahead": MiniMap.MIN_AHEAD, "next": {}})
 
 
 ## The arm: a satin tube from a flange on the port console's nose up to a boss on the pod's back.
 ## Built in the rig's frame (the node under it undoes this panel's own placement).
-func _arm() -> void:
+func _arm(fleet_cockpit: bool) -> void:
 	var to_rig := transform
 	var boss: Vector3 = to_rig * Vector3(-0.045, -0.085, -0.058)
 	var away: Vector3 = -to_rig.basis.z.normalized()
 	var p := [ARM_FOOT, ARM_FOOT + Vector3(0, 0.07, 0), boss + away * 0.06, boss]
 	const STEPS := 14
-	const SIDES := 10
+	var sides := 16 if fleet_cockpit else 10
 	const RADIUS := 0.011
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
@@ -300,15 +300,15 @@ func _arm() -> void:
 		var at: Vector3 = u * u * u * p[0] + 3.0 * u * u * t * p[1] + 3.0 * u * t * t * p[2] + t * t * t * p[3]
 		var along: Vector3 = (3.0 * u * u * (p[1] - p[0]) + 6.0 * u * t * (p[2] - p[1]) + 3.0 * t * t * (p[3] - p[2])).normalized()
 		side = (side - along * side.dot(along)).normalized()   # carried along the tube, so it does not twist
-		var other := along.cross(side)
+		var other := side.cross(along) if fleet_cockpit else along.cross(side)
 		var ring := []
-		for s in SIDES:
-			var a := TAU * s / SIDES
+		for s in sides:
+			var a := TAU * s / sides
 			ring.append([at, side * cos(a) + other * sin(a)])
 		rings.append(ring)
 	for k in STEPS:
-		for s in SIDES:
-			var s1 := (s + 1) % SIDES
+		for s in sides:
+			var s1 := (s + 1) % sides
 			for corner in [[k, s], [k + 1, s1], [k + 1, s], [k, s], [k, s1], [k + 1, s1]]:
 				var v: Array = rings[corner[0]][corner[1]]
 				st.set_normal(v[1])

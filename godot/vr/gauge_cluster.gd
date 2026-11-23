@@ -190,8 +190,8 @@ func _add(mesh: Mesh, mat: Material, name: String) -> MeshInstance3D:
 
 
 ## A quad from four corners given anticlockwise as the pilot sees them (Godot fronts are clockwise).
-func _quad(st: SurfaceTool, xf: Transform3D, p: Array, n: Array, uv: Array, colour: Color) -> void:
-	for k in [0, 2, 1, 0, 3, 2]:
+func _quad(st: SurfaceTool, xf: Transform3D, p: Array, n: Array, uv: Array, colour: Color, centre_fan := false) -> void:
+	for k in ([0, 2, 1] if centre_fan else [0, 2, 1, 0, 3, 2]):
 		var local: Vector3 = p[k]
 		st.set_normal(xf.basis * (n[k] as Vector3))
 		st.set_uv(uv[k])
@@ -233,7 +233,7 @@ func _build_faces() -> void:
 					n.append(Vector3(-cos(a) * Layout.CHAPTER, -sin(a) * Layout.CHAPTER, 0.03 * rf).normalized() if k == 3 else Vector3(0, 0, 1))
 					uv.append(Vector2(g.uv[0] + r * cos(a) * g.uv[2], g.uv[1] - r * sin(a) * g.uv[2]))
 					shade += 0.25 * (0.92 - 0.42 * pow(r, 3.0))   # the tube's wall shades the dial's edge
-				_quad(st, xf, p, n, uv, Color(shade, 0.0, gi / 8.0, 0.0))
+				_quad(st, xf, p, n, uv, Color(shade, 0.0, gi / 8.0, 0.0), flight_deck != null and k == 0)
 	for t in Layout.TELLTALES:
 		var g: Dictionary = gauges[t[1]]
 		_tile(st, Kit.on_arc(g.x, g.y, 0.0, R), Vector2(t[2], t[3]) * g.rf, Vector2(t[4], t[5]) * g.rf * 0.5, g.face + 0.0003, t[6], t[1], _lamp_index[t[0]], 0.0)
@@ -276,6 +276,8 @@ func _build_faces() -> void:
 		var nd: Array = Layout.NEEDLES[i]
 		shadows[i] = Vector4(nd[1], 0.0, 0.0, nd[4] * gauges[nd[1]].rf)
 	_face_mat.set_shader_parameter("needle", shadows)
+	if flight_deck:
+		st.index()
 	_add(st.commit(), _face_mat, "dials")
 
 
@@ -419,7 +421,8 @@ static func g_text(pull: float) -> String:
 
 
 func _build_glass() -> void:
-	const RINGS := 10
+	# Seven radial steps keep the largest fleet lens within 0.1 mm of its spherical profile.
+	var rings := 7 if flight_deck else 10
 	const SEG := 64
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
@@ -430,14 +433,19 @@ func _build_glass() -> void:
 		var rc := (a * a + rise * rise) / (2.0 * rise)   # the dome's radius of curvature
 		var edge := asin(a / rc)
 		var rim: float = g.mouth - Layout.SEAT
-		for i in RINGS:
+		for i in rings:
 			for s in SEG:
-				for corner in [[i, s], [i + 1, s + 1], [i + 1, s], [i, s], [i, s + 1], [i + 1, s + 1]]:
-					var th: float = edge * corner[0] / RINGS
+				var corners := [[i, s], [i + 1, s + 1], [i + 1, s]]
+				if i != 0 or not flight_deck:
+					corners.append_array([[i, s], [i, s + 1], [i + 1, s + 1]])
+				for corner in corners:
+					var th: float = edge * corner[0] / rings
 					var ph: float = TAU * corner[1] / SEG
 					var n := Vector3(sin(th) * cos(ph), sin(th) * sin(ph), cos(th))
 					st.set_normal(xf.basis * n)
 					st.add_vertex(xf * (n * rc + Vector3(0, 0, rim - rc * cos(edge))))
+	if flight_deck:
+		st.index()
 	var mat := _unlit("res://vr/gauge_glass.gdshader")
 	mat.set_shader_parameter("up_local", mount().basis.inverse() * Vector3.UP)
 	_add(st.commit(), mat, "glass")

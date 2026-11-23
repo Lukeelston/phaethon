@@ -88,7 +88,7 @@ func _batched_mesh() -> ArrayMesh:
 	for group in [[panels, Finish.powder_coat()], [trim, Finish.satin()], [facing, Finish.deck_finish(DECK_MATERIAL[id])]]:
 		var pieces: Array = group[0]
 		if not pieces.is_empty():
-			Kit.compound(pieces, mesh)
+			Kit.compound(pieces, mesh, true)
 			mesh.surface_set_material(mesh.get_surface_count() - 1, group[1])
 			pieces.clear()
 	return mesh
@@ -101,11 +101,80 @@ func _flush(parent: Node3D, label: String) -> void:
 	parent.add_child(node)
 
 
-func _bar(parts: Array, a: Vector3, b: Vector3, radius: float, colour: Color, sides := 12) -> void:
-	var axis := b - a
-	var across := axis.cross(Vector3.FORWARD if absf(axis.normalized().z) < .9 else Vector3.RIGHT).normalized()
-	var basis := Basis(across, axis.normalized(), across.cross(axis.normalized()))
-	parts.append([Kit.cyl(radius, radius, axis.length(), sides), Transform3D(basis, (a + b) * .5), colour])
+## A continuous bent tube with a rolled end on each exposed cut. Ring frames
+## follow the spine, so a bent grab handle has no capped-cylinder joints.
+func _tube(parts: Array, path: Array, radius: float, colour: Color) -> void:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var sides := 16 if radius > .008 else 12
+	var lip := minf(radius * .22, path[0].distance_to(path[1]) * .25)
+	lip = minf(lip, path.back().distance_to(path[-2]) * .25)
+	var previous := []
+	var previous_normals := []
+	var across := Vector3.ZERO
+	for i in path.size():
+		var centre: Vector3 = path[i]
+		var tangent: Vector3 = (path[mini(i + 1, path.size() - 1)] - path[maxi(i - 1, 0)]).normalized()
+		if i == 0:
+			across = tangent.cross(Vector3.UP if absf(tangent.y) < .9 else Vector3.RIGHT)
+		across = across.slide(tangent).normalized()
+		var around := tangent.cross(across)
+		var end_sign := -1 if i == 0 else (1 if i == path.size() - 1 else 0)
+		var count := (3 if radius > .008 else 2) if end_sign != 0 else 1
+		for step in count:
+			var angle := 0.0
+			if end_sign != 0:
+				angle = PI * .5 * float(count - 1 - step if end_sign < 0 else step) / (count - 1)
+			var ring_centre := centre - end_sign * tangent * lip * (1 - sin(angle))
+			var ring := []
+			var normals := []
+			for j in sides:
+				var theta := TAU * j / sides
+				var radial := across * cos(theta) + around * sin(theta)
+				ring.append(ring_centre + radial * (radius - lip + lip * cos(angle)))
+				normals.append(radial * cos(angle) + end_sign * tangent * sin(angle))
+			for j in sides:
+				var k := (j + 1) % sides
+				if not previous.is_empty():
+					_smooth_quad(st, [previous[j], ring[j], ring[k], previous[k]],
+						[previous_normals[j], normals[j], normals[k], previous_normals[k]])
+				if angle > 1.56:
+					Finish._triangle(st, ring_centre, ring[j], ring[k], end_sign * tangent)
+			previous = ring
+			previous_normals = normals
+	parts.append([st.commit(), Transform3D.IDENTITY, colour])
+
+
+func _bar(parts: Array, a: Vector3, b: Vector3, radius: float, colour: Color) -> void:
+	_tube(parts, [a, b], radius, colour)
+
+
+## Quadratic tangent returns retain the designed silhouette through each bend.
+## Subdivide long spans in the flat pattern before wrapping it onto the dash.
+func _rounded_path(stations: Array, setback: float, spacing := .045) -> Array:
+	var bends := [stations[0]]
+	for i in range(1, stations.size() - 1):
+		var at: Vector3 = stations[i]
+		var incoming: Vector3 = stations[i - 1] - at
+		var outgoing: Vector3 = stations[i + 1] - at
+		if incoming.normalized().dot(outgoing.normalized()) < -.997:
+			bends.append(at)
+			continue
+		var cut := minf(setback, minf(incoming.length(), outgoing.length()) * .36)
+		var a := at + incoming.normalized() * cut
+		var b := at + outgoing.normalized() * cut
+		for j in 5:
+			var t := j * .25
+			bends.append(a.lerp(at, t).lerp(at.lerp(b, t), t))
+	bends.append(stations.back())
+	var path := [bends[0]]
+	for i in range(1, bends.size()):
+		var a: Vector3 = bends[i - 1]
+		var b: Vector3 = bends[i]
+		var count := maxi(1, ceili(a.distance_to(b) / spacing))
+		for j in range(1,count + 1):
+			path.append(a.lerp(b, float(j) / count))
+	return path
 
 
 func _arc(x: float, y: float, z: float) -> Vector3:
@@ -130,6 +199,18 @@ func _profile(stations: Array, depth: float, colour: Color, thickness := .032) -
 	var ordered := stations.duplicate()
 	if ordered.front().x > ordered.back().x:
 		ordered.reverse()
+	ordered = _rounded_path(ordered, .012)
+	# Roll the cut ends as well as the long upper and lower edges. Closely
+	# spaced slices fit a quarter circle tangent to both the cap and the face.
+	var end_radius := minf(.003, minf(ordered[1].x - ordered[0].x, ordered[-1].x - ordered[-2].x) * .75)
+	var first: Vector3 = ordered.front()
+	var last: Vector3 = ordered.back()
+	var first_slope: Vector3 = (ordered[1] - first) / (ordered[1].x - first.x)
+	var last_slope: Vector3 = (last - ordered[-2]) / (last.x - ordered[-2].x)
+	for step in range(1,5):
+		var offset := end_radius * (1.0 - cos(PI * .125 * step))
+		ordered.insert(step, first + first_slope * offset)
+		ordered.insert(ordered.size() - step, last - last_slope * offset)
 	var previous: Array[Vector3] = []
 	var previous_normals: Array[Vector3] = []
 	for k in ordered.size():
@@ -138,6 +219,10 @@ func _profile(stations: Array, depth: float, colour: Color, thickness := .032) -
 		var frame := Kit.on_arc(station.x, 0, depth, Layout.R)
 		var ring: Array[Vector3] = []
 		var normals: Array[Vector3] = []
+		var end_weight := 1.0 - clampf(minf(station.x - first.x, last.x - station.x) / end_radius, 0, 1)
+		var face_weight := sqrt(maxf(0.0, 1.0 - end_weight * end_weight))
+		var inset := end_radius * (1.0 - face_weight)
+		var end_normal := Vector3.LEFT if station.x < (first.x + last.x) * .5 else Vector3.RIGHT
 		var radius := minf(.004, (station.z - station.y) * .24)
 		# Start on the lower back edge and travel round the face to the upper back.
 		for side: float in [-1.0, 1.0]:
@@ -147,10 +232,11 @@ func _profile(stations: Array, depth: float, colour: Color, thickness := .032) -
 			for step in 5:
 				var index := step if side < 0 else 4 - step
 				var angle := PI * .5 * maxf(index - 1, 0) / 3
-				var y := height - side * radius * (1 - cos(angle))
-				var z := depth - thickness if index == 0 else depth - radius + radius * sin(angle)
+				var y := height - side * (inset + radius * (1 - cos(angle)))
+				var z := depth - thickness + inset if index == 0 else depth - inset - radius + radius * sin(angle)
 				ring.append(_arc(station.x, y, z))
-				normals.append((frame.basis * (edge * cos(angle) + FRONT * sin(angle))).normalized())
+				var across := (edge * cos(angle) + FRONT * sin(angle)).normalized()
+				normals.append((frame.basis * (across * face_weight + end_normal * end_weight)).normalized())
 		if not previous.is_empty():
 			for i in ring.size() - 1:
 				var j := i + 1
@@ -167,10 +253,13 @@ func _profile(stations: Array, depth: float, colour: Color, thickness := .032) -
 
 
 func _line(stations: Array, z: float, radius: float, colour: Color) -> void:
-	for i in range(1, stations.size()):
-		var a: Vector2 = stations[i - 1]
-		var b: Vector2 = stations[i]
-		_bar(trim, _arc(a.x, a.y, z), _arc(b.x, b.y, z), radius, colour)
+	var flat := []
+	for point: Vector2 in stations:
+		flat.append(Vector3(point.x, point.y, z))
+	var path := []
+	for point: Vector3 in _rounded_path(flat, .014):
+		path.append(_arc(point.x, point.y, z))
+	_tube(trim, path, radius, colour)
 
 
 func _dial(g: Dictionary) -> void:
@@ -222,22 +311,67 @@ func _dial(g: Dictionary) -> void:
 	panels.append([dark.commit(), frame, INK])
 	trim.append([metal.commit(), frame, accent if id in [P.ORRERY, P.VESPER] else STEEL])
 	# Hub over the two needle roots.
-	trim.append(
-		[Kit.cyl(g.rf * .065, g.rf * .075, .006, 16), frame * Kit.at(Vector3(0, 0, g.face + .009), FACE_UP), DARK]
-	)
+	_bar(trim, frame * Vector3(0, 0, g.face + .006), frame * Vector3(0, 0, g.face + .012), g.rf * .071, DARK)
+
+
+## A formed LCD tray. The glass overlaps the inner ledge and sits below the
+## rolled lip. All section dimensions are measured from the edge of the glass.
+func _lcd_tray(half_size: Vector2, glass_z: float) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var corner_centres := half_size - Vector2.ONE * .0035
+	var outline := PackedVector2Array()
+	var radial := PackedVector2Array()
+	for corner in 4:
+		var start := corner * PI * .5
+		var centre := Vector2.from_angle(start + PI * .25).sign() * corner_centres
+		for step in 5:
+			var direction := Vector2.from_angle(start + step * PI / 8)
+			outline.append(centre + direction * .0035)
+			radial.append(direction)
+	# Cross section (distance outside glass, height relative to glass). The lower
+	# rim lands on the carrier. Millimetre-scale rolls soften both edges of the lip.
+	var profile := PackedVector2Array([
+		Vector2(-.0016,-.00015), Vector2(-.0006,-.00015), Vector2(.0001,.00025),
+		Vector2(.0010,.00175), Vector2(.0016,.00235), Vector2(.0025,.0026),
+		Vector2(.0054,.0026), Vector2(.0064,.00235), Vector2(.0071,.00165),
+		Vector2(.0074,.0006), Vector2(.0074,-.0225), Vector2(.0070,-.0236),
+		Vector2(.0060,-.0240)])
+	var rings := []
+	var normals := []
+	for row in profile.size():
+		var tangent := Vector2.ZERO
+		if row > 0:
+			tangent += profile[row - 1].direction_to(profile[row])
+		if row + 1 < profile.size():
+			tangent += profile[row].direction_to(profile[row + 1])
+		var normal := tangent.normalized().orthogonal() * -1
+		var points := PackedVector3Array()
+		var directions := PackedVector3Array()
+		for index in outline.size():
+			var xy := outline[index] + radial[index] * profile[row].x
+			points.append(Vector3(xy.x, xy.y, glass_z + profile[row].y))
+			directions.append(Vector3(radial[index].x * normal.x, radial[index].y * normal.x, normal.y))
+		rings.append(points)
+		normals.append(directions)
+		if row == 0:
+			continue
+		for index in outline.size():
+			var next := (index + 1) % outline.size()
+			_smooth_quad(st, [rings[row-1][index], rings[row-1][next], points[next], points[index]],
+					[normals[row-1][index], normals[row-1][next], directions[next], directions[index]])
+	# Close the rear of the tray. The front aperture stays open around the display.
+	var back: PackedVector3Array = rings.back()
+	for i in back.size():
+		Finish._triangle(st, Vector3(0,0,back[i].z), back[i], back[(i+1) % back.size()], -FRONT)
+	st.index()
+	return st.commit()
 
 
 func fit_cluster(parent: Node3D, gauges: Array) -> void:
-	# Independent lower trays carry the unchanged LCDs. Keep their frames outside the active glass.
 	for w in Layout.WINDOWS:
 		var mount := Kit.on_arc(w[1], w[2], 0, Layout.R)
-		panels.append(
-			[
-				Finish.beveled_plate(Vector3(w[3] * 2 + .015, .022, w[4] * 2 + .014), .002),
-				mount * Kit.at(Vector3(0, 0, .003), FACE_UP),
-				DARK
-			]
-		)
+		panels.append([_lcd_tray(Vector2(w[3], w[4]), w[5] + .0006), mount, DARK])
 	match id:
 		P.SHRIKE:
 			# A light sprint rack: individual pods on a triangulated vermilion frame.
@@ -319,16 +453,16 @@ func fit_cluster(parent: Node3D, gauges: Array) -> void:
 					Vector3(-.466, -.062, .041),
 					Vector3(-.39, -.078, .132),
 					Vector3(-.246, -.052, .143),
-					Vector3(-.183, -.024, .080)
+					Vector3(-.189, -.024, .080)
 				],
 				[
 					Vector3(-.186, -.084, .025),
 					Vector3(-.14, -.072, .080),
 					Vector3(.146, -.039, .119),
-					Vector3(.203, -.013, .082)
+					Vector3(.186, -.013, .082)
 				],
 				[
-					Vector3(.186, -.067, -.008),
+					Vector3(.191, -.067, -.008),
 					Vector3(.233, -.055, .062),
 					Vector3(.396, -.012, .122),
 					Vector3(.462, .032, .127)
@@ -349,24 +483,26 @@ func fit_cluster(parent: Node3D, gauges: Array) -> void:
 func _punched_bay() -> ArrayMesh:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	for j in 32:
-		var rings := []
-		for k in [j, j + 1]:
-			var d := Vector2.from_angle(TAU * k / 32.0 + PI * .25)
-			var edge := d / maxf(absf(d.x), absf(d.y))
-			rings.append(
-				[
-					Vector3(edge.x * .074, .008, edge.y * .087),
-					Vector3(d.x * .035, .008, d.y * .035),
-					Vector3(d.x * .030, .005, d.y * .030),
-					Vector3(d.x * .030, .001, d.y * .030)
-				]
-			)
-		var inward: Vector3 = -rings[0][1]
-		inward.y = 0
-		for i in 3:
-			var normal := Vector3.UP if i == 0 else (inward.normalized() + Vector3.UP if i == 1 else inward)
-			Finish._quad(st, rings[0][i], rings[1][i], rings[1][i + 1], rings[0][i + 1], normal)
+	var previous := []
+	var previous_normals := []
+	for j in 25:
+		var direction := Vector2.from_angle(TAU * (j % 24) / 24.0 + PI * .25)
+		var edge := direction / maxf(absf(direction.x), absf(direction.y))
+		var radial := Vector3(direction.x, 0, direction.y)
+		var ring := [Vector3(edge.x * .074, .008, edge.y * .087)]
+		var normals := [Vector3.UP]
+		for k in 4:
+			var angle := PI * k / 6.0
+			ring.append(radial * (.035 - .005 * sin(angle)) + Vector3.UP * (.003 + .005 * cos(angle)))
+			normals.append(Vector3.UP * cos(angle) - radial * sin(angle))
+		ring.append(radial * .030 + Vector3.UP * .001)
+		normals.append(-radial)
+		if j > 0:
+			for k in ring.size() - 1:
+				_smooth_quad(st, [previous[k], ring[k], ring[k + 1], previous[k + 1]],
+					[previous_normals[k], normals[k], normals[k + 1], previous_normals[k + 1]])
+		previous = ring
+		previous_normals = normals
 	return st.commit()
 
 
@@ -385,9 +521,9 @@ func _floor() -> ArrayMesh:
 					var z := -.348 + j * .174
 					for dx in [-.074, .074]:
 						trim.append([bay, Kit.at(Vector3(cx + dx, .145, z)), Color("#596169")])
-					panels.append([Kit.box(Vector3(.277, .003, .008)), Kit.at(Vector3(cx, .154, z + .064)), DARK])
+					panels.append([Finish.beveled_plate(Vector3(.277, .003, .008)), Kit.at(Vector3(cx, .154, z + .064)), DARK])
 				trim.append(
-					[Kit.box(Vector3(.007, .005, .84)), Kit.at(Vector3(cx + .158 * side, .147, 0)), accent]
+					[Finish.beveled_plate(Vector3(.007, .005, .84), .001), Kit.at(Vector3(cx + .158 * side, .147, 0)), accent]
 				)
 			P.ORRERY:
 				# Oiled slats with a black seam between boards and brass end straps.
@@ -398,12 +534,12 @@ func _floor() -> ArrayMesh:
 						[Finish.beveled_plate(Vector3(.063, .008, .954)), Kit.at(Vector3(x, .148, 0)), colour]
 					)
 				for z in [-.449, .449]:
-					trim.append([Kit.box(Vector3(.343, .003, .020)), Kit.at(Vector3(cx, .154, z)), accent])
+					trim.append([Finish.beveled_plate(Vector3(.343, .003, .020)), Kit.at(Vector3(cx, .1535, z)), accent])
 			P.KILN:
 				# Bar grating over the dark drain pan. The backing remains visible through every slot.
 				for j in 5:
 					trim.append(
-						[Kit.box(Vector3(.008, .007, .915)), Kit.at(Vector3(cx + (j - 2) * .072, .147, 0)), STEEL]
+						[Finish.beveled_plate(Vector3(.008, .007, .915), .001), Kit.at(Vector3(cx + (j - 2) * .072, .147, 0)), STEEL]
 					)
 				for j in 15:
 					trim.append(
@@ -414,7 +550,7 @@ func _floor() -> ArrayMesh:
 						]
 					)
 				for z in [-.477, .477]:
-					panels.append([Kit.box(Vector3(.336, .004, .029)), Kit.at(Vector3(cx, .147, z)), accent])
+					panels.append([Finish.beveled_plate(Vector3(.336, .004, .029)), Kit.at(Vector3(cx, .147, z)), accent])
 			P.VESPER:
 				# Three flush longitudinal runners taper toward the toe.
 				for j in 3:
@@ -428,8 +564,8 @@ func _floor() -> ArrayMesh:
 		for edge in [-1, 1]:
 			trim.append(
 				[
-					Kit.box(Vector3(.014, .003, .267)),
-					Kit.at(Vector3(side * .46 + edge * .034, .1435, .2035)),
+					Finish.beveled_plate(Vector3(.014, .003, .267)),
+					Kit.at(Vector3(side * .46 + edge * .034, .1415, .2035)),
 					STEEL
 				]
 			)
@@ -461,8 +597,60 @@ func _glare_shield_return(interior: Node3D) -> void:
 	panels.append([st.commit(), Transform3D.IDENTITY, upholstery])
 
 
-## Welt on the pilot-facing side of the actual fitted coaming. A shallow channel
-## runs under each row of thread. The end of each stitch enters the leather.
+const WELT_STEPS := 6
+
+## Contact and normal for one point on the rolled leather section. The same
+## section revolves through a half circle at each end, like the toe of a cushion.
+func _welt_band(shell: TriangleMesh, frame: Transform3D, radial: Vector3, step: int, groove: float) -> Array:
+	var angle := PI * .5 * step / WELT_STEPS
+	var width := .013 * sin(angle)
+	var dent := (width - groove) / .0015
+	var depression := .00055 * exp(-dent * dent)
+	var crown := .0058 * cos(angle) - .0008 - depression
+	var at := frame.origin + radial * width
+	var sample := shell.intersect_ray(at + frame.basis.z * .025, -frame.basis.z)
+	var base: Vector3 = sample.get("position", at)
+	var normal: Vector3 = sample.get("normal", frame.basis.z)
+	# A raised coaming strap can present a near-vertical wall to the sampler.
+	# Use the cheek's outward axis for padding thickness, including over straps.
+	var dw := .013 * cos(angle)
+	var dh := -.0058 * sin(angle) + 2.0 * dent * depression * dw / .0015
+	var surface_normal := (normal * dw - radial * dh).normalized()
+	return [base + frame.basis.z * crown, surface_normal]
+
+
+func _welt_cap(skin: SurfaceTool, shell: TriangleMesh, frame: Transform3D, direction: float, groove: float) -> void:
+	var previous := []
+	for i in 13:
+		var angle := PI * i / 12
+		var radial := frame.basis.y * cos(angle) + frame.basis.x * direction * sin(angle)
+		var ring := []
+		for j in WELT_STEPS + 1:
+			ring.append(_welt_band(shell, frame, radial, j, groove))
+		if i > 0:
+			# The centre is one vertex, so the innermost band is a fan.
+			_soft_triangle(skin, previous[0], previous[1], ring[1])
+			for j in range(1, WELT_STEPS):
+				_soft_quad(skin, previous[j], ring[j], ring[j + 1], previous[j + 1])
+		previous = ring
+
+
+func _soft_triangle(st: SurfaceTool, a: Array, b: Array, c: Array) -> void:
+	var normal: Vector3 = a[1] + b[1] + c[1]
+	var edge: Vector3 = b[0] - a[0]
+	var order := [a, c, b] if edge.cross(c[0] - a[0]).dot(normal) >= 0 else [a, b, c]
+	for vertex: Array in order:
+		st.set_normal(vertex[1])
+		st.add_vertex(vertex[0])
+
+
+func _soft_quad(st: SurfaceTool, a: Array, b: Array, c: Array, d: Array) -> void:
+	_soft_triangle(st, a, b, c)
+	_soft_triangle(st, a, c, d)
+
+
+## Welt on the pilot-facing side of the actual fitted coaming. Both long sides
+## turn into the shell under the stitches and the leather rolls around the ends.
 func fit_stitched_rim(rim: MeshInstance3D) -> void:
 	var shell := rim.mesh.generate_triangle_mesh()
 	if shell == null:
@@ -473,69 +661,58 @@ func fit_stitched_rim(rim: MeshInstance3D) -> void:
 	var thread := _stitch_mesh()
 	var yarn := accent.lerp(Color("#c6b397"), .54)
 	var double_row := id in [P.ORRERY, P.VESPER]
+	var groove := .0065 if double_row else 0.0
+	# Shrike's segmented coaming has a 12 mm joint here. Turn both pieces
+	# back onto their own cushion before the moulded shell drops away.
+	var spans := [Vector2(.293, .320), Vector2(.370, .498)] if id == P.SHRIKE else [Vector2(.293, .498)]
 	for side: float in [-1, 1]:
-		var previous := []
-		var previous_normals := []
-		var tracks := [Curve3D.new(), Curve3D.new()]
-		# Across the seam in metres: turned edge, crown, compressed stitch
-		# channel, centre, and the matching return along the opposite edge.
-		var section := [Vector2(-.013,-.001), Vector2(-.012,.0018), Vector2(-.009,.0038),
-			Vector2(-.006,.0028), Vector2(0,.0042), Vector2(.006,.0028),
-			Vector2(.009,.0038), Vector2(.012,.0018), Vector2(.013,-.001)]
-		for i in 33:
-			var t := i / 32.0
-			var x := side * lerpf(.282, .508, t)
-			var y := (.597 - .010 * t) if id == P.SHRIKE else (.593 + .005 * t)
-			var hit := shell.intersect_ray(Vector3(x, y, 0), Vector3.FORWARD)
-			if hit.is_empty():
-				continue
-			var centre: Vector3 = hit.position
-			var normal: Vector3 = hit.normal
-			var up := Vector3.UP.slide(normal).normalized()
-			var end_scale := smoothstep(0, .075, minf(t, 1 - t))
-			var row := []
-			for yz: Vector2 in section:
-				var across := centre + up * yz.x * lerpf(.24, 1, end_scale)
-				var contact := shell.intersect_ray(across + normal * .03, -normal)
-				var base: Vector3 = contact.get("position", across)
-				var facing_out: Vector3 = contact.get("normal", normal)
-				row.append(base + facing_out * lerpf(-.0008, yz.y, end_scale))
-			var normals := []
-			var along := Vector3.UP.cross(normal).normalized()
-			for j in row.size():
-				var across: Vector3 = row[mini(j + 1, row.size()-1)] - row[maxi(j-1, 0)]
-				normals.append(along.cross(across).normalized())
-			if not previous.is_empty():
-				for j in section.size() - 1:
-					var k := j + 1
-					_smooth_quad(skin, [previous[j], row[j], row[k], previous[k]],
-						[previous_normals[j], normals[j], normals[k], previous_normals[k]])
-			if i >= 2 and i <= 30:
-				tracks[0].add_point(row[3] if double_row else row[4])
-				tracks[1].add_point(row[5])
-			previous = row
-			previous_normals = normals
-		for row_index in (2 if double_row else 1):
-			var path: Curve3D = tracks[row_index]
-			path.bake_interval = .002
-			var length := path.get_baked_length()
-			var count := floori(length / .0072)
-			for i in count:
-				var distance := (i + .5) * length / count
-				var start := path.sample_baked(distance - .0025)
-				var end := path.sample_baked(distance + .0025)
-				var along := start.direction_to(end)
-				var middle := (start + end) * .5
-				var hit := shell.intersect_ray(Vector3(middle.x, middle.y, 0), Vector3.FORWARD)
-				var support: Vector3 = hit.get("normal", along.cross(Vector3.UP) * side)
-				var out := support.slide(along).normalized()
-				var up := out.cross(along).normalized()
-				stitches.append([thread, Transform3D(Basis(along, up, out), middle), yarn])
+		for span: Vector2 in spans:
+			var previous := []
+			var tracks := [Curve3D.new(), Curve3D.new()]
+			var intervals := ceili((span.y - span.x) / .008)
+			for i in intervals + 1:
+				var x := side * lerpf(span.x, span.y, float(i) / intervals)
+				var t := (absf(x) - .293) / .205
+				var y := (.597 - .010 * t) if id == P.SHRIKE else (.593 + .005 * t)
+				var hit := shell.intersect_ray(Vector3(x, y, 0), Vector3.FORWARD)
+				if hit.is_empty():
+					continue
+				var normal: Vector3 = hit.normal
+				var up := Vector3.UP.slide(normal).normalized()
+				var frame := Transform3D(Basis(up.cross(normal), up, normal), hit.position)
+				var row := []
+				for j in range(-WELT_STEPS, WELT_STEPS + 1):
+					row.append(_welt_band(shell, frame, -up if j < 0 else up, absi(j), groove))
+				if not previous.is_empty():
+					for j in row.size() - 1:
+						_soft_quad(skin, previous[j], row[j], row[j + 1], previous[j + 1])
+				if i == 0 or i == intervals:
+					_welt_cap(skin, shell, frame, -side if i == 0 else side, groove)
+				tracks[0].add_point(row[WELT_STEPS - 2 if double_row else WELT_STEPS][0])
+				tracks[1].add_point(row[WELT_STEPS + 2][0])
+				previous = row
+			for row_index in (2 if double_row else 1):
+				var path: Curve3D = tracks[row_index]
+				path.bake_interval = .002
+				var length := path.get_baked_length()
+				var count := floori(length / .0072)
+				for i in count:
+					var distance := (i + .5) * length / count
+					var start := path.sample_baked(distance - .0025)
+					var end := path.sample_baked(distance + .0025)
+					var along := start.direction_to(end)
+					var middle := (start + end) * .5
+					var hit := shell.intersect_ray(Vector3(middle.x, middle.y, 0), Vector3.FORWARD)
+					var support: Vector3 = hit.get("normal", along.cross(Vector3.UP) * side)
+					var out := support.slide(along).normalized()
+					var up := out.cross(along).normalized()
+					stitches.append([thread, Transform3D(Basis(along, up, out), middle), yarn])
 	if stitches.is_empty():
 		return
+	skin.index()
 	var mesh := skin.commit()
 	mesh.surface_set_material(0, Finish.tinted("leather", upholstery))
-	Kit.compound(stitches, mesh)
+	Kit.compound(stitches, mesh, true)
 	mesh.surface_set_material(1, Finish.webbing())
 	var pad := MeshInstance3D.new()
 	pad.name = "StitchedWelt"
@@ -550,8 +727,8 @@ func _stitch_mesh() -> ArrayMesh:
 	var previous_normals := []
 	# Each curved strand narrows into the punctures. Smooth normals carry the
 	# highlight along its crown even when the light grazes the leather.
-	for i in 7:
-		var t := i / 6.0
+	for i in 6:
+		var t := i / 5.0
 		var arch := sin(PI * t)
 		var centre := Vector3(lerpf(-.0025,.0025,t), lerpf(-.00028,.00028,t), -.00065 + .0014 * arch)
 		var axis := Vector3(.005, .00056, .0014 * PI * cos(PI * t)).normalized()
@@ -559,14 +736,14 @@ func _stitch_mesh() -> ArrayMesh:
 		var outward := axis.cross(across)
 		var row := []
 		var normals := []
-		for j in 6:
-			var angle := TAU * j / 6
+		for j in 5:
+			var angle := TAU * j / 5
 			var normal := across * cos(angle) + outward * sin(angle)
 			normals.append(normal)
 			row.append(centre + normal * lerpf(.00032, .00059, arch))
 		if not previous.is_empty():
-			for j in 6:
-				var k := (j + 1) % 6
+			for j in 5:
+				var k := (j + 1) % 5
 				_smooth_quad(st, [previous[j], row[j], row[k], previous[k]],
 					[previous_normals[j], normals[j], normals[k], previous_normals[k]])
 		previous = row
@@ -610,18 +787,17 @@ func fit_cabin(interior: Node3D) -> void:
 						Vector3(s * .72, .476, z + .215),
 						Vector3(s * .706, .408, z + .241)
 					]
-					for k in 3:
-						_bar(trim, rail[k], rail[k + 1], .016, accent)
+					_tube(trim, _rounded_path(rail, .030, .30), .016, accent)
 					_bar(panels, rail[1].lerp(rail[2], .15), rail[1].lerp(rail[2], .85), .020, DARK)
 			P.VESPER:
 				for k in 3:
 					var z := -.15 + k * .24
 					panels.append(
 						[
-							Kit.rounded_box(Vector3(.044, .066, .224), 4.0, 8),
-							Kit.at(Vector3(s * .724, .449, z + .13), Vector3(-.15, 0, s * .18)),
+							Finish.beveled_plate(Vector3(.044, .066, .224), .009),
+							Kit.at(Vector3(s * .736, .449, z + .13), Vector3(-.15, 0, s * .18)),
 							paint
 						]
 					)
-					_bar(trim, Vector3(s * .699, .438, z + .032), Vector3(s * .699, .463, z + .228), .0035, accent)
+					_bar(trim, Vector3(s * .711, .438, z + .032), Vector3(s * .711, .463, z + .228), .0035, accent)
 	_flush(interior, "SillFittings")

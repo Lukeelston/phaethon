@@ -141,17 +141,92 @@ func check_fleet(game, id: String, vr: bool) -> void:
 	game.inp = previous
 
 
+## Measure the cast lip on the installed binnacle, relative to each LCD's glass.
+func check_lcd_trays(cluster, id: String) -> void:
+	var frame_mesh: Mesh = cluster.get_node("binnacle").mesh
+	var surface := frame_mesh.generate_triangle_mesh()
+	var seated := true
+	for w in cluster.Layout.WINDOWS:
+		var frame: Transform3D = cluster.Kit.on_arc(w[1], w[2], 0, cluster.R)
+		var glass_z: float = w[5] + .0006
+		for side in [-1.0, 1.0]:
+			var ray := Vector3(side * (w[3] + .004), 0, glass_z + .015)
+			var hit := surface.intersect_ray(frame * ray, -frame.basis.z)
+			if hit.is_empty():
+				seated = false
+				continue
+			var height: float = (frame.affine_inverse() * Vector3(hit.position)).z - glass_z
+			seated = seated and height > .002 and height < .003
+	check(id + " both LCDs sit inside their rolled metal edges", seated)
+
+
+## The covers may be hollow. Trace under the middle of each skirt edge, where
+## the lens seats, and check that its illuminated crown stands clear of the grip.
+func check_grip_lenses(game, id: String) -> void:
+	var fitted := true
+	for lever: Node3D in game.lever_pivots:
+		var grip: MeshInstance3D = lever.get_node("PilotGrip")
+		var lens: MeshInstance3D = grip.get_node("GateIndicator")
+		# Probe in lens-space millimetres so the ray epsilon cannot skip its seat.
+		var faces := grip.mesh.get_faces()
+		var into_lens := lens.transform.affine_inverse()
+		for i in faces.size():
+			faces[i] = (into_lens * faces[i]) * 1000
+		var support := TriangleMesh.new()
+		support.create_from_faces(faces)
+		var bounds := lens.mesh.get_aabb()
+		for offset in [Vector2(.475, 0), Vector2(-.475, 0), Vector2(0, .475), Vector2(0, -.475)]:
+			var ray := bounds.get_center() + Vector3(offset.x * bounds.size.x, .045, offset.y * bounds.size.z)
+			var hit := support.intersect_ray(ray * 1000, Vector3.DOWN)
+			if hit.is_empty():
+				fitted = false
+				continue
+			var contact_y: float = hit.position.y
+			fitted = fitted and contact_y >= bounds.position.y * 1000 - .3 \
+					and contact_y < bounds.end.y * 1000 - .5
+	check(id + " both illuminated grip caps are seated and exposed", fitted)
+
+
+func check_throttle_boots(game, id: String) -> void:
+	var previous: Dictionary = game.inp.duplicate()
+	var seated: bool = game.throttle_gaiters.size() == 2
+	for demand in [Vector2(0, 1), Vector2(.5, .5), Vector2(1, 0)]:
+		game.inp.thrL = demand.x
+		game.inp.thrR = demand.y
+		game._place_camera(1.0)
+		for k in game.throttle_gaiters.size():
+			var boot: Skeleton3D = game.throttle_gaiters[k]
+			var fixed_joint := boot.find_bone("Gate")
+			var shaft_joint := boot.find_bone("Shaft")
+			seated = seated and fixed_joint >= 0 and shaft_joint >= 0
+			if fixed_joint < 0 or shaft_joint < 0:
+				continue
+			var lever: Node3D = game.lever_pivots[k]
+			var expected := Quaternion(Vector3.RIGHT, deg_to_rad(lerpf(30, -30, demand[k])))
+			seated = seated and boot.position.is_equal_approx(lever.position) \
+					and boot.get_bone_pose(fixed_joint).is_equal_approx(Transform3D.IDENTITY) \
+					and boot.get_bone_pose_rotation(shaft_joint).is_equal_approx(expected)
+			var cover := boot.get_node("Bellows") as MeshInstance3D
+			seated = seated and cover.skin != null and cover.get_node(cover.skeleton) == boot
+	game.inp = previous
+	game._place_camera(1.0)
+	check(id + " boot skirts stay on the gate and both necks follow independent lever travel", seated)
+
+
 func check_flight_deck(game, id: String) -> void:
 	var cluster = game.dashboard
 	var meter = game.aux_meter
 	if id == Sim.PilotCraft.STANDARD:
-		check("base cockpit uses the original gauge body and layout", meter == null and cluster.flight_deck == null
+		check("base cockpit uses the original gauge body and layout", meter == null and cluster.flight_deck == null and game.throttle_gaiters.is_empty()
 				and cluster.gauges == cluster.Layout.GAUGES and not game.interior.has_node("SillFittings")
 				and cluster.get_node("binnacle").mesh == cluster.Interior._hd_mesh(cluster.BODY, "Binnacle"))
 		return
 	check(id + " has its own dial layout, side fittings and auxiliary instrument",
 			cluster.flight_deck.id == id and cluster.gauges != cluster.Layout.GAUGES
 			and game.interior.has_node("SillFittings") and meter.id == id)
+	check_lcd_trays(cluster, id)
+	check_throttle_boots(game, id)
+	check_grip_lenses(game, id)
 	if id != Sim.PilotCraft.ORRERY:
 		var housing: MeshInstance3D = meter.get_node("Case")
 		var surface := housing.mesh.generate_triangle_mesh()
