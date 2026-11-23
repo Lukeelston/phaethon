@@ -75,10 +75,12 @@ func _run() -> void:
 	var far = v.network_world.far_roads
 	# (110,000, from 100,000: the Helios road added about 370 km of far ribbon)
 	# (... and 112,000 from 110,000: Mount Hyperion's leaps added 227 km of it, 2,422 vertices on 108,696)
-	check("distant roads cover every road without unbounded vertices",far!=null and far.vertex_count<112000 and far.pieces.size()>v.sim.roads.size())
+	check("distant roads cover every road without unbounded vertices (%d of 112000)" % far.vertex_count,far!=null and far.vertex_count<112000 and far.pieces.size()>v.sim.roads.size())
 	far.sync(pos.x,pos.y)
 	var endpoint_error := 0.0
 	var chord_intrusion := -INF
+	var apron_error := 0.0
+	var apron_roads := {}
 	for piece in far.pieces:
 		var r: int = piece[2]
 		var road = v.sim.roads[r]
@@ -88,9 +90,17 @@ func _run() -> void:
 			for side in 2:
 				var index: int = side if end==0 else vertices.size()-2+side
 				var actual: Vector3 = vertices[index]+piece[0].global_position+Vector3(pos.x,0,-pos.y)
-				var expected: Vector3 = v.network_world._p(road,0,0,i,(side*2-1)*road.w[i]*0.5,v.sim.net_height(r,i)-far.UNDER_DECK)
+				var expected: Vector3 = v.network_world._p(road,0,0,i,_edge(road, i, side),v.sim.net_height(r,i)-far.UNDER_DECK)
 				endpoint_error=maxf(endpoint_error,actual.distance_to(expected))
 		var rows := vertices.size()/2
+		if not road.apl.is_empty():
+			for row in rows:
+				var i := mini(int(piece[3]) + row * int(piece[5]), int(piece[4]))
+				for side in 2:
+					var expected: Vector3 = v.network_world._p(road, piece[1].x, piece[1].y, i, _edge(road, i, side), v.sim.net_height(r, i) - far.UNDER_DECK)
+					apron_error = maxf(apron_error, vertices[row * 2 + side].distance_to(expected))
+				if road.apl[i] > 0.0 or road.apr[i] > 0.0:
+					apron_roads[road.name] = true
 		for row in rows-1:
 			var stride: int = piece[5]      # (its own: finer where a climb steepens fast, _stride)
 			var start: int = piece[3]+row*stride
@@ -101,9 +111,10 @@ func _run() -> void:
 			if v.network_world.shaft.on(r,float(mid)): normal=v.network_world.shaft.at(r,float(mid))[5]
 			for side in 2:
 				var actual: Vector3=vertices[row*2+side].lerp(vertices[(row+1)*2+side],u)+piece[0].global_position+Vector3(pos.x,0,-pos.y)
-				var expected: Vector3=v.network_world._p(road,0,0,mid,(side*2-1)*road.w[mid]*0.5,v.sim.net_height(r,mid))
+				var expected: Vector3=v.network_world._p(road,0,0,mid,_edge(road, mid, side),v.sim.net_height(r,mid))
 				chord_intrusion=maxf(chord_intrusion,(actual-expected).dot(normal))
 	check("distant road endpoints follow real carried geometry and floating origin",endpoint_error<0.15)
+	check("every far row follows both scenic edges through their openings and tapers (%.3f m worst)" % apron_error, apron_error < 0.15 and apron_roads.has_all(["SCoast", "SDrop", "SCaucasus"]))
 	check("coarse road chords stay below detailed decks (%.3f m)"%chord_intrusion,chord_intrusion<0.1)
 	var wet_key := Vector2i(floori(300000/land.TILE),floori(100000/land.TILE))
 	var water_a := Node3D.new()
@@ -269,4 +280,11 @@ func _run() -> void:
 	v.free()
 	print("NETWORK LANDSCAPE %s (%d checks, %d failures)" % ["PASS" if failures == 0 else "FAIL", checks, failures])
 	quit(int(failures > 0))
+
+
+func _edge(road: CraftSim.TrackPath, i: int, side: int) -> float:
+	var half_width := road.w[i] * 0.5
+	if side == 0:
+		return -half_width - (road.apr[i] if not road.apr.is_empty() else 0.0)
+	return half_width + (road.apl[i] if not road.apl.is_empty() else 0.0)
 

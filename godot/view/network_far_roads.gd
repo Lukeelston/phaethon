@@ -20,6 +20,7 @@ func build(world) -> void:
 	_material = material
 	for r in world.sim.roads.size():
 		var road = world.sim.roads[r]
+		var has_aprons: bool = not road.apl.is_empty()
 		var pressure_route: bool = r == world.sim.NET_PRESSURE[0]
 		for first in range(0,road.N-1,BLOCK):
 			var end := mini(first+BLOCK,road.N-1)
@@ -27,16 +28,33 @@ func build(world) -> void:
 				continue
 			var origin: Vector2 = world._wxy(r,first)
 			var vertices := PackedVector3Array()
+			var glass_edges := PackedVector2Array()
 			var indices := PackedInt32Array()
 			var stride := _stride(world,r,first,end)
 			var samples := range(first,end,stride)
 			samples.append(end)
 			for i in samples:
-				for side in [-1.0,1.0]:
-					var off: float = side*road.w[i]*0.5
-					# _p handles both carried shafts and twisting recovery decks.
-					var h: float = world._h(r,i)-UNDER_DECK
+				var half_width: float = road.w[i] * 0.5
+				var left := half_width
+				var right := half_width
+				var paved_left := half_width
+				var paved_right := half_width
+				if has_aprons:
+					left += road.apl[i]
+					right += road.apr[i]
+					# The near glass begins at the old ramp's foot and ends at the moved wall.
+					var ramp := CraftSim.net_edge_span(road.w[i])
+					if left > half_width or (world.scenic != null and world.scenic.open(r, i, true)):
+						paved_left -= ramp
+					if right > half_width or (world.scenic != null and world.scenic.open(r, i, false)):
+						paved_right -= ramp
+				# _p handles both carried shafts and twisting recovery decks.
+				var h: float = world._h(r,i)-UNDER_DECK
+				for off: float in [-right, left]:
 					vertices.append(world._p(road,origin.x,origin.y,i,off,h))
+					if has_aprons:
+						# Signed distances past the left and right pavement edges; positive on glass.
+						glass_edges.append(Vector2(off - paved_left, -off - paved_right))
 			for row in samples.size()-1:
 				if pressure_route and world.sim.in_pressure(r, samples[row]) and world.sim.in_pressure(r, samples[row + 1]):
 					continue
@@ -48,6 +66,8 @@ func build(world) -> void:
 			arrays.resize(Mesh.ARRAY_MAX)
 			arrays[Mesh.ARRAY_VERTEX]=vertices
 			arrays[Mesh.ARRAY_INDEX]=indices
+			if not glass_edges.is_empty():
+				arrays[Mesh.ARRAY_TEX_UV] = glass_edges
 			var mesh := ArrayMesh.new()
 			mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES,arrays)
 			var instance := MeshInstance3D.new()
