@@ -11,14 +11,17 @@
 				}
 			],
 			"seconds": 9.0,
-			"seam": 0.07,
-			"seam_level_db": 0.91,
-			"seam_cents": 779.8,
-			"peak_db": -5.05,
-			"centroid_hz": 172,
-			"half_hz": 73,
-			"skew": -0.72,
-			"peaks_s": 21.3
+			"seam": 0.154,
+			"seam_level_db": 0.78,
+			"seam_cents": 164.1,
+			"peak_db": -5.8,
+			"tenth_hz": 35,
+			"half_hz": 53,
+			"most_hz": 287,
+			"skew": -2.04,
+			"peaks_s": 14.7,
+			"turned_deg": 45.0,
+			"lean_us": 9.5
 		},
 		"ramtear": {
 			"unit": "speed",
@@ -29,14 +32,17 @@
 				}
 			],
 			"seconds": 7.0,
-			"seam": 0.111,
-			"seam_level_db": 0.88,
-			"seam_cents": 115.4,
+			"seam": 0.04,
+			"seam_level_db": 0.5,
+			"seam_cents": 301.7,
 			"peak_db": -5.0,
-			"centroid_hz": 179,
-			"half_hz": 126,
-			"skew": -0.76,
-			"peaks_s": 16.7
+			"tenth_hz": 44,
+			"half_hz": 82,
+			"most_hz": 243,
+			"skew": -1.53,
+			"peaks_s": 12.3,
+			"turned_deg": -45.0,
+			"lean_us": 9.5
 		}
 	},
 	"oneshots": {

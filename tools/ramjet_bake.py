@@ -6,35 +6,58 @@ Luke, 2026-11-22: "the ram jet needs its own sound signifier. First gut is sayin
 just a low screaming roar". And after flying the first cut of it: "I like the ramjet sound, but I feel like it's
 a few octaves too high. It's correct on the ripping/shredding sound", with a launch's raw sound for what he
 meant. That first cut put its weight at 400 Hz to 3 kHz (half its energy over 407 Hz); the launch he pointed
-at has half its energy under 70 Hz and 90% under 284 Hz. So this is the same two recordings re-cut and run
+at has half its energy under 70 Hz and 90% under 284 Hz. So the same two recordings were re-cut and run
 slower, as a tape is run slower (pitch and pace together: the tear's crackle comes down with its pitch, which
-is what his launch does: its loudness flutters at 50 Hz where the first cut's fluttered at 220).
-Nothing here is synthesised. Two recordings (tools/audio_src/ramjet, credited in godot/audio/ramjet/CREDITS.md
-and THIRD_PARTY.md):
+is what his launch does: its loudness flutters at 50 Hz where the first cut's fluttered at 220). That second
+cut held half its energy over 123 Hz, for a headset's own speakers; on headphones he said of it: "It sounds
+better, but it could be deeper still." This is the third cut: the launch's own profile (half the energy under
+70 Hz, its centroid at 137 Hz, 90% under 284 Hz), the roar carrying the voice and the tear under it. As the
+game sums it at 7,000 mph: half under 64 Hz, the centroid at 139 Hz, 90% under 308 Hz.
+
+Nothing here is synthesised: every sample is one of two recordings, cut, slowed and treated. The treatments,
+beyond the filters named below, are two, and both are for the tear (how hard each crack's edge stands; measured
+as the skewness of the wave's rate of change, which is -1.36 in the launch he pointed at and was -0.4 in the
+second cut as the game summed it):
+  the turn    every frequency's phase turned by one angle (the roar 45 degrees, the tear -45). The spectrum is
+              not touched at all (no octave band moves by 0.01 dB), nor the loudness from moment to moment
+              (the envelope): only the wave's shape, and with it how each crack's edge stands. The angle is
+              found by measure: it is where the skewness is greatest (the roar -0.96 as cut, -1.45 turned;
+              the tear -1.06 and -1.59). Microphones, recorders and encoders do turn a sound's phase, and a
+              crack whose phase is turned is a rounded one; whether that is what happened to these two
+              recordings is not known, only that each tears hardest at its angle.
+  the lean    each part of the wave moved in time in proportion to its own pressure, by LEAN_US microseconds
+              for each rms of level (at most 39 microseconds in the roar and 61 in the tear: two samples,
+              three). It is what loud sound does to itself in air, and is how a launch comes to crackle: the
+              wave leans until its fronts stand up. It takes the roar's skewness from -1.45 to -2.04. In the
+              roar no octave band up to 1 kHz moves by more than 0.02 dB (the 2 kHz band rises 0.2 dB, the
+              4 kHz band 0.3); the envelope changes by a hundredth of itself. That is a change to the wave's
+              fine shape and to nothing else: it is in the measure, and whether an ear hears it is not known.
+Two recordings (tools/audio_src/ramjet, credited in godot/audio/ramjet/CREDITS.md and THIRD_PARTY.md):
 
   shuttle_launch   Freesound 220127, klangfabrik, "shuttlelaunch.wav", CC0: a re-edit of NASA's own recordings
                    of Space Shuttle launches (the site's high-quality preview). The roar: the stack climbing
-                   away, 35 s to 43 s in, the stretch of it that tears hardest (the skewness of the wave's rate
-                   of change is -0.8 there, against +0.4 to -0.4 in the stretch the first cut used). And the
-                   ignition's first thump.
+                   away, 40 s to 46 s in, the six seconds of it that tear hardest (the skewness of the wave's
+                   rate of change is -1.0 there as recorded and -1.4 turned, against +0.4 to -0.4 in the stretch
+                   the first cut used). And the ignition's first thump.
   rs25_*           NASA Stennis Space Center, "RS-25 Engine Test 2025-11-12" (NASA Image and Video Library id
                    SSC_2025-11-12_RS-25_Engine_Test): a Space Shuttle main engine run for 500 s on the Fred
                    Haise Test Stand. NASA's own film, not copyrighted. Three stretches of its sound (the start,
                    50 s of the run, the cut-off), taken from the library's "medium" copy and kept as mono
-                   Vorbis. The tear: three quarters of a second of the engine's crackle (0.5 to 14 kHz)
-                   run eleven times slower, three and a half octaves down. And the catch as it lights and
-                   the fall as it is cut off, run four times slower.
+                   Vorbis. The tear: half a second of the engine's crackle (0.5 to 14 kHz) run seventeen and a
+                   half times slower, a little over four octaves down. And the catch as it lights and the fall
+                   as it is cut off, run five and two thirds times slower.
 
 What is written to godot/audio/ramjet, 48 kHz mono 16-bit:
-  ramjet_body.wav     a loop: the roar. The shuttle run 1.3 times slower: half its energy under 70 Hz, its
-                      weight from 45 to 350 Hz, its crackle's edge left on it (nothing is cut but what lies
-                      under 40 Hz, which nothing here can play)
-  ramjet_tear.wav     a loop: the tear, 45 Hz to 1.3 kHz with its weight at 90 to 500 Hz, where a headset's own
-                      speakers (little under 90 Hz) can play the voice
-  ramjet_light_N.wav  the light-up: the shuttle's ignition thump (run 1.5 times slower), the test engine's
-                      crackle over it two octaves down (an octave over where the tear settles), a low swell
-  ramjet_out_N.wav    the shut-down: the test engine's last third of a second at power, two octaves down and
-                      slowed further as it falls (a tape running down), over the roar running down with it
+  ramjet_body.wav     a loop: the roar. The shuttle run 1.65 times slower: half its energy under 55 Hz, its
+                      weight from 35 to 280 Hz, its crackle's edge left on it (nothing is cut but what lies
+                      under 25 Hz)
+  ramjet_tear.wav     a loop: the tear, 30 to 800 Hz with its weight at 45 to 300 Hz. EngineAudio plays it
+                      6 dB under the roar: it is what a headset's own speakers (little under 90 Hz) have
+                      most of
+  ramjet_light_N.wav  the light-up: the shuttle's ignition thump (run 1.8 times slower), the test engine's
+                      crackle over it two and a half octaves down (over where the tear settles), a low swell
+  ramjet_out_N.wav    the shut-down: the test engine's last third of a second at power, two and a half octaves
+                      down and slowed further as it falls (a tape running down), over the roar running down
   (N: 0 for the left engine, 1 for the right, the same sound a hair slower and so lower, as the staged start's)
   manifest.json       the files, and what was measured of them (levels, the loops' seams)
 
@@ -51,8 +74,8 @@ from pathlib import Path
 
 import numpy as np
 import soundfile as sf
-from scipy import signal
-from scipy.ndimage import maximum_filter1d, uniform_filter1d
+from scipy import fft, signal
+from scipy.ndimage import map_coordinates, maximum_filter1d, uniform_filter1d
 
 RATE = 48000
 ROOT = Path(__file__).resolve().parents[1]
@@ -65,10 +88,15 @@ TEAR_CREST_DB = 13.0     # the tear's tallest peaks held this far over its rms, 
                          # the Engines bus's limiter, which would shave them anyway and duck the whole mix with each one.
 SHOT_PEAK = 0.7          # the one-shots' peak (the start-up's sounds are written at the same)
 RIGHT = 0.965            # the right engine's one-shots: this much slower, and lower
-BODY_SLOW = 1.3          # the roar: the shuttle's tape run this many times slower (0.38 of an octave down)
-TEAR_SLOW = 11.0         # the tear: the test engine's, three and a half octaves down
-SHOT_SLOW = 4.0          # the test engine in the light-up and the shut-down: two octaves down
-THUMP_SLOW = 1.3         # the shuttle's ignition thump in the light-up
+BODY_SLOW = 1.65         # the roar: the shuttle's tape run this many times slower (0.72 of an octave down)
+TEAR_SLOW = 17.5         # the tear: the test engine's, a little over four octaves down
+SHOT_SLOW = 5.66         # the test engine in the light-up and the shut-down: two and a half octaves down
+THUMP_SLOW = 1.8         # the shuttle's ignition thump in the light-up
+BODY_FROM = 39.5         # where in the re-edit the roar's stretch begins, s (the loop itself a third of a second on)
+TEAR_FROM = 35.3         # where in the kept stretch of the test engine's run the tear's half second begins, s
+BODY_TURN = 45.0         # the turn of phase, degrees, that stands the roar's cracks up (found by measure: main() prints
+TEAR_TURN = -45.0        # ... each loop's skewness as cut, turned, and at 15 degrees either side of the turn)
+LEAN_US = 9.5            # the lean: microseconds a part of the wave is moved for each rms of its own level
 _cache = {}
 
 
@@ -119,6 +147,54 @@ def pitch(y, ratio):
 def slow(y, times):
     """A tape run `times` slower: lower and longer by that much, nothing else done to it."""
     return signal.resample_poly(y, int(round(100 * times)), 100)
+
+
+def turn(y, degrees):
+    """Every frequency's phase turned by the same angle. The spectrum is not touched, nor the envelope (the
+    loudness from moment to moment): only the shape of the wave, and so how each crack's edge stands."""
+    if not degrees:
+        return y
+    a = signal.hilbert(y, fft.next_fast_len(len(y)))[:len(y)]
+    r = math.radians(degrees)
+    return a.real * math.cos(r) + a.imag * math.sin(r)
+
+
+def lean(y, microseconds, over=4):
+    """A loop's wave leaned as loud sound leans itself in air. There the higher the pressure the faster that part
+    of the wave travels, so every front steepens until it stands as a shock: that is a launch's crackle. Here
+    each part of the wave is moved in time by `microseconds` for each rms of its own level (the lossless Burgers
+    equation, solved exactly by the Hopf-Lax formula: where two parts of the wave would pass each other a shock
+    forms, by the equal-area rule the formula carries). The way it leans is the recordings' own: in both the
+    pressure falls faster than it rises (as it does in the launch Luke pointed at), so it is the falls that
+    steepen. `y` is a loop and is treated as one. Worked at `over` times the rate, so nothing folds back."""
+    if microseconds <= 0:
+        return y
+    rms = math.sqrt(float(np.mean(y * y)))
+    pad = RATE // 4
+    u = signal.resample_poly(np.concatenate([y[-pad:], y, y[:pad]]), over, 1) / rms
+    n = len(u)
+    t = microseconds * 1e-6 * RATE * over                 # samples (at the working rate) for each rms of level
+    w = int(math.ceil(t * float(np.abs(u).max()))) + 2
+    # the wave at x is the wave as it was at y*, the y that makes U(y) + (x - y)^2 / 2t least; U is the wave summed
+    # up to y. q[k + w] is U at k - 1/2.
+    q = np.concatenate([np.zeros(w + 1), np.cumsum(u), np.zeros(w)])
+    q[n + w + 1:] = q[n + w]
+    best = np.full(n, np.inf)
+    arg = np.zeros(n)
+    for m in range(-w, w + 1):
+        c = q[w - m:w - m + n] + (m + 0.5) ** 2 / (2 * t)
+        better = c < best
+        best[better] = c[better]
+        arg[better] = m
+    at = np.arange(n, dtype=np.float64)
+    foot = at - arg - 0.5
+    for _ in range(3):                                    # the foot of each characteristic, to a fraction of a sample:
+        here = map_coordinates(u, [foot], order=3, mode="nearest")      # y + t u(y) = x, by Newton's rule,
+        slope = map_coordinates(u, [foot + 0.5], order=3, mode="nearest") - map_coordinates(u, [foot - 0.5], order=3, mode="nearest")
+        step = (foot + t * here - at) / np.maximum(1.0 + t * slope, 0.25)
+        foot = foot - np.clip(step, -0.5, 0.5)            # ... never leaving the minimum that was found
+    out = signal.resample_poly(map_coordinates(u, [foot], order=3, mode="nearest"), 1, over) * rms
+    return out[pad:pad + len(y)]
 
 
 def ramp(y, r0, r1, seconds):
@@ -228,20 +304,25 @@ def band_db(y, lo, hi):
     return rms_db(b)
 
 
-def tear_of(y):
-    """How a sound tears: the skewness of the wave's rate of change (a crackling sound's pressure moves faster one
-    way than the other), the peaks a second its envelope throws over three times its rms, and the frequency
-    under which half its energy lies."""
+def skew_of(y):
+    """The skewness of the wave's rate of change: a crackling sound's pressure moves faster one way than the other."""
     d = np.diff(y)
     d = d - d.mean()
-    skew = float((d ** 3).mean() / (d ** 2).mean() ** 1.5)
+    return float((d ** 3).mean() / (d ** 2).mean() ** 1.5)
+
+
+def tear_of(y):
+    """How a sound tears, and where its weight lies: the skewness of the wave's rate of change, the peaks a second
+    its envelope throws over three times its rms, and the frequencies under which a tenth, half and nine tenths
+    of its energy lie (counted from 20 Hz up)."""
     z = y - y.mean()
     rms = math.sqrt(float((z ** 2).mean()))
     peaks, _ = signal.find_peaks(np.abs(signal.hilbert(z)), height=3.0 * rms, distance=int(RATE * 0.004))
     f, p = signal.welch(y, RATE, nperseg=16384, noverlap=8192)
     keep = f >= 20.0
-    half = float(f[keep][np.searchsorted(np.cumsum(p[keep]) / p[keep].sum(), 0.5)])
-    return skew, len(peaks) / (len(y) / RATE), half
+    run = np.cumsum(p[keep]) / p[keep].sum()
+    tenth, half, most = (float(f[keep][np.searchsorted(run, share)]) for share in (0.1, 0.5, 0.9))
+    return skew_of(y), len(peaks) / (len(y) / RATE), half, tenth, most
 
 
 # ---- the sounds ----
@@ -256,40 +337,40 @@ def engine_crackle(name, t0, t1, lead=0.3):
     return y[int(lead * RATE):]
 
 
-def body_loop():
-    """The roar: the shuttle's stack 35 s into the re-edit, the stretch of it that tears hardest, run BODY_SLOW
-    times slower. Only what lies under 40 Hz is taken off (a headset cannot play it and it eats the mix's
-    headroom): its top is its crackle's edge, and is left on it."""
+def body_loop(turned=BODY_TURN, leaned=LEAN_US):
+    """The roar: the shuttle's stack 40 s into the re-edit, the stretch of it that tears hardest, run BODY_SLOW
+    times slower, turned and leaned. Only what lies under 25 Hz is taken off (the recording has little there, and
+    it would eat the mix's headroom): its top is its crackle's edge, and is left on it."""
     lead = 0.5
-    y = slow(piece("shuttle_launch", 34.6, 34.6 + (lead + BODY_S + FOLD_S + 0.3) / BODY_SLOW), BODY_SLOW)
-    y = butter(y, "highpass", 40.0)[int(lead * RATE):]
+    y = slow(piece("shuttle_launch", BODY_FROM, BODY_FROM + (lead + BODY_S + FOLD_S + 0.3) / BODY_SLOW), BODY_SLOW)
+    y = turn(butter(y, "highpass", 25.0), turned)[int(lead * RATE):]
     y = seamless(y, int(BODY_S * RATE), int(FOLD_S * RATE))
-    return level_out(y)
+    return lean(level_out(y), leaned)
 
 
-def tear_loop():
-    """The tear: a second of the test engine's crackle at full power (35 s into the kept stretch of its run, where
-    it crackles hardest) run TEAR_SLOW times slower. Three and a half octaves down its band is 45 Hz to 1.3 kHz
-    and its crackle comes at a dozen and a half hard peaks a second, as the launch Luke pointed at does (16):
-    a rip, not a hiss."""
+def tear_loop(turned=TEAR_TURN, leaned=LEAN_US):
+    """The tear: half a second of the test engine's crackle at full power (35 s into the kept stretch of its run,
+    one of the three places it crackles hardest, and the steadiest of them) run TEAR_SLOW times slower, turned and
+    leaned. Four octaves down its band is 30 to 800 Hz and its crackle comes at a dozen hard peaks a second (the
+    launch Luke pointed at: 16): slow cracks, each with its edge."""
     lead = 0.4
-    y = slow(engine_crackle("rs25_steady", 35.0, 35.0 + (lead + TEAR_S + FOLD_S + 0.3) / TEAR_SLOW), TEAR_SLOW)
-    y = y[int(lead * RATE):]
+    y = slow(engine_crackle("rs25_steady", TEAR_FROM, TEAR_FROM + (lead + TEAR_S + FOLD_S + 0.3) / TEAR_SLOW), TEAR_SLOW)
+    y = turn(y, turned)[int(lead * RATE):]
     y = seamless(y, int(TEAR_S * RATE), int(FOLD_S * RATE))
-    return level_out(y)
+    return lean(level_out(y), leaned)
 
 
 def light_up(speed):
     """The catch, 1.9 s: the shuttle's ignition thump (taken from where it is already 7 dB under its top, so it
     lands hard; run THUMP_SLOW times slower), the test engine's crackle over it just after it has caught (run
-    SHOT_SLOW times slower: an octave over where the tear settles, so the catch is brighter than what follows),
+    SHOT_SLOW times slower: an octave and a half over where the tear settles, so the catch is brighter than what follows),
     and a low swell that hands over to the loops."""
     bang = full(fade(slow(piece("shuttle_launch", 0.37, 1.05), THUMP_SLOW), 0.004, 0.4))
     catch = slow(engine_crackle("rs25_start", 7.62, 8.07), SHOT_SLOW)
     catch = full(swell(fade(catch, 0.01, 0.4), 0.02, 0.6, 0.35))
     low = butter(piece("shuttle_launch", 1.45, 3.3), "lowpass", 350.0)
     low = full(swell(fade(low, 0.02, 0.5), 0.12, 0.5, 0.4))
-    y = mix((bang, 0.0, 1.0), (catch, 0.03, 0.8), (low, 0.07, 0.7))[:int(1.9 * RATE)]
+    y = mix((bang, 0.0, 1.0), (catch, 0.03, 0.8), (low, 0.07, 0.9))[:int(1.9 * RATE)]
     y = fade(y, 0.001, 0.3)
     return pitch(y, speed) if speed != 1.0 else y
 
@@ -304,7 +385,7 @@ def shut_down(speed):
     cut = full(swell(cut, 0.003, 0.10, 0.35))
     thump = butter(piece("rs25_stop", 12.18, 13.0), "lowpass", 500.0)
     thump = full(swell(fade(thump, 0.005, 0.3), 0.01, 0.08, 0.2))
-    low = butter(slow(piece("shuttle_launch", 36.0, 37.3), BODY_SLOW), "highpass", 40.0)
+    low = butter(slow(piece("shuttle_launch", 36.0, 37.3), BODY_SLOW), "highpass", 25.0)
     low = full(swell(ramp(fade(low, 0.003, 0.3), 1.0, 0.6, 0.8), 0.003, 0.08, 0.3))
     y = fade(mix((cut, 0.0, 1.0), (thump, 0.0, 0.5), (low, 0.0, 0.8))[:int(1.5 * RATE)], 0.001, 0.25)
     return pitch(y, speed) if speed != 1.0 else y
@@ -329,7 +410,7 @@ def main():
     OUT.mkdir(parents=True, exist_ok=True)
     fails = 0
     manifest = {"rate": RATE, "rms_db": LOOP_RMS_DB, "layers": {}, "oneshots": {}}
-    for layer, name, make in (("ramjet", "ramjet_body.wav", body_loop), ("ramtear", "ramjet_tear.wav", tear_loop)):
+    for layer, name, make, turned in (("ramjet", "ramjet_body.wav", body_loop, BODY_TURN), ("ramtear", "ramjet_tear.wav", tear_loop, TEAR_TURN)):
         y = finish_loop(make(), 10 ** ((LOOP_RMS_DB + TEAR_CREST_DB) / 20) if layer == "ramtear" else LOOP_PEAK)
         sf.write(str(OUT / name), y, RATE, subtype="PCM_16")
         seam = seam_ratio(y)
@@ -341,15 +422,19 @@ def main():
               "the brightness %.0f cents (elsewhere up to %.0f); second to second the level holds within %.1f dB" % (
                   "ok  " if ok else "FAIL", name, len(y) / RATE, rms_db(y), 20 * math.log10(np.abs(y).max()), seam, step_l, usual_l, step_c, usual_c,
                   max(swing) - min(swing)))
-        skew, peaks, half = tear_of(y)
-        print("       bands: 45-90 Hz %.1f dB, 90-180 %.1f, 180-355 %.1f, 355-710 %.1f, 710-1.4k %.1f, 1.4k-2.8k %.1f; half its energy under %.0f Hz, "
-              "centroid %.0f Hz; over 90 Hz %.1f dB" % (band_db(y, 45, 90), band_db(y, 90, 180), band_db(y, 180, 355), band_db(y, 355, 710),
-                                                    band_db(y, 710, 1400), band_db(y, 1400, 2800), half, centroid(y), rms_db(butter(y, "highpass", 90.0, 4))))
-        print("       its tear: the skewness of its rate of change %.2f, %.0f hard peaks a second" % (skew, peaks))
+        skew, peaks, half, tenth, most = tear_of(y)
+        print("       bands: 22-45 Hz %.1f dB, 45-90 %.1f, 90-180 %.1f, 180-355 %.1f, 355-710 %.1f, 710-1.4k %.1f, 1.4k-2.8k %.1f; a tenth of its energy under "
+              "%.0f Hz, half under %.0f, nine tenths under %.0f; over 90 Hz %.1f dB" % (band_db(y, 22, 45), band_db(y, 45, 90), band_db(y, 90, 180),
+                                                    band_db(y, 180, 355), band_db(y, 355, 710), band_db(y, 710, 1400), band_db(y, 1400, 2800), tenth, half, most,
+                                                    rms_db(butter(y, "highpass", 90.0, 4))))
+        print("       its tear: the skewness of its rate of change %.2f (as cut %.2f; turned %g degrees %.2f, at 15 degrees less %.2f, at 15 more %.2f), "
+              "%.0f hard peaks a second" % (skew, skew_of(make(0.0, 0.0)), turned, skew_of(make(turned, 0.0)), skew_of(make(turned - 15.0, 0.0)),
+                                            skew_of(make(turned + 15.0, 0.0)), peaks))
         manifest["layers"][layer] = {"unit": "speed", "bands": [{"file": name, "at": 1.0}], "seconds": round(len(y) / RATE, 3),
                                      "seam": round(seam, 3), "seam_level_db": round(step_l, 2), "seam_cents": round(step_c, 1),
-                                     "peak_db": round(20 * math.log10(np.abs(y).max()), 2), "centroid_hz": round(centroid(y)),
-                                     "half_hz": round(half), "skew": round(skew, 2), "peaks_s": round(peaks, 1)}
+                                     "peak_db": round(20 * math.log10(np.abs(y).max()), 2), "tenth_hz": round(tenth),
+                                     "half_hz": round(half), "most_hz": round(most), "skew": round(skew, 2), "peaks_s": round(peaks, 1),
+                                     "turned_deg": turned, "lean_us": LEAN_US}
     for shot, make in (("light", light_up), ("out", shut_down)):
         files = []
         for k, speed in enumerate((1.0, RIGHT)):

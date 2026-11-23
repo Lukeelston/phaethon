@@ -38,11 +38,14 @@
 ## The ramjet has a voice of its own (Luke, 2026-11-22: "the ram jet needs its own sound signifier. First gut
 ## is saying an actual rocket engine - just a low screaming roar"; and when he had flown its first cut, "I
 ## like the ramjet sound, but I feel like it's a few octaves too high. It's correct on the ripping/shredding
-## sound", with a launch's raw sound for what he meant): recordings of real rocket engines, baked by
+## sound", with a launch's raw sound for what he meant; and of that second cut, on headphones, "It sounds
+## better, but it could be deeper still"): recordings of real rocket engines, baked by
 ## tools/ramjet_bake.py into res://audio/ramjet. Two loops an engine: the roar (the Space Shuttle's stack
-## climbing away: half its energy under 70 Hz) and, in it, the tear (a shuttle main engine's crackle from
-## NASA's test stand run three and a half octaves down: 90 to 500 Hz, where a headset's own speakers can
-## play it).
+## climbing away, run 1.65 times slower: half its energy under 55 Hz), which carries the voice, and 6 dB
+## under it the tear (a shuttle main engine's crackle from NASA's test stand run four octaves down: 45 to
+## 300 Hz, most of what a headset's own speakers can play of the voice). In this third cut the voice has
+## the profile of the launch he pointed at: at 7,000 mph half its energy lies under 64 Hz and 90% under
+## 310 Hz (the launch: 70 and 284), and it tears as hard by the same measure.
 ## They sound only while the sim is on the ramjet (armed, the burner's gate through) and that engine is
 ## alight. It catches: a shot (the shuttle's ignition thump, the test engine's crackle) and the loops
 ## straight in, a few dB over where they settle. Then it follows the speed (louder, the tear more than the
@@ -167,13 +170,16 @@ const TUNE := {
 	# their levels, set by measuring the game's recorded mix with and without them at 3,000, 5,000 and 7,000 mph
 	# (tests/record_ramjet.gd; the figures are in godot/audio/ramjet/CREDITS.md), not by ear. In its second cut
 	# (lowered) the mix's rms is held where Luke flew the first: the voice is 2.5 to 4 dB up on the first cut's,
-	# most of that under 90 Hz, and the layers in its band are stepped back for it (ram_duck).
+	# most of that under 90 Hz, and the layers in its band are stepped back for it (ram_duck). In its third
+	# (deep) the roar carries it and the tear sits 6 to 8 dB under the roar; the voice's own rms is held where
+	# the second cut's was (-12.6 / -12.5 / -12.0 dB at 3,000 / 5,000 / 7,000 mph), and what it has over 90 Hz
+	# (-17.8 / -17.5 / -16.6 dB) is 2.1 to 2.8 dB under the second cut's: the weight went under 90 Hz.
 	"ram_mph": [2500.0, 8000.0],     # its level, brightness and note run with the speed over this (fourth gear has no top speed)
-	"ram_body_db": [-2.1, -1.7],     # the roar, at ram_mph[0] -> ram_mph[1]
-	"ram_tear_db": [-2.1, 0.3],      # the tear: it comes up more than the roar does, so the voice brightens
+	"ram_body_db": [0.6, 1.0],       # the roar, at ram_mph[0] -> ram_mph[1]
+	"ram_tear_db": [-7.4, -5.0],     # the tear: it comes up more than the roar does, so the voice brightens
 	"ram_slow_db": -6.0,             # both, at a standstill (a ramjet lit on the line is a weak thing), gone by ram_mph[0]
 	"ram_pitch": [0.92, 1.08],       # the roar's speed of playing, ram_mph[0] -> ram_mph[1]
-	"ram_tear_pitch": [0.85, 1.2],   # the tear's: the frequency half its energy lies under runs from 107 to 151 Hz
+	"ram_tear_pitch": [0.85, 1.2],   # the tear's: the frequency half its energy lies under runs from 70 to 98 Hz
 	"ram_tau": [0.04, 0.1],          # it catches, it dies: time constants, s
 	"ram_fall": 0.55,                # dying, its note falls to this of where it was
 	"ram_kick_db": [3.0, 4.0],       # the light-up: the roar and the tear this much over where they settle ...
@@ -183,14 +189,16 @@ const TUNE := {
 	"ram_boost_pitch": 0.25,         # ... and the tear played this much faster (the roar by half as much)
 	"ram_boost_tau": 0.1,
 	"ram_thrust": [0.4, 1.0],        # level scale, this engine's thrust 0 -> the ramjet's full (the tear takes it twice)
-	"ram_light_db": 5.0,             # the light-up's shot, over the roar's level at that speed
-	"ram_out_db": -3.0,              # the shut-down's shot, against the roar's level as it was (under it: the loops are still falling)
+	"ram_light_db": 2.0,             # the light-up's shot, over the roar's level at that speed
+	"ram_out_db": -5.5,              # the shut-down's shot, against the roar's level as it was (under it: the loops are still falling)
 	"ram_shot_max_db": 1.0,          # ... neither played over this (the shots peak at -3 dBFS; the Engines bus limits at -1)
 	"ram_relight_s": 0.5,            # a ramjet lit again inside this long of its last light-up gets no second shot
 	# Room for it: under a lit ramjet these layers play at this much of their own level (the voice's weight is
-	# 45 to 700 Hz, which is theirs: measured alone on the ramjet at 5,000 mph the second engine put -17 dB
+	# 40 to 700 Hz, which is theirs: measured alone on the ramjet at 5,000 mph the second engine put -17 dB
 	# into 90-180 Hz and the first cut of the voice -22, and at 3,000 mph the V8 -18 into every octave from 45
-	# to 700 Hz). The turbines' whine and the V12 sit over 700 Hz and are left alone.
+	# to 700 Hz). The turbines' whine and the V12 sit over 700 Hz and are left alone. Set for the second cut
+	# and kept for the third: the deep voice needs no more room than the lowered one took (the mix peaks at
+	# -0.3 dBFS with the boost held at 3,000, 5,000 and 7,000 mph, and the whine does not pump under it).
 	"ram_duck": {"v8": 0.75, "second": 0.5, "roar": 0.5, "burner": 0.3},
 }
 

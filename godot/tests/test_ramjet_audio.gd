@@ -118,8 +118,11 @@ func _run() -> void:
 	var lit_mph := _mph()
 	var kicked: Array = (vl.ram_db as Array).duplicate()
 	var settled_there: float = float(kicked[0]) - float(T.ram_kick_db[0]) * float(vl.ram_kick)      # the roar's level at this speed, its kick taken off
-	_check("... the shot %.0f dB over the roar's settled level at that speed, and no higher than %+.0f dB (%.1f dB against %.1f): bolder than the steady roar" % [T.ram_light_db, T.ram_shot_max_db, shot_l.volume_db, settled_there],
-		float(T.ram_light_db) > 0.0 and shot_l.volume_db > settled_there + 2.0
+	# (in the deep cut the roar carries the voice and is itself played about where the shots' ceiling is, so the shot's
+	# setting no longer stands over the roar's: its samples do, peaking at -3 dBFS where the roar's stand at -6, and how
+	# bold the light-up lands is measured in the recording by tools/engine_audio_check.py)
+	_check("... the shot %.0f dB over the roar's settled level at that speed, and no higher than %+.0f dB (%.1f dB against %.1f)" % [T.ram_light_db, T.ram_shot_max_db, shot_l.volume_db, settled_there],
+		float(T.ram_light_db) > 0.0 and shot_l.volume_db > settled_there - 0.5
 		and absf(shot_l.volume_db - minf(settled_there + float(T.ram_light_db), float(T.ram_shot_max_db))) < 0.05)
 	await _fly(0.1)
 	_check("a tenth of a second on its loops are in (%.2f of the way) and heard, both engines'" % vl.ram, vl.ram > 0.9 and _heard(0) and _heard(1))

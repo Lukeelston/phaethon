@@ -475,9 +475,10 @@ def band(x, sr, lo, hi):
     return signal.sosfilt(signal.butter(4, [lo, hi], "bandpass", fs=sr, output="sos"), x, axis=0)
 
 
-TEAR_BAND = (90.0, 710.0)    # Hz: where the ramjet's tear has its weight, and where a headset's own speakers can play the voice
+TEAR_BAND = (90.0, 710.0)    # Hz: what a headset's own speakers can play of the ramjet's voice (in its deep cut the voice's weight
+                             # is under this, 40 to 300 Hz; this is the part of it that must still be the voice's on those speakers)
 VOICE_SHARE_DB = -3.0        # the voice's own level in that band against the mix's: -3 dB is half of what is there
-RIP_BAND = (180.0, 710.0)    # Hz: the upper half of it, where the tear's climb with speed and with the boost shows
+RIP_BAND = (180.0, 710.0)    # Hz: the upper half of it, where the voice's climb with speed and with the boost shows
 
 
 def check_ramjet(wav, mix_wav, tally):
@@ -524,7 +525,7 @@ def check_ramjet(wav, mix_wav, tally):
     bold = lvl(t_on + 0.1, t_on + 0.5) - settled
     tally.add("ramjet lights: up %.2f s after it is armed, its first 0.4 s %.1f dB over where it settles (%d light-up, %d shut-down)" % (
         t_up, bold, log["ramLit"][-1], log["ramOuts"][-1]),
-        int(-0.15 <= t_up <= 0.25 and 1.0 <= bold <= 12.0 and log["ramLit"][-1] == 1 and log["ramOuts"][-1] == 1), 1, 1.0)   # (measured on the lowered voice, three runs: 2.0 to 3.1 dB)
+        int(-0.15 <= t_up <= 0.25 and 1.0 <= bold <= 12.0 and log["ramLit"][-1] == 1 and log["ramOuts"][-1] == 1), 1, 1.0)   # (measured on the lowered voice, three runs: 2.0 to 3.1 dB; on the deep one, three: 2.2 to 2.5)
     # it follows the speed: the first four seconds after its light-up's shot has gone (1.9 s) against the last four
     # before the boost. Its level hardly moves with the speed (it is as loud at 3,000 mph as the limiters leave room
     # for); what climbs is the tear, in level and in pace. A 45-700 Hz crackle's level wanders a dB from half second to
@@ -532,21 +533,23 @@ def check_ramjet(wav, mix_wav, tally):
     # by more than the climb, so the pace is taken from the game's own log. What is asked is that the band does not
     # fall and keeps within a dB of the climb the game logs for the tear; the law itself (so many dB and so much faster
     # at 3,000, 5,000 and 7,000 mph) is tests/test_ramjet_audio.gd's. (Measured 2026-11-22: level +0.1 dB, the band
-    # +0.4 dB, the game's own figure +0.6 dB, x1.09 faster.)
+    # +0.4 dB, the game's own figure +0.6 dB, x1.09 faster.) In the deep cut the roar carries the voice and the tear sits
+    # 6 dB under it, so most of this band is the roar's and it climbs less: +0.2 to +0.7 dB in four runs, the spread
+    # being where in their loops the two engines happened to start. "Does not fall" is read to half a dB for that.
     a0, a1, b0, b1 = t_on + 2.2, t_on + 6.2, t_b0 - 4.1, t_b0 - 0.1
     rise, rise_s = lvl(b0, b1) - lvl(a0, a1), lvl(b0, b1, rip) - lvl(a0, a1, rip)
     said = at(log, "ramTearDb", (b0 + b1) / 2) - at(log, "ramTearDb", (a0 + a1) / 2)
     faster = at(log, "ramTearAt", (b0 + b1) / 2) / at(log, "ramTearAt", (a0 + a1) / 2)
     tally.add("ramjet follows the speed: %.0f -> %.0f mph, level %+.1f dB, its %d-%d Hz band %+.1f dB (the game's own figure for its tear %+.1f dB), its tear played x%.2f faster" % (
         at(log, "mph", (a0 + a1) / 2), at(log, "mph", (b0 + b1) / 2), rise, RIP_BAND[0], RIP_BAND[1], rise_s, said, faster),
-        int(rise >= -0.5 and rise_s >= -0.2 and said >= 0.3 and abs(rise_s - said) <= 1.0 and faster >= 1.06), 1, 1.0)
+        int(rise >= -0.5 and rise_s >= -0.5 and said >= 0.3 and abs(rise_s - said) <= 1.0 and faster >= 1.06), 1, 1.0)
     # the boost: the voice alone is at the Engines bus's limiter already, so a stage harder is heard less as level than as
     # the tear played faster and harder: read where that shows, in the upper half of its band
     lift, lift_s = lvl(t_b0 + 0.5, t_b1 - 0.1) - lvl(t_b0 - 1.5, t_b0 - 0.1), lvl(t_b0 + 0.5, t_b1 - 0.1, rip) - lvl(t_b0 - 1.5, t_b0 - 0.1, rip)
     back_s = lvl(t_b0 + 0.5, t_b1 - 0.1, rip) - lvl(t_b1 + 0.5, t_b1 + 1.5, rip)
     harder = at(log, "ramTearAt", (t_b0 + t_b1) / 2) / at(log, "ramTearAt", t_b0 - 0.5)
     tally.add("ramjet takes the boost: %+.1f dB while it is held (%+.1f dB at %d-%d Hz, its tear played x%.2f faster), %.1f dB back down there once it is let go" % (
-        lift, lift_s, RIP_BAND[0], RIP_BAND[1], harder, back_s), int(lift >= 0.0 and lift_s >= 1.0 and back_s >= 1.0 and harder >= 1.15), 1, 1.0)   # (measured: +0.7 to +1.1, +1.8 to +2.0, x1.28, 2.0 to 2.2)
+        lift, lift_s, RIP_BAND[0], RIP_BAND[1], harder, back_s), int(lift >= 0.0 and lift_s >= 1.0 and back_s >= 1.0 and harder >= 1.15), 1, 1.0)   # (measured: +0.7 to +1.1, +1.8 to +2.0, x1.28, 2.0 to 2.2; on the deep voice +1.1 to +2.1, +2.4 to +3.1, x1.28, 2.2 to 2.7)
     last = lvl(t_off - 1.0, t_off - 0.1)
     fall, gone = last - lvl(t_off + 0.5, t_off + 0.7), lvl(t_off + 2.0, t_off + 2.5)
     note = at(log, "ramTearAt", t_off + 0.4) / at(log, "ramTearAt", t_off - 0.2)
