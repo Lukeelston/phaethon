@@ -93,6 +93,14 @@ func _run() -> void:
 	quit(int(failures > 0))
 
 
+func _wait_for_art(stage) -> bool:
+	var deadline := Time.get_ticks_msec() + 3000
+	while not stage.art_ready and Time.get_ticks_msec() < deadline:
+		await process_frame
+	return check("the complete title arrives behind the usable menu within 3 s (%s)" % stage.build_split,
+		stage.art_ready and stage.build_ms < 3000 and stage.build_split.frames > 1)
+
+
 func _letters() -> void:
 	var missing := []
 	var thin := []
@@ -133,8 +141,9 @@ func _headset() -> void:
 	check("the menu is usable in its first frame: its rows are there, one has the highlight, nothing is launching",
 		menu.buttons.size() > UI.COURSES.size() and menu.focus_index == UI.course_index(menu.selected_course) and not menu.launching and menu.board.visible)
 	menu.set_process(false)
+	if not await _wait_for_art(stage):
+		return
 	print("TITLE build: %d ms (headset layout) %s" % [stage.build_ms, stage.build_split])
-	check("the title is built in under 3 s (%d ms)" % stage.build_ms, stage.build_ms < 3000)
 	check("one sky: the title's, not the board's old dark", menu.find_children("*", "WorldEnvironment", true, false).size() == 1 and stage.environment.environment.background_mode == Environment.BG_SKY)
 	check("no engine sounds in the menu", menu.find_children("*", "AudioStreamPlayer", true, false).is_empty() and menu.find_children("*", "AudioStreamPlayer3D", true, false).is_empty())
 	# what it is made of
@@ -226,6 +235,8 @@ func _headset() -> void:
 	check("the second press launches", menu.launching)
 	var old_stage: WeakRef = weakref(stage)
 	var old_menu: WeakRef = weakref(menu)
+	var old_display_model: WeakRef = weakref(stage.craft[0].model)
+	var old_shrike_source: WeakRef = weakref(stage._sources["res://art/shrike/bodywork.glb"])
 	stage = null
 	menu = null
 	board = null
@@ -235,6 +246,8 @@ func _headset() -> void:
 	var flight = current_scene
 	check("the flight is the Sprint, in the real cockpit", flight is Cockpit and flight._track() == "range")
 	check("in flight the title is gone: its nodes freed, none left in the tree", old_stage.get_ref() == null and old_menu.get_ref() == null and _count(root, "TitleStage") == 0)
+	check("the idle model and its Shrike source are released; the title cache holds two fairing meshes", old_display_model.get_ref() == null
+		and old_shrike_source.get_ref() == null and Stage._display_bodies.size() == 2 and Stage._display_bodies.values().all(func(body): return body is ArrayMesh))
 	check("... its hour is out of the shaders (the afternoon's suns again)", Outlook.shader_globals.get("sky_sun") == Outlook.GLOBALS.sky_sun and Outlook.shader_globals.get("sky_haze") == Outlook.GLOBALS.sky_haze)
 	check("... and what it loaded for itself is let go (the Shrike's bodywork, with the Phaethon flown)", Shrike.meshes.is_empty())
 	check("the flight has its own sky and nothing of the title's", flight.find_children("*", "WorldEnvironment", true, false).size() == 1)
@@ -246,7 +259,19 @@ func _headset() -> void:
 	menu = current_scene
 	check("back at the menu the title is back, and the flight freed", menu.scene_file_path == UI.VR_MENU_SCENE and menu.stage != null and menu.stage.is_inside_tree() and old_flight.get_ref() == null
 		and menu.selected_course == "range")
-	print("TITLE build: %d ms (headset layout, a second time)" % menu.stage.build_ms)
+	# Launch again while a craft is partly built, with user input and flight paint available between slices.
+	var partial = menu.stage
+	var deadline := Time.get_ticks_msec() + 3000
+	while partial.world.get_node_or_null("craft_phaethon") == null and not partial.art_ready and Time.get_ticks_msec() < deadline:
+		await process_frame
+	var unfinished: WeakRef = weakref(partial)
+	var had_partial: bool = partial.world.has_node("craft_phaethon") and partial.craft.is_empty()
+	menu.start_selected()
+	await scene_changed
+	await frames(2)
+	check("starting during craft assembly frees its partial model and leaves the flight in control",
+		had_partial and unfinished.get_ref() == null and _count(root, "TitleStage") == 0 and current_scene is Cockpit)
+	check("a cancelled title leaves the selected flight paint intact", CraftModel.Livery.current != "boxcover")
 
 
 func _desktop() -> void:
@@ -258,7 +283,6 @@ func _desktop() -> void:
 	var stage = menu.stage
 	if not check("the desktop menu lies over the title, laid out for the desktop", menu is Control and stage != null and stage.layout == "flat" and stage.camera != null):
 		return
-	print("TITLE build: %d ms (desktop layout)" % stage.build_ms)
 	var window := Vector2(1280, 720)
 	check("the menu's labels and buttons fit the 1280 x 720 window", _fits(menu, Rect2(Vector2.ZERO, window)))
 	check("the menu works at once: a course has the keyboard's focus, every course has its button",
@@ -272,6 +296,9 @@ func _desktop() -> void:
 		art.size.x > 700.0 and art.size.y > 500.0 and spine.get_global_rect().end.x <= art.position.x + 0.5 and strip.get_global_rect().position.y >= art.end.y - 0.5 and strip.get_global_rect().end.x <= window.x)
 	check("the strap line lies across the picture's foot", strap.get_global_rect().end.y <= art.end.y + 0.5 and strap.get_global_rect().position.x >= art.position.x
 		and (strap.find_children("*", "Label", true, false)[0] as Label).text == Stage.STRAP)
+	if not await _wait_for_art(stage):
+		return
+	print("TITLE build: %d ms (desktop layout)" % stage.build_ms)
 	# composed as the cover is: the word across the top of the picture, the craft under the horizon, all inside it
 	var word_box := Rect2()
 	var first := true

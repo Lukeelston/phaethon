@@ -10,8 +10,8 @@
 ##   "vr"    the headset's menu: the pilot stands on a starter's stand in the middle of the road, the
 ##           menu board in front of him, the word over it and a craft on either hand, nose in
 ##   "flat"  the desktop menu: one fixed camera between the two craft, composed as the cover is
-## It lives in the menu's scene and nowhere else, so a flight starts with all of it freed (and what it
-## loaded that a flight may not want is let go: _exit_tree); back at the menu it is built again.
+## The menu board and camera are ready immediately. The stage assembles behind them over several frames.
+## Leaving the menu frees the stage, including an unfinished build.
 ##   var stage := TitleStage.make("vr"); add_child(stage)      null with `enabled` off (timings, tests), or the game
 ##                                    started with -- --no-title: the menus are then exactly as they were
 ##   stage.place(eye, forward)        VR: stand it under the pilot's eye, facing the way he faces
@@ -56,8 +56,11 @@ const FLAT_ACROSS := 100.0       # ... through this wide a lens across the pictu
 const FLAT_BERTHS := [Vector3(-4.9, 0.0, -8.0), Vector3(5.5, 0.0, -9.6)]      # ... and where the two craft's noses come to in front of it
 const IDLE := 0.34               # the craft's levers: enough to spin the fans, light the links and stand a flame in each pipe
 const BOB := 0.035               # m: how far a hovering craft rides up and down
+const BOARD_FIRST_USEC := 50000  # Give the first menu frame and immediate input priority over any preview file reads.
 
 static var enabled := true       # (timings and tests: off, the menus are as they were before the title)
+static var _display_bodies := {} # port and starboard Phaethon fairings in the box-cover paint
+const CLOUD_COVER := "res://art/sky/cloud_cover.png"
 
 var layout := "vr"
 var sun_az := -31.0              # SUN_AZ for this layout
@@ -71,8 +74,18 @@ var word: Node3D                 # the letters' place: scaled to their cap heigh
 var craft: Array = []            # each {holder, model, sim, berth, inp, phase, rest, owed (s since its parts were last posed)}
 var stand: MeshInstance3D        # (the headset's layout only)
 var camera: Camera3D             # (the desktop's layout only)
-var build_ms := 0
-var build_split := {}            # ... and where it went, ms: {"sky", "land", "roads", "structures", "craft and word"}
+signal build_frame
+
+var build_ms := 0                # wall time from menu entry to the full, animated scene
+var build_split := {}            # longest uninterrupted assembly work and number of frames
+var art_ready := false
+var _entry_usec := 0
+var _board_draw_pending := true
+var _flight_livery := ""
+var _slice_name := "sky"
+var _building_vehicle := ""
+var _loading_path := ""
+var _sources := {}               # keep the threaded reads available to the normal model builders for this menu only
 var _clock := 0.0
 var _frame := 0
 var _shrike_was_loaded := false
@@ -110,7 +123,7 @@ static func make(for_layout: String) -> Node3D:
 
 
 func build(for_layout: String) -> void:
-	var t0 := Time.get_ticks_msec()
+	_entry_usec = Time.get_ticks_usec()
 	layout = for_layout
 	sun_az = SUN_AZ[layout]
 	name = "TitleStage"
@@ -121,33 +134,7 @@ func build(for_layout: String) -> void:
 	world.name = "world"
 	world.position.y = -STAND_H if layout == "vr" else 0.0
 	add_child(world)
-	_build_sky()
-	build_split["sky"] = Time.get_ticks_msec() - t0
-	_build_land()
-	_build_skyline()
-	build_split["land"] = Time.get_ticks_msec() - t0 - int(build_split.sky)
-	var t1 := Time.get_ticks_msec()
-	_build_roads()
-	build_split["roads"] = Time.get_ticks_msec() - t1
-	t1 = Time.get_ticks_msec()
-	_build_structures()
-	if layout == "vr":
-		_build_stand()
-	build_split["structures"] = Time.get_ticks_msec() - t1
-	t1 = Time.get_ticks_msec()
-	if layout == "vr":
-		# a craft on either hand, each nose-in along its own line to the pilot, clear of the board's edges
-		_add_craft("phaethon", "boxcover", "speed", _radial(VR_BERTHS[0][0], VR_BERTHS[0][1]), deg_to_rad(VR_BERTHS[0][0]))
-		_add_craft("shrike", "ember", "starfighter", _radial(VR_BERTHS[1][0], VR_BERTHS[1][1]), deg_to_rad(VR_BERTHS[1][0]))
-		# the word: 78 m off and 11.5 m high, over the board's top edge, its far end away to the right and a little up
-		_build_word(Vector3(0.0, EYE + 78.0 * tan(deg_to_rad(17.3)), -78.0), 11.5, Vector3(0.10, deg_to_rad(22.0), deg_to_rad(7.0)))
-	else:
-		# the cover's blocking: the two abreast and coming on, the camera between and over them, close, through
-		# a wide lens; and the word as the cover has it, measured off the picture: its near end low on the left,
-		# running away up to the right at 12 degrees, twice as far off at its far end
-		_add_craft("phaethon", "boxcover", "speed", FLAT_BERTHS[0], 0.0)
-		_add_craft("shrike", "ember", "starfighter", FLAT_BERTHS[1], 0.0)
-		_build_word(FLAT_EYE + Vector3(9.4, 15.3, -43.5), 10.0, Vector3(0.15, deg_to_rad(20.7), deg_to_rad(11.6)))
+	if layout == "flat":
 		camera = Camera3D.new()
 		camera.name = "TitleCamera"
 		camera.position = FLAT_EYE
@@ -156,9 +143,69 @@ func build(for_layout: String) -> void:
 		camera.far = 200000.0
 		camera.fov = 70.0
 		add_child(camera)
+	build_split = {"frames": 0, "max_slice_ms": 0.0, "slowest": "", "work_ms": 0.0, "by_part": {}}
+	_assemble()
+
+
+func _assemble() -> void:
+	# This signal belongs to the stage. An early launch frees pending work with the menu.
+	await build_frame
+	await _retain_source(CLOUD_COVER)
+	_slice_name = "sky"
+	_build_sky()
+	await build_frame
+	_slice_name = "title and stand"
+	if layout == "vr":
+		_build_word(Vector3(0.0, EYE + 78.0 * tan(deg_to_rad(17.3)), -78.0), 11.5, Vector3(0.10, deg_to_rad(22.0), deg_to_rad(7.0)))
+		_build_stand()
+	else:
+		_build_word(FLAT_EYE + Vector3(9.4, 15.3, -43.5), 10.0, Vector3(0.15, deg_to_rad(20.7), deg_to_rad(11.6)))
+	await build_frame
+	_slice_name = "roads"
+	_build_roads()
+	await build_frame
+	_slice_name = "land and skyline"
+	_build_land()
+	_build_skyline()
+	await build_frame
+	_slice_name = "structures"
+	_build_structures()
+	for i in 2:
+		await build_frame
+		if i == 0:
+			await _retain_source(ModelScript.CanopyScript.ROOF)
+			await _retain_source("res://art/engine/nacelle.glb")
+		else:
+			await _retain_source("res://art/shrike/bodywork.glb")
+			await _retain_source("res://art/shrike/enamel.tres")
+			await _retain_source("res://art/cockpit/shrike_coaming.webp")
+		var az := deg_to_rad(float(VR_BERTHS[i][0])) if layout == "vr" else 0.0
+		var nose: Vector3 = _radial(VR_BERTHS[i][0], VR_BERTHS[i][1]) if layout == "vr" else FLAT_BERTHS[i]
+		await _add_craft("phaethon" if i == 0 else "shrike", "boxcover" if i == 0 else "ember", "speed" if i == 0 else "starfighter", nose, az)
 	_sync_craft(0.0)
-	build_split["craft and word"] = Time.get_ticks_msec() - t1
-	build_ms = Time.get_ticks_msec() - t0
+	build_ms = ceili((Time.get_ticks_usec() - _entry_usec) / 1000.0)
+	art_ready = true
+
+
+func _retain_source(path: String) -> void:
+	if _sources.has(path):
+		return
+	if ResourceLoader.load_threaded_request(path) != OK:
+		push_error("Could not request title resource " + path)
+		return
+	_loading_path = path
+	while ResourceLoader.load_threaded_get_status(path) == ResourceLoader.THREAD_LOAD_IN_PROGRESS:
+		await build_frame
+	_finish_source()
+
+
+func _finish_source() -> void:
+	if _loading_path.is_empty():
+		return
+	var source := ResourceLoader.load_threaded_get(_loading_path)
+	if source != null:
+		_sources[_loading_path] = source
+	_loading_path = ""
 
 
 ## A place on the road `dist` m from the pilot, `az` degrees right of straight ahead: where a craft's
@@ -267,7 +314,7 @@ func _build_sky() -> void:
 	clouds.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var cm := ShaderMaterial.new()
 	cm.shader = preload("res://view/network_clouds.gdshader")
-	cm.set_shader_parameter("cloud_cover", load("res://art/sky/cloud_cover.png"))
+	cm.set_shader_parameter("cloud_cover", _sources.get(CLOUD_COVER))
 	cm.set_shader_parameter("zenith", ZENITH)
 	cm.set_shader_parameter("horizon", HORIZON)
 	cm.set_shader_parameter("lit_col", Vector3(0.86, 0.36, 0.15))
@@ -714,6 +761,8 @@ static func strap_3d(wide: float) -> Node3D:
 ## (view/livery.gd), flown by nobody: a sim that is never stepped holds it where the range would
 ## spawn it, and the game's own model is posed from that each frame, as a flight's is.
 func _add_craft(vehicle: String, livery: String, handling: String, nose: Vector3, az: float) -> void:
+	_building_vehicle = vehicle
+	_slice_name = vehicle + " bodywork and engine parts"
 	var sim = SimScript.new({"track": "range", "vehicle": vehicle, "handling": handling})
 	var berth := Berth.new()
 	berth.sim = sim
@@ -737,13 +786,14 @@ func _add_craft(vehicle: String, livery: String, handling: String, nose: Vector3
 	holder.basis = Basis(heading, Vector3.UP, heading.cross(Vector3.UP))
 	holder.position = nose - heading * reach
 	world.add_child(holder)
-	var own := Livery.current
+	holder.hide()
+	_flight_livery = Livery.current
 	Livery.current = livery      # (a craft's colours are in its meshes: built in its livery, then back)
 	var model = ModelScript.new()
 	model.name = "model"
 	holder.add_child(model)
-	model.build(berth)
-	Livery.current = own
+	await model.build(berth, _pause_craft.bind(livery), _display_body)
+	Livery.current = _flight_livery
 	# a pilot in the seat: helmet, visor, shoulders (the cover's; in a flight the pilot is you)
 	var pilot := MeshInstance3D.new()
 	pilot.name = "pilot"
@@ -756,8 +806,24 @@ func _add_craft(vehicle: String, livery: String, handling: String, nose: Vector3
 	pilot.material_override = Kit.polished(0.15, 0.32)
 	pilot.position = Vector3(0.0, 0.09, 0.62)      # the head where VRCockpit.EYE is in the pod
 	model.pod.add_child(pilot)
+	holder.show()
 	craft.append({"holder": holder, "model": model, "sim": sim, "berth": berth, "inp": {"brkL": 0.0, "brkR": 0.0, "park": false},
 		"phase": float(craft.size()) * 2.1, "rest": holder.position, "owed": 0.0})
+
+
+static func _display_body(out: float) -> ArrayMesh:
+	if not _display_bodies.has(out):
+		_display_bodies[out] = ModelScript._engine_body(out, false)      # (as the model's own: its rudder and stabiliser are parts that turn)
+	return _display_bodies[out]
+
+
+func _pause_craft(part: String, paint: String) -> void:
+	# Leave the selected paint available to the menu and any flight started between slices.
+	Livery.current = _flight_livery
+	await build_frame
+	_slice_name = _building_vehicle + " " + part
+	_flight_livery = Livery.current
+	Livery.current = paint
 
 
 func _sync_craft(delta: float) -> void:
@@ -779,6 +845,21 @@ func _sync_craft(delta: float) -> void:
 
 
 func _process(delta: float) -> void:
+	if _board_draw_pending:
+		_board_draw_pending = false
+		return
+	if not art_ready:
+		if Time.get_ticks_usec() - _entry_usec < BOARD_FIRST_USEC:
+			return
+		var before := Time.get_ticks_usec()
+		build_frame.emit()
+		build_split.frames += 1
+		var elapsed := (Time.get_ticks_usec() - before) / 1000.0
+		build_split.work_ms += elapsed
+		build_split.by_part[_slice_name] = maxf(elapsed, build_split.by_part.get(_slice_name, 0.0))
+		if elapsed > float(build_split.max_slice_ms):
+			build_split.max_slice_ms = elapsed
+			build_split.slowest = _slice_name
 	_clock += delta
 	_sync_craft(delta)
 	if clouds != null:
@@ -815,6 +896,9 @@ func frame(art: Rect2, window: Vector2, across := FLAT_ACROSS) -> void:
 # ---- when a flight starts ----
 
 func _exit_tree() -> void:
+	# Finish the one outstanding file read, if any, before the next scene enters flight.
+	_finish_source()
+	_sources.clear()
 	# the afternoon's globals back (a flight sets its own hour over them: view/outlook.gd)
 	Outlook._globals(Outlook.GLOBALS)
 	# what this loaded that a flight may not want: the Shrike's bodywork and maps (unless the flight now

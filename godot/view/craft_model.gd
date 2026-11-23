@@ -209,7 +209,9 @@ var _prev_v := []                    # last frame's [vx, vy] per body
 var _prev_turn := 0.0                # ... and how far the shafts had turned the craft by then (CraftSim.carry_turn)
 
 
-func build(v) -> void:
+## The title passes a checkpoint to divide assembly over frames while its menu is interactive.
+## Flight builds use the synchronous path.
+func build(v, checkpoint := Callable(), reuse_engine_body := Callable()) -> void:
 	view = v
 	var sim = v.sim
 	var shrike: bool = sim.P.vehicle == PilotCraft.SHRIKE
@@ -249,13 +251,20 @@ func build(v) -> void:
 			add_child(batch)
 			fin_batches.append(batch.multimesh)
 	for k in 2:
+		if checkpoint.is_valid():
+			await checkpoint.call("engine body")
 		var out := -1.0 if k == 0 else 1.0   # outboard side, engine-local X (eL rides on the left)
 		var eng := Node3D.new()
 		add_child(eng)
 		engines.append(eng)
 		var body := MeshInstance3D.new()
 		body.name = "ShrikeFairing" if shrike else "PhaethonFairing"
-		body.mesh = Shrike.part(&"Port" if k == 0 else &"Starboard") if shrike else _engine_body(out, false)      # (its rudder and stabiliser are their own parts)
+		if shrike:
+			body.mesh = Shrike.part(&"Port" if k == 0 else &"Starboard")
+		elif reuse_engine_body.is_valid():
+			body.mesh = reuse_engine_body.call(out)      # (the caller's own copy of the fixed mesh: title_stage._display_body)
+		else:
+			body.mesh = _engine_body(out, false)      # (its rudder and stabiliser are their own parts)
 		if not shrike:
 			body.material_override = Finishes.painted_metal()
 		eng.add_child(body)
@@ -310,6 +319,8 @@ func build(v) -> void:
 			light_meshes.append(tip_lamp)
 			fin_parts.append([fin, ram, rod, panel])
 			_place_fin(k, fin_cant)
+		if checkpoint.is_valid():
+			await checkpoint.call("fans")
 		# hot section: its own material, coloured by heat
 		var hot := MeshInstance3D.new()
 		hot.mesh = hot_mesh      # (its tail is open: the tailpipe runs up inside it)
@@ -395,6 +406,8 @@ func build(v) -> void:
 			stabiliser.transform = Fins.stabiliser_place(out, ENG_W / 2.0, 0.0)
 			eng.add_child(stabiliser)
 			stabilisers.append(stabiliser)
+		if checkpoint.is_valid():
+			await checkpoint.call("flaps and jets")
 		# split air brakes, two on top and two underneath: hinged at the front edge, the trailing
 		# edge swings up (or down) into the airflow
 		for fa in FLAPS_AT:
@@ -538,6 +551,8 @@ func build(v) -> void:
 		eng.add_child(lamp)
 		nozzle_lights.append(lamp)
 
+	if checkpoint.is_valid():
+		await checkpoint.call("pod hull")
 	pod = MeshInstance3D.new()
 	pod.mesh = pod_hull(shrike)   # materials live on its surfaces
 	if shrike:
@@ -553,6 +568,8 @@ func build(v) -> void:
 		tail_lights.add_to_group("exterior")
 		pod.add_child(tail_lights)
 	add_child(pod)
+	if checkpoint.is_valid():
+		await checkpoint.call("canopy")
 	canopy = CanopyScript.build()   # windscreen and forcefield (view/canopy.gd)
 	pod.add_child(canopy)
 	var flap_mat := null if shrike else Kit.polished(0.85, 0.2)
@@ -575,8 +592,12 @@ func build(v) -> void:
 		pod_flaps.append(hinge)
 
 	_place_fin_batches()
+	if checkpoint.is_valid():
+		await checkpoint.call("tow rod")
 	link_rod = TowLink.rod_for(sim.P.cableLen)
 	for k in 2:      # the tow links: four rigid parts each, placed every frame (sync_cables), their meshes made once
+		if checkpoint.is_valid():
+			await checkpoint.call("tow links")
 		var cm: StandardMaterial3D = TowLink.lit(view._mat(Color(0.2, 0.21, 0.23)))   # energized: glows with its engine's thrust (cable_glow)
 		cm.cull_mode = BaseMaterial3D.CULL_BACK
 		cm.emission = CABLE_COOL

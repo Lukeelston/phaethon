@@ -45,6 +45,7 @@ func _run() -> void:
 		var want := "stage" if view.begins_with("stage-") else ("flat" if view.begins_with("flat") else "vr")
 		if want != scene:
 			scene = want
+			var stage: Stage
 			if want == "stage":
 				if current_scene != null:
 					current_scene.queue_free()
@@ -53,7 +54,7 @@ func _run() -> void:
 				holder.name = "StageOnly"
 				root.add_child(holder)
 				current_scene = holder
-				var stage := Stage.make("vr")
+				stage = Stage.make("vr") as Stage
 				holder.add_child(stage)
 				var cam := Camera3D.new()
 				cam.name = "eye"
@@ -62,12 +63,20 @@ func _run() -> void:
 				holder.add_child(cam)
 				cam.make_current()
 				stage.place(Vector3.ZERO, Vector3.FORWARD)
-				print("TITLE STAGE built in %d ms" % stage.build_ms)
 			else:
 				change_scene_to_file("res://release/menu.tscn" if want == "flat" else "res://release/vr_menu.tscn")
 				await scene_changed
 				if want == "vr":
 					current_scene.set_process(false)      # (no headset: its own frame would only look for one)
+				stage = current_scene.stage
+			var deadline := Time.get_ticks_msec() + 15000
+			while stage != null and not stage.art_ready and Time.get_ticks_msec() < deadline:
+				await process_frame
+			if stage == null or not stage.art_ready:
+				push_error("Title assembly did not finish for " + want)
+				quit(1)
+				return
+			print("TITLE STAGE built in %d ms" % stage.build_ms)
 			await _wait(settle)
 		var cam: Camera3D = null
 		if want == "stage":
