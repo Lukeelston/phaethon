@@ -101,8 +101,6 @@ func check_fleet(game, id: String, vr: bool) -> void:
 	check(id + " shows its own cab, seat and roof", hull.is_visible_in_tree() and hull.mesh == art.part(&"Cab")
 			and hull.get_node("FleetSeat").mesh == art.part(&"Seat")
 			and (game.canopy if vr else model.canopy).get_node("roof").mesh == art.part(&"Roof"))
-	if vr:
-		check_sight_lines(game, hull)
 	var closed: bool = model.nose_closed
 	model.set_nose_closed(not closed, game)
 	check(id + " service bonnet follows the nose switch", hull.get_node("ServiceBonnet").visible != closed)
@@ -143,25 +141,78 @@ func check_fleet(game, id: String, vr: bool) -> void:
 	game.inp = previous
 
 
-func check_sight_lines(game, hull: MeshInstance3D) -> void:
-	# Both eyes at seated height and a slightly lower head must see all five dials
-	# through the full authored cab, including the optional service cover.
+func check_flight_deck(game, id: String) -> void:
+	var cluster = game.dashboard
+	var meter = game.aux_meter
+	if id == Sim.PilotCraft.STANDARD:
+		check("base cockpit uses the original gauge body and layout", meter == null and cluster.flight_deck == null
+				and cluster.gauges == cluster.Layout.GAUGES and not game.interior.has_node("SillFittings")
+				and cluster.get_node("binnacle").mesh == cluster.Interior._hd_mesh(cluster.BODY, "Binnacle"))
+		return
+	check(id + " has its own dial layout, side fittings and auxiliary instrument",
+			cluster.flight_deck.id == id and cluster.gauges != cluster.Layout.GAUGES
+			and game.interior.has_node("SillFittings") and meter.id == id)
+	var before: Array = []
+	meter.sync(0, [0,1], [0,1], -20, 0)
+	for cursor in meter.cursors:
+		before.append(cursor.transform)
+	check(id + " instrument lighting follows the battery", is_zero_approx(meter.card_material.emission_energy_multiplier))
+	# Drive the opposite readings through the same HUD update used in flight.
+	game._read_g()
+	game.sim.pod.th = PI / 2
+	game.inp.brkL = 1.0
+	game.inp.brkR = 0.0
+	game.craft.cable_strain.assign([1.0, 0.0])
+	game.g_turn = 20.0
+	game.startup.park = false
+	game.startup.power = 1.0
+	game._update_hud()
+	for i in meter.cursors.size():
+		check(id + " live indicator responds " + str(i), not meter.cursors[i].transform.is_equal_approx(before[i]))
+	check(id + " restores its instrument lighting", meter.card_material.emission_energy_multiplier > .1)
+	if id == Sim.PilotCraft.KILN:
+		meter.sync(0,[0,0],[1,1],0,1)
+		check("load pointers can respond independently", meter.cursors[0].position.x > .05
+				and meter.cursors[1].position.x > .05 and is_equal_approx(meter.cursors[1].position.x,before[1].origin.x))
+	if id == Sim.PilotCraft.ORRERY:
+		check("compass reads north with the north-up map", is_zero_approx(meter.cursors[0].rotation.z))
+	check_sight_lines(game)
+
+
+func check_sight_lines(game) -> void:
+	var cluster = game.dashboard
+	var hull: MeshInstance3D = game.shell.get_node("PodHull")
+	var obstacles := [hull, game.canopy.get_node("roof"), game.interior.get_node("SegmentedCoaming"),
+			game.interior.get_node("Dashboard"), game.interior.get_node("SillFittings"), cluster.get_node("binnacle")]
+	for name in ["FleetSeat","ServiceBonnet"]:
+		if hull.has_node(name):
+			obstacles.append(hull.get_node(name))
+	obstacles.append_array(game.aux_meter.find_children("*","MeshInstance3D",true,false))
+	var targets: Array[Vector3] = []
+	for g: Dictionary in cluster.gauges:
+		var frame: Transform3D = cluster.Kit.on_arc(g.x,g.y,0,cluster.R)
+		for offset: Vector2 in [Vector2(-.55,.20),Vector2(.55,.20),Vector2(0,.65),Vector2(0,-.55)]:
+			targets.append(cluster.to_global(frame * Vector3(offset.x*g.rf,offset.y*g.rf,g.face+.003)))
+	# Also trace to the lower status strips, points counter and two heel trays.
+	# A high undertray can hide these even when every gauge above it is visible.
+	for x in [-.32,-.17,0.0,.17,.32]:
+		var at: Transform3D = cluster.Kit.on_arc(x,-.125,.02,cluster.R)
+		targets.append(cluster.to_global(at.origin))
+	for x in [-.20,.20]:
+		targets.append(game.shell.to_global(Vector3(x,.16,-.16)))
 	var seen := true
-	var obstacles := [hull, hull.get_node("FleetSeat"), hull.get_node("ServiceBonnet"),
-			game.canopy.get_node("roof"), game.interior.get_node("SegmentedCoaming")]
 	for fitting: MeshInstance3D in obstacles:
 		var surface := fitting.mesh.generate_triangle_mesh()
-		for eye_x in [-0.033, 0.033]:
-			for drop in [0.0, 0.04]:
-				var eye := fitting.to_local(game.shell.to_global(game.EYE + Vector3(eye_x, -drop, 0)))
-				for dial_x in [-0.212, -0.116, 0.0, 0.116, 0.212]:
-					for dial_y in [0.0, 0.046]:
-						var dial := fitting.to_local(game.dashboard.to_global(Vector3(dial_x, dial_y, 0.01)))
-						var hit := surface.intersect_ray(eye, eye.direction_to(dial))
-						if hit and eye.distance_to(hit.position) < eye.distance_to(dial) - 0.002:
-							seen = false
-							print("Sight line blocked ", game.sim.P.vehicle, " ", fitting.name, " dial ", dial_x, " ", dial_y)
-	check(game.sim.P.vehicle + " left and right eye can see all five dials", seen)
+		for eye_x in [-.033,.033]:
+			for drop in [0.0,.04]:
+				var eye := fitting.to_local(game.shell.to_global(game.EYE+Vector3(eye_x,-drop,0)))
+				for target in targets:
+					var dial := fitting.to_local(target)
+					var hit := surface.intersect_ray(eye,eye.direction_to(dial))
+					if hit and eye.distance_to(hit.position) < eye.distance_to(dial)-.002:
+						seen = false
+						print("Sight line blocked ",game.sim.P.vehicle," ",fitting.name," to ",cluster.to_local(target))
+	check(game.sim.P.vehicle + " both eyes see the gauges, lower displays and footwells at both heights",seen)
 
 
 func _run() -> void:
@@ -216,6 +267,7 @@ func _run() -> void:
 			if game.craft.Fleet.supports(id):
 				check_fleet(game, id, vr)
 			if vr:
+				check_flight_deck(game, id)
 				check("the pilot sees the selected cabin", (game.shell.find_child("ShrikePlate", true, false) != null) == is_shrike)
 				check("tow instrument matches the selection", (game.tow_meter != null) == is_shrike)
 				if is_shrike:

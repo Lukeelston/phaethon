@@ -1,5 +1,6 @@
 ## In-game exterior, engine, cab and pilot-eye views. Run with --xr-mode off
 ## -s res://tests/render_pilot_fleet.gd -- --mute --out=ABSOLUTE_DIRECTORY.
+## Add --interiors for each custom cockpit at eye height and a closer view of its instruments.
 extends SceneTree
 
 const Seat := preload("res://vr/vr_cockpit.gd")
@@ -41,7 +42,17 @@ func _run() -> void:
 	Seat._map_loaded = true
 	Seat._school_loaded = true
 	root.msaa_3d = Viewport.MSAA_4X
-	for id in [Pilot.ORRERY, Pilot.KILN, Pilot.VESPER]:
+	var interiors := "--interiors" in OS.get_cmdline_user_args()
+	var vehicles := [Pilot.SHRIKE, Pilot.ORRERY, Pilot.KILN, Pilot.VESPER] if interiors else [Pilot.ORRERY, Pilot.KILN, Pilot.VESPER]
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--vehicle="):
+			var chosen := arg.trim_prefix("--vehicle=")
+			if not vehicles.has(chosen):
+				push_error("Unknown vehicle for this review: " + chosen)
+				quit(1)
+				return
+			vehicles = [chosen]
+	for id in vehicles:
 		Seat.vehicle_override = id
 		var game := Seat.new()
 		root.add_child(game)
@@ -55,7 +66,8 @@ func _run() -> void:
 		var engine: Transform3D = game.craft.engines[1].global_transform
 		var middle: Vector3 = (cab.origin + engine.origin - cab.basis.x * game.sim.P.engineGap * 0.5) * 0.5
 		var cam := game.cam as Camera3D
-		for shot in ["exterior", "engine", "cab", "seat"]:
+		var shots := ["flight-deck", "instruments"] if interiors else ["exterior", "engine", "cab", "seat"]
+		for shot: String in shots:
 			match shot:
 				"exterior":
 					cam.global_position = middle + cab.basis * Vector3(26, 14, -19)
@@ -69,6 +81,13 @@ func _run() -> void:
 					cam.global_position = cab * Vector3(3.9, 2.5, 4.1)
 					cam.look_at(cab * Vector3(0, -0.02, -0.07), cab.basis.y)
 					cam.fov = 38
+				"flight-deck", "instruments":
+					var xf: Transform3D = game.shell.global_transform
+					var close := shot == "instruments"
+					var eye := Seat.EYE + (Vector3(.028,-.014,-.055) if close else Vector3.ZERO)
+					cam.global_position = xf * eye
+					cam.look_at(xf * (Vector3(.055,.365,-.32) if close else Vector3(0,.51,-.41)),xf.basis.y)
+					cam.fov = 57 if close else 69
 				"seat":
 					cam.global_position = game.shell.global_transform * Seat.EYE
 					cam.look_at(cam.global_position + cab.basis * Vector3(0, -0.18, -1), cab.basis.y)

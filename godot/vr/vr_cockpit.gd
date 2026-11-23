@@ -42,6 +42,8 @@ const MENU_HOLD := 1.5   # hold the left menu button this long to return to map 
 const DashboardScript := preload("res://vr/dashboard.gd")
 const GaugeClusterScript := preload("res://vr/gauge_cluster.gd")
 const WagMeterScript := preload("res://vr/wag_meter.gd")
+const FleetDeck := preload("res://vr/fleet_flight_deck.gd")
+const AuxMeter := preload("res://vr/fleet_aux_meter.gd")
 const CockpitInteriorScript := preload("res://vr/cockpit_interior.gd")
 const ModeSwitchScript := preload("res://vr/mode_switch.gd")
 const CanopyScript := preload("res://view/canopy.gd")
@@ -59,6 +61,7 @@ var _await_neutral_controls := false
 
 var xr: XRInterface
 var rig: Node3D
+var aux_meter: AuxMeter
 var shell: Node3D   # the cockpit's fittings (hull, seat, levers, panel): shudders, your head doesn't
 var interior   # vr/cockpit_interior.gd
 var mode_switch   # vr/mode_switch.gd: the SPEEDCRAFT / STARFIGHTER toggle on the right console
@@ -747,6 +750,14 @@ func _build_cockpit() -> void:
 	interior = CockpitInteriorScript.new()   # floor, frames, consoles, harness, rim light
 	shell.add_child(interior)
 	interior.build()
+	var deck: FleetDeck
+	if sim != null and FleetDeck.STATIONS.has(sim.P.vehicle):
+		deck = FleetDeck.new(sim.P.vehicle)
+		deck.fit_cabin(interior)
+		aux_meter = AuxMeter.new()
+		aux_meter.name = "AuxiliaryMeter"
+		shell.add_child(aux_meter)
+		aux_meter.build(deck,EYE)
 	if fleet:
 		var rim: MeshInstance3D = interior.get_node("SegmentedCoaming")
 		rim.mesh = fleet.part(&"Coaming")
@@ -781,6 +792,7 @@ func _build_cockpit() -> void:
 		overhead.build()
 	dashboard = GaugeClusterScript.new() if GaugeClusterScript.available() else DashboardScript.new()
 	if dashboard is GaugeClusterScript:
+		dashboard.flight_deck = deck
 		dashboard.ivory_thrust_dials = tow_meter != null
 	shell.add_child(dashboard)
 	dashboard.transform = DashboardScript.mount()
@@ -2103,12 +2115,15 @@ func _update_hud() -> void:
 	if tow_meter:
 		tow_meter.set_shader_parameter("loads", Vector2(craft.cable_strain[0], craft.cable_strain[1]))
 	_read_g()
+	var brakes := _shown_brakes()
+	if aux_meter:
+		aux_meter.sync(sim.pod.th, brakes, craft.cable_strain, g_turn, startup.power)
 	dashboard.show_state({
 		"mph": kmh / 1.609344, "kmh": kmh, "mach": cues.mach, "backlight": lerpf(1.0, 0.5, maxf(1.0 if light_preset == "twilight" else 0.0, Outlook.darkness())), "mach_line": cues.readout() + boost_text() + autopilot.suffix(), "progress": progress,
 		"footer": "%s   /   %s" % [handling_text(), ctl],
 		"points": int(_skill_shown.get("points", 0)) if _skill_on else 0, "feat": String(_skill_shown.get("award", "")) if _skill_on else "", "feat_age": float(_skill_shown.get("age", 1e9)),
 		"thr": [inp.thrL * startup.engine_k(0), inp.thrR * startup.engine_k(1)],
-		"brk": _shown_brakes(), "heat": [sim.eL.heat, sim.eR.heat],
+		"brk": brakes, "heat": [sim.eL.heat, sim.eR.heat],
 		"health": [sim.eL.health, sim.eR.health],
 		"flameout": [sim.eL.flameout, sim.eR.flameout], "battery": sim.battery,
 		"burner": sim.mode == "burner", "armed": arm_lamp(), "ramjet": sim.mode == "ramjet", "turbines": _turbines or _turbine_lamp,
