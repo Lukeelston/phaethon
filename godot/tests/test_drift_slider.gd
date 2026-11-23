@@ -1,6 +1,6 @@
 ## The drift slider (vr/drift_slider.gd, vr/vr_cockpit.gd; Luke, 2026-11-23, from the seat: "add a physical
 ## slider or knob in the cockpit to adjust the amount of drift in real time"): how far the cockpit steps
-## out in a turn, set by hand in flight, from none to half as much again as it did before the slider.
+## out in a turn, set by hand in flight, from none to two and a half times what it did before the slider.
 ##   where        a rail on the left console's inboard shoulder, behind the SLIDE / GRIP switch: its slot
 ##                fore and aft, forward for more; from the seat it reads left to right, OFF .. DRIFT .. MAX,
 ##                upright and turned toward the eye, under a ramp that grows toward MAX; an arm's reach
@@ -157,7 +157,7 @@ func _run() -> void:
 	var s = v.drift_slider
 	_check("the cockpit has its drift slider, and with nothing saved it stands in the notch: the amount the cockpit had before the slider (%.2f), the SLIDE switch up" % Cockpit.slide_amount,
 		s != null and s.get_script() == Drift and s.get_parent() == v.shell and Cockpit.slide_amount == Drift.STANDARD and s.amount == Drift.STANDARD and Cockpit.slide_feel
-		and Drift.STANDARD == 1.0 and Drift.AMOUNT_MAX == 1.5)
+		and Drift.STANDARD == 1.0 and Drift.AMOUNT_MAX == 2.5)
 	if s == null:
 		print("DRIFT SLIDER FAIL (no slider)")
 		quit(1)
@@ -226,7 +226,7 @@ func _run() -> void:
 	var into_switch: Transform3D = sw.global_transform.affine_inverse() * s.global_transform
 	var in_box := 0
 	var nearest := INF
-	for a in [0.0, 0.5, 1.0, 1.25, 1.5]:
+	for a in [0.0, 0.5, 1.0, 1.25, 1.5, 2.0, Drift.AMOUNT_MAX]:
 		var middle := Vector3(Drift.place(a), 0.0, Drift.CAP_Z)
 		for i in 13:
 			for j in 24:
@@ -262,13 +262,14 @@ func _run() -> void:
 	var did := _carry(hand, start, start + Vector3(0.03, 0.0, 0.0))
 	_check("pushed 30 mm forward it goes with the hand: %.3f, and the cockpit's amount with it (%.3f), the hand ticked as it crossed each detent (%s)" % [s.amount, Cockpit.slide_amount, did],
 		absf(s.amount - (Drift.STANDARD + 0.03 / Drift.TRAVEL * Drift.AMOUNT_MAX)) < 0.01 and Cockpit.slide_amount == s.amount and did.count("tick") >= 2 and not did.has("let_go"))
-	did = _carry(hand, start + Vector3(0.03, 0.0, 0.0), start + Vector3(0.075, 0.0, 0.0))
+	var past: float = Drift.place(Drift.AMOUNT_MAX) - Drift.place(Drift.STANDARD) + 0.035      # (35 mm past the slot's forward end, wherever the notch is along it)
+	did = _carry(hand, start + Vector3(0.03, 0.0, 0.0), start + Vector3(past, 0.0, 0.0))
 	_check("pushed on past the end of the slot it stops at the most, %.2f times what it was (%s)" % [s.amount, did], s.amount == Drift.AMOUNT_MAX and Cockpit.slide_amount == Drift.AMOUNT_MAX and did.has("end") and s.held_by == hand)
 	var before_jump: float = s.amount
-	_poke(hand, start + Vector3(0.075 - 0.06, 0.0, 0.0))      # (0.06 m in a frame: 5.4 m/s, no hand)
+	_poke(hand, start + Vector3(past - 0.06, 0.0, 0.0))      # (0.06 m in a frame: 5.4 m/s, no hand)
 	_check("a tracking jump does not move it (%.2f)" % s.amount, s.amount == before_jump and s.held_by == hand)
 	# (it is held now from where the tip jumped to: the knob at the slot's forward end, the tip 60 mm short of where it was)
-	var here := start + Vector3(0.015, 0.0, 0.0)
+	var here := start + Vector3(past - 0.06, 0.0, 0.0)
 	var to_notch: float = Drift.place(Drift.STANDARD) - Drift.place(Drift.AMOUNT_MAX)
 	did = _carry(hand, here, here + Vector3(to_notch + 0.002, 0.0, 0.0))
 	_check("pulled back to within %.0f mm of the notch it falls in: exactly %.3f (%s)" % [Drift.NOTCH / Drift.AMOUNT_MAX * Drift.TRAVEL * 1000.0, s.amount, did],
@@ -286,14 +287,14 @@ func _run() -> void:
 
 	# ---- the amount: what the cockpit does with it
 	var held := {}
-	for a in [0.0, 0.5, 1.0, 1.5]:
+	for a in [0.0, 0.5, 1.0, Drift.AMOUNT_MAX]:
 		Cockpit.slide_amount = a
 		held[a] = _held_slide()
 	var full := rad_to_deg(Cockpit.SLIDE_MAX)
 	_check("in a hard left turn (30 g) the cockpit steps out by the amount: %.2f degrees at OFF, %.2f at a half, %.2f in the notch (as it was: %.1f), %.2f at the most; never faster than %.0f degrees a second (%.1f)" % [
-			(held[0.0] as Vector2).x, (held[0.5] as Vector2).x, (held[1.0] as Vector2).x, full, (held[1.5] as Vector2).x, rad_to_deg(Cockpit.SLIDE_RATE), (held[1.5] as Vector2).y],
-		(held[0.0] as Vector2).x == 0.0 and absf((held[0.5] as Vector2).x - 0.5 * full) < 0.15 and absf((held[1.0] as Vector2).x - full) < 0.15 and absf((held[1.5] as Vector2).x - 1.5 * full) < 0.2
-		and (held[1.5] as Vector2).y <= rad_to_deg(Cockpit.SLIDE_RATE) * 1.02)
+			(held[0.0] as Vector2).x, (held[0.5] as Vector2).x, (held[1.0] as Vector2).x, full, (held[Drift.AMOUNT_MAX] as Vector2).x, rad_to_deg(Cockpit.SLIDE_RATE), (held[Drift.AMOUNT_MAX] as Vector2).y],
+		(held[0.0] as Vector2).x == 0.0 and absf((held[0.5] as Vector2).x - 0.5 * full) < 0.15 and absf((held[1.0] as Vector2).x - full) < 0.15 and absf((held[Drift.AMOUNT_MAX] as Vector2).x - Drift.AMOUNT_MAX * full) < 0.2
+		and (held[Drift.AMOUNT_MAX] as Vector2).y <= rad_to_deg(Cockpit.SLIDE_RATE) * 1.02)
 	# in the notch: the same as before there was a slider, to the last bit
 	Cockpit.slide_amount = 1.0
 	_still()
@@ -349,7 +350,7 @@ func _run() -> void:
 	s.show_state(true, 0.0)
 	var dead: float = s.ramp.get_shader_parameter("glow")
 	_check("the knob stands where the amount is (%.1f mm along the slot for 0.75) and the ramp is lit that far (%.2f of it); dark with the switch at GRIP (%.1f) and with the battery dead (%.1f)" % [(knob_at - Drift.place(0.0)) * 1000.0, level, unlit, dead],
-		is_equal_approx(knob_at, Drift.place(0.75)) and is_equal_approx(level, 0.5) and lit == 1.0 and unlit == 0.0 and dead == 0.0)
+		is_equal_approx(knob_at, Drift.place(0.75)) and is_equal_approx(level, 0.75 / Drift.AMOUNT_MAX) and lit == 1.0 and unlit == 0.0 and dead == 0.0)
 	v.set_slide_amount(1.25)
 	_check("set from outside (a test, a menu) the knob goes there and it is saved: %.2f, \"slide_amount\": %s" % [s.amount, _saved().get("slide_amount", "nothing")],
 		s.amount == 1.25 and Cockpit.slide_amount == 1.25 and absf(float(_saved().get("slide_amount", -1.0)) - 1.25) < 0.001 and _saved().get("slide", "") == "on")

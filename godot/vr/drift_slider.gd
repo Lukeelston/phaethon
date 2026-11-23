@@ -31,11 +31,12 @@ extends Node3D
 
 const Kit := preload("res://view/mesh_kit.gd")
 const Finish := preload("res://view/craft_materials.gd")
-const AMOUNT_MAX := 1.5        # the most: half as much again as the cockpit stepped out before the slider
+const AMOUNT_MAX := 2.5        # the most: two and a half times what the cockpit stepped out before the slider (1.5 as it first
+                               # flew; Luke, 2026-11-23, with it at the stop: "the slider's max should be more I think")
 const STANDARD := 1.0          # ... which is this
 const TRAVEL := 0.12           # m of slot from none to AMOUNT_MAX
-const NOTCH := 0.05            # the knob falls into the notch from this near it (of the amount: 4 mm of the slot)
-const DETENT := 0.125          # a tick in the hand for every this much it is moved (a centimetre of the slot)
+const NOTCH := AMOUNT_MAX * 0.004 / TRAVEL      # the knob falls into the notch from this near it (of the amount: 4 mm of the slot)
+const DETENT := AMOUNT_MAX * 0.01 / TRAVEL      # a tick in the hand for every this much it is moved (a centimetre of the slot)
 const STILL := 0.0005          # less of a change than this is the hand's own tremor, not a move (0.04 mm of the slot)
 const HOLD_R := 0.045          # m: a tip this near the knob's cap ...
 const HOLD_S := 0.15           # ... for this long ...
@@ -159,7 +160,7 @@ func build() -> void:
 	body.material_override = Finish.powder_coat()
 	add_child(body)
 	var marks := []
-	for k in 4:      # a mark at each half: none, a half, STANDARD (the notch: longer, both sides of the slot), the most
+	for k in int(round(AMOUNT_MAX / 0.5)) + 1:      # a mark at each half: none, a half, STANDARD (the notch: longer, both sides of the slot), and on to the most
 		var a := 0.5 * k
 		var notch := is_equal_approx(a, STANDARD)
 		marks.append([Kit.box(Vector3(0.0022 if notch else 0.0012, 0.011 if notch else 0.004, 0.0006)),
