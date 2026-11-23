@@ -48,11 +48,18 @@ float span(float f, float lo, float hi, float px) {
 }
 
 void vertex() {
-	// Reshape the tiers above the lower shaft from a number that belongs to this tower alone
-	// (its place in the city), so one shared mesh gives a skyline of different ones.
-	vec2 place = floor(MODEL_MATRIX[3].xz);
-	float kind = fract(sin(dot(place, vec2(127.1, 311.7))) * 43758.5453);
-	float other = fract(sin(dot(place, vec2(269.5, 183.3))) * 43758.5453);
+	tall = max(length(MODEL_MATRIX[1].xyz), 1.0);
+	float width = length(MODEL_MATRIX[0].xyz);
+	float depth = length(MODEL_MATRIX[2].xyz);
+	// Reshape the tiers above the lower shaft from two numbers that belong to this tower alone, so one
+	// shared mesh gives a skyline of different ones. They come from its own three measures, which are
+	// what they are wherever the craft is. (They came from its place, MODEL_MATRIX[3]: but the view's
+	// origin floats with the craft, a tower's place is measured from the craft, and so every tower
+	// became another building with each metre flown: at speed, another every frame. Nothing here may
+	// read the place. tests/test_skyline_still.gd holds it to that.)
+	vec3 own = vec3(tall, width, depth);
+	float kind = fract(dot(own, vec3(0.6180, 0.7548, 0.5698)));
+	float other = fract(dot(own, vec3(0.3247, 0.2207, 0.8191)));
 	if (VERTEX.y > 0.021) {
 		vec2 squeeze = kind < 0.34 ? vec2(1.0) : (kind < 0.67 ? vec2(mix(0.62, 0.9, other)) : vec2(1.12, mix(0.5, 0.8, other)));
 		VERTEX.xz *= min(squeeze, vec2(1.16));
@@ -62,9 +69,6 @@ void vertex() {
 	}
 	ly = clamp(VERTEX.y + 0.5, 0.0, 1.0);
 	tint = COLOR.rgb;
-	tall = max(length(MODEL_MATRIX[1].xyz), 1.0);
-	float width = length(MODEL_MATRIX[0].xyz);
-	float depth = length(MODEL_MATRIX[2].xyz);
 	bool x_face = abs(NORMAL.x) > 0.5;
 	facade = vec2(x_face ? VERTEX.z * depth : VERTEX.x * width, ly * tall);
 	roof = abs(NORMAL.y);
