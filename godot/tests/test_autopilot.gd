@@ -22,6 +22,7 @@ const CraftSimScript := preload("res://sim/craft_sim.gd")
 const Autopilot := preload("res://view/autopilot.gd")
 const View := preload("res://view/craft_view.gd")
 const Cockpit := preload("res://vr/vr_cockpit.gd")
+const Traffic := preload("res://view/network_traffic.gd")
 const DT := 1.0 / 480.0
 const SUB := 8
 const MPH := 2.236936
@@ -329,6 +330,62 @@ func _traffic() -> void:
 			_check("it chose another lane %d times for that one vehicle (over, and back: 2); its hands meanwhile: %s" % [lanes_changed, hands[1]], lanes_changed == 2 and hands[0])
 
 
+func _traffic_footprint() -> void:
+	var sim = CraftSimScript.new({"track": "network", "handling": "speed", "obstacleCollisions": true})
+	sim.respawn_on(_road(sim, "N3"), 400, 1)
+	var a := Autopilot.new()
+	a.engage(sim, _city(sim, "GLACIER"))
+	var along := Vector2(a.rtx[a.at], a.rty[a.at])
+	var across := Vector2(-along.y, along.x)
+	for body in sim.bodies:
+		body.vx = along.x * 850.0
+		body.vy = along.y * 850.0
+	var lead := Vector2(sim.pod.x, sim.pod.y) + 550.0 * along + 48.0 * across
+	var heading := (along + 0.18 * across).normalized()
+	var car := Traffic.Car.new()
+	car.x = lead.x
+	car.y = lead.y
+	car.hx = heading.x
+	car.hy = heading.y
+	car.v = 150.0
+	a._traffic(sim, [car])
+	var clear_for_car := a.lane == 0.0 and a.lane_cap == INF
+	car.kind = Traffic.TRANSPORT
+	a._traffic(sim, [car])
+	_check("a lead clear of the line is harmless alone; its freight train's trailing units occupy our lane",
+		clear_for_car and (a.lane != 0.0 or a.lane_cap < INF))
+	_check("the move home waits for a slower vehicle between slots and can cross once it has passed",
+		not a._can_cross([[500.0, 25.0, 200.0, 0.0]], 50.0, 0.0, 500.0)
+		and a._can_cross([[-100.0, 25.0, 200.0, 0.0]], 50.0, 0.0, 500.0))
+	# At the Glacier contact the slot was zero but the hull was 19 m into the neighbouring
+	# lane. A centred craft can thread the gap. One physically closing in that lane must slow.
+	sim.respawn_on(_road(sim, "SFrost"), 1203, 1)
+	a = Autopilot.new()
+	if not a.engage(sim, _city(sim, "GLACIER")):
+		_check("Glacier approach fixture engages", false)
+		return
+	along = Vector2(a.rtx[a.at], a.rty[a.at])
+	across = Vector2(-along.y, along.x)
+	lead = Vector2(a.rx[a.at], a.ry[a.at]) + along * 200.0 - across * 25.0
+	car.kind = Traffic.CAR
+	car.x = lead.x
+	car.y = lead.y
+	car.hx = along.x
+	car.hy = along.y
+	car.v = 550.0
+	for body in sim.bodies:
+		body.vx = along.x * 1000.0
+		body.vy = along.y * 1000.0
+	a._traffic(sim, [car])
+	var centered := a.lane_cap == INF and a.lane == 0.0
+	for body in sim.bodies:
+		body.x -= 15.0 * across.x
+		body.y -= 15.0 * across.y
+	a._traffic(sim, [car])
+	_check("a clear middle slot stays clear; a hull already 15 m into the neighbouring lane follows without a flick",
+		centered and a.lane_cap < INF and a.lane == 0.0)
+
+
 ## Leaving Dunes the wrong way the only road on is the highway's end and its shaft: up it, over and back.
 func _shaft() -> void:
 	var sim = CraftSimScript.new({"track": "network", "handling": "speed"})
@@ -442,7 +499,8 @@ func _views() -> void:
 	v.queue_free()
 	await process_frame
 	# ---- the cockpit ----
-	var prefs_before := FileAccess.get_file_as_string(Cockpit.PREFS) if FileAccess.file_exists(Cockpit.PREFS) else ""
+	var prefs_existed := FileAccess.file_exists(Cockpit.PREFS)
+	var prefs_before := FileAccess.get_file_as_bytes(Cockpit.PREFS) if prefs_existed else PackedByteArray()
 	Cockpit.camera = "cockpit"
 	Cockpit._camera_loaded = true
 	Cockpit._startup_loaded = true
@@ -540,12 +598,15 @@ func _views() -> void:
 	_check("the parking brake set under it: the craft is given back (\"%s\")" % c.flash_msg, not c.autopilot.on and String(c.flash_msg).contains("PARKED"))
 	c.queue_free()
 	await process_frame
-	if prefs_before == "":
+	if not prefs_existed and FileAccess.file_exists(Cockpit.PREFS):
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(Cockpit.PREFS))
-	else:
+	elif prefs_existed and (not FileAccess.file_exists(Cockpit.PREFS) or FileAccess.get_file_as_bytes(Cockpit.PREFS) != prefs_before):
 		var out := FileAccess.open(Cockpit.PREFS, FileAccess.WRITE)
-		out.store_string(prefs_before)
-		out.close()
+		if out:
+			out.store_buffer(prefs_before)
+			out.close()
+	_check("the exact VR preferences or their absence are restored",
+		FileAccess.file_exists(Cockpit.PREFS) == prefs_existed and (not prefs_existed or FileAccess.get_file_as_bytes(Cockpit.PREFS) == prefs_before))
 
 
 func _run() -> void:
@@ -554,6 +615,7 @@ func _run() -> void:
 	_holds()
 	_route()
 	_traffic()
+	_traffic_footprint()
 	_shaft()
 	_cost()
 	await _views()

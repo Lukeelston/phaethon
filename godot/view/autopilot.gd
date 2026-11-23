@@ -651,7 +651,6 @@ func _traffic(sim, cars: Array) -> void:
 	# back with each mph, the whole road's speed asked for in the frames it was out.)
 	var far := reach * 1.25 + 300.0
 	var n := rx.size()
-	var sp := maxf(1.0, rlen[0])
 	var i := at
 	var ox := rx[i]
 	var oy := ry[i]
@@ -661,43 +660,52 @@ func _traffic(sim, cars: Array) -> void:
 	var R = sim.roads[rpath[i]]
 	var half: float = R.w[clampi(ri[i], 0, int(R.N) - 1)] * 0.5
 	var lane_step := LANE_STEP_HWY if half > LANE_WIDE else LANE_STEP_RAMP
+	var narrow := half <= LANE_WIDE
+	var hull_offset := lane
+	var hull_half := 0.0
+	if narrow:
+		var low := INF
+		var high := -INF
+		for body in sim.bodies:
+			var side: float = -(body.x - ox) * ty + (body.y - oy) * tx
+			low = minf(low, side)
+			high = maxf(high, side)
+		hull_offset = (low + high) * 0.5
+		hull_half = (high - low) * 0.5
+	var tracking_bias := hull_offset - _lane_now if narrow else 0.0
+	var extra_half_width := maxf(0.0, hull_half - sim.P.engineGap * 0.5)
+	var settled := not narrow or absf(hull_offset - lane) < lane_step * 0.25
 	var seen: Array = []
 	for c in cars:
-		var dx: float = c.x - ox
-		var dy: float = c.y - oy
-		if absf(dx) > far or absf(dy) > far:
+		var tail: float = c.train_tail if "train_tail" in c else 0.0
+		if absf(c.x - ox) > far + tail or absf(c.y - oy) > far + tail:
 			continue
-		var along: float = dx * tx + dy * ty - here
-		if along < -40.0 or along > far:
+		if tail <= 0.0:
+			_see_traffic_point(seen, c, c.x, c.y, here, half, far)
 			continue
-		var left: float = -dx * ty + dy * tx
-		var cx := tx
-		var cy := ty
-		if along > BEND_FROM:
-			# By the route's own line where the vehicle is. (It was this sample's line carried on straight, "the
-			# roads bend over tens of kilometres": on a highway's bend, 44 km round at its speed, that puts a
-			# vehicle 6 km ahead 400 m to one side of where it is, and one in its lane was not seen there till
-			# it was a kilometre off: a second and a half to move over or stop in.)
-			var j := clampi(i + roundi((along + here) / sp), 0, n - 1)
-			j = clampi(j + roundi(((c.x - rx[j]) * rtx[j] + (c.y - ry[j]) * rty[j]) / maxf(1.0, rlen[j])), 0, n - 1)
-			var ex: float = c.x - rx[j]
-			var ey: float = c.y - ry[j]
-			cx = rtx[j]
-			cy = rty[j]
-			left = -ex * cy + ey * cx
-			along = rs[j] - rs[i] + ex * cx + ey * cy - here
-		if absf(left) > half + 10.0:
-			continue   # not on this road
-		# Nor is one going across it: the Network's roads meet by running together, and where one crosses another
-		# it is over it or under it. (Such a vehicle has no speed along the route, and read as one standing in her
-		# lane: at 4,250 mph a ramp's traffic passing under the highway had the brakes out for 43 mph, 90 g at
-		# the seat, for the 0.4 s it took to cross.)
-		var its: float = float(c.hx) * cx + float(c.hy) * cy
-		if absf(its) < ACROSS:
-			continue
-		seen.append([along, left, float(c.v) * its])
+		# One train occupies a continuous strip. Include its middle on a bend and score it once.
+		var sections := []
+		for part in 3:
+			var back := 0.5 * tail * part
+			_see_traffic_point(sections, c, c.x - c.hx * back, c.y - c.hy * back, here, half, far)
+		if not sections.is_empty():
+			var train: Array = sections[0]
+			var ahead: float = train[0]
+			var left: float = train[1]
+			var right := left
+			for part in sections:
+				train[0] = minf(train[0], part[0])
+				ahead = maxf(ahead, part[0])
+				left = minf(left, part[1])
+				right = maxf(right, part[1])
+			if ahead > 0.0:
+				train[0] = maxf(0.01, train[0])
+			train[1] = 0.5 * (left + right)
+			train[3] = 0.5 * (right - left)
+			seen.append(train)
 	if seen.is_empty():
-		lane = move_toward(lane, 0.0, lane_step) if absf(lane) > 0.5 else 0.0
+		if settled:
+			lane = move_toward(lane, 0.0, lane_step) if absf(lane) > 0.5 else 0.0
 		return
 	var edge := floorf(half * LANE_EDGE / lane_step) * lane_step
 	# Coming up to a change of road (within the look) it moves no further out, only back toward the middle: the
@@ -706,6 +714,9 @@ func _traffic(sim, cars: Array) -> void:
 	# the highway's as she came to an exit, 90 m out, was off the side of the ramp she was turning onto.) The
 	# same when the lane it holds is further out than this road has room for: it has just come off a wider one.
 	var turning := (rnext[i] < n - 1 and rs[rnext[i]] - rs[i] < maxf(LOOK_MIN, v * LOOK_S)) or absf(lane) > edge + 0.5
+	# On narrow pavement there are 25 m from a slot to traffic's lane centre. Don't start a
+	# pass if the measured tracking error on this bend has already spent the available clearance.
+	turning = turning or (narrow and absf(tracking_bias) + extra_half_width + CAR_HALF >= lane_step * 0.5)
 	var lanes: Array = [lane]
 	for step in [1, -1, 2, -2, 3, -3]:
 		var cand := clampf(roundf(lane / lane_step) * lane_step + step * lane_step, -edge, edge)
@@ -721,9 +732,11 @@ func _traffic(sim, cars: Array) -> void:
 	var gap_t := INF          # ... and how many seconds off
 	for cand in lanes:
 		var held := is_equal_approx(float(cand), lane)
+		if not held and (not settled or not _can_cross(seen, hull_offset, cand + tracking_bias, v)):
+			continue
 		var t := INF
 		for s in seen:
-			if absf(float(s[1]) - float(cand)) > CAR_HALF + (0.0 if held else 8.0) or float(s[0]) > reach:
+			if absf(float(s[1]) - float(cand)) > CAR_HALF + float(s[3]) + (0.0 if held else 8.0) or float(s[0]) > reach:
 				continue
 			var closing: float = v - float(s[2])
 			if not held and float(s[0]) < 60.0:
@@ -744,15 +757,15 @@ func _traffic(sim, cars: Array) -> void:
 		_lane_w = clampf(LANE_EASE * LANE_HURRY_S / maxf(gap_t, 0.1), LANE_EASE, LANE_HURRY)
 		events.append("lane")
 		return
-	if gap_t >= LOOK_S and absf(lane) > 0.5 and _lane_t >= LANE_DWELL:
+	if gap_t >= LOOK_S and absf(lane) > 0.5 and _lane_t >= LANE_DWELL and settled:
 		# nothing in its way: back toward the middle, a lane at a time, when that is clear too. Clear of whatever
 		# it would move over for again: it used to look 3 s ahead for this and 6 s to move over, and for a vehicle
 		# between the two it changed lane every frame, over and back (132 times in the 2.2 s a 300 mph vehicle
 		# took to come from the one to the other at 2,400).
 		var back := move_toward(lane, 0.0, lane_step)
-		var clear := true
+		var clear := _can_cross(seen, hull_offset, back + tracking_bias, v)
 		for s in seen:
-			if absf(float(s[1]) - back) > CAR_HALF + 8.0 or float(s[0]) <= -60.0 or float(s[0]) > reach:
+			if absf(float(s[1]) - back) > CAR_HALF + float(s[3]) + 8.0 or float(s[0]) <= -60.0 or float(s[0]) > reach:
 				continue
 			if float(s[0]) < maxf(LOOK_MIN, v * 3.0) or v - float(s[2]) > 1.0:
 				clear = false
@@ -764,11 +777,59 @@ func _traffic(sim, cars: Array) -> void:
 	# was the nearest it was closing on by more than 1 m/s, and matched to a vehicle's speed that came and went
 	# with each mph, the whole road's speed asked for in the frames between.
 	for s in seen:
-		if float(s[0]) > 0.0 and absf(float(s[1]) - lane) <= CAR_HALF:
+		var closing: float = v - float(s[2])
+		var width := CAR_HALF + float(s[3])
+		var in_way := absf(float(s[1]) - lane) <= width
+		if narrow and closing > 0.0 and float(s[0]) <= closing * LOOK_S:
+			# At the encounter, the hull is still travelling from its actual lateral position
+			# to the slot. The tracking bias on a bend also applies once the shift settles.
+			var meet := clampf(float(s[0]) / closing / LANE_COMMIT, 0.0, 1.0)
+			var line := lerpf(hull_offset, lane + tracking_bias, meet)
+			in_way = in_way or absf(float(s[1]) - line) <= width + extra_half_width
+		if float(s[0]) > 0.0 and in_way:
 			lane_cap = minf(lane_cap, _behind(float(s[0]), float(s[2])))
-			var closing: float = v - float(s[2])
 			if closing > 0.0:
 				lane_need = maxf(lane_need, closing * closing / (2.0 * maxf(30.0, float(s[0]) - FOLLOW_GAP_S * maxf(float(s[2]), 0.0) - FOLLOW_ROOM)))
+
+
+## Locate a section against the route at the section, including bends. Ignore transverse traffic on overpasses.
+func _see_traffic_point(seen: Array, car, x: float, y: float, here: float, half: float, far: float) -> void:
+	var i := at
+	var dx := x - rx[i]
+	var dy := y - ry[i]
+	var cx := rtx[i]
+	var cy := rty[i]
+	var along := dx * cx + dy * cy - here
+	if along < -40.0 or along > far:
+		return
+	var left := -dx * cy + dy * cx
+	if along > BEND_FROM:
+		var j := clampi(i + roundi((along + here) / maxf(1.0, rlen[0])), 0, rx.size() - 1)
+		j = clampi(j + roundi(((x - rx[j]) * rtx[j] + (y - ry[j]) * rty[j]) / maxf(1.0, rlen[j])), 0, rx.size() - 1)
+		cx = rtx[j]
+		cy = rty[j]
+		dx = x - rx[j]
+		dy = y - ry[j]
+		left = -dx * cy + dy * cx
+		along = rs[j] - rs[i] + dx * cx + dy * cy - here
+	var alignment: float = car.hx * cx + car.hy * cy
+	if absf(left) <= half + 10.0 and absf(alignment) >= ACROSS:
+		seen.append([along, left, float(car.v) * alignment, 0.0])
+
+
+## The road users between two slots must clear the craft while it moves across to the new one.
+## Ignore the vehicle in the original slot that motivated the pass; the existing gap test handles it.
+func _can_cross(seen: Array, from: float, to: float, speed: float) -> bool:
+	for other in seen:
+		var left: float = other[1]
+		var half: float = other[3]
+		if left + half <= minf(from, to) or left - half >= maxf(from, to) or absf(left - from) + half <= CAR_HALF:
+			continue
+		var ahead: float = other[0]
+		var after := ahead + (float(other[2]) - speed) * LANE_COMMIT
+		if minf(ahead, after) <= FOLLOW_ROOM and maxf(ahead, after) >= -40.0:
+			return false
+	return true
 
 
 ## The speed it may hold `gap` m behind a vehicle doing `its` m/s along the route: no faster than

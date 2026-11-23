@@ -12,6 +12,8 @@
 ##        fast                 taken at 3,100 mph on N3 with 3,200 asked, a minute (flight 18's way in)
 ##   --out=DIR --label=before  a CSV a drive (DIR/<label>-<mode><hz>-<drive>.csv) and the summary
 ##   --every=N                 a CSV row every N frames (1)
+##   --solid-traffic           cockpit: enable physical traffic and pillars for this drive only
+##   --require-clean           fail when a solid cockpit drive ends early or touches traffic, supports or walls
 ## --headless --xr-mode off --audio-driver Dummy [--fixed-fps 90] -s res://tests/probe_autopilot_hands.gd -- --mute --mode=sim --out=...
 extends SceneTree
 
@@ -30,6 +32,35 @@ var mode := "sim"
 var hz := 60
 var every := 1
 var summary: Array[String] = []
+var failures := 0
+
+
+# Physics dispatches every contact here before clearing its events, including a touch that
+# begins and ends between rendered frames. A car can have several collidable sections.
+class MeteredCockpit extends "res://vr/vr_cockpit.gd":
+	var contacts := {"bump": 0, "smash": 0, "hit": 0, "scrape": 0}
+	var contact_log: Array[String] = []
+	var decision_us := PackedInt64Array()
+
+	func _autopilot_frame(delta: float) -> void:
+		var start := Time.get_ticks_usec()
+		super(delta)
+		decision_us.append(Time.get_ticks_usec() - start)
+
+	func _on_event(event: Dictionary) -> void:
+		if contacts.has(event.type):
+			contacts[event.type] += 1
+			var obstacle := "wall"
+			if event.has("id"):
+				obstacle = "pillar %d" % event.id if event.id < 0 else "vehicle %d section %d" % [int(event.id) / 32, int(event.id) % 32]
+			contact_log.append("CONTACT t=%.4f event=%s body=%s obstacle=%s road=%s sample=%d mph=%.0f closing_mps=%.1f target_lane=%.1f" % [
+				sim.time, event.type, event.get("who", "?"), obstacle, sim.roads[sim.pod.path].name,
+				sim.pod.hint, Vector2(sim.pod.vx, sim.pod.vy).length() * 2.236936, event.get("v", 0.0), autopilot.lane])
+		super(event)
+
+	# The probe can shift handling as it flies. It needs no writes to the pilot's preferences.
+	func _save_prefs() -> void:
+		pass
 
 
 func _arg(name: String, fallback: String) -> String:
@@ -283,11 +314,15 @@ func _cockpit_drive(drive: String) -> void:
 	# flight there with another target)
 	var slate := "probe_hands_%s_%s_%d_" % [label, drive, Time.get_ticks_usec()]
 	View.best_dir = OS.get_user_data_dir().path_join(slate)
-	var c = Cockpit.new()
+	var c := MeteredCockpit.new()
 	root.add_child(c)
 	await process_frame
 	c.set_process(false)
 	var sim = c.sim
+	var solid := "--solid-traffic" in OS.get_cmdline_user_args()
+	if solid:
+		sim.P.obstacleCollisions = true
+		c.traffic_net.collide = true
 	var plan := _setup(drive, sim)
 	c.net_target = int(plan.city)
 	if drive == "fast":      # as a pilot would have her: top gear, both levers in
@@ -316,8 +351,9 @@ func _cockpit_drive(drive: String) -> void:
 	var frame := 1.0 / hz
 	var nearest := INF         # the least a vehicle came to the pod
 	var close := 0             # frames with one within 12 m (a vehicle is some 9 m wide: inside one, were it solid)
-	var walls := 0             # wall contacts: a body's contact flag going up (the view keeps the sim's events to itself)
-	var touching := false
+	c.contact_log.clear()
+	for kind in c.contacts:
+		c.contacts[kind] = 0
 	c.set_process(true)        # the engine's own frames from here (--fixed-fps: each is 1/hz s)
 	while t < float(plan.secs) and a.on:
 		await process_frame
@@ -345,11 +381,6 @@ func _cockpit_drive(drive: String) -> void:
 		if float(near[0]) >= 0.0:
 			nearest = minf(nearest, float(near[0]))
 			close += int(float(near[0]) < 12.0)
-		var touch := false
-		for b in sim.bodies:
-			touch = touch or b.contact[0] or b.contact[1]
-		walls += int(touch and not touching)
-		touching = touch
 		tr.row(t, dt, inp.thrL, inp.thrR, inp.brkL, inp.brkR, sim, a, String(c.handling_ask), c.quest.gear, near)
 		if t >= 45.0:
 			var mph := Vector2(sim.pod.vx, sim.pod.vy).length() * MPH
@@ -359,8 +390,22 @@ func _cockpit_drive(drive: String) -> void:
 			var i := clampi(int(sim.pod.hint), 0, int(R.N) - 1)
 			off_most = maxf(off_most, absf((sim.pod.x - R.px[i]) * R.nx[i] + (sim.pod.y - R.py[i]) * R.ny[i] - a.lane))
 	c.set_process(false)
-	_report(drive, m, "took %s, %.0f s (%d frames), %.0f to %.0f mph after 45 s, most %.1f m off its line, %d wall contacts, s in each gear %s, the traffic %d vehicles (pass-through: OBSTACLE COLLISIONS off), the nearest one came %.0f m (%d frames with one within 12 m), still its own %s (%s)" % [
-		took, t, frames, mph_lo, mph_hi, off_most, walls, gears, c.traffic_net.cars.size() if c.traffic_net else 0, nearest, close, a.on, a.why_off])
+	var collisions: bool = sim.P.obstacleCollisions and c.traffic_net.collide
+	for line in c.contact_log:
+		print(drive, " ", line)
+		summary.append(drive + " " + line)
+	if not c.decision_us.is_empty():
+		c.decision_us.sort()
+		var n := c.decision_us.size()
+		var cost := "AUTOPILOT COST %s %d decisions median=%d us p95=%d us max=%d us" % [
+			drive, n, c.decision_us[n / 2], c.decision_us[ceili(0.95 * n) - 1], c.decision_us[n - 1]]
+		print(cost)
+		summary.append(cost)
+	_report(drive, m, "took %s, %.0f s (%d frames), %.0f to %.0f mph after 45 s, most %.1f m off its line, contacts %s, s in each gear %s, the traffic %d vehicles (OBSTACLE COLLISIONS %s), the nearest one came %.0f m (%d frames with one within 12 m), still its own %s (%s)" % [
+		took, t, frames, mph_lo, mph_hi, off_most, c.contacts, gears, c.traffic_net.cars.size() if c.traffic_net else 0,
+		"ON" if collisions else "off", nearest, close, a.on, a.why_off])
+	if "--require-clean" in OS.get_cmdline_user_args() and (not collisions or not took or not a.on or t < float(plan.secs) or not c.contact_log.is_empty()):
+		failures += 1
 	c.set_autopilot(false)
 	c.queue_free()
 	await process_frame
@@ -371,7 +416,13 @@ func _cockpit_drive(drive: String) -> void:
 
 
 func _run() -> void:
-	var prefs_before := FileAccess.get_file_as_string(Cockpit.PREFS) if FileAccess.file_exists(Cockpit.PREFS) else ""
+	var args := OS.get_cmdline_user_args()
+	if ("--solid-traffic" in args and mode != "cockpit") or ("--require-clean" in args and not "--solid-traffic" in args):
+		push_error("Solid traffic verification requires --mode=cockpit --solid-traffic")
+		quit(1)
+		return
+	var existed := FileAccess.file_exists(Cockpit.PREFS)
+	var prefs_before := FileAccess.get_file_as_bytes(Cockpit.PREFS) if existed else PackedByteArray()
 	var drives := _arg("drives", "hold2400,hold1200,route,pass,wall" if mode == "sim" else "hold2400,hold1200,route").split(",")
 	for drive in drives:
 		if mode == "cockpit":
@@ -379,15 +430,18 @@ func _run() -> void:
 		else:
 			_sim_drive(drive)
 	if mode == "cockpit":
-		if prefs_before == "":
+		if not existed and FileAccess.file_exists(Cockpit.PREFS):
 			DirAccess.remove_absolute(ProjectSettings.globalize_path(Cockpit.PREFS))
-		else:
+		elif existed and (not FileAccess.file_exists(Cockpit.PREFS) or FileAccess.get_file_as_bytes(Cockpit.PREFS) != prefs_before):
 			var out := FileAccess.open(Cockpit.PREFS, FileAccess.WRITE)
-			out.store_string(prefs_before)
-			out.close()
+			if out:
+				out.store_buffer(prefs_before)
+				out.close()
+		if FileAccess.file_exists(Cockpit.PREFS) != existed or (existed and FileAccess.get_file_as_bytes(Cockpit.PREFS) != prefs_before):
+			failures += 1
 	if out_dir != "":
 		var f := FileAccess.open(out_dir.path_join("%s-%s%d-summary.txt" % [label, mode, hz]), FileAccess.WRITE)
 		if f:
 			f.store_string("\n".join(summary) + "\n")
-	print("HANDS DONE")
-	quit(0)
+	print("HANDS DONE" if failures == 0 else "HANDS FAIL")
+	quit(int(failures > 0))

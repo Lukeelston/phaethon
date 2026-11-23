@@ -158,6 +158,9 @@ class Car:
 	var right_width := 7.0
 	var front := 24.0
 	var rear := 24.0
+	var train_tail: float:
+		get:
+			return (TRAIN - 1) * TRAIN_GAP if kind == TRANSPORT else 0.0
 	var v := 0.0          # m/s
 	var vdes := 0.0
 	var cruise := 0.0     # the vehicle's own lower-deck cruise; express roads scale cars/hot rods
@@ -1066,8 +1069,7 @@ func _clear(arr: Array, idx: int, c: Car, lat_n: float) -> bool:
 			continue # a road switch or a direction normalization can leave a stale bucket entry
 		var g: float = (o.f - c.f) * c.dir * 24.0
 		var future := g + (o.v - c.v) * duration
-		var tail := (TRAIN - 1) * TRAIN_GAP if o.kind == TRANSPORT else 0.0
-		var unsafe_gap := minf(g, future) < front_gap + o.rear + tail if g > 0.0 else maxf(g, future) > -(rear_gap + o.front)
+		var unsafe_gap := minf(g, future) < front_gap + o.rear + o.train_tail if g > 0.0 else maxf(g, future) > -(rear_gap + o.front)
 		if not unsafe_gap:
 			continue
 		var committed := o.lat if o.id == 0 else _lane_lat(o, o.lane)
