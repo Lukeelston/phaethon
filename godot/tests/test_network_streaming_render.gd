@@ -1,4 +1,5 @@
 ## Actual renderer checks of first-frame fade, followed by ramp/profile snapshots.
+## Run windowed for frame readback.
 extends SceneTree
 const View := preload("res://view/craft_view.gd")
 var failures := 0

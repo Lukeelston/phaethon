@@ -1,7 +1,7 @@
 ## The quick menu's camera change (Luke: "Will you also add a camera change to the pause menu?"):
 ## the seat, a chase view and a far one. Outside, the view is level and turns with the pod's
 ## heading only; back in the seat the origin is the eye point again.
-## Run windowed with -- --shots=DIR to save a picture of each camera.
+## Optional screenshots use a window and -- --shots=DIR to save a picture of each camera.
 extends SceneTree
 
 const View := preload("res://view/craft_view.gd")

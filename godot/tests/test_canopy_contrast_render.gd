@@ -1,4 +1,5 @@
 ## Actual GPU A/B test: fixed real cockpit eye, distant dark/light targets, real canopy.
+## Run windowed to read the canopy images.
 extends SceneTree
 const CanopyScript := preload("res://view/canopy.gd")
 var failed := 0

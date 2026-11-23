@@ -1,5 +1,5 @@
 ## Render the production guide include and its real material uniforms, then read the result.
-## Run with an actual renderer, not --headless. The test window is moved offscreen and never focused.
+## Run windowed. The test moves its window offscreen for pixel readback.
 extends SceneTree
 const Sim := preload("res://sim/craft_sim.gd")
 const Guide := preload("res://view/speed_guide.gd")

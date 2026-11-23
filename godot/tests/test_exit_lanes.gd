@@ -8,6 +8,7 @@
 ##             and a kilometre beyond; a craft on them 30 samples past the mouth is on the exit's road
 ##             within half a second (the sim's own hand-over), and one that went straight on is not
 ## Prints EXIT LANES PASS.
+## Run windowed for the painted lane measurements.
 extends SceneTree
 
 const View := preload("res://view/craft_view.gd")

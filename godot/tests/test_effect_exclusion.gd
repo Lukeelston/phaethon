@@ -2,7 +2,7 @@
 ## current eye, even when the VR rig replaces the hidden exterior pod. Keep external cues.
 ## Mutations caught: absent mask, stale/flat-only frame, missing VR floor offset, missing eye mask,
 ## and disabling the whole effect. Runs the production effect materials on small witness faces.
-## Run with a real renderer, --xr-mode off, -- --track=range --mute (not --headless).
+## Run windowed with --xr-mode off -- --track=range --mute.
 extends SceneTree
 
 const Flat := preload("res://view/craft_view.gd")

@@ -11,7 +11,7 @@
 ##               vehicles strung from 6 to 18 km do not add up to a saturated smear, as the glows they
 ##               replace do; a far body is never under two pixels wide
 ## --headless --xr-mode off --audio-driver Dummy -s res://tests/test_traffic_lamps.gd -- --mute
-## (windowed: --xr-mode off --resolution 1280x720 --audio-driver Dummy -s ... for the drawn checks too)
+## Run windowed for the drawn checks with --xr-mode off --resolution 1280x720 --audio-driver Dummy.
 ## Prints TRAFFIC LAMPS PASS.
 extends SceneTree
 

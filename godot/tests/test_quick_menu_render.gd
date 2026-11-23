@@ -1,4 +1,5 @@
 ## Rendered gate: the cockpit quick menu needs a visible dark backing.
+## Run windowed for frame readback.
 extends SceneTree
 
 const View := preload("res://view/craft_view.gd")

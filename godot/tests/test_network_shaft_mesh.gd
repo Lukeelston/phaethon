@@ -1,4 +1,5 @@
 ## Committed shaft road rows, physical support exclusions and actual traffic instances.
+## Run windowed to read the traffic instances.
 extends SceneTree
 
 const Sim := preload("res://sim/craft_sim.gd")

@@ -1,4 +1,5 @@
 ## Imported models, distance selection, per-pilot markings and the moving range fleet.
+## Run windowed to check the transforms stored in the instance batch.
 extends SceneTree
 
 const Network := preload("res://view/network_traffic.gd")
