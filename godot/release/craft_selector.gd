@@ -22,12 +22,11 @@ func build(vr: bool) -> void:
 
 
 func cycle() -> void:
-	selected = Craft.STANDARD if selected == Craft.SHRIKE else Craft.SHRIKE
+	selected = Craft.next(selected)
 	Settings.set_selected_craft(selected)
 	_refresh()
 
 
 func _refresh() -> void:
-	var shrike := selected == Craft.SHRIKE
-	button.text = "Pilot craft   ·   %s   ›" % ("Shrike RS" if shrike else "Phaethon")
-	detail.text = "Lightweight sprint chassis  ·  12.5 m tow" if shrike else "Original twin-engine chassis  ·  16 m tow"
+	button.text = "Pilot craft   ·   %s   ›" % Craft.NAMES[selected]
+	detail.text = Craft.DETAILS[selected]

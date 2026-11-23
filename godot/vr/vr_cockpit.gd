@@ -733,12 +733,16 @@ func _build_cockpit() -> void:
 	var hull := MeshInstance3D.new()
 	hull.name = "PodHull"
 	var shrike: bool = sim != null and sim.P.vehicle == CraftModelScript.PilotCraft.SHRIKE
-	hull.mesh = CraftModelScript.pod_hull(shrike)
+	var fleet = craft.fleet if craft else null
+	if fleet:
+		fleet.dress_cab(hull, CraftModelScript.nose_closed)
+	else:
+		hull.mesh = CraftModelScript.pod_hull(shrike)
 	if shrike:
 		CraftModelScript.Shrike.dress_pod(hull)
 	hull.position = Vector3(0, CraftModelScript.POD_FRAME_UP, 0)
 	shell.add_child(hull)
-	if shrike and craft:
+	if (shrike or fleet) and craft:
 		# The seat and chase cameras both see the hull on the cockpit rig. Carry the
 		# working hinges and lamps with that hull, including its bank and shudder.
 		for hinge in craft.pod_flaps:
@@ -753,9 +757,9 @@ func _build_cockpit() -> void:
 		_hardpoint_at.append(mark.position)
 	if shrike:
 		CraftModelScript.Shrike.fit_seat(shell)
-	elif SeatFinish.hd:
+	elif not fleet and SeatFinish.hd:
 		_shaped_seat(leather)
-	else:
+	elif not fleet:
 		_rbox(shell, Vector3(0.62, 0.78, 0.13), Vector3(0, 0.54, 1.1), leather, -0.12, 5.0).name = "seat_back"   # its top is the headrest
 		_rbox(shell, Vector3(0.6, 0.12, 0.52), Vector3(0, 0.145, 0.86), leather, 0.0, 5.0).name = "seat_cushion"   # both clear the hull floor (test_cables)
 	for s in [-1.0, 1.0]:
@@ -779,8 +783,12 @@ func _build_cockpit() -> void:
 		pivot.add_child(shaft)
 		var knob := MeshInstance3D.new()
 		knob.name = "PilotGrip"
-		knob.mesh = CraftModelScript.Shrike.part(&"PilotGrip") if shrike else CockpitInteriorScript.deck_mesh("Grip")
-		if not shrike:
+		if fleet:
+			knob.mesh = fleet.part(&"Grip")
+		elif shrike:
+			knob.mesh = CraftModelScript.Shrike.part(&"PilotGrip")
+		else:
+			knob.mesh = CockpitInteriorScript.deck_mesh("Grip")
 			CockpitInteriorScript.Accent.dress(knob)      # its anodised band is the livery's
 		knob.position = Vector3(0, 0.36, 0)
 		pivot.add_child(knob)
@@ -809,6 +817,10 @@ func _build_cockpit() -> void:
 	interior = CockpitInteriorScript.new()   # floor, frames, consoles, harness, rim light
 	shell.add_child(interior)
 	interior.build()
+	if fleet:
+		var rim: MeshInstance3D = interior.get_node("SegmentedCoaming")
+		rim.mesh = fleet.part(&"Coaming")
+		rim.set_surface_override_material(0, null)
 	if sim != null and sim.P.vehicle == CraftModelScript.PilotCraft.SHRIKE:
 		tow_meter = CraftModelScript.Shrike.dress_coaming(interior.get_node("SegmentedCoaming"), CockpitInteriorScript.hd_parts and ResourceLoader.exists(CockpitInteriorScript.HD_PARTS.Coaming))
 	mode_switch = ModeSwitchScript.new()   # SPEEDCRAFT / STARFIGHTER, on the front of the right console
@@ -833,7 +845,7 @@ func _build_cockpit() -> void:
 	drift_slider.transform = DriftSliderScript.mount()
 	drift_slider.build()
 	drift_slider.amount = slide_amount
-	canopy = CanopyScript.build()
+	canopy = CanopyScript.build(fleet)
 	canopy.position = Vector3(0, CraftModelScript.POD_FRAME_UP, 0)
 	shell.add_child(canopy)
 	if ChaseScript.craft == "patrol":      # the patrol craft: the cockpit's own roof carries the light bar too
@@ -856,8 +868,9 @@ func _build_cockpit() -> void:
 	minimap_panel.build()
 	minimap_panel.set_scheme(map_scheme, false)
 	minimap_panel.set_live(sim.kind == "circuit" or sim.kind == "network")
-	minimap_panel.fit_glass(canopy)        # (its HUD switch shows the map in the windscreen)
-	if ScreenReflectionScript.available():   # last: it takes its picture of everything the cockpit holds
+	if not fleet:      # (the map in the windscreen is laid on the Phaethon's and the Shrike's glass, as the reflection below is)
+		minimap_panel.fit_glass(canopy)        # (its HUD switch shows the map in the windscreen)
+	if not fleet and ScreenReflectionScript.available():   # last: it takes its picture of everything the cockpit holds
 		screen_reflection = ScreenReflectionScript.new()
 		# what the glass is to show, besides the coaming along its foot: the instruments and the map
 		var inv: Transform3D = canopy.global_transform.affine_inverse()

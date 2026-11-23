@@ -82,6 +82,8 @@ const FLAP_RATE := 9.0                # flap travel, full range per second (~0.1
 # The engines are flat rounded slabs (Luke: "horizontally flat, rounded rectangular prisms"),
 # 2.4 m wide (the sim's 1.2 m collision radius) by 0.96 m tall. Air brakes: two flaps on top, two
 # underneath, [x, top (+1) or bottom (-1)], hinged at the front edge on the skin.
+const Fleet := preload("res://view/fleet_airframe.gd")
+var fleet: Fleet
 const Shrike := preload("res://view/shrike_airframe.gd")
 const PilotCraft := preload("res://sim/pilot_craft.gd")
 const ENG_W := 2.4
@@ -215,7 +217,9 @@ func build(v, checkpoint := Callable(), reuse_engine_body := Callable()) -> void
 	view = v
 	var sim = v.sim
 	var shrike: bool = sim.P.vehicle == PilotCraft.SHRIKE
-	var nacelle_scene: PackedScene = null if shrike else load("res://art/engine/nacelle.glb")
+	if Fleet.supports(sim.P.vehicle):
+		fleet = Fleet.new(sim.P.vehicle)
+	var nacelle_scene: PackedScene = null if shrike or fleet != null else load("res://art/engine/nacelle.glb")
 	var finish := Finishes.machined()
 	var lit_mat := Kit.vertex_colors(true)
 	# the nozzle's parts, one of each for both engines (view/jet_exhaust.gd)
@@ -236,7 +240,7 @@ func build(v, checkpoint := Callable(), reuse_engine_body := Callable()) -> void
 		[Kit.cyl(0.38, 0.38, 0.03, 24), emitter_at * Kit.at(Vector3(0, -0.03, 0)), Livery.coat("engine")],
 		[wall_skins, Transform3D.IDENTITY, Color.WHITE, true],
 	])
-	if not shrike:
+	if not shrike and not fleet:
 		# The Phaethon's rudders and stabiliser panels: one mesh of each for both engines, and each pair drawn
 		# as one batch (with the ring and walls, the engines draw no more things than they did). The batches
 		# are the model's own, since each spans both engines: sync() puts their two where the engines are.
@@ -258,21 +262,27 @@ func build(v, checkpoint := Callable(), reuse_engine_body := Callable()) -> void
 		add_child(eng)
 		engines.append(eng)
 		var body := MeshInstance3D.new()
-		body.name = "ShrikeFairing" if shrike else "PhaethonFairing"
-		if shrike:
-			body.mesh = Shrike.part(&"Port" if k == 0 else &"Starboard")
-		elif reuse_engine_body.is_valid():
-			body.mesh = reuse_engine_body.call(out)      # (the caller's own copy of the fixed mesh: title_stage._display_body)
+		var side_part := &"Port" if k == 0 else &"Starboard"
+		if fleet:
+			body.name = "FleetFairing"
+			body.mesh = fleet.part(side_part)
+		elif shrike:
+			body.name = "ShrikeFairing"
+			body.mesh = Shrike.part(side_part)
 		else:
-			body.mesh = _engine_body(out, false)      # (its rudder and stabiliser are their own parts)
-		if not shrike:
+			body.name = "PhaethonFairing"
+			# (without its rudder and stabiliser, which are their own parts; or the caller's own copy of that fixed mesh: title_stage._display_body)
+			body.mesh = reuse_engine_body.call(out) if reuse_engine_body.is_valid() else _engine_body(out, false)
 			body.material_override = Finishes.painted_metal()
 		eng.add_child(body)
 		# One shared UV-mapped shell on each engine. The hot section, brakes and
 		# vectoring vanes still use their independent pivots and materials.
 		var aft_leaf: Mesh
 		var front_leaf: Mesh
-		if shrike:
+		if fleet:
+			aft_leaf = fleet.part(&"AftBrake")
+			front_leaf = fleet.part(&"FrontBrake")
+		elif shrike:
 			aft_leaf = Shrike.part(&"AftBrake")
 			front_leaf = Shrike.part(&"ForwardBrake")
 		else:
@@ -283,7 +293,7 @@ func build(v, checkpoint := Callable(), reuse_engine_body := Callable()) -> void
 			eng.add_child(shell)
 			Accent.dress_all(shell)      # its armour plates and fairing band are the livery's (Ember: as made)
 		var lights := MeshInstance3D.new()   # nav, tail, landing lights and the repulsor underglow
-		lights.mesh = Shrike.lights(out) if shrike else _engine_lights(out)
+		lights.mesh = fleet.lights(out) if fleet else (Shrike.lights(out) if shrike else _engine_lights(out))
 		lights.material_override = lit_mat
 		lights.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		eng.add_child(lights)
@@ -325,7 +335,7 @@ func build(v, checkpoint := Callable(), reuse_engine_body := Callable()) -> void
 		var hot := MeshInstance3D.new()
 		hot.mesh = hot_mesh      # (its tail is open: the tailpipe runs up inside it)
 		hot.position.z = 2.9
-		if shrike:
+		if shrike or fleet:
 			hot.scale = Vector3(0.87, 0.75, 0.88)   # hot core inside the open exhaust petals
 		var hm := StandardMaterial3D.new()
 		hm.albedo_color = STEEL
@@ -361,19 +371,24 @@ func build(v, checkpoint := Callable(), reuse_engine_body := Callable()) -> void
 		glow_mats.append(gm)
 		# twin intake fans: spinners and eight blades each, one painted so the spin reads
 		var fan := Node3D.new()
-		fan.position.z = -3.86
+		fan.position.z = 0.0 if fleet else -3.86
 		eng.add_child(fan)
 		fans.append(fan)
-		for fx in [-0.55, 0.55]:
+		var centres := fleet.rotor_centres() if fleet else [Vector3(-0.55, 0, 0), Vector3(0.55, 0, 0)]
+		for centre: Vector3 in centres:
 			var rotor := Node3D.new()
-			rotor.position.x = fx
+			rotor.position = centre
 			fan.add_child(rotor)
 			rotors[k].append(rotor)
 			var fm := MeshInstance3D.new()
-			if shrike:
+			if fleet:
+				fm.mesh = fleet.part(&"Rotor")
+				if centre.x > 0.0:
+					fm.scale.x = -1.0
+			elif shrike:
 				fm.mesh = Shrike.part(&"Compressor")
 				# Opposing rotor shafts need opposite blade pitch to pull air aft.
-				if fx > 0.0:
+				if centre.x > 0.0:
 					fm.scale.x = -1.0
 			else:
 				var parts := [[Kit.cyl(0.03, 0.15, 0.24, 12), Kit.at(Vector3(0, 0, -0.08), Vector3(-PI / 2.0, 0, 0)), Color(0.85, 0.85, 0.82)]]
@@ -384,7 +399,7 @@ func build(v, checkpoint := Callable(), reuse_engine_body := Callable()) -> void
 				fm.mesh = Kit.compound(parts)
 				fm.material_override = Kit.polished(0.88, 0.31)
 			rotor.add_child(fm)
-		if not shrike:
+		if not shrike and not fleet:
 			var legend := Label3D.new()
 			legend.text = "PHAETHON  /  " + ("L" if k == 0 else "R")
 			legend.font_size = 48
@@ -420,7 +435,8 @@ func build(v, checkpoint := Callable(), reuse_engine_body := Callable()) -> void
 			ring.add_child(hinge)
 			var fl := MeshInstance3D.new()
 			fl.mesh = aft_leaf
-			Accent.dress(fl)
+			if not fleet:
+				Accent.dress(fl)
 			hinge.add_child(fl)
 			flaps[k].append(hinge)
 		# front speed brakes (Luke: "front speed brake flaps for braking done at high speed"): a
@@ -433,7 +449,8 @@ func build(v, checkpoint := Callable(), reuse_engine_body := Callable()) -> void
 			eng.add_child(fh)
 			var fp := MeshInstance3D.new()
 			fp.mesh = front_leaf
-			Accent.dress(fp)
+			if not fleet:
+				Accent.dress(fp)
 			fp.rotation.z = -side * PI / 2.0
 			fp.scale = Vector3(0.73, 1.0, 0.88)
 			fh.add_child(fp)
@@ -474,9 +491,11 @@ func build(v, checkpoint := Callable(), reuse_engine_body := Callable()) -> void
 		var strobe := MeshInstance3D.new()
 		strobe.mesh = Kit.ball(0.08, 10)
 		strobe.material_override = view._mat(Color(1.0, 1.0, 1.0), true)
-		strobe.position = Shrike.panel_tip(out) if shrike else Vector3(0, 1.08 - ENG_H / 2.0, 1.35 - Fins.RUDDER_Z)
+		strobe.position = fleet.strobe_at(out) if fleet else (Shrike.panel_tip(out) if shrike else Vector3(0, 1.08 - ENG_H / 2.0, 1.35 - Fins.RUDDER_Z))
 		strobe.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		if shrike:
+		if fleet:
+			eng.add_child(strobe)      # (the fleet's fins are fixed, in its airframe: the strobe stands on the engine)
+		elif shrike:
 			(fin_parts[k][3] as Node3D).add_child(strobe)
 		else:
 			rudders[k].add_child(strobe)
@@ -554,13 +573,17 @@ func build(v, checkpoint := Callable(), reuse_engine_body := Callable()) -> void
 	if checkpoint.is_valid():
 		await checkpoint.call("pod hull")
 	pod = MeshInstance3D.new()
-	pod.mesh = pod_hull(shrike)   # materials live on its surfaces
+	if fleet:
+		fleet.dress_cab(pod, nose_closed)
+	else:
+		pod.mesh = pod_hull(shrike)
 	if shrike:
 		Shrike.dress_pod(pod)
 		Shrike.fit_seat(pod, Vector3.DOWN * POD_FRAME_UP)
+	if shrike or fleet:
 		tail_lights = MeshInstance3D.new()
 		tail_lights.name = "BrakeLights"
-		tail_lights.mesh = Shrike.part(&"TailLights")
+		tail_lights.mesh = fleet.part(&"BrakeLenses") if fleet else Shrike.part(&"TailLights")
 		var lens := ShaderMaterial.new()
 		lens.shader = preload("res://view/shrike_tail_lamps.gdshader")
 		tail_lights.material_override = lens
@@ -570,13 +593,17 @@ func build(v, checkpoint := Callable(), reuse_engine_body := Callable()) -> void
 	add_child(pod)
 	if checkpoint.is_valid():
 		await checkpoint.call("canopy")
-	canopy = CanopyScript.build()   # windscreen and forcefield (view/canopy.gd)
+	canopy = CanopyScript.build(fleet)   # windscreen and forcefield (view/canopy.gd)
 	pod.add_child(canopy)
-	var flap_mat := null if shrike else Kit.polished(0.85, 0.2)
+	var flap_mat := null if shrike or fleet else Kit.polished(0.85, 0.2)
 	for s in [-1.0, 1.0]:
 		var hinge := Node3D.new()
 		var pm := MeshInstance3D.new()
-		if shrike:
+		if fleet:
+			hinge.position = fleet.CAB_HINGES[fleet.id] * Vector3(s, 1, 1)
+			pm.mesh = fleet.part(&"CabBrake")
+			pm.rotation.z = -s * PI / 2.0
+		elif shrike:
 			hinge.position = Vector3(s * 1.247, -0.185, 0.80)
 			pm.mesh = Shrike.part(&"PortPodBrake" if s < 0 else &"StarboardPodBrake")
 		else:
@@ -1117,7 +1144,9 @@ static func set_nose_closed(closed: bool, under: Node = null) -> void:
 	nose_closed = closed
 	if under:
 		for part: MeshInstance3D in under.find_children("*", "MeshInstance3D", true, false):
-			if part.mesh and part.mesh.has_meta(&"shrike_hull"):
+			if part.has_meta(&"service_bonnet"):
+				part.visible = closed
+			elif part.mesh and part.mesh.has_meta(&"shrike_hull"):
 				part.mesh = pod_hull_in(String(part.mesh.get_meta(&"livery", Livery.current)), part.mesh.get_meta(&"shrike_hull"))
 
 
@@ -1404,7 +1433,7 @@ func sync(sim, inp: Dictionary, delta: float) -> void:
 		# fan: spins up with thrust, winds down on a flameout; capped below where it would strobe
 		var w_target := 0.0 if out else 3.0 + 16.0 * t
 		_fan_w[k] = lerpf(_fan_w[k], w_target, 1.0 - exp(-delta * 2.0))
-		for r in 2:   # the twin rotors counter-rotate
+		for r in rotors[k].size():   # paired rotors counter-rotate
 			var rotor: Node3D = rotors[k][r]
 			rotor.rotation.z = fposmod(rotor.rotation.z + _fan_w[k] * delta * (1.0 if r == 0 else -1.0), TAU)
 		# Hinge travel follows the actuator. The pressure face only buffets when

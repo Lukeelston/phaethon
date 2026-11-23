@@ -47,7 +47,7 @@ const SF_COL := Color(1.0, 0.3, 0.75)
 const MPH := 2.236936
 
 
-static func build() -> Node3D:
+static func build(fleet = null) -> Node3D:
 	var root := Node3D.new()
 	root.name = "canopy"
 	root.add_to_group("exterior")
@@ -89,7 +89,11 @@ static func build() -> Node3D:
 	root.add_child(field)
 	for n in [glass, frame, field]:
 		n.add_to_group("exterior")
-	if roof_available():
+	if fleet:
+		glass.visible = false
+		frame.visible = false
+		fleet.fit_canopy(root)
+	elif roof_available():
 		glass.visible = false
 		frame.visible = false
 		# the roof is authored in the rig's frame (the hull's centre POD_FRAME_UP above its floor), like the other fittings
