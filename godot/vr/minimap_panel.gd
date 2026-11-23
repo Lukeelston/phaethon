@@ -429,6 +429,9 @@ func _show_whole(f: Dictionary) -> void:
 		match m[1]:
 			"jump":
 				_tri(q + Vector2(0, 0.0065), q + Vector2(-0.005, -0.004), q + Vector2(0.005, -0.004), Color(MiniMap.JUMP_COL, 1.0))
+			"leap":   # a jump's mark and a second over it: the long one
+				for lift in [0.0, 0.007]:
+					_tri(q + Vector2(0, 0.0075 + lift), q + Vector2(-0.006, -0.004 + lift), q + Vector2(0.006, -0.004 + lift), Color(MiniMap.JUMP_COL, 1.0))
 			"gp":
 				_seg(q + Vector2(-0.007, 0.007), q + Vector2(0.007, -0.007), 0.0018, Color(MiniMap.GP_COL, 1.0))
 				_seg(q + Vector2(-0.007, -0.007), q + Vector2(0.007, 0.007), 0.0018, Color(MiniMap.GP_COL, 1.0))

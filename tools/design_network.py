@@ -67,6 +67,12 @@ drive farther over the beach and ocean"): where a scenic road's edge is open (it
 that side) the deck goes on level for SC_APRON m more before its ramp and its wall, eased in and out
 along the road. apron_table gives it to the sims (NET_APRONS), which move that side's ramp and wall out;
 the views draw it see-through.
+Hyperion's leaps (Luke, 2026-11-22: "add the ultimate jump at the bottom of each side of Hyperion's access
+roads? Such that you could start at the peak, rocket towards the bottom, and hit a jump at 9-11k mph, and
+literally jet for some odd tens of miles"): J21 and K21 at the cliff's foot, J22 and K22 at the ramp's
+(add_hyperion_leaps, LEAP_LANE): a launch lane beside SHyperion's centreline, inside its deck, to a lip half a
+degree up, and a landing field (a catch deck) under the whole flight. Built last of all; the sims have them
+as NET_LEAPS, beside the interchanges' NET_JUMPS.
 Roads are sampled exactly as the sims sample them (NET_STEP: straights in equal steps, arcs in
 exact chords, a last point at the end). Junction zones are found by walking: a road's end samples
 whose corridor overlaps its parent's (plus a margin), against the parent's nearest samples.
@@ -347,6 +353,66 @@ HYPERION_PLATEAU = (3000.0, 1200.0)      # the summit plateau: half its width ac
 HYPERION_SKIRT = (10000.0, 8000.0)       # the mountain's sides: this much more run at the foot than the ramp's own, gone by this height
 HYPERION_KEY = (24, 6, 1)                # a height key every so many samples on the ramp and the run-out, on the crest, on the lip
 HYPERION_LAND = (60, 600.0)              # its land's rows: every so many samples on the mountain, each side's run (m)
+
+# Hyperion's leaps (Luke, 2026-11-22: "add the ultimate jump at the bottom of each side of Hyperion's access roads?
+# Such that you could start at the peak, rocket towards the bottom, and hit a jump at 9-11k mph, and literally jet
+# for some odd tens of miles."). One at each foot, on the Network's own model of a jump: a launch lane whose end
+# is a lip, and a catch deck in line with it (add_hyperion_leaps). What is different is the scale. At 10,000 mph
+# (4,470 m/s) a degree of lip is 44 miles of flight, so the lip is half a degree; the flight is as long as the
+# speed makes it, so the catch is a landing field under the whole of it, from under the lip on: every speed lands.
+# And a tenth of a degree off the line is 100 m to one side after 35 miles: nothing between the summit and the lip
+# bends (a lane with a 2 degree bend in it was tried first: the lane's edges carry a craft round, and leave its
+# heading a degree off). A lane is LEAP_LANE to one side of SHyperion's centreline, inside its 800 m deck, and runs
+# dead straight on where the deck narrows to the plain way through: the lane is chosen coming down, nothing is
+# steered at speed. (A craft climbing the mountain, or one that keeps to the middle, is never on a lane: a lane's
+# lip is the lane's own far end.)
+#   the cliff's  the lane leaves the deck on its right past the run-out's end (SHyperion narrows to LEAP_NARROW
+#                beside it) and climbs to the lip. The field is laid along the far straight itself, centred on the
+#                lane's line and as wide as from the far straight's left wall to as far again on the lane's other
+#                side: the two are one surface (a junction all along it), the far straight's own 800 m its left
+#                part. At its far end it narrows into the far straight, short of SHyperion's own mouth: the far
+#                straight is the longest run-out there is (a field with a 45 km bend of its own onto E3 was tried:
+#                the bend began 19 km sooner, and nothing takes it at 10,000 mph either). A craft must be under
+#                6,000 mph by SHyperion's last turn, as one that came down the plain way must.
+#   the ramp's   for a craft come back down the way it climbed: the lane leaves the approach on its left where the
+#                approach narrows to its mouth, and climbs to a lip short of E2; the flight crosses E2; the field
+#                begins as a bridge over E2 and runs south-west to N1's east shoulder.
+# Speeds at the lips from a standing start on the summit, flat out in top gear with the ramjet armed, nothing
+# steered (godot/tests/test_hyperion_leaps.gd holds them): the cliff's 9,016 mph, and 10,252 with the boost held;
+# the ramp's 9,581 and 10,901. The road's own length does it, with no change to either sim: the lips stand where
+# the speed is (at the feet themselves a craft is doing 7,900 and 8,600 mph, 8,960 and 9,770 with the boost).
+# The flight, off either lip (flat out, the ramjet held through it: a craft gains some 800 mph in the air):
+#   9,000 mph   0.50 degrees   10.35 s   peak 266 m (66 over the lip)   44.0 km, 27.3 miles
+#  10,000 mph   0.50 degrees   10.97 s   peak 281 m                    51.1 km, 31.7 miles
+#  11,000 mph   0.50 degrees   11.60 s   peak 297 m                    58.9 km, 36.6 miles
+# (and 150 mph: 0.4 km; 4,000: 13.4 km; 7,000: 31.5 km). More lip is more miles and less far straight to stop in:
+# after the cliff's flight with the boost held there are 25 km to SHyperion's last turn.
+LEAP_LANE = 280.0                        # a lane's centre: m off SHyperion's centreline (on its right, the way its samples run)
+LEAP_W = 240.0                           # a lane's width
+LEAP_LIP = (200.0, 0.5)                  # the lip: m over the plain, degrees up
+LEAP_CLIMB = 7 * KM                      # the climb to it (one bowed rise: leap_keys)
+LEAP_CATCH = (40.0, 150.0)               # the ramp's field under the lip: its height there (m); how far past a lip its field begins (m)
+LEAP_FIELD = (600.0, 1200.0, 400.0)      # the ramp's field: its width under the lip, across the landing ground, at its merge (JC_W)
+LEAP_SLOWEST = 500.0                     # mph: the table's "slowest", as a jump has one. Nothing is too slow for a leap (at 150 mph a craft drops off
+                                         # the lip onto the field's first stretch, 0.4 km on); under this it is a drop and no flight. No board gives it.
+LEAP_NARROW = 280.0                      # SHyperion's width beside the cliff's lane (the plain way through; its mouths are SC_W)
+LEAP_CLIFF = dict(start=10,              # the lane begins so many samples past the run-out's end
+                  taper=(20, 600),       # SHyperion narrows from so many samples past it, over so many (14 km: its walls come in at one degree.
+                                         # Over 220 samples, as at its mouths, a craft 100 m off the middle was thrown from edge to edge at 8,000 mph)
+                  lip=35 * KM,           # the lip, from the run-out's end along the lane (30 km: 8,880 mph there on the ramjet alone)
+                  mouth=30,              # the field's samples under the lip at the lane's own width, before it and the far straight open out ...
+                  open=220,              # ... over so many
+                  ease=24 * KM,          # the field narrows into the far straight over this much (its walls at 1.4 degrees) ...
+                  short=20)              # ... and ends so many samples short of where the far straight narrows to its mouth
+LEAP_RAMP = dict(start=900,              # the lane begins at this sample of SHyperion (its 800 m deck narrows from 764 down to 544)
+                 lip_short=500.0,        # the lip, short of E2's centreline along the lane (m)
+                 bridge=1300.0,          # the field stays at its height to this far past E2's centreline
+                 down=4 * KM,            # ... and is down on the plain this much further on
+                 wide=10 * KM,           # the field reaches its full width this far from its start
+                 field=90 * KM,          # the straight landing ground, from the field's start
+                 ease=16 * KM,           # ... the last of it narrowing to the merge's width
+                 turn=30 * KM,           # the turn onto N1 (Dubins)
+                 climb=15 * KM)          # the climb to N1's tier, before 4 km of level at the merge
 
 
 def helios_spire():
@@ -1216,6 +1282,146 @@ def hyperion_land(road):
     return rows
 
 
+beside = set()   # (parent road, lane): a leap's lane runs wall to wall beside its parent to its lip, by design (check)
+leaps = []   # Hyperion's leaps, set by add_hyperion_leaps: (launch road, catch road, LEAP_SLOWEST mph, the lip's height m, its slope)
+join_len = {}   # (child road, end) -> the most samples of the child its junction zone may hold (a lane beside its parent)
+
+
+def leap_keys(n, first, top, slope):
+    """A launch lane's heights: level to sample `first`, then one bowed rise to `top` at the lip (its last sample),
+    arriving at `slope` (the cubic launch_keys uses: no terrace, never downhill)."""
+    span = n - 1 - first
+    length = span * STEP
+    a = slope * length - 2.0 * top
+    b = 3.0 * top - slope * length
+    assert -2.0 * b / (3.0 * a) > 1.0, "the leap's rise would turn downhill before its lip"
+    keys = [[0, 0.0, 0.0]]
+    for q in range(9):
+        i = first + round(span * q / 8)
+        t = (i - first) / span
+        keys.append([i, (a * t + b) * t * t, (3 * a * t * t + 2 * b * t) / length])
+    return keys
+
+
+def widths(road, keys):
+    road.wkeys = [[int(k[0]), float(k[1])] for k in keys]
+    assert all(a[0] < b[0] for a, b in zip(road.wkeys, road.wkeys[1:])), f"{road.name}: its width keys aren't in order"
+    road.wid = np.interp(np.arange(road.N), [k[0] for k in road.wkeys], [k[1] for k in road.wkeys])
+
+
+def add_hyperion_leaps(roads, joins):
+    """J21 / K21 at the cliff's foot and J22 / K22 at the ramp's (see LEAP_LANE). Made after every other road, so
+    none before them changes its index. SHyperion's own samples, plan and heights are untouched; its width beside
+    the cliff's lane narrows to LEAP_NARROW (the ramp's lane uses the narrowing its mouth already had)."""
+    hy = next(i for i, R in enumerate(roads) if R.name == "SHyperion")
+    Y = roads[hy]
+    at = Y.hyperion["at"]
+    top, deg = LEAP_LIP
+    slope = math.tan(math.radians(deg))
+    under, gap = LEAP_CATCH
+    w0, w1, w2 = LEAP_FIELD
+    leaps.clear()
+    beside.clear()
+
+    def lane(i):
+        tx, ty = Y.t[i]
+        x, y = Y.p[i] + LEAP_LANE * np.array([ty, -tx])
+        return float(x), float(y)
+
+    def launch(name, x, y, hdeg, segs, level):
+        J = Road(name, "jump", x, y, hdeg, LEAP_W, segs)
+        J.role = "launch"
+        J.profile = "LEAP"
+        first = J.N - 1 - round(LEAP_CLIMB / STEP)
+        assert first > level, f"{name}: its climb would begin inside its junction ({first} <= {level})"
+        J.keys = leap_keys(J.N, first, top, slope)
+        join_off[(len(roads), 0)] = LEAP_LANE
+        join_len[(len(roads), 0)] = level
+        joins.append((len(roads), 0, hy))
+        roads.append(J)
+        return J
+
+    # --- the cliff's -------------------------------------------------------------------------------------------
+    C = LEAP_CLIFF
+    i0 = at["end"] + C["start"]
+    t_from, t_over = C["taper"]
+    a = at["end"] + t_from
+    lip = at["end"] + round(C["lip"] / STEP)              # SHyperion's sample abreast of the lip
+    x, y = lane(i0)
+    # (beside the deck until its narrowing has left the lane: junction() finds where; level to there and a little on)
+    level = t_from - C["start"] + t_over + JZ_MARGIN + 2
+    J = launch("J21", x, y, HYPERION_HEADING, [("S", (lip - i0) * STEP, 0, "sp")], level)
+    beside.add((hy, len(roads) - 1))
+    # the field: from just past the lip, along the far straight, to short of where that narrows to its mouth
+    old = Y.wkeys
+    k0 = lip + math.ceil(gap / STEP)                      # SHyperion's sample abreast of the field's start
+    open_at = k0 + C["mouth"]
+    last = old[3][0] - C["short"]
+    n_ease = round(C["ease"] / STEP)
+    assert a + t_over < lip and open_at + C["open"] < last - n_ease and Y.w(i0) == HYPERION_W[0] and i0 < a
+    assert LEAP_LANE - LEAP_W / 2 > LEAP_NARROW / 2 + 10.0
+    # SHyperion beside the lane: down to LEAP_NARROW as the lane leaves it, whole again once the field is under way
+    widths(Y, old[:3] + [[a, HYPERION_W[0]], [a + t_over, LEAP_NARROW], [open_at, LEAP_NARROW], [open_at + C["open"], HYPERION_W[0]]] + old[3:])
+    kx, ky = lane(k0)
+    K = Road("K21", "jump", kx, ky, HYPERION_HEADING, LEAP_W, [("S", (last - k0) * STEP, 0, "sp")])
+    K.role = "catch"
+    K.profile = "LEAP"
+    full = 2.0 * (HYPERION_W[0] / 2 + LEAP_LANE)          # from the far straight's left wall to as far again beyond the lane
+    widths(K, [[0, LEAP_W], [C["mouth"], LEAP_W], [C["mouth"] + C["open"], full], [K.N - 1 - n_ease, full], [K.N - 1, SC_W]])
+    assert LEAP_LANE + SC_W / 2 < HYPERION_W[0] / 2      # its end is inside the far straight
+    join_off[(len(roads), 1)] = LEAP_LANE
+    joins.append((len(roads), 1, hy))
+    roads.append(K)
+    leaps.append((len(roads) - 2, len(roads) - 1, LEAP_SLOWEST, top, slope))
+
+    # --- the ramp's --------------------------------------------------------------------------------------------
+    M = LEAP_RAMP
+    i0 = M["start"]
+    hd = HYPERION_HEADING + 180.0
+    ux, uy = math.cos(math.radians(hd)), math.sin(math.radians(hd))
+    x, y = lane(i0)
+    e2 = next(i for i, R in enumerate(roads) if R.name == "E2")
+    cross = (roads[e2].y0 - y) / uy                      # along the lane to E2's centreline
+    assert Y.w(i0) == HYPERION_W[0] and cross > 12 * KM
+    # (the lane is beside the deck until the deck's own narrowing toward its mouth has left it: junction() finds where)
+    level = next(k for k in range(1, 2000) if (LEAP_W + Y.w(i0 - k)) / 2 <= LEAP_LANE) + JZ_MARGIN + 2
+    J = launch("J22", x, y, hd, [("S", cross - M["lip_short"], 0, "sp")], level)
+    kx, ky = float(J.p[-1, 0]) + ux * gap, float(J.p[-1, 1]) + uy * gap
+    n1 = next(i for i, R in enumerate(roads) if R.name == "N1")
+    fx, fy = kx + ux * M["field"], ky + uy * M["field"]
+    best = None
+    for station in np.arange(250.0, 150.0, -0.5):
+        finish = backroad_mouth(roads[n1], station, -1, -1)
+        try:
+            segs = dubins((fx, fy, hd), finish, M["turn"])
+        except AssertionError:
+            continue
+        if any(q[0] != "S" and q[2] > 100.0 for q in segs):
+            continue
+        segs = [q for q in segs if (q[1] if q[0] == "S" else q[1] * math.radians(q[2])) > 1.0]
+        length = sum(q[1] if q[0] == "S" else q[1] * math.radians(q[2]) for q in segs)
+        if best is None or length < best[0]:
+            best = (length, station, segs)
+    assert best is not None, "K22 finds no way onto N1"
+    K = Road("K22", "jump", kx, ky, hd, w2, [("S", M["field"], 0, "sp")] + best[2])
+    K.role = "catch"
+    K.profile = "LEAP"
+    K.station = best[1]
+    n_bridge = round((M["lip_short"] - gap + M["bridge"]) / STEP)
+    n_down = n_bridge + round(M["down"] / STEP)
+    n_wide = round(M["wide"] / STEP)
+    n_field = round(M["field"] / STEP)
+    n_ease = n_field - round(M["ease"] / STEP)
+    flat = round(4 * KM / STEP)        # (level through its junction with N1: a turn of LEAP_RAMP turn shares 3.5 km with the highway)
+    n_up = K.N - 1 - flat - round(M["climb"] / STEP)
+    assert n_down < n_wide < n_ease < n_field and n_ease < n_up, f"K22: its parts are out of order ({n_down}, {n_wide}, {n_ease}, {n_field}, {n_up})"
+    widths(K, [[0, w0], [n_wide, w1], [n_ease, w1], [n_field, w2], [K.N - 1 - flat, w2], [K.N - 1, SC_W]])   # (its end inside N1's deck: no wall across any of it)
+    K.keys = [[0, under, 0.0], [n_bridge, under, 0.0], [n_down, 0.0, 0.0], [n_up, 0.0, 0.0], [K.N - 1 - flat, EXPRESS_H, 0.0], [K.N - 1, EXPRESS_H, 0.0]]
+    joins.append((len(roads), 1, n1))
+    roads.append(K)
+    leaps.append((len(roads) - 2, len(roads) - 1, LEAP_SLOWEST, top, slope))
+
+
 def build():
     roads = []
     ew, ns = [], []
@@ -1406,6 +1612,8 @@ def build():
     # ... and the Caucasus after that.
     for spec in SCENIC_LATE:
         add_scenic(roads, joins, spec)
+    # ... and Hyperion's leaps last of all.
+    add_hyperion_leaps(roads, joins)
     return roads, joins, cities, ew, ns, jumps, onramps, shafts
 
 
@@ -1564,11 +1772,13 @@ def deck_table(roads):
 def junction(roads, c, end, p):
     """The zone where road c's end `end` joins road p: [p, a0, a1, c, b0, b1, sense]."""
     C, P = roads[c], roads[p]
-    reach = (C.width + P.width) / 2
     idx = range(C.N) if end == 0 else range(C.N - 1, -1, -1)
     inside = []
     for i in idx:
         k, lat, _ = P.nearest(C.p[i])
+        reach = (C.w(i) + P.w(k)) / 2      # (their widths there: SHyperion's changes along it; every other road's is its own all along)
+        if len(inside) >= join_len.get((c, end), C.N):
+            break
         if C.kind == "turn" and (k == P.N - 1 or k == 0):   # a shaft's leg runs on past the highway's end: not joined there
             past = abs((C.p[i, 0] - P.p[k, 0]) * P.t[k, 0] + (C.p[i, 1] - P.p[k, 1]) * P.t[k, 1])
             if past > 2 * STEP:
@@ -1728,6 +1938,8 @@ def check(roads, joins, J, cities, ew, ns, jumps=(), onramps=(), overlaps=()):
                     continue
                 if any(z[0] - sub <= i <= z[1] + sub for z in zone.get((ri, rj), [])) or any(z[0] - sub <= j <= z[1] + sub for z in zone.get((rj, ri), [])):
                     continue
+                if d >= -1.0 and ((ri, rj) in beside or (rj, ri) in beside):
+                    continue   # a leap's lane, wall to wall beside the road it left
                 if in_zone(ri, i) and in_zone(rj, j):
                     continue   # two roads joining a third side by side
                 if A.kind == "highway" and B.kind == "highway" and min(abs(A.p[i, 0] - c) + abs(A.p[i, 1] - e) for c in LINES for e in LINES) < FLY_END:
@@ -1789,6 +2001,22 @@ def check(roads, joins, J, cities, ew, ns, jumps=(), onramps=(), overlaps=()):
             bad(f"{L.name}: lands {[m for m, ok_ in lands if ok_]} (want {ref:.0f} mph and up)")
         print(f"  jump {L.name} -> {C.name}: lip {h_lip:.0f} m at {angle} deg, {gap:.0f} m to a deck "
               f"{C.h(0) - h_lip:.0f} m above it ({(C.h(0) - h_lip) / 0.3048:.0f} ft), level at {top:.0f} m; lands from {lo} mph")
+    for li, ci, slowest, h_lip, m_lip in leaps:
+        L, C = roads[li], roads[ci]
+        lip_angle = math.degrees(math.atan((L.h(L.N - 1) - L.h(L.N - 1 - 0.01)) / (0.01 * STEP)))
+        gap = math.hypot(C.p[0, 0] - L.p[-1, 0], C.p[0, 1] - L.p[-1, 1])
+        if abs(lip_angle - LEAP_LIP[1]) > 0.01 or abs(L.h(L.N - 1) - h_lip) > 0.01 or C.h(0) > h_lip - 100.0:
+            bad(f"{L.name}'s lip is {L.h(L.N - 1):.1f} m up at {lip_angle:.3f} deg over a field {C.h(0):.1f} m up")
+        # the flight without thrust (the sims' is longer: the engines push all the way), to the field's own height there
+        flights = []
+        for mph in (9000, 10000, 11000):
+            v = mph * MPH
+            vz, vx = v * math.sin(math.atan(m_lip)), v * math.cos(math.atan(m_lip))
+            t = (vz + math.sqrt(vz * vz + 2 * G * h_lip)) / G
+            flights.append(f"{mph:,} mph {t:.1f} s, {vx * t / KM:.0f} km")
+        print(f"  leap {L.name} -> {C.name}: lane {L.len[:-1].sum() / KM:.1f} km from {L.p[0, 0] / KM:.2f},{L.p[0, 1] / KM:.2f} km, lip {h_lip:.0f} m up at {lip_angle:.2f} deg at {L.p[-1, 0] / KM:.2f},{L.p[-1, 1] / KM:.2f} km; "
+              f"field {C.len[:-1].sum() / KM:.1f} km, begins {gap:.0f} m past the lip {C.h(0):.0f} m up, widths {[(int(k[0]), int(k[1])) for k in C.wkeys]}, ends at {C.end[0] / KM:.2f},{C.end[1] / KM:.2f} km; "
+              f"unpowered: {'; '.join(flights)}")
     for k, r in onramps:
         O = roads[r]
         print(f"  on-ramp {O.name}: from {O.p[0, 0] / KM:.1f},{O.p[0, 1] / KM:.1f} km on the open ground")
@@ -1867,6 +2095,7 @@ def main():
     tube_samples = sum(r.N for r in roads if r.kind == "tube")
     # (... and from 9,600 km and 400,000 samples for SHyperion: 242 km of plan, 12,900 samples)
     # (... and from 9,900 km and 420,000 samples for SCaucasus: 252 km, 10,500 samples)
+    # (Hyperion's leaps are inside it: 227 km, 9,500 samples; 10,141 km and 426,000 samples in all)
     if km - tube_km > 10200 or N - tube_samples > 432000 or tube_km > 980 or tube_samples > 41000:
         ok = False
         print(f"  BAD  too big: {km:.0f} km, {N} samples")

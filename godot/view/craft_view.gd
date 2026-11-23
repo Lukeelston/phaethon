@@ -2106,6 +2106,45 @@ func _net_exit_approach_text(travel: int, speed: float, horizon: float) -> Strin
 	return "%s EXIT  %s\nTO %s\nOPTIONAL / KEEP %s" % [side, _net_guidance_countdown(nearest, speed), destination, side]
 
 
+## Mount Hyperion's leaps on the dash (CraftSim.NET_LEAPS). Coming down the mountain toward a lane's mouth: how far
+## off to one side the lane is, or that the craft is in it (the lane is chosen on the way down: at the foot there
+## is no steering into it). On the lane: the lip's count down. "" when neither.
+const LEAP_CALL := 100000.0      # m before a lane's mouth that the line begins (the summit is 57 km from one, 98 from the other)
+func _net_leap_text() -> String:
+	if sim.kind != "network" or sim.pod.off_road or sim.leaps.is_empty():
+		return ""
+	var speed: float = sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy)
+	var travel := _net_guidance_way()
+	var hint := int(sim.pod.hint)
+	for lp in sim.leaps:
+		var lane := int(lp[0])
+		var L = sim.roads[lane]
+		if int(sim.pod.path) == lane:
+			if travel < 0:
+				return ""
+			return "LEAP LIP  %s\nHYPERION LEAP > LANDING FIELD\nHOLD IT STRAIGHT | READY" % _net_guidance_countdown(float(L.N - 1 - hint) * 24.0, speed)      # (three lines, as the windscreen's glass lays a page out: ApproachProjector._write)
+		for ji in L.jx:
+			var J: Array = sim.junctions[ji]
+			if int(J[3]) != lane or int(J[4]) != 0 or int(J[0]) != int(sim.pod.path):
+				continue
+			var P = sim.roads[int(J[0])]
+			var way := int(J[6])                                  # the way along the parent that takes a craft onto the lane
+			var mouth: int = int(J[1]) if way > 0 else int(J[2])
+			var off_end: int = int(J[2]) if way > 0 else int(J[1])   # where the parent's deck has left the lane
+			var ahead: float = float((mouth - hint) * way) * 24.0
+			if travel != way or ahead > LEAP_CALL or (off_end - hint) * way < 0 or speed < 20.0:
+				continue
+			var lane_lat: float = (L.px[0] - P.px[mouth]) * P.nx[mouth] + (L.py[0] - P.py[mouth]) * P.ny[mouth]
+			var at := clampi(hint, 0, P.N - 1)
+			var lat: float = (sim.pod.x - P.px[at]) * P.nx[at] + (sim.pod.y - P.py[at]) * P.ny[at]
+			var off := lane_lat - lat                               # the lane's middle, m to the left of the craft the way the parent's samples run
+			var head := "HYPERION LEAP  %s" % _net_guidance_countdown(maxf(0.0, ahead), speed)
+			if absf(off) <= float(L.w[0]) / 2.0 - 30.0:
+				return "%s\nIN THE LEAP LANE\nHOLD IT STRAIGHT | READY" % head
+			return "%s\nLEAP LANE %d M TO YOUR %s\nOR KEEP TO THE MIDDLE: THE PLAIN WAY" % [head, roundi(absf(off)), "LEFT" if off * float(way) > 0.0 else "RIGHT"]
+	return ""
+
+
 ## One compact approach readout shared by desktop and cockpit. At high speed its lead grows to
 ## twelve seconds; the action comes first, and the minimum remains a requirement at the lip.
 func _net_jump_approach_text() -> String:
@@ -2171,6 +2210,9 @@ func _net_jump_approach_text() -> String:
 ## the emergency run.
 func _progress_text() -> String:
 	if sim.kind == "network":
+		var leap := _net_leap_text()
+		if leap != "":
+			return leap
 		var ascent := _net_jump_approach_text()
 		if ascent != "":
 			return ascent
@@ -2267,7 +2309,9 @@ func _mount_approach_projector(windscreen: Node3D) -> void:
 func _hud_progress(in_cockpit: bool) -> String:
 	if approach_display == null:
 		return _progress_text()
-	var message := _net_jump_approach_text()
+	var message := _net_leap_text()      # (Mount Hyperion's leaps first: a lane's line is the mountain's road's, no exit's)
+	if message.is_empty():
+		message = _net_jump_approach_text()
 	approach_display.set_message(message)
 	if message.is_empty():
 		return _net_text()

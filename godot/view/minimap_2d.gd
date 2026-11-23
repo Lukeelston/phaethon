@@ -86,6 +86,9 @@ func _draw_whole() -> void:
 		match m[1]:
 			"jump":
 				draw_colored_polygon(PackedVector2Array([_px(q + Vector2(0, 6)), _px(q + Vector2(-5, -4)), _px(q + Vector2(5, -4))]), MiniMap.JUMP_COL)
+			"leap":   # a jump's mark and a second over it: the long one
+				for lift in [0.0, 7.0]:
+					draw_colored_polygon(PackedVector2Array([_px(q + Vector2(0, 7 + lift)), _px(q + Vector2(-6, -4 + lift)), _px(q + Vector2(6, -4 + lift))]), MiniMap.JUMP_COL)
 			"gp":
 				draw_line(_px(q + Vector2(-6, 6)), _px(q + Vector2(6, -6)), MiniMap.GP_COL, 2.5, true)
 				draw_line(_px(q + Vector2(-6, -6)), _px(q + Vector2(6, 6)), MiniMap.GP_COL, 2.5, true)

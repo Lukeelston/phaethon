@@ -67,7 +67,7 @@ func _run() -> void:
 					check("co-located faces are physically separated",separation >= (left.mesh.size.x+right.mesh.size.x)/2.0)
 					paired += 1
 			node.free()
-	check("all nine sign families (the stunt roads' warnings are the ninth): %s" % [kinds.keys()],kinds.size()==9 and kinds.has("stunt"))
+	check("all ten sign families (the stunt roads' warnings are the ninth, Mount Hyperion's leaps' boards the tenth): %s" % [kinds.keys()],kinds.size()==10 and kinds.has("stunt") and kinds.has("leap"))
 	check("five double-faced terminal signs",terminals==5)
 	check("paired exit gantries were built",paired>=30)
 	for key: Vector3i in world._exits:

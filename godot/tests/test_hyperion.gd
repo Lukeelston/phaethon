@@ -34,7 +34,9 @@ const DT := 1.0 / 480.0
 const MPH := 2.236936
 # The designer's own account of the road (tools/design_network.py prints these):
 const AT := {"ramp": 1874, "wall": 4754, "crest": 4824, "summit": 5016, "centre": 5116, "lip": 5216, "drop": 5235, "runout": 6580, "end": 7604}
-const WIDE := [764, 12125]      # the deck is 800 m wide from here to here
+const WIDE := [764, 7624]       # the deck is 800 m wide from here to here: the approach, the whole mountain and 20 samples past the run-out's end
+const WIDE_ON := [9319, 12125]  # ... and from here to here, the far straight (it was 800 m from 764 to 12125 before the leaps: tests/test_hyperion_leaps.gd)
+const BESIDE := [8224, 9099]    # between, beside the cliff's leap lane, it is 280 m: the plain way through
 # As recorded on b4c7878, before this mountain (the same arithmetic: _helios_road, _helios_surface). Its road's
 # samples and its surface are not to change (Luke: "Keep it as it is"); if they are ever changed on purpose,
 # this test prints the new figures.
@@ -191,14 +193,21 @@ func _run() -> void:
 		chord_lo > step - 0.05 and chord_hi < step + 0.001 and bool(R.deck) and deck_m > 137000.0 and plan < 71000.0)
 	var narrow := INF
 	var mouth := 0.0
-	for i in range(WIDE[0], WIDE[1] + 1):
-		narrow = minf(narrow, R.w[i])
+	for wide in [WIDE, WIDE_ON]:
+		for i in range(wide[0], wide[1] + 1):
+			narrow = minf(narrow, R.w[i])
+	var beside := 0.0
+	var beside_least := INF
+	for i in range(BESIDE[0], BESIDE[1] + 1):
+		beside = maxf(beside, R.w[i])
+		beside_least = minf(beside_least, R.w[i])
 	for i in [0, 100, R.N - 1]:
 		mouth = maxf(mouth, R.w[i])
 	var e3 := _road(sim, "E3")
-	_check("the deck is %.0f m wide from sample %d (%.1f km before the ramp's foot) to %d, twice a highway's %.0f; %.0f m at its mouths" % [
-			narrow, WIDE[0], (AT.ramp - WIDE[0]) * step / 1000.0, WIDE[1], sim.roads[e3].w[100], mouth],
-		narrow >= 800.0 and narrow >= 2.0 * float(sim.roads[e3].w[100]) and mouth == 200.0 and WIDE[0] < AT.ramp - 1000 and WIDE[1] > AT.end + 4000)
+	_check("the deck is %.0f m wide from sample %d (%.1f km before the ramp's foot) to %d (past the run-out's end) and from %d to %d, twice a highway's %.0f; %.0f m beside the cliff's leap lane between (samples %d to %d); %.0f m at its mouths" % [
+			narrow, WIDE[0], (AT.ramp - WIDE[0]) * step / 1000.0, WIDE[1], WIDE_ON[0], WIDE_ON[1], sim.roads[e3].w[100], beside, BESIDE[0], BESIDE[1], mouth],
+		narrow >= 800.0 and narrow >= 2.0 * float(sim.roads[e3].w[100]) and mouth == 200.0 and WIDE[0] < AT.ramp - 1000 and WIDE[1] > AT.end and WIDE_ON[1] > AT.end + 4000
+			and beside == 280.0 and beside_least == 280.0)
 	var tightest := INF
 	for i in R.N:
 		if R.kap[i] != 0.0:

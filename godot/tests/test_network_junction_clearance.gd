@@ -69,6 +69,7 @@ func _run() -> void:
 func _check_search() -> bool:
 	var n := 0
 	var mismatched := 0
+	var one_road := 0      # rows of a leap's field and the far straight under it, drawn as one plain road (no junction's shoulders there to check)
 	var error := 0.0
 	for j in sim.junctions:
 		for reverse in [false, true]:
@@ -77,6 +78,9 @@ func _check_search() -> bool:
 			var hi := int(j[2]) if reverse else int(j[5])
 			var R = sim.roads[r]
 			for i in range(maxi(0, lo - 4), mini(R.N - 1, hi + 4) + 1, 8):
+				if world._leap_row(r, i):      # (a leap's field over the far straight: drawn as one plain road there, the road under it not at all; NetworkWorld._prepare_leaps)
+					one_road += 1
+					continue
 				for fraction in [-1.0, -0.9, -0.8, -0.7, 0.7, 0.8, 0.9, 1.0]:
 					var off: float = R.w[i] / 2.0 * fraction
 					var actual: Vector4 = world._joined_surface(r, i, off)
@@ -106,7 +110,7 @@ func _check_search() -> bool:
 							print("SEARCH MISMATCH %s sample %d offset %.1f actual %s expected %s" % [R.name, i, off, actual.x, expected])
 					elif not is_inf(expected):
 						error = maxf(error, absf(actual.x - expected))
-	print("junction search: %d offsets across all joins, %d corridor mismatches, max height error %.6f m" % [n, mismatched, error])
+	print("junction search: %d offsets across all joins, %d corridor mismatches, max height error %.6f m (%d rows of a leap's field and the road under it passed over: one plain road there)" % [n, mismatched, error, one_road])
 	return mismatched == 0 and error < 0.001
 
 func _check_triangles() -> bool:

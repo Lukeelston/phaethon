@@ -74,7 +74,8 @@ func _run() -> void:
 	check("detailed roads stream beyond 25km",v.network_world.VIS>=25000)
 	var far = v.network_world.far_roads
 	# (110,000, from 100,000: the Helios road added about 370 km of far ribbon)
-	check("distant roads cover every road without unbounded vertices",far!=null and far.vertex_count<110000 and far.pieces.size()>v.sim.roads.size())
+	# (... and 112,000 from 110,000: Mount Hyperion's leaps added 227 km of it, 2,422 vertices on 108,696)
+	check("distant roads cover every road without unbounded vertices",far!=null and far.vertex_count<112000 and far.pieces.size()>v.sim.roads.size())
 	far.sync(pos.x,pos.y)
 	var endpoint_error := 0.0
 	var chord_intrusion := -INF

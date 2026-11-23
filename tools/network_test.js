@@ -38,7 +38,7 @@ function check(msg, cond) { console.log(`${cond ? 'ok  ' : 'FAIL'} ${msg}`); ok 
 const sim = PS.makeSim({ track: 'network', handling: 'speed' });
 const { S, T } = sim;
 check(`build: kind ${T.kind}, ${T.roads ? T.roads.length : 0} roads, ${T.roads ? T.roads.reduce((a, R) => a + R.N, 0) : 0} samples, ${T.junctions ? T.junctions.length : 0} junctions, ${T.cities ? T.cities.length : 0} cities`,
-  T.kind === 'network' && T.roads.length === 130 && T.junctions.length === 201 && T.cities.length === 5 && T.jumps.length === 21 && T.shafts.length === 12);
+  T.kind === 'network' && T.roads.length === 134 && T.junctions.length === 205 && T.cities.length === 5 && T.jumps.length === 21 && T.leaps.length === 2 && T.shafts.length === 12);   // (130 and 201 before Hyperion's leaps: two lanes, two fields)
 if (T.kind !== 'network') { console.log('NETWORK FAIL'); process.exit(1); }
 
 // zones: the child's centreline inside the parent's corridor (plus its own half width) through the zone
@@ -352,7 +352,7 @@ for (const [mph, deg] of [[4000, 2], [2500, 3], [1500, 3], [800, 3]]) {
 // SHyperion is 242 km of map and 310 km of deck, over a mountain 48 km high.)
 for (const name of ['SWash', 'SFrost', 'SReed', 'SRed', 'SNeedle', 'SHammer', 'SAurora', 'SHelios', 'SHyperion']) {
   const id = road(name), R = T.roads[id];
-  const ends = R.jx.map(k => T.junctions[k]).sort((a, b) => a.b0 - b.b0);
+  const ends = R.jx.map(k => T.junctions[k]).filter(j => j.b === id).sort((a, b) => a.b0 - b.b0);   // (its own two ends: SHyperion is also the road its leaps' lanes leave and the cliff's field rejoins)
   for (const dir of [1, -1]) {
     const [entry, exit] = dir > 0 ? ends : [ends[1], ends[0]];
     const begin = dir > 0 ? 0 : R.N - 1, end = R.N - 1 - begin;
@@ -435,6 +435,49 @@ for (const name of ['SWash', 'SFrost', 'SReed', 'SRed', 'SNeedle', 'SHammer', 'S
   // ... and on a road that is not a deck road nothing is asked of any of it
   check(`deck: no other road is one (${T.roads.filter((Q) => Q.deck).map((Q) => Q.name).join(', ')}); E3's pitch reads ${s.deckSine(road('E3'), 9000.3)}, SHelios's wall ${s.deckSine(road('SHelios'), 7000.5)}`,
     T.roads.filter((Q) => Q.deck).length === 1 && s.deckSine(road('E3'), 9000.3) === 0 && s.deckSine(road('SHelios'), 7000.5) === 0);
+}
+
+// leaps: Mount Hyperion's two (Luke, 2026-11-22: "hit a jump at 9-11k mph, and literally jet for some odd tens of miles";
+// NET_LEAPS, godot/tests/test_hyperion_leaps.gd flies the same in the GD sim). A craft put down on each launch lane 250
+// samples short of its lip: flat out as he would be from 5,000 mph up (top gear, the ramjet lit, held through the
+// flight), the speed pinned to the figure while it is on the lane; slower, a lever that holds the speed.
+{
+  const fly = (lane, mph) => {
+    const q = PS.makeSim({ track: 'network', handling: 'speed' }), Q = q.S, R = q.T.roads[lane];
+    const from = R.N - 251, p = R.pts[from], v = mph / MPH, flat = mph >= 5000;
+    q.respawnOn(lane, from, 1);
+    for (const b of Q.bodies) { b.vx = v * p.tx; b.vy = v * p.ty; }
+    Q.armed = flat;
+    const feed = q.P.gate * (2 * q.P.engineCd + q.P.podCd) * v * v / (2 * q.P.thrustMax);
+    let air = null, lip = null, caught = null, ground = false, peak = 0;
+    for (let n = 0; n < 200 * 480 && !(caught && n * DT - caught.t > 1.5) && Q.crashT <= 0 && !ground; n++) {
+      const lever = flat ? 0.87 : Math.max(0, Math.min(0.87, feed + (v - Math.hypot(Q.pod.vx, Q.pod.vy)) * 0.003));
+      const inp = { thrL: lever, thrR: lever, brkL: 0, brkR: 0, repair: false, reignite: true, handling: 'speed' };
+      if (flat) { inp.burner = true; inp.gearOverdrive = true; inp.thrMul = 1; }
+      q.step(inp, DT);
+      if (flat && !Q.pod.offRoad && Q.pod.path === lane) { const k = v / Math.max(1, Math.hypot(Q.pod.vx, Q.pod.vy)); for (const b of Q.bodies) { b.vx *= k; b.vy *= k; } }
+      while (Q.events.length) {
+        const e = Q.events.shift();
+        if (e.type === 'airborne' && air === null) { air = n * DT; lip = { isLip: e.lip, mph: e.v * MPH, deg: Math.atan2(e.vz, e.v) * 180 / Math.PI, x: Q.pod.x, y: Q.pod.y }; }
+        else if (e.type === 'catch' && !caught) caught = { t: n * DT, road: e.road, dz: e.dz, closing: e.v, m: Math.hypot(Q.pod.x - lip.x, Q.pod.y - lip.y) };
+        else if (e.type === 'ground') ground = true;
+      }
+      if (Q.pod.offRoad) peak = Math.max(peak, Q.pod.z);
+    }
+    return { lip, air, caught, ground, peak, crash: Q.crashT > 0, whole: Q.bodies.every((b) => !b.offRoad && caught && b.path === caught.road) };
+  };
+  check(`leaps: ${T.leaps.length} of them, a launch lane and a landing field each (${T.leaps.map(([l, c]) => `${T.roads[l].name} ${T.roads[l].role} to ${T.roads[c].name} ${T.roads[c].role}`).join('; ')})`,
+    T.leaps.length === 2 && T.leaps.every(([l, c]) => T.roads[l].role === 'launch' && T.roads[c].role === 'catch'));
+  for (const [lane, field] of T.leaps) {
+    let was = 0;
+    for (const mph of [150, 4000, 9000, 10000, 11000]) {
+      const r = fly(lane, mph), miles = r.caught ? r.caught.m / 1609.344 : 0;
+      check(`leaps: ${T.roads[lane].name} at ${mph} mph: ${r.lip ? `off the lip ${r.lip.deg.toFixed(2)} deg up` : 'never off the lip'}, ${r.caught ? `${(r.caught.t - r.air).toFixed(2)} s in the air, peak ${r.peak.toFixed(0)} m, ${(r.caught.m / 1000).toFixed(1)} km (${miles.toFixed(1)} miles) to ${T.roads[r.caught.road].name}, caught ${r.caught.dz.toFixed(1)} m over it closing ${r.caught.closing.toFixed(0)} m/s` : 'not caught'}`,
+        r.lip && r.lip.isLip && Math.abs(r.lip.deg - 0.5) < 0.06 && r.caught && r.caught.road === field && r.caught.dz > 30 && r.caught.closing < 90 && !r.ground && !r.crash && r.whole
+          && miles > was && (mph < 9000 || (miles >= 25 && miles <= 60)));
+      was = miles;
+    }
+  }
 }
 
 console.log(ok ? 'NETWORK OK' : 'NETWORK FAIL');

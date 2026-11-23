@@ -130,6 +130,12 @@ const SIGN_FAR := 536             # samples (8 mi) before a jump's exit: time to
 const SIGN_NEAR := 268             # samples (4 mi) before the exit
 const FORK_BEFORE := 22           # samples before the fork: the board over it, the arrow straight on
 const CHEV_EVERY := 14            # samples between the lit chevrons on a launch spur
+# Mount Hyperion's leaps (CraftSim.NET_LEAPS): a lane beside the mountain's road to a lip, a landing field under the flight
+const LEAP_RAILS := 2500          # samples of amber rails down the mountain's road to a lane's mouth (60 km: from the summit's middle, over the cliff's lip and down; the lane is chosen coming down)
+const LEAP_GREEN := Color(0.3, 1.0, 0.5)   # a field's marks (the catch decks' green)
+const LEAP_BAR_EVERY := 120       # samples between the bars across a field (2.9 km: one every 0.6 s at 10,000 mph)
+const LEAP_LINE := 60.0           # m either side of a field's middle: its two lit lines, the flight's own line between them
+const LEAP_BRAKE_MI := [20, 10, 5, 2]   # a field's count down to where its straight ends
 const HOOP_EVERY := 8             # samples between a shaft's hoops (~190 m); every second one lit
 const HOOP_H := 80.0              # the hoops' clearance over the road
 const CORNER_MIN_K := 1.0 / 17000.0   # side roads: a bend this tight gets a board (speed, gear)
@@ -191,6 +197,10 @@ var skylines := []        # [node, cx, cy]
 var far_shafts := []      # [node, ox, oy]: each shaft's shape from far off, before its chunks stream in
 var _signs := {}
 var _approaches := {}     # road -> [first, last, direction, lateral centre] for amber exit guidance
+var _leap_fields := {}    # a leap's landing field (road) -> its launch lane's width (m): the fields are marked along their length
+var _leap_rails := {}     # road -> [[first, last, direction, lateral centre], ...]: the amber rails down it to a leap's lane (drawn as an exit's approach is; its lane paint stays)
+var _leap_plain := {}     # a leap's field laid along another road -> [first, last, that road]: its samples drawn as a plain road of its own (_prepare_leaps)
+var _leap_cover := {}     # ... and that road -> [first, last, the field]: its samples under the field, whose chunks are left empty
 var exit_lanes := {}      # road -> [first, last, direction, lateral centre, mouth sample, the road it leads to]: each ordinary exit's lane on its parent road
 var _traffic_paint := []  # byte per road station: hidden, four lanes or eight lanes
 var halls := {}            # road -> [first, last sample] of its hall (the cities' terminals; CourseAudio reads it)
@@ -351,6 +361,7 @@ func build(s, v) -> void:
 	if scenic_on:   # (after the heights: it takes the roads' from them)
 		scenic = preload("res://view/network_scenic.gd").new()
 		scenic.setup(sim, _heights)
+	_prepare_leaps()
 	_warm_join_hints()
 	_warm_physical_joins()
 	_plan_signs()
@@ -432,6 +443,55 @@ func _prepare_traffic_paint() -> void:
 			for i in range(maxi(0, int(span[0]) + 1), mini(R.N, int(span[1]))):
 				rows[i] = 3
 		_traffic_paint.append(rows)
+
+
+## A leap's field laid along another road (the cliff's, along SHyperion's far straight: one surface with it to the
+## sims, a junction 3,000 samples long). Through the stretch where the field is at its full width and covers the
+## other road's whole deck, the two are drawn as one plain road, the field's: the other road's chunks are left
+## empty there and the field's rows are spared the junction's work (a row in a junction costs five times a plain
+## one to build, and a craft crosses five chunks of each a second there). A chunk short of where either's width
+## changes, both are drawn again, as any junction is.
+func _prepare_leaps() -> void:
+	_leap_plain.clear()
+	_leap_cover.clear()
+	for lp in sim.leaps:
+		var f := int(lp[1])
+		var F: CraftSim.TrackPath = sim.roads[f]
+		for ji in F.jx:
+			var J: Array = sim.junctions[ji]
+			if int(J[3]) != f or int(J[5]) - int(J[4]) < 10 * CH:
+				continue
+			var p := int(J[0])
+			var P: CraftSim.TrackPath = sim.roads[p]
+			var widest := 0.0
+			for i in range(int(J[4]), int(J[5]) + 1):
+				widest = maxf(widest, F.w[i])
+			var a := -1
+			var b := -1
+			for i in range(int(J[4]), int(J[5]) + 1):
+				if F.w[i] == widest:
+					a = i if a < 0 else a
+					b = i
+			if a < 0 or b - a < 6 * CH:
+				continue
+			# ... and the other road's deck inside it all the way: its samples abreast, its width, its place across the field
+			var pa := mini(_map(J, a), _map(J, b))
+			var pb := maxi(_map(J, a), _map(J, b))
+			var covered := true
+			for i in range(pa, pb + 1, 8):
+				sim._nearest_on(f, P.px[i], P.py[i], clampi(a + (i - pa) * int(J[6]) if int(J[6]) > 0 else b - (i - pa), 0, F.N - 1), 24)
+				covered = covered and not sim._n_off and absf(sim._n_lat) + P.w[i] / 2.0 <= widest / 2.0 + 0.5 and absf(sim.net_height(p, float(i)) - sim.net_height(f, float(sim._n_i))) < 0.01
+			if not covered:
+				continue
+			_leap_plain[f] = [a + CH, b - CH, p]
+			_leap_cover[p] = [pa + CH, pb - CH, f]
+
+
+## Is row i of road r one of a leap's field's plain rows, or one of the road's under it (_prepare_leaps)?
+func _leap_row(r: int, i: int) -> bool:
+	if _leap_plain.has(r) and i >= int(_leap_plain[r][0]) and i <= int(_leap_plain[r][1]):
+		return true
+	return _leap_cover.has(r) and i >= int(_leap_cover[r][0]) and i <= int(_leap_cover[r][1])
 
 
 ## Junction centreline projections are static and reused by each shoulder offset.
@@ -750,6 +810,9 @@ func _joining_at(r: int, i: int) -> Array:
 		return _prepared_join_hints[r].get(i, [])
 	if _join_hints.has(i):
 		return _join_hints[i]
+	if _leap_row(r, i):      # (a leap's field and the road under it: one plain road there)
+		_join_hints[i] = []
+		return _join_hints[i]
 	var R: CraftSim.TrackPath = sim.roads[r]
 	var joins := []
 	for k in R.sjx:
@@ -805,6 +868,10 @@ func _start_chunk(r: int, k: int) -> void:
 		if c0 <= finish + 4 and c1 >= start - 4:
 			joins = true
 			fine_joins = fine_joins or ji >= sim.junctions.size()
+	var leap_rows: bool = _leap_row(r, c0) and _leap_row(r, c1)
+	if leap_rows:
+		joins = false
+		fine_joins = false
 	var w0 := _wxy(r, c0)
 	var ox: float = w0.x
 	var oy: float = w0.y
@@ -834,6 +901,10 @@ func _start_chunk(r: int, k: int) -> void:
 	var template_key := _deco_template_key(_job, R)
 	_job.template_key = template_key
 	_job.template = _deco_templates.get(template_key, []) if template_key != "" else []
+	if leap_rows and _leap_cover.has(r):      # (under a leap's field, which is the surface there: nothing of this road's to draw)
+		_job.i = c1
+		_job.made = true
+		_job.signs = []
 
 
 ## Unsealed sections stop at the paved highway approaches. The causeway rail
@@ -853,7 +924,7 @@ static func backroad_surface(road_name: String, fraction: float) -> int:
 
 
 func _deco_template_key(J: Dictionary, R: CraftSim.TrackPath) -> String:
-	if R.role != "" or _smap.has(R) or int(J.c1) - int(J.c0) != CH or int(J.c0) == 0 or int(J.c1) == R.N - 1:
+	if (R.role != "" and not _leap_fields.has(J.r)) or _smap.has(R) or int(J.c1) - int(J.c0) != CH or int(J.c0) == 0 or int(J.c1) == R.N - 1:      # (a leap's field is 70 to 100 km of one straight deck: its chunks are alike, as a highway's are)
 		return ""
 	if scenic != null and (scenic.on(J.r, int(J.c0)) or scenic.on(J.r, int(J.c1))):
 		return ""
@@ -861,7 +932,7 @@ func _deco_template_key(J: Dictionary, R: CraftSim.TrackPath) -> String:
 	var finish: int = J.c1
 	if halls.has(J.r) and finish >= int(halls[J.r][0]) and start <= int(halls[J.r][1]):
 		return ""
-	for guide in _approaches.get(J.r, []):
+	for guide in _approaches.get(J.r, []) + _leap_rails.get(J.r, []):
 		if finish >= int(guide[0]) and start <= int(guide[1]):
 			return ""
 	var height := _h(J.r, start)
@@ -1083,7 +1154,13 @@ func _sample(J: Dictionary, R: CraftSim.TrackPath, i: int) -> void:
 	if R.role == "launch":
 		for side in [-1.0, 1.0]:
 			_strip(lglow, R, ox, oy, i, side * (hw * 0.55) - 1.75, side * (hw * 0.55) + 1.75, hi + 0.12, hj + 0.12, JUMP_AMBER)
-	for guide in _approaches.get(r, []):
+	if _leap_fields.has(r):
+		for side in [-1.0, 1.0]:
+			_strip(lglow, R, ox, oy, i, side * LEAP_LINE - 2.5, side * LEAP_LINE + 2.5, hi + 0.12, hj + 0.12, LEAP_GREEN, 0.0, 0.0, span)
+		if i % LEAP_BAR_EVERY == 0 and i > 0 and i < R.N - 2:
+			var along := Vector3(R.tx[i], 0.0, -R.ty[i])
+			_across(lglow, R, ox, oy, i, hi, Vector3.ZERO, along * 16.0, LEAP_GREEN)
+	for guide in _approaches.get(r, []) + _leap_rails.get(r, []):
 		if i < int(guide[0]) or i >= int(guide[1]):
 			continue
 		var centre: float = guide[3]
@@ -1291,7 +1368,7 @@ func _deco_span(J: Dictionary, R: CraftSim.TrackPath, i: int) -> int:
 		eligible = eligible and not ((h0 > DECK + 2.0 and h0 <= 150.0) or (h1 > DECK + 2.0 and h1 <= 150.0))
 		if halls.has(r) and last >= int(halls[r][0]) and first <= int(halls[r][1]):
 			eligible = false
-		for guide in _approaches.get(r, []):
+		for guide in _approaches.get(r, []) + _leap_rails.get(r, []):
 			if (first < int(guide[0]) and last > int(guide[0])) or (first < int(guide[1]) and last > int(guide[1])):
 				eligible = false
 		if eligible:
@@ -2184,6 +2261,9 @@ func _plan_signs() -> void:
 		var dq := 1 if at_start else -1           # into the joining road
 		var dp := dq * sense                       # on the parent, the way that takes you in
 		var P = sim.roads[p]
+		if C.role == "launch" and leap_of(c) >= 0:
+			_plan_leap(leap_of(c), p, ca, dp)
+			continue
 		if C.role == "launch":
 			_plan_jump(c, p, ca, dp)
 			continue
@@ -2337,6 +2417,62 @@ func _index_exits() -> void:
 			choices.sort_custom(func(a,b): return a.side < b.side if a.side != b.side else a.mouth < b.mouth)
 			for j in choices.size():
 				choices[j].number += String.chr(65+j)
+
+
+## Which of Mount Hyperion's leaps road r is the lane or the field of (-1: neither).
+func leap_of(r: int) -> int:
+	for k in sim.leaps.size():
+		if int(sim.leaps[k][0]) == r or int(sim.leaps[k][1]) == r:
+			return k
+	return -1
+
+
+## A leap's boards and marks (CraftSim.NET_LEAPS[k]): its lane leaves road p beside p's sample `mouth`, for a craft
+## going dp along p. On p: amber rails down to the lane's mouth along the lane's own line (the lane is chosen
+## coming down the mountain: nothing is steered at speed), and boards that say which side it is. On the lane:
+## the lip's count down. On the field: its count down to where its straight ends.
+func _plan_leap(k: int, p: int, mouth: int, dp: int) -> void:
+	var lp: Array = sim.leaps[k]
+	var c := int(lp[0])
+	var f := int(lp[1])
+	var C = sim.roads[c]
+	var F = sim.roads[f]
+	var P = sim.roads[p]
+	sim._nearest_on(p, C.px[0], C.py[0], mouth, 400)
+	mouth = sim._n_i
+	var lateral: float = (C.px[0] - P.px[mouth]) * P.nx[mouth] + (C.py[0] - P.py[mouth]) * P.ny[mouth]
+	var side := -1 if lateral * dp > 0.0 else 1
+	var hand := "LEFT" if side < 0 else "RIGHT"
+	var back := clampi(mouth - dp * LEAP_RAILS, 1, P.N - 2)
+	if not _leap_rails.has(p):
+		_leap_rails[p] = []
+	_leap_rails[p].append([mini(back, mouth), maxi(back, mouth), dp, lateral])
+	var title := "LEAP LANE %s" % hand
+	for mi in [10, 3, 1]:
+		var at: int = mouth - dp * roundi(mi * MILE / 24.0)
+		if at > 0 and at < P.N - 1:
+			_add_sign(p, at, dp, "leap", [title, "%d MI  OR KEEP CENTRE" % mi], {"side": side})
+	if Hyperion.ready and p == Hyperion.road:
+		# ... and on the summit, where the craft is slow enough to read it: short of the lip one way, of the crest the other
+		var top: int = int(Hyperion.at.lip) - 40 if dp > 0 else int(Hyperion.at.summit) + 40
+		_add_sign(p, top, dp, "leap", ["HYPERION LEAP", "LANE %d M %s  FLAT OUT" % [roundi(absf(lateral)), hand]], {"side": side})
+	_add_sign(c, mini(300, C.N - 2), 1, "leap", ["HYPERION LEAP", "LIP %d MI  HOLD STRAIGHT" % roundi(float(C.N - 1 - mini(300, C.N - 2)) * 24.0 / MILE)])
+	for mi in [3, 1]:
+		var at: int = C.N - 1 - roundi(mi * MILE / 24.0)
+		if at > 310:
+			_add_sign(c, at, 1, "leap", ["LIFT-OFF %d MI" % mi, "HOLD STRAIGHT"])
+	# the field: where its straight ends (its first bend, or its end)
+	_leap_fields[f] = float(C.w[0])
+	var stop: int = F.N - 1
+	for i in F.N:
+		if F.kap[i] != 0.0:
+			stop = i
+			break
+	var ends := "BEND" if stop < F.N - 1 else "FIELD ENDS"
+	for mi in LEAP_BRAKE_MI:
+		var at: int = stop - roundi(mi * MILE / 24.0)
+		if at > 200:
+			_add_sign(f, at, 1, "brake", ["%d MI" % mi, "%s  BRAKE" % ends])
 
 
 ## A jump's boards: launch spur c forks off exit ramp p at the ramp's sample `fork`, going dp along it.

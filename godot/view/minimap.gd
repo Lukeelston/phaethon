@@ -102,6 +102,9 @@ func _net_setup() -> void:
 	for jp in sim.jumps:   # each jump at its lip
 		var L = sim.roads[int(jp[0])]
 		_w_marks.append([Vector2(L.px[L.N - 1], L.py[L.N - 1]) - W_MID, "jump"])
+	for lp in sim.leaps:   # each of Mount Hyperion's leaps at its lip
+		var LL = sim.roads[int(lp[0])]
+		_w_marks.append([Vector2(LL.px[LL.N - 1], LL.py[LL.N - 1]) - W_MID, "leap"])
 	for op in sim.onramps:   # each on-ramp at its mouth
 		var O = sim.roads[int(op[1])]
 		_w_marks.append([Vector2(O.px[0], O.py[0]) - W_MID, "ramp"])
