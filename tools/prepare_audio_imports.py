@@ -4,6 +4,7 @@ from pathlib import Path
 import wave
 root = Path(__file__).resolve().parents[1]
 files = list((root/'godot/audio/engines').glob('*.wav')) + list((root/'godot/audio/ramjet').glob('*.wav'))
+files += list((root/'godot/audio/fleet').glob('*/*.wav'))
 for wav in files:
     with wave.open(str(wav)) as source:
         assert source.getnchannels() == 1 and source.getsampwidth() == 2, wav.name
