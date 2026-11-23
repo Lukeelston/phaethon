@@ -1,5 +1,5 @@
 PHAETHON
-Experimental Desktop Racer - Windows x64 - v0.3.6
+Experimental Desktop Racer - Windows x64 - v0.4.0
 ElstonWorks
 
 The twin engines now have rolled intakes, ribbed air brakes and heat-stained
@@ -45,7 +45,18 @@ GET IN
 3. Double-click Phaethon.exe. Choose the 100-mile sprint first.
 No Godot editor, account, headset, or online connection is required to play.
 
-WHAT YOU BOUGHT
+NEW IN 0.4.0
+- The menu stands in a scene of its own: the title over a road at sunset.
+- The Network has Mount Hyperion, 48 km high. A road climbs it and drops off
+  its far side, and a marked lane on each side runs out to a leap.
+- A mountain road, the Caucasus, joins E2 to E1 in the south-east.
+- The coast road and the drop have wide level aprons on their open edges.
+- Five computer pilots race you on Eridanus, from grid lights to a timed finish.
+- Distant traffic shows as pairs of lamps, and lit gates on the Network give a
+  short surge of thrust.
+- The ramjet has a voice of its own: it catches, roars and dies away.
+
+WHAT THIS IS
 An offline, single-player physics experiment with nine course selections:
 - 100-mile sprint: build speed, survive, then stop in the finish box.
 - Grand Prix: a circuit with tighter Starfighter handling.
@@ -60,7 +71,7 @@ You steer using the difference between your left and right engine thrust.
 This is a small experimental build, not a finished campaign. Expect strange
 handling, sparse scenery, rough collisions, and the occasional spectacular
 mistake. There is no multiplayer. This download is the flat-screen edition.
-Future features, updates, and other platforms are not part of this purchase.
+Future features, updates, and other platforms are not promised.
 
 The Network has twenty ascent ramps: staged climbs, longer gaps, four jumps
 that transfer onto another highway, and four twisting recovery decks.
@@ -119,7 +130,8 @@ Windows x64 desktop with a Vulkan-capable graphics driver. The release was
 render-tested on Windows with an NVIDIA GeForce RTX 5080 at 1280 x 720.
 Minimum GPU and performance on other machines have not been established.
 Mac, Linux, mobile, standalone Quest and VR are not supported by this package.
-The executable is unsigned. Download it from the ElstonWorks product page.
+The executable is unsigned. Download it only from the project's own page:
+https://github.com/Lukeelston/phaethon/releases
 The window can be resized; Escape provides controls if you get lost.
 
 Local game data is stored under the Windows application-data directory:
@@ -127,12 +139,12 @@ ElstonWorks/Phaethon. The game has no online account or telemetry integration.
 
 RIGHTS AND CREDITS
 Game code and original content copyright 2026 Luke Elston / ElstonWorks.
-Purchase permits personal gameplay use; it does not transfer the game's
-copyright. Third-party components and the CC BY engine audio retain their
-own licenses and permissions. See THIRD_PARTY.md and licenses/.
-Adapted engine audio is also supplied separately in audio/engines/.
+This build is free to download and play for personal use. That does not
+transfer the game's copyright. Third-party components and the CC BY engine
+audio retain their own licenses and permissions. See THIRD_PARTY.md and
+licenses/. Adapted engine audio is also supplied separately in audio/engines/.
 
-Build: 0.3.6-experimental | 2026-11-22
+Build: 0.4.0-experimental | 2026-11-23
 
 IN THIS LOCAL BUILD
 Central highway transfers and long side-road sweeps now alternate bends with

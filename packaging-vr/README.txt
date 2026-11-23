@@ -1,5 +1,5 @@
 PHAETHON - EXPERIMENTAL PC VR EDITION
-Windows x64 / OpenXR - v0.3.6 - ElstonWorks
+Windows x64 / OpenXR - v0.4.0 - ElstonWorks
 
 Watch the engines ahead during a fast braking turn. Their ribbed flaps flutter
 under load, the jet follows its steering vanes, and the trailing pod swings
@@ -37,6 +37,23 @@ Geological detail, fractured rocks, branched trees, stepped city towers and
 settlement hardware add character. Road decoration streams more efficiently.
 VR cockpit lean is gentler, with slower rotation and smooth air-brake reversals.
 
+NEW IN 0.4.0
+- A flight starts cold. Reach up to the overhead panel: BATT, ENGINE under its
+  guard, START, then PARK. The run-up teaches the controls the first time.
+- The menu stands in a scene of its own, with a craft on either hand.
+- The quick menu has an OPTIONS page: heat and energy, power-up gates, an
+  avoidance field, the speed rush, and on Eridanus the racing pilots.
+- Hold ARM for a boost. A tap still arms the ramjet.
+- On the Network, flick the left stick across to hand the craft to an
+  autopilot. Any trigger or grip takes it back.
+- The map pod has a GLOBAL / LOCAL switch and a COLOR button.
+- The Network has Mount Hyperion, 48 km high, with a marked lane on each side
+  of its summit that runs out to a leap; and a mountain road, the Caucasus.
+- Five computer pilots race you on Eridanus, from grid lights to a timed finish.
+- The ramjet has a voice of its own: it catches, roars and dies away.
+- To hear the game on headphones plugged into the PC, start it with
+  PhaethonVR.exe -- --audio-out=headphones (words of the device's name, joined by +).
+
 START HERE
 1. Extract the whole ZIP. Keep PhaethonVR.exe and PhaethonVR.pck together.
 2. Start your Windows PC VR software and connect the headset. On Quest,
@@ -66,7 +83,8 @@ runtime, a connected VR headset and motion controllers. The existing controller
 layout is designed for Quest Touch over PC Link/Air Link. Compatibility with
 other controller layouts is not promised. This is not a standalone Quest APK,
 mobile game, Mac build, or Linux build. No headset or controllers are included.
-The executable is unsigned. Get it from the ElstonWorks product page.
+The executable is unsigned. Get it only from the project's own page:
+https://github.com/Lukeelston/phaethon/releases
 Minimum hardware and headset performance have not been established.
 
 DEFAULT TOUCH CONTROLS - TRIGGER THROTTLES
@@ -167,9 +185,9 @@ always keep you on the road; ground contact and jump landings stay active.
 
 ABOUT THIS BUILD
 Offline, single-player, seated cockpit prototype. Expect odd handling, rough
-collisions and unfinished scenery. This purchase includes the current build;
+collisions and unfinished scenery. This is the current build, free to download;
 future features, updates and other platforms are not promised. A separate
-desktop ZIP is included with the same product for ordinary keyboard play.
+desktop ZIP is published beside this one for ordinary keyboard play.
 If you feel uncomfortable in the headset, stop and take it off.
 
 LOCAL DATA
@@ -178,12 +196,12 @@ directory ElstonWorks/Phaethon-VR. Desktop and VR preferences are separate.
 
 RIGHTS AND CREDITS
 Game code and original content copyright 2026 Luke Elston / ElstonWorks.
-Purchase permits personal gameplay use; it does not transfer the game's
-copyright. Third-party components and the CC BY engine audio retain their
-own licenses and permissions. See THIRD_PARTY.md and licenses/.
-Adapted engine audio is supplied separately in audio/engines/.
+This build is free to download and play for personal use. That does not
+transfer the game's copyright. Third-party components and the CC BY engine
+audio retain their own licenses and permissions. See THIRD_PARTY.md and
+licenses/. Adapted engine audio is supplied separately in audio/engines/.
 
-Build: 0.3.6-experimental | 2026-11-20
+Build: 0.4.0-experimental | 2026-11-23
 
 IN THIS LOCAL BUILD
 Central highway transfers and long side-road sweeps now alternate bends with
