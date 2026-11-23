@@ -53,6 +53,7 @@ const StartupScript := preload("res://vr/startup_sequence.gd")
 const OverheadPanelScript := preload("res://vr/overhead_panel.gd")
 const StartupAudioScript := preload("res://audio/startup_audio.gd")
 const SpeedRushScript := preload("res://vr/speed_rush.gd")
+const TacticalScript := preload("res://view/tactical_display.gd")   # the tactical display: the road ahead, the traffic and the exits marked out in the world
 var _brake_trace: RefCounted
 static var require_neutral_on_entry := false
 var _await_neutral_controls := false
@@ -114,6 +115,7 @@ static var _options_loaded := false       # (both read once a run)
 static var speed_rush := true
 static var _rush_loaded := false          # (its saved setting is read once a run, as the camera's)
 var rush                                  # vr/speed_rush.gd; null in a cockpit without its view (the camera's own tests)
+var tactical                              # view/tactical_display.gd; null while its switch is off (the OPTIONS pages' TACTICAL DISPLAY)
 var _shake := Vector3.ZERO                # the shell's shudder (the air brakes', the gear's grab, the run-up's tremble) ...
 var _rush_shift := Vector3.ZERO           # ... and the speed rush's part of its place: the shell stands at their sum
 var _rush_flow := Transform3D.IDENTITY    # the air's frame for the streaks, in this node's space: its origin the seated eye, its -Z the craft's way, level
@@ -279,6 +281,7 @@ func _ready() -> void:
 		consumables = String(prefs.get("consumables", "off")) == "on"
 		power_ups_on = String(prefs.get("powerups", "on")) != "off"
 		avoid_on = String(prefs.get("field", "off")) == "on"      # the avoidance field: off until he asks for it
+		TacticalScript.wanted = String(prefs.get("tactical", "off")) == "on"      # the tactical display: the same
 	_options_loaded = true
 	if bool(sim.P.limits) != consumables:
 		sim.set_limits(consumables)
@@ -342,7 +345,7 @@ func _save_prefs() -> void:
 			"nose": "closed" if CraftModelScript.nose_closed else "open", "slide": "on" if slide_feel else "off",
 			"startup": "cold" if cold_start else "hot", "school": "on" if school else "done",
 			"consumables": "on" if consumables else "off", "powerups": "on" if power_ups_on else "off",
-			"field": "on" if avoid_on else "off", "rush": "on" if speed_rush else "off",
+			"field": "on" if avoid_on else "off", "rush": "on" if speed_rush else "off", "tactical": "on" if TacticalScript.wanted else "off",
 			"map": "global" if map_whole else "local", "map_scheme": String(MinimapPanelScript.SCHEMES[map_scheme].name),
 			"map_hud": "on" if map_hud else "off"}))
 
@@ -1285,14 +1288,17 @@ static func _outlook_name(rows: Array, id: String) -> String:
 func _menu_items() -> Array:
 	if _menu_page == "options":      # the second page: the gameplay switches
 		# (RACING PILOTS is here too, on the Eridanus track: it was built as an eleventh line of the first page)
-		return [{"key": "consumables", "label": "HEAT AND ENERGY", "value": "ON" if consumables else "OFF"},
+		# It is more than a panel holds on the Eridanus track (ten lines; an eleventh ran off it): laid out as panels
+		# (MainMenu.lay), each ending in BACK. The first is the page as it was; what has come since begins the next.
+		return menu.lay([[{"key": "consumables", "label": "HEAT AND ENERGY", "value": "ON" if consumables else "OFF"},
 			{"key": "powerups", "label": "POWER-UPS", "value": "ON" if power_ups_on else "OFF"},
 			{"key": "field", "label": "AVOIDANCE FIELD", "value": "ON" if avoid_on else "OFF"}] + _race_menu_items() + [
 			{"key": "autopilot", "label": "AUTOPILOT", "value": "ON" if autopilot.on else "OFF"},
 			{"key": "rush", "label": "SPEED RUSH", "value": "ON" if speed_rush else "OFF"},
 			# (NOSE came here from the first page, which is full at ten lines: an eleventh ran off its panel)
-			{"key": "nose", "label": "NOSE", "value": "CLOSED" if CraftModelScript.nose_closed else "OPEN"},
-			{"key": "back", "label": "BACK"}]
+			{"key": "nose", "label": "NOSE", "value": "CLOSED" if CraftModelScript.nose_closed else "OPEN"}],
+			[{"key": "tactical", "label": "TACTICAL DISPLAY", "value": "ON" if TacticalScript.wanted else "OFF"}]],
+			{"key": "back", "label": "BACK"})
 	return [{"key": "partner", "label": "DRIVING PARTNER", "value": "ON" if partner_on else "OFF"},
 		{"key": "scheme", "label": "CONTROLS", "value": String(quest.scheme).to_upper()},
 		{"key": "camera", "label": "CAMERA", "value": String(CAMERA_NAMES[camera])},
@@ -1382,6 +1388,7 @@ func menu_choose() -> bool:
 		"options", "back":           # the second page, and back from it (the cursor returns to OPTIONS)
 			_menu_page = "options" if menu.key() == "options" else ""
 			menu.title = "OPTIONS" if _menu_page == "options" else "FLIGHT HOLD"
+			menu.page = 0                # (its first panel)
 			menu.items = _menu_items()
 			menu.at = 0
 			for k in menu.items.size():
@@ -1429,6 +1436,15 @@ func menu_choose() -> bool:
 			var rush_at: int = menu.at
 			menu.items = _menu_items()
 			menu.at = rush_at
+			_menu_show()
+			return true
+		"tactical":                  # the tactical display (view/tactical_display.gd): built at the next frame, or gone at it
+			TacticalScript.wanted = not TacticalScript.wanted
+			_save_prefs()
+			print("OPTIONS: tactical display ", "on" if TacticalScript.wanted else "off")
+			var tactical_at: int = menu.at
+			menu.items = _menu_items()
+			menu.at = tactical_at
 			_menu_show()
 			return true
 		"race_pace", "race_laps":
@@ -1974,6 +1990,7 @@ func _process(delta: float) -> void:
 		_brake_trace.capture(self, delta)
 	_apply_shudder(delta)
 	_sync_rush(delta)
+	tactical = TacticalScript.frame(self, tactical, delta, _rush_flow, camera == "cockpit" and startup.is_hot())
 	interior.set_power(startup.power)
 	interior.set_mode(sim.mode, sim.hblend)
 	# In pursuit the patrol's lights wash the cabin: the rim light takes the lamp that is lit.

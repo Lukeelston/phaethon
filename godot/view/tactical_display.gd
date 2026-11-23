@@ -1,0 +1,1173 @@
+## The tactical display (Luke, 2026-11-22: "a switch that adds a 'tactical speed display' hud over the whole
+## windscreen ... a physical overlay onto the world. Traffic could have lines running up from each car, exits
+## could have an arrow animation ... a driving display to help handle decision making at speed").
+## At 3,000 to 5,000 mph a bend, an exit or a vehicle goes from a dot to on top of him in a second or two, and
+## the road itself tells him nothing in time: his eye rides 2.7 m over it, so a hundred metres of road a
+## kilometre off is a hundredth of a degree high. What is flat on the road cannot be seen coming. So everything
+## here STANDS on the thing it describes, at that thing's own place and depth (nothing is glued to the head or
+## the glass), and is drawn as tall as the eye needs it, not as tall as it is:
+##   the road ahead   a rail of light along each edge of the road he is on, from half a second's flying out
+##                    to twelve seconds' (1.5 to 28 km): a line over the road's edge with a faint curtain
+##                    under it, and the line stands higher in the view the further off it is (0.3 degrees
+##                    where it begins, 3 at its far end). On a straight road the two rails close to a point
+##                    over the road's far end; where the road bends the point swings off to that side and
+##                    the rails lean after it, long before the surface shows. (Held at one height they were
+##                    a sliver on the horizon, bend or no bend.) Its colour is the bend's ask against what
+##                    the craft can hold at the speed she is doing now: calm, amber as it nears the limit,
+##                    red past it.
+##   the vehicles     a line of light standing on each vehicle he is closing on and would reach within eight
+##                    seconds, 1.6 degrees tall: over a crest, over the traffic in front of it. Those in his way
+##                    (his lane and the next) are coloured by the seconds left; the rest are short and calm,
+##                    and go when the road is busy.
+##   the exits        over an exit's lane, a row of upright chevrons pointing the way the lane leaves, a wave
+##                    of light running along them into the ramp; begun seven seconds before the mouth (never
+##                    less than 8 km, where the lane's own paint begins). A join: five, pointing in.
+##   the speed        one number, in the sky over the road's far end: 60 m ahead on the craft's own way, 4.5
+##                    degrees over the horizon. It goes amber and red with the road ahead, as the rails do.
+## What the craft can hold is the sim's own: its engines' and its pod's grip caps by their masses (CraftSim P
+## gripCapG, podCapG: 13.8 g as a SPEEDCRAFT, 46.6 g as a STARFIGHTER), and on a banked road the bank's own
+## share (CraftSim step: g tan(bank) + bankDown v^2 sin(bank)). Nothing is guessed. The road is read through
+## the views' own accessor (CraftSim.surface_at: its height and its bank), a station at a time as it comes
+## into reach, so the rails stand on whatever surface the sims have.
+## Drawn through the world, as a display on the glass is: the bank, the fin or the hill on the inside of a
+## bend is exactly what hides the road he needs to see (tested against the world's depth, the rails were gone
+## behind the first fin). So that it is never drawn across the cockpit's own frame, which is a metre from the
+## eye where the display is kilometres off, it is kept to within 24 degrees of the cockpit's nose from the
+## seated eye (gone by 30; the A-pillars stand 35 out): inside the windscreen for any lean of the head.
+## It is drawn after the world's own see-through things (under the craft's haze it was washed out).
+## Quiet: nothing in the first fifth of a second's flying (the road itself is plain there), nothing over
+## the lanes dead ahead, nothing flashes; a thing begins far enough off to be seen for two seconds or it is
+## not begun; a far row of chevrons, seen end on, is thinned to every fourth; at night it is at a little
+## over half its strength. Nothing is drawn standing still, at a pad, in the Aurora tube, from an outside
+## camera; up a shaft, on Mount Hyperion's wall, on the shade line and off the roads, the number alone.
+## Cost: the world is read once a frame, in the view. The rails are one mesh whose stations are added as they
+## come into reach and sent to the renderer six at a time (the vertex shader stands them up and colours
+## them: a frame sets a handful of numbers); the traffic is looked through a sixth a frame; the vehicles'
+## lines and the chevrons are a MultiMesh each; the number is a Label3D (its type and its outline). Five
+## draws. Beside 218 vehicles at 5,000 mph it took a tenth of a millisecond of the main thread a frame.
+## The quick menu's OPTIONS pages switch it (TACTICAL DISPLAY, saved; off unless switched on). Off, there is
+## no node: nothing is drawn and nothing runs but the cockpit's one test of `wanted`.
+##   tactical = TacticalDisplay.frame(view, tactical, delta, flow)      the cockpit's one call a frame
+## tests/test_tactical_display.gd holds it to the above; tests/render_tactical.gd is the pictures and the cost.
+extends Node3D
+
+const Sim := preload("res://sim/craft_sim.gd")
+const Hour := preload("res://view/outlook.gd")
+const Pilot := preload("res://view/autopilot.gd")      # (the junctions' own map: across())
+const Traffic := preload("res://view/network_traffic.gd")
+const MPH := 2.236936
+const G := 9.81
+
+static var wanted := false                  # the switch
+static var drawn := true                    # (timings only: false builds and runs it all and draws none of it)
+static var probe_usec := 0                  # (timings only: the microseconds its frames have taken since this was last set to 0)
+
+# --- when ---
+const SPEED_MPH := Vector2(60.0, 200.0)     # nothing under the first, all of it from the second
+const FADE_T := 0.4                         # s: it comes and goes over this
+const NIGHT := 0.55                         # its strength at night, of the day's (Outlook.darkness)
+const HALL := 0.6                           # ... and under a city's roof
+const PRIORITY := 1                         # drawn after the world's own see-through things (the craft's haze, the clouds, the canopy's glass: under them it was washed out), before the map, the menu and the fade
+const PANE := Vector2(24.0, 30.0)           # degrees off the cockpit's nose, from the seated eye: all of it inside the first, none of it past the second (the A-pillars stand 35 degrees out)
+
+# --- the road ahead ---
+const LOOK_S := 12.0                        # s of flying that the rails run ahead ...
+const REACH := Vector2(1500.0, 28000.0)     # ... never less or more than these, m
+const NEAR_S := Vector2(0.2, 0.6)           # s of flying ahead: nothing before the first, all of it from the second ...
+const NEAR_MIN := Vector2(60.0, 200.0)      # ... and never nearer than these, m
+const STEP_NET := 4                         # samples between stations on the Network (96 m) ...
+const STEP_COURSE := 2                      # ... and on a course (24 m)
+const RAIL_INSET := 2.5                     # m inside the road's edge
+const RAIL_RISE := Vector2(0.3, 3.0)        # degrees: a rail's height as the eye sees it, where it begins and at its far end (it rises with the distance between)
+const RAIL_H := Vector2(0.6, 2600.0)        # ... never lower or higher than these, m
+const RAIL_LINE := 4.0                      # pixels: the line along a rail's top
+const RAIL_CURTAIN := Vector3(0.09, 0.15, 0.3)     # the curtain under it: its strength where the bend is calm, amber, red
+const CALM_AT := 0.62                       # of what she can hold: a bend under this is calm (the autopilot's own margin: it plans 8.5 g of the SPEEDCRAFT's 13.8) ...
+const WARM_AT := 0.85                       # ... amber from this ...
+const HOT_AT := 1.0                         # ... and from this it is past what she can hold: red by HOT_FULL
+const HOT_FULL := 1.12
+const GROW_USEC := 250                      # the most of a frame spent reading road that has come into reach
+const MAX_STATIONS := 448
+const TRIM_AT := 64                         # stations behind her before they are dropped
+const AHEAD_SPARE := 10                     # stations kept laid beyond what shows ...
+const SEND_EVERY := 6                       # ... so the mesh is sent to the renderer once for this many added, not for each
+const REANCHOR := 60000.0                   # m from where the rails' own places are measured before they are laid again
+const CALM := Color(0.0, 0.8, 1.0)          # (a cyan that stands off a pale sky and a dark road alike)
+const WARM := Color(1.0, 0.7, 0.1)
+const HOT := Color(1.0, 0.16, 0.08)
+
+# --- the vehicles ---
+const LOOK_T := 8.0                         # s: a vehicle she would reach within this, at the speed she is closing on it now
+const BEGIN_T := 2.0                        # s: a line is not begun for one nearer in time than this, unless it is in her way
+const CORRIDOR := 60.0                      # m either side of her own line: in her way (her lane and half the next: the lanes are 45 m apart)
+const CAR_NEAR := Vector2(60.0, 220.0)      # m: a line is gone by the first, whole from the second (the vehicle itself is plain by then)
+const MAX_LINES := 12
+const SCAN_FRAMES := 6                      # the traffic is looked through a share a frame: all of it in this many frames (a twentieth of a second at 120 Hz)
+const THIN := Vector2i(4, 6)                # more candidates than the second: only those in her way keep a line; back at the first
+const LINE_ANGLE := 1.6                     # degrees: a line's height as the eye sees it ...
+const LINE_H := Vector2(5.0, 700.0)         # ... never lower or higher than these, m
+const LINE_W := Vector2(2.0, 4.5)           # its half width: m, and never under this many pixels
+const LINE_FADE := 0.3                      # s
+const SIDE_LINE := Vector2(0.6, 0.5)        # a vehicle not in her way: its line this much of the height, and of the strength
+const SOON := Vector3(5.0, 2.5, 1.2)        # s to reach it: calm from the first, amber at the second, red by the third
+const NEAR_REACH := 2500.0                  # m: a vehicle on another road is looked at inside this (a ramp running into hers)
+const ALONG := 0.8                          # ... and counts if it is going along her road (the cosine: within 37 degrees) ...
+const SAME_DECK := 12.0                     # ... on her road's own level, to this many metres (not on a road crossing overhead)
+
+# --- the exits ---
+const EXIT_LEAD_S := 7.0                    # s before an exit's mouth that its chevrons begin ...
+const EXIT_LEAD := Vector2(8000.0, 24000.0) # ... never less or more than these, m (the lane's own paint begins 8 km out)
+const EXIT_CLEAR_S := 2.5                   # ... and none nearer her, when they are laid, than this many seconds
+const EXIT_GREEN := Color(0.25, 1.0, 0.55)  # (the lanes' own green: view/network_world.gd)
+const CHEV_NEAR := 12                       # samples between chevrons for the last 3 km (288 m) ...
+const CHEV_FAR := 24                        # ... and before that
+const CHEV_ON := 6                          # ... and this many on along the exit itself, 240 m apart
+const JOIN_LOOK := 6000.0                   # m: a join ahead is marked inside this ...
+const JOIN_COUNT := 5                       # ... with this many chevrons past its mouth
+const MAX_CHEVRONS := 96
+const CHEV_THIN := Vector2(3000.0, 6000.0)  # m: past the second only every fourth chevron of a row is drawn, past the first every second (end on, they lie one over another)
+const CHEV_ANGLE := 0.7                     # degrees: a chevron's half size as the eye sees it ...
+const CHEV_SIZE := Vector2(2.5, 220.0)      # ... never under or over these, m
+const CHEV_FOOT := 1.5                      # m over the road
+const CHEV_RATE := 1.1                      # the wave: this many crests a second pass a place ...
+const CHEV_WAVE := 1400.0                   # ... this far apart, m
+
+# --- the speed ---
+const NUMBER_AHEAD := 60.0                  # m ahead of the seated eye, on the craft's own way
+const NUMBER_ELEVATION := 4.5               # degrees over level
+const NUMBER_HEIGHT := 2.0                  # degrees: a figure's height
+const NUMBER_STEP := 10                     # mph it is rounded to ...
+const NUMBER_EVERY := 0.1                   # ... and s between its readings
+const NUMBER_LOOK_S := 6.0                  # it takes the colour of the hardest bend within this many seconds
+
+var view
+var sim
+var amount := 0.0                           # 0 off .. 1 on, eased
+var rails: MeshInstance3D
+var rail_mesh: ArrayMesh
+var rail_mat: ShaderMaterial
+var lines: MultiMeshInstance3D
+var line_mat: ShaderMaterial
+var chevrons: MultiMeshInstance3D
+var chev_mat: ShaderMaterial
+var number: Label3D
+var number_load := 0.0                      # the hardest bend's ask within NUMBER_LOOK_S, of what she can hold
+var marks := {}                             # a vehicle's id -> its Mark: the lines, eased in and out
+var exits: Array = []                       # the exits and joins whose chevrons are laid: [{key, join, mouth, side, to}]
+var chevron_count := 0
+var chev_laid: Array = []                   # the chevrons as they were laid: [the exit's key, its place and facing, m still to the mouth] (tests read it)
+var line_count := 0                         # the lines drawn this frame ...
+var _line_way := PackedByteArray()
+var line_tints := PackedColorArray()        # ... and each one's colour and strength (tests read them: a headless renderer gives nothing back)
+var thinned := false
+var _found: Array = []                      # the vehicles that could matter, found so far this pass through the traffic
+var _scan_at := 0                           # ... and how far through it the pass is
+
+# the route: the road ahead, a station at a time
+var route_road := -1                        # the road it was laid from, and which way along it
+var route_dir := 0
+var route_done := false                     # it has run out of road
+var st_road := PackedInt32Array()
+var st_i := PackedInt32Array()
+var st_x := PackedFloat64Array()            # the road's middle there (the sims' metres) ...
+var st_y := PackedFloat64Array()
+var st_tx := PackedFloat64Array()           # ... the way it runs, the way she flies it ...
+var st_ty := PackedFloat64Array()
+var st_half := PackedFloat64Array()         # ... its half width ...
+var st_h := PackedFloat64Array()            # ... its middle's height ...
+var st_s := PackedFloat64Array()            # ... how far along the route ...
+var st_k := PackedFloat64Array()            # ... its curvature, 1/m (+: a left-hander the way she flies it): the harder of the bends into and out of it ...
+var st_bank := PackedFloat64Array()         # ... and its bank into that bend, radians
+var spans := {}                             # road -> [first sample, its s, way, last sample]: where the route runs on each road
+var pod_s := 0.0                            # where she is along it, m
+var pod_left := 0.0                         # ... and across it, m left of the road's middle the way she flies
+var at := 0                                 # the last station she has passed
+var _ax := 0.0                              # the rails' anchor (the sims' metres): their own places are measured from it
+var _ay := 0.0
+var _verts := PackedVector3Array()
+var _uv := PackedVector2Array()             # x: 0 the rail's foot, 1 its top; y: the bank into the bend
+var _uv2 := PackedVector2Array()            # x: m along the route; y: the curvature, 1/m
+var _index := PackedInt32Array()
+var _dirty := false
+var _net := false
+var _step := STEP_NET
+var _clock := 0.0
+var _tick := 0
+var _route_age := 0.0
+var _number_t := 0.0
+var _number_tint := Color(0, 0, 0, 0)
+var _unsent := 0                            # stations added at the far end since the mesh was last sent to the renderer
+var _chev_ax := 0.0
+var _chev_ay := 0.0
+var _px := 0.0                              # (a sample, read: _sample)
+var _py := 0.0
+var _tx := 0.0
+var _ty := 0.0
+var _nx := 0.0
+var _ny := 0.0
+var _w := 0.0
+
+## A vehicle's line.
+class Mark:
+	var id := 0
+	var car: Traffic.Car
+	var a := 0.0             # its strength now, 0..1 ...
+	var to := 1.0            # ... and where that is going
+	var seconds := 0.0       # till she reaches it, as the last pass through the traffic found
+	var way := false         # in her way
+	var tint := Color.WHITE  # its colour, for those seconds
+
+
+const RAIL_SHADER := """
+// The tactical display's rails (view/tactical_display.gd). Each station of the road ahead is four vertices: a
+// foot and a top at each edge, both at the edge's place on the road. The top is stood up here by what the
+// eye needs (rail_tan of its distance), and the colour is the bend's ask against what the craft holds at the
+// speed she is doing: UV2.y the curvature, UV.y the bank into the bend.
+shader_type spatial;
+render_mode unshaded, blend_mix, depth_draw_never, depth_test_disabled, cull_disabled, shadows_disabled, fog_disabled;
+uniform mat4 to_seat = mat4(1.0);      // the world to the cockpit's own frame at the seated eye (-Z its nose)
+uniform vec2 pane = vec2(0.42, 0.52);   // radians off the nose, from the seated eye: all of it inside the first, none past the second
+
+float through_glass(vec3 world_place) {
+	vec3 d = (to_seat * vec4(world_place, 1.0)).xyz;
+	return d.z < -1.0 ? 1.0 - smoothstep(pane.x, pane.y, abs(atan(d.x, -d.z))) : 0.0;
+}
+uniform float pod_s = 0.0;
+uniform float reach = 12000.0;
+uniform vec2 fade_in = vec2(250.0, 900.0);
+uniform float speed2 = 0.0;
+uniform float grip = 135.0;
+uniform vec2 bank_law = vec2(1.0, 0.00039);
+uniform vec2 rail_rise = vec2(0.0052, 0.0524);
+uniform vec2 rail_h = vec2(0.6, 2600.0);
+uniform float rail_line = 4.0;
+uniform vec3 curtain = vec3(0.09, 0.15, 0.3);
+uniform vec4 at_load = vec4(0.62, 0.85, 1.0, 1.12);
+uniform vec3 calm : source_color = vec3(0.0, 0.8, 1.0);
+uniform vec3 warm : source_color = vec3(1.0, 0.7, 0.1);
+uniform vec3 hot : source_color = vec3(1.0, 0.16, 0.08);
+uniform float gain = 1.0;
+varying float ask;
+varying float fade;
+
+void vertex() {
+	float along = UV2.x - pod_s;
+	float dist = length((MODELVIEW_MATRIX * vec4(VERTEX, 1.0)).xyz);
+	float hold = grip + bank_law.x * (9.81 * tan(UV.y) + bank_law.y * speed2 * sin(UV.y));
+	ask = UV2.y * speed2 / max(hold, 0.1);
+	fade = gain * smoothstep(fade_in.x, fade_in.y, along) * (1.0 - smoothstep(reach * 0.85, reach, along)) * through_glass((MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz);
+	// as tall as the eye needs it: a far station stands higher in the view than a near one
+	float tall = clamp(dist * max(rail_rise.x, rail_rise.y * clamp(along / reach, 0.0, 1.0)), rail_h.x, rail_h.y);
+	VERTEX.y += UV.x * tall * step(0.002, fade);      // (nothing to fill where it is not shown)
+}
+
+void fragment() {
+	float amber = smoothstep(at_load.x, at_load.y, ask);
+	float red = smoothstep(at_load.z, at_load.w, ask);
+	vec3 colour = mix(mix(calm, warm, amber), hot, red);
+	float t = clamp(UV.x, 0.0, 1.0);
+	float edge = clamp(rail_line * fwidth(UV.x), 0.004, 0.6);      // the line along its top, a few pixels of it
+	float line = smoothstep(1.0 - edge, 1.0 - 0.5 * edge, t);
+	float under = mix(mix(curtain.x, curtain.y, amber), curtain.z, red) * (0.35 + 0.65 * t * t);
+	ALBEDO = colour;
+	ALPHA = clamp(fade * max(line, under), 0.0, 1.0);
+}
+"""
+
+const LINE_SHADER := """
+// The tactical display's lines on the vehicles (view/tactical_display.gd). An instance stands at a vehicle's
+// lamps; the quad has no shape of its own (UV is its corner, -1..1). It is stood straight up, turned to the
+// eye, line_tan of its distance tall and never thinner than a few pixels. COLOR: its colour and strength;
+// INSTANCE_CUSTOM.x: its height, of the full one.
+shader_type spatial;
+render_mode unshaded, blend_mix, depth_draw_never, depth_test_disabled, cull_disabled, shadows_disabled, fog_disabled;
+uniform mat4 to_seat = mat4(1.0);      // the world to the cockpit's own frame at the seated eye (-Z its nose)
+uniform vec2 pane = vec2(0.42, 0.52);   // radians off the nose, from the seated eye: all of it inside the first, none past the second
+
+float through_glass(vec3 world_place) {
+	vec3 d = (to_seat * vec4(world_place, 1.0)).xyz;
+	return d.z < -1.0 ? 1.0 - smoothstep(pane.x, pane.y, abs(atan(d.x, -d.z))) : 0.0;
+}
+uniform float line_tan = 0.0175;
+uniform vec2 line_h = vec2(5.0, 420.0);
+uniform vec2 line_w = vec2(2.0, 2.5);
+uniform vec2 fade_in = vec2(60.0, 220.0);
+uniform float gain = 1.0;
+varying vec3 tint;
+varying float lit;
+
+void vertex() {
+	vec3 c = (MODELVIEW_MATRIX * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+	vec3 up = normalize((VIEW_MATRIX * vec4(0.0, 1.0, 0.0, 0.0)).xyz);
+	float dist = max(length(c), 1.0);
+	vec3 side = cross(up, -c / dist);
+	side = length(side) > 1e-4 ? normalize(side) : vec3(1.0, 0.0, 0.0);
+	float pixel = max(-c.z, 0.5) * 2.0 / (abs(PROJECTION_MATRIX[1][1]) * VIEWPORT_SIZE.y);
+	float tall = clamp(dist * line_tan, line_h.x, line_h.y) * INSTANCE_CUSTOM.x;
+	float wide = max(line_w.x, line_w.y * pixel);
+	lit = COLOR.a * gain * smoothstep(fade_in.x, fade_in.y, dist) * through_glass(MODEL_MATRIX[3].xyz);
+	tint = pow(COLOR.rgb, vec3(2.2));      // authored sRGB
+	vec3 p = c;
+	if (lit > 0.004) {
+		p += up * ((UV.y * 0.5 + 0.5) * tall) + side * (UV.x * wide);
+	}
+	POSITION = PROJECTION_MATRIX * vec4(p, 1.0);
+}
+
+void fragment() {
+	float x = abs(UV.x);
+	float y = UV.y * 0.5 + 0.5;
+	float stem = (1.0 - smoothstep(0.22, 0.46, x)) * smoothstep(0.0, 0.04, y) * 0.8;
+	float head = 1.0 - smoothstep(0.75, 1.0, x + abs(y - 0.95) / 0.05);      // a small diamond at its top
+	ALBEDO = tint;
+	ALPHA = clamp(lit * max(stem, head), 0.0, 1.0);
+}
+"""
+
+const CHEVRON_SHADER := """
+// The tactical display's chevrons over an exit's lane (view/tactical_display.gd). An instance stands on the
+// lane, its x the way the lane leaves; the quad has no shape of its own (UV is its corner, -1..1). Upright,
+// chev_tan of its distance in half size. INSTANCE_CUSTOM: x the metres still to the mouth (less than none
+// past it), y the clock when it was laid, z how far off it is still drawn (far off a row is seen end on and its
+// chevrons lie one over another: only every fourth is drawn past thin.y metres, every second past thin.x).
+// A wave of light runs along the row toward the mouth and on.
+shader_type spatial;
+render_mode unshaded, blend_mix, depth_draw_never, depth_test_disabled, cull_disabled, shadows_disabled, fog_disabled;
+uniform mat4 to_seat = mat4(1.0);      // the world to the cockpit's own frame at the seated eye (-Z its nose)
+uniform vec2 pane = vec2(0.42, 0.52);   // radians off the nose, from the seated eye: all of it inside the first, none past the second
+
+float through_glass(vec3 world_place) {
+	vec3 d = (to_seat * vec4(world_place, 1.0)).xyz;
+	return d.z < -1.0 ? 1.0 - smoothstep(pane.x, pane.y, abs(atan(d.x, -d.z))) : 0.0;
+}
+uniform float chev_tan = 0.00785;
+uniform vec2 chev_size = vec2(2.5, 220.0);
+uniform float foot = 1.5;
+uniform vec2 fade_in = vec2(250.0, 900.0);
+uniform float clock = 0.0;
+uniform float rate = 1.1;
+uniform float wave = 1400.0;
+uniform vec2 thin = vec2(3000.0, 6000.0);
+uniform float gain = 1.0;
+varying vec3 tint;
+varying float lit;
+
+void vertex() {
+	vec3 c = (MODELVIEW_MATRIX * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+	vec3 out_way = normalize((MODELVIEW_MATRIX * vec4(1.0, 0.0, 0.0, 0.0)).xyz);
+	vec3 up = normalize((VIEW_MATRIX * vec4(0.0, 1.0, 0.0, 0.0)).xyz);
+	float dist = length(c);
+	float size = clamp(dist * chev_tan, chev_size.x, chev_size.y);
+	float crest = 0.5 + 0.5 * sin(6.2831853 * (clock * rate + INSTANCE_CUSTOM.x / wave));
+	float far_off = INSTANCE_CUSTOM.z < 0.5 ? 1.0 : 1.0 - smoothstep(0.8, 1.0, dist / (INSTANCE_CUSTOM.z < 1.5 ? thin.y : thin.x));
+	lit = COLOR.a * gain * far_off * smoothstep(fade_in.x, fade_in.y, dist) * smoothstep(0.0, 0.5, clock - INSTANCE_CUSTOM.y) * mix(0.45, 1.0, crest) * through_glass(MODEL_MATRIX[3].xyz);
+	tint = pow(COLOR.rgb, vec3(2.2));      // authored sRGB
+	vec3 p = c;
+	if (lit > 0.004) {
+		p += out_way * (UV.x * size) + up * (foot + size + UV.y * size);
+	}
+	POSITION = PROJECTION_MATRIX * vec4(p, 1.0);
+}
+
+void fragment() {
+	float c = UV.x + 0.7 * abs(UV.y);
+	float soft = max(0.02, fwidth(c));
+	float arms = max(1.0 - smoothstep(0.13 - soft, 0.13 + soft, abs(c - 0.55)), 1.0 - smoothstep(0.13 - soft, 0.13 + soft, abs(c + 0.05)));
+	ALBEDO = tint;
+	ALPHA = clamp(lit * arms * (1.0 - smoothstep(0.9, 1.0, abs(UV.y))), 0.0, 1.0);
+}
+"""
+
+
+# ---------------------------------------------------------------- what the craft can hold
+
+## What the craft holds across her path with no brake on, m/s^2: the sim's own grip caps, her engines' and
+## her pod's, by their masses (CraftSim.step: each body's sideways force is capped at its mass times its cap).
+static func grip(s) -> float:
+	var P: Dictionary = s.P
+	var engines: float = s.eL.m + s.eR.m
+	var pod: float = s.pod.m
+	return G * (engines * float(P.gripCapG) + pod * float(P.podCapG)) / (engines + pod)
+
+
+## ... and with the road banked `bank_in` radians into the bend, at `speed` m/s: the bank's own push toward
+## the bend's middle added, as the sims add it (CraftSim.step: gravity's g tan(bank), the downforce's
+## bankDown v^2 sin(bank)).
+static func hold(s, speed: float, bank_in := 0.0) -> float:
+	var P: Dictionary = s.P
+	return grip(s) + float(P.bank) * (G * tan(bank_in) + float(P.bankDown) * speed * speed * sin(bank_in))
+
+
+## A bend's ask at `speed` m/s, of what the craft holds there: under 1 she makes it, over 1 she does not.
+static func load_of(s, curvature: float, speed: float, bank_in := 0.0) -> float:
+	return absf(curvature) * speed * speed / maxf(hold(s, speed, bank_in), 0.1)
+
+
+## The colour that goes with it (the rails' shader's own, and the number's).
+static func tint(ask: float) -> Color:
+	return CALM.lerp(WARM, smoothstep(CALM_AT, WARM_AT, ask)).lerp(HOT, smoothstep(HOT_AT, HOT_FULL, ask))
+
+
+## A vehicle's line: by the seconds till she reaches it.
+static func soon_tint(seconds: float) -> Color:
+	return HOT.lerp(WARM, smoothstep(SOON.z, SOON.y, seconds)).lerp(CALM, smoothstep(SOON.y, SOON.x, seconds))
+
+
+## How far ahead the rails run at `speed` m/s.
+static func reach_at(speed: float) -> float:
+	return clampf(speed * LOOK_S, REACH.x, REACH.y)
+
+
+## Where the rails begin ahead of her at `speed` m/s: nothing before x, all of it from y (m).
+static func near_at(speed: float) -> Vector2:
+	return Vector2(maxf(speed * NEAR_S.x, NEAR_MIN.x), maxf(speed * NEAR_S.y, NEAR_MIN.y))
+
+
+## How far before an exit's mouth its chevrons begin at `speed` m/s.
+static func exit_lead(speed: float) -> float:
+	return clampf(speed * EXIT_LEAD_S, EXIT_LEAD.x, EXIT_LEAD.y)
+
+
+static func _wrap(a: float) -> float:
+	return atan2(sin(a), cos(a))
+
+
+# ---------------------------------------------------------------- the cockpit's one call
+
+## A frame, from the cockpit: built when it is first wanted, freed when it is not. `node` is what the last
+## call gave back (null at first); `flow` the craft's own way in the view's space (its origin the seated eye,
+## its -Z the way she is going, level: the speed rush's frame); `in_seat`: the pilot is looking out of the
+## cockpit and the craft is his to fly (not an outside camera, not a start-up). -> the display, or null while
+## it is off.
+static func frame(v, node, delta: float, flow: Transform3D, in_seat := true):
+	if not wanted:
+		if node != null and is_instance_valid(node):
+			node.queue_free()
+		return null
+	if node == null or not is_instance_valid(node):
+		node = new()
+		v.add_child(node)
+		node.build(v)
+	var began := Time.get_ticks_usec()
+	node.sync(delta, flow, in_seat)
+	probe_usec += Time.get_ticks_usec() - began
+	return node
+
+
+func build(v) -> void:
+	view = v
+	sim = v.sim
+	name = "TacticalDisplay"
+	_net = String(sim.kind) == "network"
+	_step = STEP_NET if _net else STEP_COURSE
+	var bounds := AABB(Vector3(-400000.0, -3000.0, -400000.0), Vector3(800000.0, 40000.0, 800000.0))
+	# the rails
+	var rail_shader := Shader.new()
+	rail_shader.code = RAIL_SHADER
+	rail_mat = ShaderMaterial.new()
+	rail_mat.shader = rail_shader
+	rail_mat.set_shader_parameter("rail_rise", Vector2(tan(deg_to_rad(RAIL_RISE.x)), tan(deg_to_rad(RAIL_RISE.y))))
+	rail_mat.set_shader_parameter("rail_h", RAIL_H)
+	rail_mat.set_shader_parameter("rail_line", RAIL_LINE)
+	rail_mat.set_shader_parameter("curtain", RAIL_CURTAIN)
+	rail_mat.set_shader_parameter("at_load", Vector4(CALM_AT, WARM_AT, HOT_AT, HOT_FULL))
+	rail_mat.set_shader_parameter("calm", CALM)
+	rail_mat.set_shader_parameter("warm", WARM)
+	rail_mat.set_shader_parameter("hot", HOT)
+	rail_mesh = ArrayMesh.new()
+	rails = MeshInstance3D.new()
+	rails.name = "tactical_rails"
+	rails.mesh = rail_mesh
+	rails.material_override = rail_mat
+	_dress(rails, bounds)
+	for material: ShaderMaterial in [rail_mat]:
+		material.set_shader_parameter("pane", Vector2(deg_to_rad(PANE.x), deg_to_rad(PANE.y)))
+	_index.resize((MAX_STATIONS - 1) * 12)
+	for k in MAX_STATIONS - 1:      # the two rails between station k and the next: the same for any number of stations
+		var a := 4 * k
+		var b := a + 4
+		var o := 12 * k
+		for n in 2:
+			_index[o + 6 * n] = a + 2 * n
+			_index[o + 6 * n + 1] = a + 2 * n + 1
+			_index[o + 6 * n + 2] = b + 2 * n
+			_index[o + 6 * n + 3] = a + 2 * n + 1
+			_index[o + 6 * n + 4] = b + 2 * n + 1
+			_index[o + 6 * n + 5] = b + 2 * n
+	# the vehicles' lines
+	var line_shader := Shader.new()
+	line_shader.code = LINE_SHADER
+	line_mat = ShaderMaterial.new()
+	line_mat.shader = line_shader
+	line_mat.set_shader_parameter("line_tan", tan(deg_to_rad(LINE_ANGLE)))
+	line_mat.set_shader_parameter("line_h", LINE_H)
+	line_mat.set_shader_parameter("line_w", LINE_W)
+	line_mat.set_shader_parameter("fade_in", CAR_NEAR)
+	line_mat.set_shader_parameter("pane", Vector2(deg_to_rad(PANE.x), deg_to_rad(PANE.y)))
+	lines = _batch("tactical_lines", MAX_LINES, line_mat, bounds)
+	line_tints.resize(MAX_LINES)
+	_line_way.resize(MAX_LINES)
+	_line_way.fill(255)
+	# the exits' chevrons
+	var chev_shader := Shader.new()
+	chev_shader.code = CHEVRON_SHADER
+	chev_mat = ShaderMaterial.new()
+	chev_mat.shader = chev_shader
+	chev_mat.set_shader_parameter("chev_tan", tan(deg_to_rad(CHEV_ANGLE)))
+	chev_mat.set_shader_parameter("chev_size", CHEV_SIZE)
+	chev_mat.set_shader_parameter("foot", CHEV_FOOT)
+	chev_mat.set_shader_parameter("rate", CHEV_RATE)
+	chev_mat.set_shader_parameter("wave", CHEV_WAVE)
+	chev_mat.set_shader_parameter("thin", CHEV_THIN)
+	chev_mat.set_shader_parameter("pane", Vector2(deg_to_rad(PANE.x), deg_to_rad(PANE.y)))
+	chevrons = _batch("tactical_chevrons", MAX_CHEVRONS, chev_mat, bounds)
+	# the speed
+	number = Label3D.new()
+	number.name = "tactical_speed"
+	number.font_size = 160
+	number.pixel_size = NUMBER_AHEAD * tan(deg_to_rad(NUMBER_HEIGHT)) / 112.0      # (a figure is about 0.7 of the font's size)
+	number.outline_size = 28
+	number.outline_modulate = Color(0.0, 0.03, 0.05, 0.8)
+	number.shaded = false
+	number.double_sided = false
+	number.fixed_size = false
+	number.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	number.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	number.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	number.no_depth_test = true      # (nothing of the cockpit is where it stands; a bridge going by overhead must not blink it)
+	number.render_priority = PRIORITY + 1
+	number.outline_render_priority = PRIORITY
+	number.visible = false
+	add_child(number)
+
+
+func _dress(node: GeometryInstance3D, bounds: AABB) -> void:
+	node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	node.custom_aabb = bounds
+	(node.material_override as ShaderMaterial).render_priority = PRIORITY
+	node.visible = false
+	add_child(node)
+
+
+func _batch(named: String, count: int, material: ShaderMaterial, bounds: AABB) -> MultiMeshInstance3D:
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.use_colors = true
+	mm.use_custom_data = true
+	mm.mesh = corner_mesh()
+	mm.instance_count = count
+	mm.visible_instance_count = 0
+	var node := MultiMeshInstance3D.new()
+	node.name = named
+	node.multimesh = mm
+	node.material_override = material
+	_dress(node, bounds)
+	return node
+
+
+## A quad with all four corners at one point, its corner in UV (-1..1): the shaders spread it.
+static func corner_mesh() -> ArrayMesh:
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = PackedVector3Array([Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO])
+	arrays[Mesh.ARRAY_TEX_UV] = PackedVector2Array([Vector2(-1, -1), Vector2(1, -1), Vector2(1, 1), Vector2(-1, 1)])
+	arrays[Mesh.ARRAY_INDEX] = PackedInt32Array([0, 1, 2, 0, 2, 3])
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	return mesh
+
+
+# ---------------------------------------------------------------- a frame
+
+## What of it applies where the craft is: {all, road, number}. `all` 0 leaves nothing; `road` is the rails, the
+## vehicles' lines and the chevrons.
+func applies(in_seat := true) -> Dictionary:
+	var out := {"all": 0.0, "road": false, "number": true}
+	var P = sim.pod
+	if sim.crash_t > 0.0 or not in_seat:      # (an outside camera has its own readout; on the pad she is still being started)
+		return out
+	var mph: float = sqrt(P.vx * P.vx + P.vy * P.vy) * MPH
+	out.all = smoothstep(SPEED_MPH.x, SPEED_MPH.y, mph)
+	if _net:
+		if P.off_road or P.path < 0 or P.path >= sim.roads.size():
+			return out      # (in the air off a lip, on the open ground: her speed alone)
+		if sim.in_pressure(P.path, P.hint):
+			out.all = 0.0      # the Aurora tube: nothing
+			return out
+		var R = sim.roads[P.path]
+		out.road = not (R.shaft or R.deck)
+	else:
+		out.road = sim.N > 8 and int(P.path) == 0      # a circuit's own road: not the range, not the shade line's twist
+	return out
+
+
+func sync(delta: float, flow: Transform3D, in_seat := true) -> void:
+	var dt := clampf(delta, 0.0, 0.05)
+	_clock += dt
+	_tick += 1
+	var what := applies(in_seat)
+	amount = move_toward(amount, float(what.all), dt / FADE_T)
+	var shown: bool = amount > 0.002
+	if not shown and float(what.all) <= 0.0:
+		rails.visible = false
+		lines.visible = false
+		chevrons.visible = false
+		number.visible = false
+		return
+	var P = sim.pod
+	var speed: float = sqrt(P.vx * P.vx + P.vy * P.vy)
+	var strength := amount * lerpf(1.0, NIGHT, Hour.darkness())
+	if "terminal_lighting" in view and view.terminal_lighting != null:
+		strength *= lerpf(1.0, HALL, clampf(float(view.terminal_lighting.enclosure), 0.0, 1.0))
+	# the cockpit's own frame at the seated eye: what is drawn is kept inside the windscreen by it
+	# (in the world's own space, as the shaders have their places: the view itself is lowered when she is far aloft)
+	var seat: Transform3D = (view as Node3D).global_transform * flow
+	if "rig" in view and view.rig != null:
+		seat = Transform3D((view.rig as Node3D).global_transform.basis.orthonormalized(), seat.origin)
+	var to_seat := seat.affine_inverse()
+	rail_mat.set_shader_parameter("to_seat", to_seat)
+	line_mat.set_shader_parameter("to_seat", to_seat)
+	chev_mat.set_shader_parameter("to_seat", to_seat)
+	var on_road: bool = what.road
+	if on_road:
+		_follow(speed)
+	else:
+		route_road = -1
+	rails.visible = shown and on_road and st_s.size() >= 2
+	if rails.visible:
+		_route_age = minf(_route_age + dt / 0.25, 1.0)
+		rails.position = Vector3(_ax - float(view.org_x), 0.0, -(_ay - float(view.org_y)))
+		rail_mat.set_shader_parameter("pod_s", pod_s)
+		rail_mat.set_shader_parameter("reach", reach_at(speed))
+		rail_mat.set_shader_parameter("fade_in", near_at(speed))
+		rail_mat.set_shader_parameter("speed2", speed * speed)
+		rail_mat.set_shader_parameter("grip", grip(sim))
+		rail_mat.set_shader_parameter("bank_law", Vector2(float(sim.P.bank), float(sim.P.bankDown)))
+		rail_mat.set_shader_parameter("gain", strength * _route_age)
+	_lines_frame(dt, speed, shown and on_road, strength)
+	_chevrons_frame(speed, shown and on_road, strength)
+	_number_frame(dt, speed, shown and bool(what.number), strength, flow)
+	if not drawn:      # (timings: all of its work, none of its drawing)
+		rails.visible = false
+		lines.visible = false
+		chevrons.visible = false
+		number.visible = false
+
+
+# ---------------------------------------------------------------- the road ahead
+
+## A sample of road r, read into _px.. (the Network's roads, or a circuit's own).
+func _sample(r: int, i: int) -> void:
+	if _net:
+		var R = sim.roads[r]
+		_px = R.px[i]; _py = R.py[i]; _tx = R.tx[i]; _ty = R.ty[i]; _nx = R.nx[i]; _ny = R.ny[i]; _w = R.w[i]
+	else:
+		_px = sim.tpx[i]; _py = sim.tpy[i]; _tx = sim.ttx[i]; _ty = sim.tty[i]; _nx = sim.tnx[i]; _ny = sim.tny[i]; _w = sim.tw[i]
+
+
+func _count(r: int) -> int:
+	return int(sim.roads[r].N) if _net else int(sim.N)
+
+
+## Which way along her road she is going: her travel, or standing her facing.
+func way() -> int:
+	if _net:
+		return Pilot.way(sim)
+	var i := posmod(int(sim.pod.hint), int(sim.N))
+	var along: float = sim.pod.vx * sim.ttx[i] + sim.pod.vy * sim.tty[i]
+	if absf(along) < 1.0:
+		along = cos(sim.pod.th) * sim.ttx[i] + sin(sim.pod.th) * sim.tty[i]
+	return 1 if along >= 0.0 else -1
+
+
+## The route kept up with her: laid again when she is on another road or going the other way, grown at its
+## far end as road comes into reach, and where she is along it found.
+func _follow(speed: float) -> void:
+	var P = sim.pod
+	var road := int(P.path) if _net else 0
+	var dir := way()
+	var n := _count(road)
+	var here := clampi(int(P.hint), 0, n - 1) if _net else posmod(int(P.hint), n)
+	var off: float = absf(float(view.org_x) - _ax) + absf(float(view.org_y) - _ay)
+	if road != route_road or dir != route_dir or off > REANCHOR or st_s.is_empty():
+		_lay(road, here, dir)
+	# where she is along it
+	var m := st_s.size()
+	var j := clampi(at, 0, m - 1)
+	var along: float = (P.x - st_x[j]) * st_tx[j] + (P.y - st_y[j]) * st_ty[j]
+	while j + 1 < m:
+		var next: float = (P.x - st_x[j + 1]) * st_tx[j + 1] + (P.y - st_y[j + 1]) * st_ty[j + 1]
+		if next < 0.0:
+			break
+		j += 1
+		along = next
+	if along < -400.0 or (j == m - 1 and along > 400.0 and not route_done):      # knocked back down it, or off its end: again
+		_lay(road, here, dir)
+		j = 0
+		along = (P.x - st_x[0]) * st_tx[0] + (P.y - st_y[0]) * st_ty[0]
+	at = j
+	pod_s = st_s[j] + along
+	pod_left = -(P.x - st_x[j]) * st_ty[j] + (P.y - st_y[j]) * st_tx[j]
+	# the road that has come into reach, a station at a time, inside the frame's allowance
+	var want: float = pod_s + reach_at(speed) + float(_step * AHEAD_SPARE) * (float(sim.NET_STEP) if _net else 12.0)
+	var t0 := Time.get_ticks_usec()
+	var added := 0
+	while not route_done and st_s[st_s.size() - 1] < want and st_s.size() < MAX_STATIONS and (added < 2 or Time.get_ticks_usec() - t0 < GROW_USEC):
+		_grow()
+		added += 1
+	if at > TRIM_AT:
+		_trim(at - 2)
+		_unsent = SEND_EVERY
+	# (what has been added is past where the rails fade out: it can wait; a route still being laid cannot)
+	if _dirty and (_unsent >= SEND_EVERY or route_done or st_s[st_s.size() - 1] < want or _route_age < 1.0):
+		_upload()
+
+
+## The route laid again from sample `here` of `road`, going `dir`.
+func _lay(road: int, here: int, dir: int) -> void:
+	route_road = road
+	route_dir = dir
+	route_done = false
+	_route_age = 0.0
+	at = 0
+	spans.clear()
+	st_x.clear(); st_y.clear(); st_tx.clear(); st_ty.clear(); st_half.clear(); st_h.clear(); st_s.clear(); st_k.clear(); st_bank.clear()
+	st_road.clear()
+	st_i.clear()
+	_verts.clear()
+	_uv.clear()
+	_uv2.clear()
+	_ax = float(view.org_x)
+	_ay = float(view.org_y)
+	var first := here - posmod(here, _step)      # (on the road's own grid: the same stations whoever lays it)
+	if dir > 0 and not _net:
+		first = posmod(first, _count(road))
+	_station(road, clampi(first, 0, _count(road) - 1), dir)
+	_dirty = true
+
+
+## One more station at the route's far end: the next on its road, or where that road runs out the road it
+## runs into. Sets route_done where there is no more.
+func _grow() -> void:
+	var m := st_s.size()
+	var r := st_road[m - 1]
+	var d: int = spans[r][2]
+	var i := st_i[m - 1] + d * _step
+	var n := _count(r)
+	if not _net:
+		_station(r, posmod(i, n), d)
+		return
+	if i >= 0 and i <= n - 1:
+		_station(r, i, d)
+		return
+	# off the road's end: the road it is one with there (a junction's samples), the way that road is entered
+	var end := n - 1 if d > 0 else 0
+	for k in sim.roads[r].jx:
+		var J: Array = sim.junctions[k]
+		var on_a := int(J[0]) == r
+		var lo := int(J[1]) if on_a else int(J[4])
+		var hi := int(J[2]) if on_a else int(J[5])
+		if end < lo or end > hi:
+			continue
+		var q := int(J[3]) if on_a else int(J[0])
+		var dq := d * int(J[6])
+		var iq: int = Pilot.across(J, on_a, end) + dq * _step
+		if spans.has(q) or iq < 0 or iq > int(sim.roads[q].N) - 1:
+			continue
+		_station(q, iq, dq)
+		return
+	route_done = true
+
+
+## A station at sample i of road r, flown the way d: its place, its surface (the views' own accessor), the
+## bend into it, and its four vertices.
+func _station(r: int, i: int, d: int) -> void:
+	_sample(r, i)
+	var m := st_s.size()
+	var tx := _tx * d
+	var ty := _ty * d
+	var s := 0.0
+	var bend := 0.0
+	if m > 0:
+		var gap := Vector2(_px - st_x[m - 1], _py - st_y[m - 1]).length()
+		s = st_s[m - 1] + gap
+		bend = _wrap(atan2(ty, tx) - atan2(st_ty[m - 1], st_tx[m - 1])) / maxf(gap, 1.0)
+	var path := r if _net else 0
+	var middle: Vector2 = sim.surface_at(_px, _py, i, path)
+	var half := _w / 2.0
+	var lat := maxf(half - RAIL_INSET, 1.0)
+	st_road.append(r)
+	st_i.append(i)
+	st_x.append(_px)
+	st_y.append(_py)
+	st_tx.append(tx)
+	st_ty.append(ty)
+	st_half.append(half)
+	st_h.append(middle.x)
+	st_s.append(s)
+	st_k.append(bend)
+	# the bank, + down to the left the way the samples run: into the bend when it leans the way she turns
+	st_bank.append(middle.y * d)
+	if not spans.has(r):
+		spans[r] = [i, s, d, i]
+	else:
+		spans[r][3] = i
+	for side in [1.0, -1.0]:      # the road's left edge, then its right, the way its samples run
+		var ex: float = _px + _nx * lat * side
+		var ey: float = _py + _ny * lat * side
+		var foot := Vector3(ex - _ax, float(sim.surface_at(ex, ey, i, path).x) + 0.3, -(ey - _ay))
+		for top in 2:
+			_verts.append(foot)
+			_uv.append(Vector2(float(top), 0.0))
+			_uv2.append(Vector2(s, 0.0))
+	_unsent += 1
+	_shade(m)
+	if m > 0:
+		if absf(bend) > absf(st_k[m - 1]):      # the station before takes the harder of the bends either side of it
+			st_k[m - 1] = bend
+		_shade(m - 1)
+	_dirty = true
+
+
+## A station's vertices given its bend and its bank into it.
+func _shade(k: int) -> void:
+	var bend := st_k[k]
+	var leans := st_bank[k] * (1.0 if bend >= 0.0 else -1.0)
+	for v in 4:
+		_uv[4 * k + v] = Vector2(_uv[4 * k + v].x, leans)
+		_uv2[4 * k + v] = Vector2(_uv2[4 * k + v].x, absf(bend))
+
+
+## The bank into station k's own bend, radians.
+func lean_at(k: int) -> float:
+	return st_bank[k] * (1.0 if st_k[k] >= 0.0 else -1.0)
+
+
+## The first `count` stations dropped (she is past them).
+func _trim(count: int) -> void:
+	if count <= 0:
+		return
+	st_x = st_x.slice(count); st_y = st_y.slice(count); st_tx = st_tx.slice(count); st_ty = st_ty.slice(count); st_half = st_half.slice(count)
+	st_h = st_h.slice(count); st_s = st_s.slice(count); st_k = st_k.slice(count); st_bank = st_bank.slice(count)
+	st_road = st_road.slice(count)
+	st_i = st_i.slice(count)
+	_verts = _verts.slice(4 * count)
+	_uv = _uv.slice(4 * count)
+	_uv2 = _uv2.slice(4 * count)
+	at -= count
+	_dirty = true
+
+
+func _upload() -> void:
+	_dirty = false
+	_unsent = 0
+	rail_mesh.clear_surfaces()
+	var m := st_s.size()
+	if m < 2:
+		return
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = _verts
+	arrays[Mesh.ARRAY_TEX_UV] = _uv
+	arrays[Mesh.ARRAY_TEX_UV2] = _uv2
+	arrays[Mesh.ARRAY_INDEX] = _index.slice(0, (m - 1) * 12)
+	rail_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+
+
+## The hardest bend's ask within `seconds` of flying at `speed` m/s, of what she holds.
+func worst_load(speed: float, seconds: float) -> float:
+	var worst := 0.0
+	var far := pod_s + speed * seconds
+	for k in range(maxi(at, 0), st_s.size()):
+		if st_s[k] > far:
+			break
+		worst = maxf(worst, load_of(sim, st_k[k], speed, lean_at(k)))
+	return worst
+
+
+# ---------------------------------------------------------------- the vehicles
+
+## The vehicles that could matter, of `cars` (NetworkTraffic.cars): on the road ahead of her (or on a road
+## running along it at its own level, close by), closing, and reached within LOOK_T at the speed she is
+## closing now. [{car, along (m ahead by the road), left (m left of her), seconds, way (in her way)}].
+## Not a vehicle she is not gaining on, one going across her road, or one on a road over or under it.
+func pick(cars: Array, speed: float) -> Array:
+	var out: Array = []
+	_pick_into(out, cars, 0, cars.size(), speed)
+	return out
+
+
+## ... of cars[first] to cars[last - 1], added to `out`.
+func _pick_into(out: Array, cars: Array, first: int, last: int, speed: float) -> void:
+	var m := st_s.size()
+	if m < 2 or speed < 1.0:
+		return
+	var reach := reach_at(speed)
+	var step_m: float = sim.NET_STEP if _net else 12.0
+	var px: float = sim.pod.x
+	var py: float = sim.pod.y
+	for k in range(first, last):
+		var c: Traffic.Car = cars[k]
+		var along := 0.0
+		var left := 0.0
+		var its := 0.0
+		if spans.has(c.road):
+			var sp: Array = spans[c.road]
+			var d := int(sp[2])
+			if (c.f - float(sp[0])) * d < -2.0 or (c.f - float(sp[3])) * d > float(_step):
+				continue
+			along = float(sp[1]) + (c.f - float(sp[0])) * d * step_m - pod_s
+			left = c.lat * d
+			its = c.v * (1.0 if c.dir == d else -1.0)
+		else:
+			var dx: float = c.x - px
+			var dy: float = c.y - py
+			if absf(dx) > NEAR_REACH or absf(dy) > NEAR_REACH:
+				continue
+			var j := clampi(at, 0, m - 1)
+			var ahead: float = dx * st_tx[j] + dy * st_ty[j]
+			if ahead <= 0.0 or ahead > NEAR_REACH:
+				continue
+			# by the route's own line where the vehicle is
+			j = clampi(j + roundi(ahead / maxf(1.0, st_s[mini(j + 1, m - 1)] - st_s[j])), 0, m - 1)
+			var ex: float = c.x - st_x[j]
+			var ey: float = c.y - st_y[j]
+			its = c.hx * st_tx[j] + c.hy * st_ty[j]
+			if absf(its) < ALONG:
+				continue      # going across her road: over it or under it
+			left = -ex * st_ty[j] + ey * st_tx[j]
+			if absf(left) > st_half[j] + 10.0:
+				continue      # beside her road, not on it
+			if absf(float(sim.net_height(c.road, c.f)) - st_h[j]) > SAME_DECK:
+				continue      # on another level
+			along = st_s[j] - pod_s + ex * st_tx[j] + ey * st_ty[j]
+			its *= c.v
+		var closing := speed - its
+		if along <= CAR_NEAR.x or along > reach or closing <= 1.0:
+			continue
+		var seconds := along / closing
+		if seconds > LOOK_T:
+			continue
+		out.append({"car": c, "along": along, "left": left - pod_left, "seconds": seconds, "way": absf(left - pod_left) <= CORRIDOR})
+
+
+func _lines_frame(dt: float, speed: float, shown: bool, strength: float) -> void:
+	var traffic = view.traffic_net if "traffic_net" in view else null
+	if not shown or traffic == null:
+		lines.visible = false
+		line_count = 0
+		marks.clear()
+		_found.clear()
+		_scan_at = 0
+		return
+	# which vehicles: the traffic looked through a share a frame (their lines' places are every frame's)
+	var cars: Array = traffic.cars
+	var total := cars.size()
+	var pass_done := _scan_at >= total
+	var found := _found
+	if pass_done:
+		_found = []
+		_scan_at = 0
+	var upto := mini(total, _scan_at + maxi(8, (total + SCAN_FRAMES - 1) / SCAN_FRAMES))
+	_pick_into(_found, cars, _scan_at, upto, speed)
+	_scan_at = upto
+	if pass_done:      # a pass is done: what it found is what there is
+		if found.size() > THIN.y:
+			thinned = true
+		elif found.size() <= THIN.x:
+			thinned = false
+		for old: Mark in marks.values():
+			old.to = 0.0
+		for pass_way in [true, false]:      # those in her way first: they are never the ones left out
+			for f in found:
+				if bool(f.way) != pass_way:
+					continue
+				var id: int = f.car.id
+				var mark: Mark = marks.get(id)
+				if mark != null:
+					mark.to = 0.0 if (thinned and not pass_way) else 1.0
+				elif marks.size() < MAX_LINES and (pass_way or (not thinned and float(f.seconds) >= BEGIN_T)):
+					mark = Mark.new()
+					mark.id = id
+					mark.car = f.car
+					marks[id] = mark
+				if mark != null:
+					mark.seconds = f.seconds
+					mark.way = pass_way
+					mark.tint = soon_tint(mark.seconds) if pass_way else CALM
+	var mm := lines.multimesh
+	var k := 0
+	var ease := dt / LINE_FADE
+	for mark: Mark in marks.values():
+		mark.a = move_toward(mark.a, mark.to, ease)
+		if mark.a <= 0.0 and mark.to <= 0.0:
+			marks.erase(mark.id)
+			continue
+		var in_way := mark.way
+		var colour := mark.tint
+		colour.a = mark.a * (1.0 if in_way else SIDE_LINE.y)
+		mm.set_instance_transform(k, Transform3D(Basis.IDENTITY, mark.car.lamp_position))
+		if line_tints[k] != colour or _line_way[k] != int(in_way):
+			mm.set_instance_color(k, colour)
+			mm.set_instance_custom_data(k, Color(1.0 if in_way else SIDE_LINE.x, 0.0, 0.0, 0.0))
+			line_tints[k] = colour
+			_line_way[k] = int(in_way)
+		k += 1
+	mm.visible_instance_count = k
+	line_count = k
+	lines.visible = k > 0
+	line_mat.set_shader_parameter("gain", strength)
+
+
+# ---------------------------------------------------------------- the exits
+
+## The exits and joins ahead on her road, from the world's own lanes (NetworkWorld.exit_lanes): an exit whose
+## mouth is within its lead and still EXIT_CLEAR_S off, a join within JOIN_LOOK.
+## [{key, join, road, mouth (sample), ahead (m), side (+1 leaves to the left the way she flies), mid, to}]
+func exits_ahead(speed: float) -> Array:
+	var out: Array = []
+	if not _net or not "network_world" in view or view.network_world == null or route_road < 0:
+		return out
+	var lanes: Array = view.network_world.exit_lanes.get(route_road, [])
+	if lanes.is_empty():
+		return out
+	var step_m: float = sim.NET_STEP
+	var here: float = sim._road_f(sim.pod)
+	var lead := exit_lead(speed)
+	for lane in lanes:
+		if int(lane[5]) < 0:
+			continue      # (the lane's run on along the exit itself)
+		var mouth := int(lane[4])
+		var ahead := (float(mouth) - here) * route_dir * step_m
+		var join := int(lane[2]) != route_dir
+		if ahead <= 0.0 or ahead > (JOIN_LOOK if join else lead):
+			continue
+		var mid := float(lane[3])
+		out.append({"key": "%d:%d:%d" % [route_road, mouth, int(lane[5])], "join": join, "road": route_road, "mouth": mouth, "ahead": ahead,
+			"side": (1.0 if mid >= 0.0 else -1.0) * route_dir, "mid": mid, "to": int(lane[5])})
+	out.sort_custom(func(a, b): return float(a.ahead) < float(b.ahead))
+	return out
+
+
+func _chevrons_frame(speed: float, shown: bool, strength: float) -> void:
+	if not shown or not _net:
+		chevrons.visible = false
+		if not exits.is_empty():
+			exits.clear()
+			chev_laid.clear()
+			chevron_count = 0
+		return
+	if _tick % 12 == 0:
+		var ahead := exits_ahead(speed)
+		# the two nearest exits (an interchange's pair) and, while the road is not busy, the nearest join
+		var want: Array = []
+		var taken := 0
+		var joined := false
+		for e in ahead:
+			if bool(e.join):
+				if not joined and not thinned:
+					joined = true
+					want.append(e)
+			elif taken < 2:
+				taken += 1
+				want.append(e)
+		var same := want.size() == exits.size()
+		for k in want.size():
+			same = same and k < exits.size() and String(want[k].key) == String(exits[k].key)
+		if not same:
+			_lay_chevrons(want, speed)
+	chevrons.position = Vector3(_chev_ax - float(view.org_x), 0.0, -(_chev_ay - float(view.org_y)))
+	chevrons.visible = chevron_count > 0
+	chev_mat.set_shader_parameter("clock", _clock)
+	chev_mat.set_shader_parameter("fade_in", near_at(speed))
+	chev_mat.set_shader_parameter("gain", strength)
+
+
+## The chevrons laid for these exits and joins: those already laid keep theirs (and when they were laid).
+func _lay_chevrons(want: Array, speed: float) -> void:
+	var born := {}
+	for e in exits:
+		born[String(e.key)] = e
+	var mm := chevrons.multimesh
+	_chev_ax = float(view.org_x)
+	_chev_ay = float(view.org_y)
+	var step_m: float = sim.NET_STEP
+	chev_laid.clear()
+	var k := 0
+	for e in want:
+		var was = born.get(String(e.key))
+		e["born"] = float(was.born) if was != null else _clock
+		# the nearest it began to her, in samples from the mouth: kept as it was, so a chevron once laid stays laid
+		e["from"] = int(was.from) if was != null else maxi(0, int((float(e.ahead) - speed * EXIT_CLEAR_S) / step_m))
+		if (int(e.from) < CHEV_NEAR and not bool(e.join)) or (was == null and float(e.ahead) < speed * BEGIN_T):
+			continue      # too near to be seen for long enough: not begun
+		var R = sim.roads[int(e.road)]
+		var mouth := int(e.mouth)
+		var join: bool = e.join
+		var colour := CALM if join else EXIT_GREEN
+		colour.a = 0.5 if join else 0.8
+		var rows: Array = []      # [road, sample, m left of its middle, m still to the mouth]
+		if join:
+			for n in range(1, JOIN_COUNT + 1):
+				rows.append([int(e.road), mouth + route_dir * n * CHEV_NEAR, float(e.mid), -float(n * CHEV_NEAR) * step_m])
+		else:
+			var back := 0
+			while back < int(e.from):
+				back += CHEV_NEAR if back < 125 else CHEV_FAR
+				if back <= int(e.from):
+					rows.append([int(e.road), mouth - route_dir * back, float(e.mid), float(back) * step_m])
+			# ... and on along the exit itself, from whichever of its ends is at the mouth
+			var C = sim.roads[int(e.to)]
+			var last := int(C.N) - 1
+			var at_start: bool = Vector2(C.px[0] - R.px[mouth], C.py[0] - R.py[mouth]).length_squared() <= Vector2(C.px[last] - R.px[mouth], C.py[last] - R.py[mouth]).length_squared()
+			for n in range(1, CHEV_ON + 1):
+				var ci := n * 10 if at_start else last - n * 10
+				if ci > 0 and ci < last:
+					rows.append([int(e.to), ci, 0.0, -float(n * 10) * step_m])
+		# the way the lane leaves, across the parent road at the mouth: every chevron of the row points it
+		var out_way := Vector3(R.nx[mouth], 0.0, -R.ny[mouth]) * (1.0 if float(e.mid) >= 0.0 else -1.0) * (-1.0 if join else 1.0)
+		var basis := Basis(out_way, Vector3.UP, out_way.cross(Vector3.UP))
+		var nth := 0
+		for row in rows:
+			var road: int = row[0]
+			var i: int = row[1]
+			if k >= MAX_CHEVRONS or i < 0 or i > int(sim.roads[road].N) - 1:
+				continue
+			var level := 0.0 if nth % 4 == 0 else (1.0 if nth % 2 == 0 else 2.0)
+			nth += 1
+			var Q = sim.roads[road]
+			var x: float = Q.px[i] + Q.nx[i] * float(row[2])
+			var y: float = Q.py[i] + Q.ny[i] * float(row[2])
+			var stands := Transform3D(basis, Vector3(x - _chev_ax, float(sim.surface_at(x, y, i, road).x), -(y - _chev_ay)))
+			mm.set_instance_transform(k, stands)
+			mm.set_instance_color(k, colour)
+			mm.set_instance_custom_data(k, Color(float(row[3]), float(e.born), level, 0.0))
+			chev_laid.append([String(e.key), stands, float(row[3])])
+			k += 1
+	mm.visible_instance_count = k
+	chevron_count = k
+	exits = want
+
+
+# ---------------------------------------------------------------- the speed
+
+func _number_frame(dt: float, speed: float, shown: bool, strength: float, flow: Transform3D) -> void:
+	number.visible = shown
+	if not shown:
+		return
+	var rise := NUMBER_AHEAD * tan(deg_to_rad(NUMBER_ELEVATION))
+	number.transform = Transform3D(flow.basis, flow * Vector3(0.0, rise, -NUMBER_AHEAD))
+	_number_t -= dt
+	if _number_t <= 0.0:
+		_number_t = NUMBER_EVERY
+		var mph := roundi(speed * MPH / float(NUMBER_STEP)) * NUMBER_STEP
+		var words := Pilot._commas(mph)
+		if number.text != words:
+			number.text = words
+		number_load = worst_load(speed, NUMBER_LOOK_S) if rails.visible else 0.0
+	var colour := tint(number_load)
+	colour.a = strength
+	if not colour.is_equal_approx(_number_tint):      # (a Label3D is made again each time its colour is set: only when it changes)
+		_number_tint = colour
+		number.modulate = colour
+		number.outline_modulate = Color(0.0, 0.03, 0.05, 0.8 * strength)
