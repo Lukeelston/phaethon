@@ -32,6 +32,7 @@ const VIEWS := [
 
 var seat
 var out_dir := ""
+var _flat_drift := false      # --no-drift-pitch: the pod as it stood in a slide before push 42 (POD_PITCH and no more)
 
 
 func _initialize() -> void:
@@ -118,6 +119,14 @@ func _run() -> void:
 			only = arg.trim_prefix("--views=").split(",")
 		if arg == "--nose=open":
 			nose_closed = false
+		# (push 42, the drift: which craft, how far the slider is up, and the same picture without the nose's
+		# extra pitch for the slide, to lay beside the one with it)
+		if arg.begins_with("--vehicle="):
+			Seat.vehicle_override = arg.trim_prefix("--vehicle=")
+		if arg.begins_with("--slide="):
+			Seat.slide_amount = float(arg.trim_prefix("--slide="))
+		if arg == "--no-drift-pitch":
+			_flat_drift = true
 	if out_dir.is_empty() or DirAccess.make_dir_recursive_absolute(out_dir) != OK:
 		push_error("Pass --out= and a writable directory.")
 		quit(1)
@@ -199,6 +208,9 @@ func _run() -> void:
 		seat.cam.fov = float(view[4])
 		for i in 30:
 			await _frame(float(place[3]))
+		if _flat_drift and seat.get("_drift_pitch") != null:
+			seat._drift_pitch = 0.0
+			seat._place_shell()
 		await RenderingServer.frame_post_draw
 		var path := out_dir.path_join(str(view[0]) + ".png")
 		if root.get_texture().get_image().save_png(path) != OK:

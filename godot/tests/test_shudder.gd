@@ -44,8 +44,10 @@ func _process(delta: float) -> bool:
 ## How far the shudder has the shell from its place: where it stands from the pod's pose on the rig (it is
 ## pitched under the pilot: vr_cockpit.gd POD_PITCH), less the speed rush's own easing of it fore and aft
 ## (vr/speed_rush.gd, on unless switched off; tests/test_speed_rush.gd is its test).
+## (One brake turns the craft, the cockpit steps out, and the pod stands further nose-down for that slide:
+## vr_cockpit.gd DRIFT_PITCH. The pose it is measured from is the one it stands at.)
 func _shaken() -> float:
-	return (VRScript.pod_pose().affine_inverse() * (v.shell.position as Vector3) - v._rush_shift).length()
+	return (VRScript.pod_pose(v._drift_pitch).affine_inverse() * (v.shell.position as Vector3) - v._rush_shift).length()
 
 
 func _check(label: String, ok: bool) -> void:

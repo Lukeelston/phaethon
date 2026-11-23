@@ -26,6 +26,7 @@ const View := preload("res://view/craft_view.gd")
 const Cockpit := preload("res://vr/vr_cockpit.gd")
 const Drift := preload("res://vr/drift_slider.gd")
 const Switch := preload("res://vr/mode_switch.gd")
+const Model := preload("res://view/craft_model.gd")
 const FRAME := 1.0 / 90.0
 const SPEED := 1500.0      # m/s along the engines' heading, for a cornering load (tests/test_slide_feel.gd's)
 var v
@@ -105,6 +106,8 @@ func _still() -> void:
 	v._slide = 0.0
 	v._slide_rate = 0.0
 	v._slide_load = 0.0
+	v._slide_lean = 0.0
+	v._slide_ask = 0.0
 	v._slide_stop = 0.0
 
 
@@ -121,13 +124,23 @@ func _held_slide() -> Vector2:
 	return Vector2(rad_to_deg(was), rad_to_deg(fastest))
 
 
-# The slide as the cockpit eased it before there was a slider (vr_cockpit.gd at push 39), to compare with.
-var _was_load := 0.0
+# The slide by its own rule with no amount in it, written out again here to compare with: the cornering load
+# through the engines' lean (CraftModel.ease_bank), the share of its way that lean covers each frame, and the spring.
+# (Until push 42 it read the load through 0.18 s of smoothing; that led the engines, and he said so.)
+var _was_lean := 0.0
+var _was_lat := 0.0
+var _was_ask := 0.0
 var _was_slide := 0.0
 var _was_rate := 0.0
 func _slide_as_it_was(delta: float, load: float, on: bool) -> float:
-	_was_load += (load - _was_load) * (1.0 - exp(-clampf(delta, 0.0, 0.05) / Cockpit.SLIDE_LOAD_T))
-	var asked := signf(_was_load) * smoothstep(Cockpit.SLIDE_LOAD.x, Cockpit.SLIDE_LOAD.y, absf(_was_load))
+	var lean_was := _was_lean
+	var leaned: Array = Model.ease_bank(_was_lean, _was_lat, load, clampf(delta, 0.0, 0.05))
+	_was_lean = leaned[0]
+	_was_lat = leaned[1]
+	var way: float = Model.BANK_MAX * tanh(_was_lat / Model.BANK_G) - lean_was
+	var covered: float = clampf((_was_lean - lean_was) / way, 0.0, 1.0) if absf(way) > 0.00001 else 1.0
+	_was_ask += (signf(_was_lat) * smoothstep(Cockpit.SLIDE_LOAD.x, Cockpit.SLIDE_LOAD.y, absf(_was_lat)) - _was_ask) * covered
+	var asked := _was_ask
 	var target := asked * Cockpit.SLIDE_MAX if on else 0.0
 	var w := TAU * Cockpit.SLIDE_HZ
 	var remaining := clampf(delta, 0.0, 0.05)
@@ -298,7 +311,9 @@ func _run() -> void:
 	# in the notch: the same as before there was a slider, to the last bit
 	Cockpit.slide_amount = 1.0
 	_still()
-	_was_load = 0.0
+	_was_lean = 0.0
+	_was_lat = 0.0
+	_was_ask = 0.0
 	_was_slide = 0.0
 	_was_rate = 0.0
 	var differ := 0
@@ -315,8 +330,8 @@ func _run() -> void:
 		most = maxf(most, absf(now))
 		frames += 1
 		t += FRAME
-	_check("in the notch the cockpit slides exactly as it did before there was a slider: through a hard left, a release, a hard right, a flick back and a weave, %d frames, %d in which it differed by a bit (the most it stepped out: %.2f degrees, into the overshoot's stop at %.2f)" % [
-			frames, differ, rad_to_deg(most), full * 1.25], differ == 0 and frames > 800 and most > Cockpit.SLIDE_MAX * 1.05)
+	_check("in the notch the cockpit slides exactly by the slide's own rule, with no amount in it: through a hard left, a release, a hard right, a flick back and a weave, %d frames, %d in which it differed by a bit (the most it stepped out: %.2f degrees, into the overshoot's stop at %.2f)" % [
+			frames, differ, rad_to_deg(most), full * 1.25], differ == 0 and frames > 800 and most > Cockpit.SLIDE_MAX * 1.02)      # (it overshoots less now that it goes out with the engines' lean: 4% where it was 14%)
 	# at GRIP: none, whatever the slider says
 	Cockpit.slide_amount = Drift.AMOUNT_MAX
 	Cockpit.slide_feel = false
@@ -337,6 +352,51 @@ func _run() -> void:
 	_check("turned down from the most to a half in the middle of that turn, the cockpit comes back from %.2f to %.2f degrees no faster than a slide moves (%.1f degrees a second at the most; %.0f allowed)" % [
 			rad_to_deg(out_at), rad_to_deg(was), rad_to_deg(fastest), rad_to_deg(Cockpit.SLIDE_RATE)],
 		out_at > Cockpit.SLIDE_MAX * 1.4 and absf(rad_to_deg(was) - 0.5 * full) < 0.15 and fastest <= Cockpit.SLIDE_RATE * 1.02)
+	_still()
+
+	# ---- behind the engines, not ahead of them (Luke, 2026-11-23: "I think the cockpit lists before the engines
+	# do. It feels like the pilot leads the engines."), and nose-down into the corner ("the nose needs to tilt
+	# down more in a drift - The pilot should be able to still see the corner they're drifting into")
+	Cockpit.slide_amount = Drift.AMOUNT_MAX
+	_still()
+	_load(30.0)
+	var lean := 0.0
+	var lean_lat := 0.0
+	var lean_end: float = Model.BANK_MAX * tanh(30.0 / Model.BANK_G)
+	var slide_end: float = Cockpit.SLIDE_MAX * Drift.AMOUNT_MAX
+	var lean_half := -1.0
+	var slide_half := -1.0
+	var slide_at_lean_half := 0.0
+	var ahead := 0
+	for k in int(2.0 / FRAME):
+		var e: Array = Model.ease_bank(lean, lean_lat, 30.0, FRAME)
+		lean = e[0]
+		lean_lat = e[1]
+		var out: float = v._ease_slide(FRAME)
+		ahead += int(out / slide_end > lean / lean_end + 0.001 and lean / lean_end < 0.95)      # (settling, both are at their ends)
+		if lean_half < 0.0 and lean >= 0.5 * lean_end:
+			lean_half = (k + 1) * FRAME
+			slide_at_lean_half = out / slide_end
+		if slide_half < 0.0 and out >= 0.5 * slide_end:
+			slide_half = (k + 1) * FRAME
+	_check("into a hard left turn (30 g, the slider at its stop) the engines lean first: they are half over at %.2f s, when the cockpit is %.0f%% of the way out; it is half out at %.2f s; frames in which it was further along than they were: %d" % [
+			lean_half, 100.0 * slide_at_lean_half, slide_half, ahead],
+		lean_half > 0.0 and slide_half > lean_half + 0.05 and slide_half < lean_half + 0.35 and slide_at_lean_half < 0.4 and ahead == 0)
+	var pose_none: Transform3D = Cockpit.pod_pose(Cockpit.drift_pitch_for(0.0))
+	var pose_full: Transform3D = Cockpit.pod_pose(Cockpit.drift_pitch_for(Cockpit.SLIDE_MAX))
+	var pose_most: Transform3D = Cockpit.pod_pose(Cockpit.drift_pitch_for(slide_end))
+	var down := func(pose: Transform3D) -> float: return rad_to_deg(asin(clampf((pose.basis * Vector3.FORWARD).y, -1.0, 1.0))) * -1.0
+	v._drift_pitch = Cockpit.drift_pitch_for(slide_end)
+	v._place_shell()
+	var hooked: bool = v.craft != null and v.craft.pod_frame_pose.is_equal_approx(pose_most) and (v.shell.transform.basis as Basis).is_equal_approx(pose_most.basis)
+	v._drift_pitch = 0.0
+	v._place_shell()
+	_check("the pod's nose goes down with the slide, about the pilot's eye: %.1f degrees with none (as it stood), %.1f at the notch's full slide, %.1f at the stop's (no further than %.0f more); the shell and the tow links' hooks go with it (%s), and it is back with the slide" % [
+			down.call(pose_none), down.call(pose_full), down.call(pose_most), rad_to_deg(Cockpit.DRIFT_PITCH_MAX), hooked],
+		pose_none.is_equal_approx(Cockpit.pod_pose()) and absf(down.call(pose_full) - rad_to_deg(Cockpit.POD_PITCH + Cockpit.SLIDE_MAX * Cockpit.DRIFT_PITCH)) < 0.01
+		and absf(down.call(pose_most) - rad_to_deg(Cockpit.POD_PITCH + Cockpit.DRIFT_PITCH_MAX)) < 0.01 and (pose_most * eye).is_equal_approx(eye) and hooked
+		and (v.shell.transform.basis as Basis).is_equal_approx(Cockpit.pod_pose().basis))
+	Cockpit.slide_amount = 1.0
 	_still()
 
 	# ---- shown, and saved

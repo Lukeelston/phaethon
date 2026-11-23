@@ -48,6 +48,12 @@ const EYE := SEAT + Vector3(0.0, SEAT_RISE, -SEAT_FWD)
 # About the eye, not his hips: a pod turned about the hips carries its fittings 28 mm forward at eye height
 # (the eye is 0.53 m over them), which would have taken back the inch he asked for in the same breath.
 const POD_PITCH := deg_to_rad(3.0)
+# ... and further down as the cockpit steps out in a turn (Luke, 2026-11-23, with the drift slider at its new
+# stop: "It also feels like the nose needs to tilt down more in a drift - The pilot should be able to still see
+# the corner they're drifting into"): for each degree of slide the pod goes DRIFT_PITCH of a degree more
+# nose-down about the same eye point, to DRIFT_PITCH_MAX at the most. With no slide it is POD_PITCH exactly.
+const DRIFT_PITCH := 0.5
+const DRIFT_PITCH_MAX := deg_to_rad(8.0)
 const FLOOR_H := 0.7                    # pod floor above the ground
 const QuestControlsScript := preload("res://input/quest_controls.gd")
 const SeatFinish := preload("res://view/craft_materials.gd")
@@ -104,7 +110,15 @@ var _comfort_roll_rate := 0.0
 # is being held, a degree in a gentle turn, most of it by 20 g, all of it by 24.
 const SLIDE_MAX := deg_to_rad(7.0)        # the cockpit's extra yaw in a hard turn
 const SLIDE_LOAD := Vector2(5.0, 24.0)    # the cornering load it steps out over, g: none at the first, all at the second
-const SLIDE_LOAD_T := 0.18                # s: the load is read through this much smoothing (the pair's own quick wag is not a turn)
+# When it steps out: behind the engines, not ahead of them. (Luke, 2026-11-23, flying push 41: "I think the
+# cockpit lists before the engines do. It feels like the pilot leads the engines." It read the cornering load
+# through 0.18 s of smoothing and was out in a fifth of a second, while the engines' own lean eases in over a
+# third of a second and never rolls faster than 65 degrees a second: in a hard turn the cockpit was all the way
+# out before the engines were half way over, and at the slider's 2.5 that was 17 degrees of it.) The load is
+# now put through the lean's own easing (CraftModel.ease_bank: the same smoothing, the same roll rates, in and
+# out), and the cockpit's slide closes on what the load asks for as fast as that lean closes on its own (_ease_slide).
+# The spring below puts it a tenth of a second behind that. Held in a turn it comes to the same angle as it did.
+# (tests/probe_drift_lead.gd follows the three through a turn: the lean, the slide as it was, the slide now.)
 const SLIDE_ARM := 2.2                    # the pivot this far ahead of your head, m: the seat swings 0.27 m out at full slide
 const SLIDE_HZ := 1.6                     # the spring: out in about a fifth of a second ...
 const SLIDE_ZETA := 0.5                   # ... lightly damped: one overshoot, then still
@@ -167,7 +181,10 @@ var drift_slider                          # vr/drift_slider.gd: how far it steps
 var _slide_stop := 0.0                    # the slide's overshoot is stopped here (it goes out with the amount past 1)
 var _slide := 0.0
 var _slide_rate := 0.0
-var _slide_load := 0.0                    # the cornering load, smoothed, g (+ a left turn)
+var _slide_load := 0.0                    # the cornering load, smoothed as the engines' lean smooths it, g (+ a left turn)
+var _slide_lean := 0.0                    # the lean the engines have come to under that load, rad (CraftModel.ease_bank's, kept here)
+var _slide_ask := 0.0                     # the slide's aim, -1..1 of the full slide: it closes on what the load asks as the lean closes on its own
+var _drift_pitch := 0.0                   # how much further nose-down the pod stands for the slide, rad (DRIFT_PITCH)
 # The g-meter on the centre dial (Luke: "a g-force meter"; vr/gauge_cluster.gd). What it reads is the
 # pod's own change of velocity, taken against the sim's clock (a frame that ran five steps of the sim
 # and one that ran six then read the same) along the pod's nose and across it, and smoothed just
@@ -445,15 +462,23 @@ func _apply_shudder(delta: float) -> void:
 
 ## Where the pod stands on the rig: POD_PITCH nose-down, turned about the pilot's eye point. That point is
 ## the one place that is the same in the rig's frame and in the pod's: EYE is where he sits in either.
-static func pod_pose() -> Transform3D:
-	var pitched := Basis(Vector3.RIGHT, -POD_PITCH)
+## How much further nose-down the pod stands for a slide of `slide` rad (either way).
+static func drift_pitch_for(slide: float) -> float:
+	return minf(absf(slide) * DRIFT_PITCH, DRIFT_PITCH_MAX)
+
+
+## `more`: further nose-down by this, rad (in a slide: drift_pitch_for).
+static func pod_pose(more := 0.0) -> Transform3D:
+	var pitched := Basis(Vector3.RIGHT, -(POD_PITCH + more))
 	return Transform3D(pitched, EYE - pitched * EYE)
 
 
 ## Stand the shell on the rig: at the pod's pose, and from there where the shudder and the speed rush have
 ## it, along its own lines. The tow links' hooks go with the pose and the rush (not with the shudder).
 func _place_shell() -> void:
-	var pose := pod_pose()
+	var pose := pod_pose(_drift_pitch)
+	if craft:
+		craft.pod_frame_pose = pose      # (the tow links hook to the nose where the pitch has it now)
 	shell.transform = pose * Transform3D(Basis.IDENTITY, _shake + _rush_shift)
 	for k in _hardpoints.size():
 		_hardpoints[k].position = pose * (_hardpoint_at[k] + _rush_shift)
@@ -1979,8 +2004,20 @@ func _work_slider(did: String, hand: XRController3D = null) -> void:
 ## The slide's angle now, radians, + = the nose further left (a left turn): toward what the
 ## cornering load asks for, on a spring (see SLIDE_MAX).
 func _ease_slide(delta: float) -> float:
-	_slide_load += (turn_load() - _slide_load) * (1.0 - exp(-clampf(delta, 0.0, 0.05) / SLIDE_LOAD_T))
-	var asked := signf(_slide_load) * smoothstep(SLIDE_LOAD.x, SLIDE_LOAD.y, absf(_slide_load))
+	# The engines' lean under this load, as CraftModel eases theirs (`_slide_lean`, and the load smoothed as the
+	# lean's own is, `_slide_load`). The lean is always on its way to where that load would bring it, and each
+	# frame it covers some share of the way it has left. The slide's aim (`_slide_ask`, -1..1 of the full
+	# slide) covers the same share of its own way to what that load asks for. So it goes out as the engines
+	# go over, comes back as they level, and through a change of mind it changes with them; and once the lean
+	# has settled it is where the load alone would put it, as it always was.
+	var lean_was := _slide_lean
+	var leaned := CraftModelScript.ease_bank(_slide_lean, _slide_load, turn_load(), clampf(delta, 0.0, 0.05))
+	_slide_lean = leaned[0]
+	_slide_load = leaned[1]
+	var way: float = CraftModelScript.BANK_MAX * tanh(_slide_load / CraftModelScript.BANK_G) - lean_was      # what the lean had left to go
+	var covered: float = clampf((_slide_lean - lean_was) / way, 0.0, 1.0) if absf(way) > 0.00001 else 1.0
+	_slide_ask += (signf(_slide_load) * smoothstep(SLIDE_LOAD.x, SLIDE_LOAD.y, absf(_slide_load)) - _slide_ask) * covered
+	var asked := _slide_ask
 	var target := asked * SLIDE_MAX * slide_amount if slide_feel else 0.0      # (the drift slider's amount: at 1, as it was)
 	# its overshoot's stop goes out with an amount past 1, and comes back in no faster than the slide itself moves
 	var stop := SLIDE_MAX * 1.25 * maxf(1.0, slide_amount)
@@ -1998,7 +2035,9 @@ func _ease_slide(delta: float) -> float:
 ## How hard the slide scrubs in a hand, 0..1: mostly while the rear is moving, a little while it is
 ## held out, more in the hand on the outside of the turn.
 func slide_scrub(right_hand: bool) -> float:
-	var moving := clampf(absf(_slide_rate) / deg_to_rad(30.0), 0.0, 1.0)
+	# (against 17 degrees a second: a hard turn moves the rear at 26 now that it goes out with the engines' lean,
+	# where it moved at 45 and this read it against 30; the same turn scrubs as hard as it did, for longer)
+	var moving := clampf(absf(_slide_rate) / deg_to_rad(17.0), 0.0, 1.0)
 	var held := clampf(absf(_slide) / SLIDE_MAX, 0.0, 1.0)
 	var outside := (_slide > 0.0) == right_hand    # a left turn swings the seat right
 	return clampf(0.8 * moving + 0.2 * held, 0.0, 1.0) * smoothstep(0.08, 0.3, held) * (1.0 if outside else 0.55)
@@ -2029,6 +2068,7 @@ func _place_camera(_k: float) -> void:
 	else:
 		var Q := shaft_carry_at(sim.pod.x, sim.pod.y)   # (identity but up a shaft: there the world turns over round you)
 		var slide := _ease_slide(get_process_delta_time())   # the rear stepped out: the cockpit turned further into the turn ...
+		_drift_pitch = drift_pitch_for(slide)                # ... and its nose that much lower, to see into it (_place_shell)
 		var b_slid := Basis(Vector3.UP, yaw + slide)
 		var b_full: Basis = Q * Basis.from_euler(Vector3(pitch, yaw + slide, roll))   # lean + the track's banking (capped), and its slope
 		var base := wz(sim.pod.x, sim.pod.y, sim.pod.z - 0.8 + CraftModelScript.POD_LIFT) + Q * Vector3.UP * (r.x - surface(sim.pod.x, sim.pod.y).x)   # floor 0.8 m below the pod body centre, lifted with the pod
