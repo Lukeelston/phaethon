@@ -145,10 +145,10 @@ func _run() -> void:
 	var joined := 0
 	for J in sim.junctions:
 		joined += int((int(J[0]) == e2 or int(J[0]) == e1) and int(J[3]) == range_r)
-	check("the Caucasus is on the Network: %.0f km of road by the south-east edge (x %.0f to %.0f km), from E2 down to E1 (y %.0f to %.0f km), joined to each (%d junctions) and the last road made (%d of %d)" % [
+	check("the Caucasus is on the Network: %.0f km of road by the south-east edge (x %.0f to %.0f km), from E2 down to E1 (y %.0f to %.0f km), joined to each (%d junctions) and the last road made but Mount Hyperion's leaps' (%d of %d: a lane and a field for each leap come after it)" % [
 		R.length / 1000.0, x[0] / 1000.0, x[1] / 1000.0, y[1] / 1000.0, y[0] / 1000.0, joined, range_r, sim.roads.size()],
 		R.length > 240000.0 and R.length < 265000.0 and x[0] > 545000.0 and x[1] < 598000.0 and y[1] < 300000.0 and y[0] > 100000.0
-		and world._joined_at(range_r, 0) and world._joined_at(range_r, R.N - 1) and joined == 2 and range_r == sim.roads.size() - 1)
+		and world._joined_at(range_r, 0) and world._joined_at(range_r, R.N - 1) and joined == 2 and range_r == sim.roads.size() - 1 - 2 * sim.leaps.size())      # (push 36: the leaps' four roads are made after it, so it and every road before it keep their numbers)
 	# its heights: the extremes, in order (a rise or fall of 150 m and more makes one)
 	var marks := []          # [sample, height, 1 a top / -1 a bottom]
 	var steepest := 0.0
