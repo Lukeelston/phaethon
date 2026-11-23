@@ -1,4 +1,5 @@
 ## Windowed readback of the same road samples at 1 km and 32 km, in metres per pixel.
+## Run windowed: it reads the roads' pixels back (tools/run_suite.ps1 finds this line).
 ## --xr-mode off --resolution 1280x720 -s res://tests/test_far_aprons_render.gd -- [--out=DIR]
 extends SceneTree
 

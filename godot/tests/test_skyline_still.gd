@@ -1,3 +1,4 @@
+## Run windowed for the picture check (tools/run_suite.ps1 finds this line); headless it checks the source only.
 ## A city's towers are the same buildings wherever the floating origin is (view/skyline.gdshader: the
 ## Network's skylines, view/network_world.gd, and the city GPs', view/craft_view.gd).
 ## (Luke, from the headset, 2026-11-22: "The buildings around cities jitter when i look at them." The shader
