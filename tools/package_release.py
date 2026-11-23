@@ -20,6 +20,13 @@ files['THIRD_PARTY.md']=root/'THIRD_PARTY.md'
 for path in (root/'packaging').rglob('*'):
     if path.is_file(): files[path.relative_to(root/'packaging').as_posix()]=path
 if edition=='pcvr':
+    # Keep the public exe name (shortcuts and CLI). The launcher must be alive
+    # before the engine enters the Windows OpenXR loader.
+    files['PhaethonVR.engine'] = build/folder/'PhaethonVR.engine'
+    launcher = files['PhaethonVR.exe']
+    receipt = launcher.with_suffix('.exe.sha256')
+    if not receipt.exists() or hashlib.sha256(launcher.read_bytes()).hexdigest() != receipt.read_text().strip():
+        raise ValueError("Windows PC VR export did not install the matching boot watchdog.")
     files['README.txt']=root/'packaging-vr/README.txt'
 for path in (root/'godot/audio/engines').glob('*.wav'):
     files['audio/engines/'+path.name]=path

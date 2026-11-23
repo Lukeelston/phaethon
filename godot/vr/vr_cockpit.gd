@@ -339,6 +339,8 @@ func _ready() -> void:
 		if a.begins_with("--brake-trace="):
 			_brake_trace = BrakeDiagnosticsScript.new()
 			_brake_trace.open(a.trim_prefix("--brake-trace="), _track())
+	if OS.get_environment("PHAETHON_SOURCE_BOOT") == "1":
+		print("PCVR HANDOFF: source cockpit ready")
 
 
 func _sim_step() -> void:

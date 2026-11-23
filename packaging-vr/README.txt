@@ -55,7 +55,7 @@ NEW IN 0.4.0
   PhaethonVR.exe -- --audio-out=headphones (words of the device's name, joined by +).
 
 START HERE
-1. Extract the whole ZIP. Keep PhaethonVR.exe and PhaethonVR.pck together.
+1. Extract the whole ZIP. Keep PhaethonVR.exe, PhaethonVR.engine and PhaethonVR.pck together.
 2. Start your Windows PC VR software and connect the headset. On Quest,
    enter Quest Link or Air Link first. Set the matching PC software as your
    active OpenXR runtime through that software's own settings.
@@ -74,6 +74,10 @@ Driving partner for formation flying and occasional passes on wide highways.
 The total rests quietly at upper right, moves to top center while points are
 earned, then fades back to its corner. The partner yields around your full craft.
 If no OpenXR headset session is available, the desktop window explains setup.
+Each launch writes a timestamped log in %APPDATA%\ElstonWorks\Phaethon-VR\boot.
+The launcher records the last stage every five seconds during startup. It retries
+once if the session is unavailable after 20 seconds or native startup stalls
+for 35 seconds. Keep the first log even if the next launch works.
 Connect the headset and relaunch the game. Close the window or use Alt+F4 to
 quit; your VR runtime's system interface can also close the application.
 

@@ -8,6 +8,7 @@ config/name.pcvr="Phaethon PC VR"
 config/version="0.4.0-experimental"
 run/main_scene="res://release/menu.tscn"
 run/main_scene.pcvr="res://release/vr_boot.tscn"
+run/flush_stdout_on_print.pcvr=true
 config/use_custom_user_dir=true
 config/custom_user_dir_name="ElstonWorks/Phaethon"
 config/custom_user_dir_name.pcvr="ElstonWorks/Phaethon-VR"
@@ -70,3 +71,7 @@ world_lift={
 "type": "float",
 "value": 0.0
 }
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/phaethon_export/plugin.cfg")
