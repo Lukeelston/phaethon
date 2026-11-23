@@ -108,7 +108,18 @@ var _comfort_roll_rate := 0.0
 # Those small splits are still real turns: the load goes with the split whatever the speed (0.03:
 # 4 g, 0.08: 10 g, 0.17: 21 g, 0.26: 33 g; tests/probe_slide.gd --small). So: nothing while a lane
 # is being held, a degree in a gentle turn, most of it by 20 g, all of it by 24.
-const SLIDE_MAX := deg_to_rad(7.0)        # the cockpit's extra yaw in a hard turn
+# What it swings about (Luke, 2026-11-23, flying push 42: "Right now, the cockpit basically chases the engine
+# that is turning. So if I'm taking a right turn, the cockpit turns, noses down, and rotates towards the right
+# engine, rather than falling back and basically being 'swung' along by the left engine. Right now it's like
+# the cockpit also has an engine and the left turbine is just along for the ride. It should feel more like a
+# tube being pulled from a boat."). It turned about a hitch 2.2 m ahead of his head: 7 degrees of turn for a
+# quarter of a metre of swing, which is a craft steering itself into the bend. A towed thing swings from what
+# tows it. The cockpit now turns about the tail of the engine on the OUTSIDE of the turn, where that engine's
+# tow link begins (tow_point: 14 to 20 m ahead and 3 to 4 m to the side, by the craft's own links). The same
+# angle is several times the swing, with a little dropping back; the engines stay where they were in the
+# windscreen, and it is the road that comes round. So the angle is half what it was.
+const SLIDE_MAX := deg_to_rad(3.5)        # the cockpit's swing in a hard turn, about the outside engine's tow point
+const SLIDE_BACK := 0.4                   # ... and it drops this far back along its links as it goes, m (in proportion to the slide)
 const SLIDE_LOAD := Vector2(5.0, 24.0)    # the cornering load it steps out over, g: none at the first, all at the second
 # When it steps out: behind the engines, not ahead of them. (Luke, 2026-11-23, flying push 41: "I think the
 # cockpit lists before the engines do. It feels like the pilot leads the engines." It read the cornering load
@@ -119,7 +130,6 @@ const SLIDE_LOAD := Vector2(5.0, 24.0)    # the cornering load it steps out over
 # out), and the cockpit's slide closes on what the load asks for as fast as that lean closes on its own (_ease_slide).
 # The spring below puts it a tenth of a second behind that. Held in a turn it comes to the same angle as it did.
 # (tests/probe_drift_lead.gd follows the three through a turn: the lean, the slide as it was, the slide now.)
-const SLIDE_ARM := 2.2                    # the pivot this far ahead of your head, m: the seat swings 0.27 m out at full slide
 const SLIDE_HZ := 1.6                     # the spring: out in about a fifth of a second ...
 const SLIDE_ZETA := 0.5                   # ... lightly damped: one overshoot, then still
 const SLIDE_RATE := deg_to_rad(45.0)      # and never faster than this
@@ -2001,6 +2011,18 @@ func _work_slider(did: String, hand: XRController3D = null) -> void:
 		print("SLIDE: amount %.2f" % slide_amount)
 
 
+## Where the cockpit swings from in a slide of `slide` rad, from the pilot's head (rig metres: -z ahead, +x to
+## his right): the tail of the engine on the outside of the turn, where its tow link begins. With no slide it
+## is the point midway between the two engines' tails, and it goes over to the outside engine's as the slide
+## comes on (all the way by the notch's full slide), so nothing jumps as a turn changes hands. The craft's own
+## geometry: its links' length and its engines' gap (sim.P), as the sim lays them out behind the engines.
+func tow_point(slide: float) -> Vector3:
+	var side: float = sim.P.engineGap / 2.0
+	var reach: float = side - sim.P.podAnchorW * sim.P.podWidth / 2.0
+	var ahead: float = sqrt(maxf(sim.P.cableLen * sim.P.cableLen - reach * reach, 1.0)) + sim.P.podLen / 2.0 + EYE.z
+	return Vector3(clampf(slide / SLIDE_MAX, -1.0, 1.0) * side, 0.0, -ahead)
+
+
 ## The slide's angle now, radians, + = the nose further left (a left turn): toward what the
 ## cornering load asks for, on a spring (see SLIDE_MAX).
 func _ease_slide(delta: float) -> float:
@@ -2035,9 +2057,9 @@ func _ease_slide(delta: float) -> float:
 ## How hard the slide scrubs in a hand, 0..1: mostly while the rear is moving, a little while it is
 ## held out, more in the hand on the outside of the turn.
 func slide_scrub(right_hand: bool) -> float:
-	# (against 17 degrees a second: a hard turn moves the rear at 26 now that it goes out with the engines' lean,
-	# where it moved at 45 and this read it against 30; the same turn scrubs as hard as it did, for longer)
-	var moving := clampf(absf(_slide_rate) / deg_to_rad(17.0), 0.0, 1.0)
+	# (against 9 degrees a second: a hard turn swings it at 13 now, half the angle it was and out with the
+	# engines' lean; it moved at 45 and this read it against 30. The same turn scrubs as hard as it did.)
+	var moving := clampf(absf(_slide_rate) / deg_to_rad(9.0), 0.0, 1.0)
 	var held := clampf(absf(_slide) / SLIDE_MAX, 0.0, 1.0)
 	var outside := (_slide > 0.0) == right_hand    # a left turn swings the seat right
 	return clampf(0.8 * moving + 0.2 * held, 0.0, 1.0) * smoothstep(0.08, 0.3, held) * (1.0 if outside else 0.55)
@@ -2072,9 +2094,10 @@ func _place_camera(_k: float) -> void:
 		var b_slid := Basis(Vector3.UP, yaw + slide)
 		var b_full: Basis = Q * Basis.from_euler(Vector3(pitch, yaw + slide, roll))   # lean + the track's banking (capped), and its slope
 		var base := wz(sim.pod.x, sim.pod.y, sim.pod.z - 0.8 + CraftModelScript.POD_LIFT) + Q * Vector3.UP * (r.x - surface(sim.pod.x, sim.pod.y).x)   # floor 0.8 m below the pod body centre, lifted with the pod
-		var hitch := head + Vector3(0.0, 0.0, -SLIDE_ARM)    # ... about a point ahead of you, so the seat swings outward
+		var hitch := head + tow_point(slide)                 # ... about the outside engine's tow point, far ahead: it swings wide and drops back
 		rig.basis = b_full
 		var seat_at: Vector3 = Q * (b_yaw * hitch + b_slid * (head - hitch))      # from the floor to the head, the cockpit level
+		seat_at += Q * (b_yaw * Vector3(0.0, 0.0, SLIDE_BACK * absf(slide) / SLIDE_MAX))      # (dropped back along the way it is towed)
 		var outside: Basis = Q * b_yaw                        # (an outside camera keeps the sim's heading, and watches the tail go)
 		if sim.kind == "network" and not sim.pod.off_road and sim.roads[sim.pod.path].deck:
 			# Mount Hyperion's road: the cockpit pitches with the deck about its floor, not about the pilot's head

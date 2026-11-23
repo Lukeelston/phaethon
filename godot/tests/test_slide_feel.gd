@@ -19,6 +19,7 @@ var peak := 0.0
 var rate_peak := 0.0
 var held := 0.0
 var head_out := 0.0
+var head_back := 0.0
 var head_peak := 0.0
 var counter := 0.0
 var settled := 0.0
@@ -85,6 +86,7 @@ func _process(_delta: float) -> bool:
 	var plain: Vector3 = seat.wz(seat.sim.pod.x, seat.sim.pod.y, seat.sim.pod.z - 0.8 + CM.POD_LIFT) + Basis(Vector3.UP, yaw) * head
 	var moved: Vector3 = seat.rig.transform * head - plain
 	var right := (Basis(Vector3.UP, yaw) * Vector3.RIGHT).dot(moved)    # how far the head has gone to the pod's right
+	var back := (Basis(Vector3.UP, yaw) * Vector3.BACK).dot(moved)      # ... and how far it has dropped back
 	rate_peak = maxf(rate_peak, absf(slide - previous) / delta)
 	previous = slide
 	if t < 2.0:
@@ -95,6 +97,7 @@ func _process(_delta: float) -> bool:
 	if t > 1.8 and t < 2.0:
 		held = slide
 		head_out = right
+		head_back = back
 	if t > 2.0 and t < 4.0:
 		counter = minf(counter, slide)
 	if t > 3.8 and t < 4.0:
@@ -114,7 +117,13 @@ func _process(_delta: float) -> bool:
 	var full := rad_to_deg(seat.SLIDE_MAX)
 	check("a left turn turns the cockpit further left: held at %.2f of %.1f deg" % [rad_to_deg(held), full], absf(rad_to_deg(held) - full) < 0.15)
 	check("it steps out past that and catches: peak %.2f deg (under a quarter over)" % rad_to_deg(peak), peak > seat.SLIDE_MAX * 1.01 and peak <= seat.SLIDE_MAX * 1.25)
-	check("the seat swings outward (to the right in a left turn): %.3f m held, %.3f m at most" % [head_out, head_peak], head_out > 0.22 and head_out < 0.32 and head_peak < 0.40)
+	# (Luke, 2026-11-23: "It should feel more like a tube being pulled from a boat": it swings from the tail of the
+	# engine on the outside of the turn, the right one in a left turn, and not about a hitch at its own nose)
+	var tow: Vector3 = seat.tow_point(seat.SLIDE_MAX)      # from the head: +x to the right, -z ahead
+	var swung: Vector3 = Basis(Vector3.UP, seat.SLIDE_MAX) * (-tow) + tow + Vector3(0.0, 0.0, seat.SLIDE_BACK)      # where a turn of SLIDE_MAX about that point puts the head, and the drop back with it
+	check("the seat swings outward and drops back, about the outside engine's tow point (%.1f m ahead, %.1f m to the right): %.3f m out and %.3f m back held (a turn about that point: %.3f and %.3f), %.3f m out at most" % [
+			-tow.z, tow.x, head_out, head_back, swung.x, swung.z, head_peak],
+		tow.x > 2.0 and tow.z < -12.0 and absf(head_out - swung.x) < 0.02 and absf(head_back - swung.z) < 0.02 and head_out > 0.8 and head_back > 0.4 and head_peak < head_out * 1.25)
 	check("never faster than %.0f deg/s: %.1f" % [rad_to_deg(seat.SLIDE_RATE), rad_to_deg(rate_peak)], rate_peak <= seat.SLIDE_RATE * 1.02)
 	check("let go, it swings back a little past straight (%.2f deg) and is still by 2 s (%.3f deg)" % [rad_to_deg(counter), rad_to_deg(settled)], counter < deg_to_rad(-0.05) and counter > deg_to_rad(-2.0) and absf(settled) < deg_to_rad(0.05))
 	check("a right turn is its mirror: %.2f deg" % rad_to_deg(other), absf(rad_to_deg(other) + full) < 0.15)

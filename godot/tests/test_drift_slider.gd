@@ -394,7 +394,8 @@ func _run() -> void:
 	_check("the pod's nose goes down with the slide, about the pilot's eye: %.1f degrees with none (as it stood), %.1f at the notch's full slide, %.1f at the stop's (no further than %.0f more); the shell and the tow links' hooks go with it (%s), and it is back with the slide" % [
 			down.call(pose_none), down.call(pose_full), down.call(pose_most), rad_to_deg(Cockpit.DRIFT_PITCH_MAX), hooked],
 		pose_none.is_equal_approx(Cockpit.pod_pose()) and absf(down.call(pose_full) - rad_to_deg(Cockpit.POD_PITCH + Cockpit.SLIDE_MAX * Cockpit.DRIFT_PITCH)) < 0.01
-		and absf(down.call(pose_most) - rad_to_deg(Cockpit.POD_PITCH + Cockpit.DRIFT_PITCH_MAX)) < 0.01 and (pose_most * eye).is_equal_approx(eye) and hooked
+		and absf(down.call(pose_most) - rad_to_deg(Cockpit.POD_PITCH + minf(slide_end * Cockpit.DRIFT_PITCH, Cockpit.DRIFT_PITCH_MAX))) < 0.01
+		and down.call(pose_most) > down.call(pose_full) and (pose_most * eye).is_equal_approx(eye) and hooked
 		and (v.shell.transform.basis as Basis).is_equal_approx(Cockpit.pod_pose().basis))
 	Cockpit.slide_amount = 1.0
 	_still()
