@@ -1294,7 +1294,7 @@ func _menu_items() -> Array:
 func _race_menu_items() -> Array:
 	if not RacePilotsScript.available(sim):
 		return []
-	return [{"key": "racers", "label": "RACING PILOTS", "value": "ON" if race != null else "OFF"}]
+	return [{"key": "racers", "label": "RACING PILOTS", "value": "ON" if race != null else "OFF"}] + (race.menu_rows() if race else [])
 
 
 ## The glass carries the race, not the dash's strip.
@@ -1414,6 +1414,11 @@ func menu_choose() -> bool:
 			var rush_at: int = menu.at
 			menu.items = _menu_items()
 			menu.at = rush_at
+			_menu_show()
+			return true
+		"race_pace", "race_laps":
+			race.next_setting(menu.key())
+			menu.items = _menu_items()
 			_menu_show()
 			return true
 		"racers":      # the racing pilots, now and from now on (switched on mid-lap they start from the grid)
@@ -1671,6 +1676,9 @@ func _hud_progress(in_cockpit: bool) -> String:
 		if approach_display:
 			approach_display.set_message(page)
 		return startup.line()
+	if race and race.calls_glass() and approach_display:
+		approach_display.set_message(race.page())
+		return _progress_text()
 	page = coach.message()         # a taught flight's first minute: the coach's line, when it has one
 	if page != "":
 		if approach_display:

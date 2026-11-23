@@ -3,10 +3,10 @@
 ## --xr-mode off --resolution 1600x900 --fixed-fps 120 --audio-driver Dummy
 ## -s res://tests/render_race_pilots.gd -- --mute --out=DIR [--views=a,b] [--bench] [--no-racers] [--headset] [--film=start|pass]
 ## --film writes numbered frames (30 a second of the race) into DIR/film-NAME for ffmpeg: "start",
-## nine seconds from behind and above his craft as the field gets away; "pass", from the seat on
+## nine seconds from the grid lights to the field getting away; "pass", from the seat on
 ## the loop as the quickest of them comes by.
 ## The pictures: the grid from the seat and from above, the start, a pilot coming by on the loop,
-## the field through the first town bend. --bench times the seat on the grid and in the pack, a
+## the field through the first town bend, and the finish of the recorded lap. --bench times the seat on the grid and in the pack, a
 ## desktop eye (with --no-racers: the same frames without them, to weigh the field).
 extends SceneTree
 
@@ -14,14 +14,22 @@ const Seat := preload("res://vr/vr_cockpit.gd")
 const Race := preload("res://view/race_pilots.gd")
 const STEP := 1.0 / 120.0
 const VIEWS := ["a1-the-grid-from-the-seat", "a2-the-grid-from-above", "b1-the-start-from-the-seat", "b2-the-start-from-above",
-	"c1-a-pilot-coming-by-on-the-loop", "c2-and-gone-ahead", "d1-the-field-through-the-first-town-bend"]
+	"c1-a-pilot-coming-by-on-the-loop", "c2-and-gone-ahead", "d1-the-field-through-the-first-town-bend", "e1-the-finish-from-the-seat"]
 
 var seat
 var out_dir := ""
+var duel_player_s := 0.0
 var ext: Camera3D
+var profile := preload("res://tests/race_review_settings.gd").new()
+var failed := false
+
+
+func _finalize() -> void:
+	profile.restore()
 
 
 func _initialize() -> void:
+	profile.pin(Seat.PREFS)
 	_run.call_deferred()
 
 
@@ -35,6 +43,7 @@ func _shot(name: String) -> void:
 	await RenderingServer.frame_post_draw
 	var path := out_dir.path_join(name + ".png")
 	if root.get_texture().get_image().save_png(path) != OK:
+		failed = true
 		push_error("Couldn't save " + path)
 	var race = seat.race
 	print("RACE_SHOT %s | %s" % [name, race.line() if race else "no pilots"])
@@ -165,7 +174,7 @@ func _run() -> void:
 		await _bench("grid")
 		await _bench("pack")
 		seat.free()
-		quit()
+		quit(int(failed))
 		return
 	if race == null:
 		push_error("No pilots: nothing to picture.")
@@ -175,7 +184,7 @@ func _run() -> void:
 		if arg.begins_with("--film="):
 			await _film(arg.trim_prefix("--film="))
 			seat.free()
-			quit()
+			quit(int(failed))
 			return
 	for name in VIEWS:
 		if not only.is_empty() and not only.has(name):
@@ -185,7 +194,7 @@ func _run() -> void:
 				seat.sim.restart()
 				race.grid()
 				_seat_camera()
-				await _frames(60)
+				await _frames(255)
 				await _shot(name)
 			"a2-the-grid-from-above":
 				seat.sim.restart()
@@ -198,7 +207,7 @@ func _run() -> void:
 				seat.sim.restart()
 				race.grid()
 				_seat_camera()
-				await _frames(30)
+				await _frames(360)
 				# (his craft set down a frame at a time along his own getaway from this line, flight 17's)
 				for frame in int(3.2 / STEP):
 					var away := _his_start((frame + 1) * STEP)
@@ -210,38 +219,25 @@ func _run() -> void:
 					_outside(here - 80.0, -30.0, 30.0, here + 140.0, 6.0, 1.0)
 					await _frames(2)
 				await _shot(name)
-			"c1-a-pilot-coming-by-on-the-loop":
-				# on the loop's first long bend at 3,350 mph, and the quickest of them 2.4 km behind in his lane
-				_seat_camera()
-				var s0 := 36000.0
-				var v0 := 1500.0
-				var p = race.pilots[4]
-				var his: float = race.nominal(race._sample(s0, 0), p.lane)      # (on that pilot's own line: it has to come round him)
-				_pose_player(s0, his, v0)
-				race.grid()
-				race.go()
-				await _frames(2)
-				p.s = s0 - 2400.0
-				p.i = race._sample(p.s, 0)
-				p.lat = his
-				p.lat_v = 0.0
-				p.v = p.f_loop * race.env[p.i]
-				p.prog = float(race.me.prog) - 2400.0
-				var frame := 0
-				var taken := 0
-				while frame < 1200 and taken < 2:
-					frame += 1
-					_pose_player(s0 + v0 * STEP * frame, his, v0)
-					seat._process(STEP)
+			"c1-a-pilot-coming-by-on-the-loop", "c2-and-gone-ahead":
+				_duel_grid()
+				var shot := false
+				for frame in 780:
+					_duel_step(frame * STEP)
 					await process_frame
-					var lead: float = race._gap(float(race.me.s), p.s)
-					if taken == 0 and lead > 45.0:
+					var lead: float = race.pilots[4].prog - race.me.prog
+					var beside: bool = name.begins_with("c1") and lead > 36.0 and race.page().contains("ALONGSIDE")
+					var clear: bool = name.begins_with("c2") and lead > Race.LEN + Race.BEHIND
+					if beside or clear:
 						await _shot(name)
-						taken = 1
-					elif taken == 1 and lead > 260.0:
-						await _shot("c2-and-gone-ahead")
-						taken = 2
-				print("RACE_SHOT the pass: %s went by %.1f m off his middle, at %.0f mph against his %.0f" % [p.name, absf(p.lat - his), p.v * 2.236936, v0 * 2.236936])
+						shot = true
+						break
+				if not shot:
+					failed = true
+					push_error("The staged pass did not reach " + name)
+
+			"e1-the-finish-from-the-seat":
+				await _recorded_finish(name)
 			"d1-the-field-through-the-first-town-bend":
 				seat.sim.restart()
 				race.grid()
@@ -256,7 +252,72 @@ func _run() -> void:
 					await process_frame
 				await _shot(name)
 	seat.free()
-	quit()
+	quit(int(failed))
+
+
+## Stage a named rival just behind the player, fighting for third. Only the player is
+## posed frame by frame. The opponent makes its own passing and line decisions.
+func _duel_grid() -> void:
+	_seat_camera()
+	var race = seat.race
+	duel_player_s = 159000.0
+	race.grid()
+	race.go()
+	race.clock = 111.0
+	race._me_s = duel_player_s
+	race.me.prog = duel_player_s
+	var offsets := [2400.0, 900.0, -1250.0, -700.0, -68.0]
+	for k in race.pilots.size():
+		var p = race.pilots[k]
+		p.s = duel_player_s + offsets[k]
+		p.prog = p.s
+		p.i = race._sample(p.s, 0)
+		p.lat = race.nominal(p.i, p.lane)
+		p.lat_v = 0.0
+		p.v = p.f_loop * race.env[p.i]
+		race._pose(p)
+
+
+func _duel_step(t: float) -> void:
+	var race = seat.race
+	var p = race.pilots[4]
+	# Leave a lane on the right and counterattack after its nose gets in front.
+	var i: int = race._sample(duel_player_s, p.i)
+	var left: float = race.nominal(i, p.lane) + 31.0
+	var speed: float = p.v + (28.0 if t > 4.4 else -32.0)
+	duel_player_s += speed * STEP / maxf(0.6, 1.0 - race.kap[i] * left)
+	_pose_player(duel_player_s, left, speed)
+	seat._process(STEP)
+	# A seated glance toward the overlapping craft, through the right-hand canopy.
+	seat.cam.rotation.y = deg_to_rad(-26.0) * smoothstep(0.7, 2.2, t)
+
+
+## A real one-lap result from the replay, including the other finish times. Fast-forward
+## just the sim and the race, then let the cockpit settle and photograph the player's page.
+func _recorded_finish(label: String) -> void:
+	seat._respawn()
+	var race = seat.race
+	race.lap_limit = 1
+	race.go()
+	var inputs: Array = JSON.parse_string(FileAccess.get_file_as_string("res://tests/replay/eridanus_inputs.json"))
+	for u in inputs:
+		var inp := {"thrL": u[0], "thrR": u[1], "brkL": u[2], "brkR": u[3], "repair": false, "reignite": true}
+		if int(u[4]) > 0:
+			inp.handling = ["", "speed", "starfighter"][int(u[4])]
+		for k in 8:
+			seat.sim.step(inp, 1.0 / 480.0)
+		seat.sim.events.clear()
+		race.step(1.0 / 60.0)
+		race._feed_obstacles()
+		if is_finite(race.you.finish):
+			break
+	if not is_finite(race.you.finish):
+		failed = true
+		push_error("Replay did not finish")
+		return
+	_seat_camera()
+	await _frames(80)
+	await _shot(label)
 
 
 ## Three passes of 240 frames from the seat, the last one timed: "grid" standing on the grid (all
@@ -305,7 +366,11 @@ func _stats(values: PackedFloat64Array) -> Dictionary:
 
 func _film_frame(dir: String, k: int) -> void:
 	await RenderingServer.frame_post_draw
-	root.get_texture().get_image().save_png(dir.path_join("f%04d.png" % k))
+	if k == 0:
+		print("FIRST_FILM_FRAME ", Engine.get_frames_drawn())
+	if root.get_texture().get_image().save_png(dir.path_join("f%04d.png" % k)) != OK:
+		failed = true
+		push_error("Could not write frame %d" % k)
 
 
 func _film(what: String) -> void:
@@ -316,40 +381,26 @@ func _film(what: String) -> void:
 	if what == "start":
 		seat.sim.restart()
 		race.grid()
-		await _frames(20)
+		_seat_camera()
 		for frame in int(9.0 / STEP):
-			var t := maxf(0.0, frame * STEP - 0.8)
+			var t := maxf(0.0, frame * STEP - Race.COUNTDOWN)
 			if t > 0.0:      # (along his own getaway from this line)
 				var away := _his_start(t)
 				_pose_player(away.x, 0.0, away.y)
 			seat._process(STEP)
 			var here: float = float(race.me.s)
-			_outside(here - 75.0, -30.0, 27.0, here + 120.0, 4.0, 1.0)
+			if t > 1.75:
+				_outside(here - 75.0, -30.0, 27.0, here + 120.0, 4.0, 1.0)
 			await process_frame
 			if frame % 4 == 0:
 				await _film_frame(dir, shot)
 				shot += 1
 	elif what == "pass":
-		_seat_camera()
-		var s0 := 36000.0
-		var v0 := 1500.0
-		var p = race.pilots[4]
-		var his: float = race.nominal(race._sample(s0, 0), p.lane)
-		_pose_player(s0, his, v0)
-		race.grid()
-		race.go()
-		await _frames(2)
-		p.s = s0 - 2400.0
-		p.i = race._sample(p.s, 0)
-		p.lat = his
-		p.lat_v = 0.0
-		p.v = p.f_loop * race.env[p.i]
-		p.prog = float(race.me.prog) - 2400.0
-		for frame in int(5.0 / STEP):
-			_pose_player(s0 + v0 * STEP * (frame + 1), his, v0)
-			seat._process(STEP)
+		_duel_grid()
+		for frame in int(8.0 / STEP):
+			_duel_step(frame * STEP)
 			await process_frame
-			if frame % 4 == 0 and frame > int(0.8 / STEP):
+			if frame % 4 == 0:
 				await _film_frame(dir, shot)
 				shot += 1
 	print("RACE_FILM %s: %d frames in %s" % [what, shot, dir])

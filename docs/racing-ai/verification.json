@@ -1,0 +1,157 @@
+{
+  "engine": "Godot 4.7.1 stable, Forward+, NVIDIA RTX 5080",
+  "benchmark": "render_race_pilots.gd --bench; 1600x900 desktop, 120 Hz fixed step, muted. Median and p95 of the last 240 grid/pack frames per configuration. on/off refer to --racers / --no-racers.",
+  "baseline": "06d8c1e",
+  "benchmarks": {
+    "before": {
+      "on": {
+        "grid": {
+          "draw_calls": {
+            "max": 484.0,
+            "p50": 404.0,
+            "p95": 405.0
+          },
+          "frames": 240,
+          "pilots": 5,
+          "primitives": {
+            "max": 1710402.0,
+            "p50": 1598823.0,
+            "p95": 1598943.0
+          },
+          "view_update_ms": {
+            "max": 3.55,
+            "p50": 2.128,
+            "p95": 2.928
+          },
+          "viewport": "(1600, 900)",
+          "viewport_gpu_ms": {
+            "max": 0.883000016212463,
+            "p50": 0.801999986171722,
+            "p95": 0.85699999332428
+          },
+          "what": "grid"
+        },
+        "pack": {
+          "draw_calls": {
+            "max": 484.0,
+            "p50": 396.0,
+            "p95": 404.0
+          },
+          "frames": 240,
+          "pilots": 5,
+          "primitives": {
+            "max": 1711310.0,
+            "p50": 1543451.0,
+            "p95": 1599477.0
+          },
+          "view_update_ms": {
+            "max": 3.441,
+            "p50": 2.448,
+            "p95": 3.098
+          },
+          "viewport": "(1600, 900)",
+          "viewport_gpu_ms": {
+            "max": 0.88400000333786,
+            "p50": 0.787999987602234,
+            "p95": 0.856000006198883
+          },
+          "what": "pack"
+        }
+      },
+      "off": {
+        "grid": {
+          "draw_calls": {
+            "max": 461.0,
+            "p50": 381.0,
+            "p95": 382.0
+          },
+          "frames": 240,
+          "pilots": 0,
+          "primitives": {
+            "max": 1473970.0,
+            "p50": 1362396.0,
+            "p95": 1362516.0
+          },
+          "view_update_ms": {
+            "max": 3.496,
+            "p50": 2.049,
+            "p95": 2.727
+          },
+          "viewport": "(1600, 900)",
+          "viewport_gpu_ms": {
+            "max": 0.845000028610229,
+            "p50": 0.762000024318695,
+            "p95": 0.816999971866608
+          },
+          "what": "grid"
+        },
+        "pack": {
+          "draw_calls": {
+            "max": 461.0,
+            "p50": 375.0,
+            "p95": 381.0
+          },
+          "frames": 240,
+          "pilots": 0,
+          "primitives": {
+            "max": 1474878.0,
+            "p50": 1355232.0,
+            "p95": 1367592.0
+          },
+          "view_update_ms": {
+            "max": 4.713,
+            "p50": 2.53,
+            "p95": 3.867
+          },
+          "viewport": "(1600, 900)",
+          "viewport_gpu_ms": {
+            "max": 0.847000002861023,
+            "p50": 0.758000016212463,
+            "p95": 0.819000005722046
+          },
+          "what": "pack"
+        }
+      }
+    }
+  },
+  "race_step_us": {
+    "before": 32,
+    "after": 36,
+    "limit": 1000
+  },
+  "tests": {
+    "test_course_parity": "COURSE PARITY PASS",
+    "test_eridanus_world": "ERIDANUS WORLD PASS",
+    "test_gp_parity": "GP PARITY PASS",
+    "test_handling_parity": "HANDLING PARITY PASS",
+    "test_job_parity": "JOB PARITY PASS",
+    "test_mode_parity": "MODE PARITY PASS",
+    "test_network_parity": "NETWORK PARITY PASS",
+    "test_network_traffic": "NETWORK TRAFFIC PASS",
+    "test_options": "OPTIONS PASS (16 checks, 0 failures)",
+    "test_parity": "PARITY PASS",
+    "test_partner_player_replay": "PARTNER PLAYER REPLAY PASS",
+    "test_race_pilots": "RACE PILOTS PASS (46 checks, 0 failures)",
+    "test_range_parity": "RANGE PARITY PASS",
+    "test_speed_brakes_parity": "SPEED BRAKES PARITY PASS (64 checks, 0 failures)",
+    "test_sprint_parity": "SPRINT PARITY PASS"
+  },
+  "replay": "PASS a recorded lap of the course (190.83 s, 11452 frames of a pilot's hands) flown with collisions on and the field racing round it: nobody touched it (0 touches; the nearest level with it 23.1 m; they were its sim's obstacles for 1838 frames), and the lap is the same lap flown alone (190.83 s) to the last digit, every frame matching all three bodies in position, planar velocity and heading",
+  "profile_check": "Both seeded vr_prefs.json and game_settings.cfg restored byte-for-byte.",
+  "media": {
+    "start.png": "Cockpit on the default Club grid before green.",
+    "fight.png": "Staged third-place contest on the loop. Real opponent planner and a posed player.",
+    "finish.png": "One-lap Club race, actual recorded sim inputs. The result includes reaction time from green.",
+    "start.mp4": {
+      "frames": 270,
+      "duration_s": 9,
+      "bytes": 4823811
+    },
+    "pass.mp4": {
+      "frames": 240,
+      "duration_s": 8,
+      "bytes": 4269120
+    },
+    "sound": "Both films use the synchronized stereo game mix from Movie Maker."
+  }
+}

@@ -1,24 +1,16 @@
-## The racing pilots of the Eridanus track (Luke, 2026-11-22: "Add AI racing pilots to Eridanus to
-## battle, target is 140 - 150 seconds"). Five craft gridded round the pilot at the start line,
-## each lapping the 199 km course in its own time between 140 and 150 s (his own laps there: a
-## best of 134.9 s, 143.2 s on the night he asked), there to be raced: they hold a line, go by a
-## slower craft with room to spare, cover a craft coming up behind them once, and give way to the
-## pilot rather than touch him.
-##
-## They are not sims. Each follows the course's centre line at a distance along it (`s`), a
-## distance left of it (`lat`) and a speed. The speed is a share of one reference lap's (`env`:
-## the fastest the course's bends, a craft's push and its air brakes allow, the limits read off
-## his own flying), and the share is what sets a pilot's lap time, exactly. Round one another and
-## round him they choose where to be across the road from what is in their way (`_plan`).
-## Touching one is touching traffic: near the pilot each is two of the sim's forcefield obstacles
-## (sim.obstacles: a shove and a 'bump', if obstacle collisions are on), and never at a closing
-## speed that would be a smash.
+## Five kinematic rivals on Eridanus. The grid counts down once the cockpit is ready.
+## Each pilot follows a precomputed speed envelope with its own sector strengths, lap form
+## and passing line. Only low relative velocities can produce forcefields in the player's sim.
+## Crossings are timed from green. The player uses the sim's validated checkpoints. Finishers
+## keep flying, but their elapsed time, best lap and classification are locked at the stripe.
 ##   var r := RacePilots.new(); add_child(r); r.build(view)
 ##   r.update(delta)       every frame, after the sim's steps
 ##   r.page() / r.line()   the pilot's place and the gaps, for the glass and the dash
 ## Tests drive it without a view's frames: r.step(dt), r.player (a stand-in for the pilot).
 extends Node3D
 
+const RaceAudio := preload("res://audio/race_audio.gd")
+const RaceLights := preload("res://view/race_lights.gd")
 const CraftModelScript := preload("res://view/craft_model.gd")
 const Kit := preload("res://view/mesh_kit.gd")
 const GameSettings := preload("res://release/game_settings.gd")
@@ -60,6 +52,7 @@ const EXIT := 100             # samples before the loop a craft is let go in a t
 const LEN := 30.0             # a craft, nose of its engines to its pod's tail, and a little
 const CLEAR := 20.0           # two craft side by side: their middles at least this far apart
 const PASS := 26.0            # ... and this far when one goes by another
+const SIDE_REACH := 2.5 * PASS  # within a few lanes, close enough for a line hold and a spotter call
 const LOOK_S := 2.2           # how far ahead a pilot plans: what it would close on in this long ...
 const LOOK_V := 0.10          # ... and this many seconds of its own speed ...
 const LOOK_NEAR := 60.0       # ... and never less than this far past its own length (m: a craft standing on the grid ahead of it)
@@ -86,7 +79,11 @@ const TANGIBLE_V := 400.0     # a pilot is one of the sim's obstacles only while
 const TANGIBLE_R := 700.0     # ... and within this of the pod
 const DRAW_R := 12000.0       # a pilot further off than this is not drawn ...
 const WHOLE_R := 700.0        # ... and one further off than this is three plain blocks in its colour (a craft's own meshes are 47,000 triangles)
-const GO_V := 3.0             # the pilot moving this fast is the start
+const COUNTDOWN := 3.0
+const PACES := ["club", "expert", "ace"]
+const PACE_SECONDS := [0.0, 5.0, 10.0]
+const DISTANCES := ["3", "5", "1"]
+const RESULT_HOLD := 4.0
 const PAGE_S := 0.25           # the glass's page is written this often, and at once when his place changes (each new one is a picture drawn)
 const PAGE_NEAR := 3.0         # the glass carries the race while a craft is within this many seconds of him ...
 const PAGE_FAR := 4.0          # ... until none is within this many ...
@@ -115,23 +112,65 @@ var reference_lap := 0.0            # the reference lap's time, s (a pilot's pac
 var town_time := 0.0                # ... of which in the towns
 var me := {"s": 0.0, "lat": 0.0, "v": 0.0, "there": false, "prog": 0.0}   # the pilot, as the others see him
 var place := 1                # his place in the race
+var overlap: Pilot
 var ahead := {}               # the craft next ahead of him {name, s (seconds)}; {} none
 var behind := {}              # ... and next behind
 var closest := INF            # tests: the nearest any pilot's middle has come to another craft's while level with it (m)
 var _me_s := -1.0
 var _page := ""
 var _page_t := -1.0
-var _was_started := false
+var _was_finished := false
 var _page_place := 0
 var _page_up := true
 var _changed_at := 0.0
 var _meshes := {}
 var _cands := PackedFloat64Array()
-var _lap_logged := 0
+var lap_limit := 3
+var pace := "club"
+var lights := COUNTDOWN
+var false_start := false
+var entrants: Array = []
+var you := Timing.new()
+var _sim_lap := 0
+var _startup
+var _sound: RaceAudio
+var _bridge: RaceLights
+var approach := PackedFloat64Array()  # metres to the next town, on the loop
 
 
-class Pilot:
+class Timing:
 	var name := ""
+	var prog := 0.0
+	var laps: Array[float] = []
+	var best := INF
+	var finish := INF
+	var lap_t0 := 0.0
+	var last_lap := -1.0
+
+	func reset_time() -> void:
+		laps.clear()
+		best = INF
+		finish = INF
+		lap_t0 = 0.0
+		last_lap = -1.0
+
+	func cross(stamp: float, limit: int) -> void:
+		if is_finite(finish):
+			return
+		last_lap = stamp - lap_t0
+		best = minf(best, last_lap)
+		laps.append(last_lap)
+		lap_t0 = stamp
+		if laps.size() == limit:
+			finish = stamp
+
+
+class Pilot extends Timing:
+	var number := 0
+	var form := 0.0
+	var base_town := 1.0
+	var base_loop := 1.0
+	var alongside := NAN
 	var colour := Color.WHITE
 	var lap_target := 0.0
 	var f_town := 1.0
@@ -144,11 +183,6 @@ class Pilot:
 	var lat_v := 0.0
 	var v := 0.0
 	var target := 0.0
-	var prog := 0.0           # m from the start line since the grid (the race's order)
-	var lap := 0              # laps begun (0 until it first crosses the line)
-	var lap_t0 := -1.0
-	var last_lap := -1.0
-	var laps: Array = []      # its lap times, flying or not
 	var go_at := 0.0
 	var defend := 0.0
 	var defend_t := 0.0
@@ -275,8 +309,19 @@ func read_course(s) -> void:
 		to_loop = 0 if modes[i] == 1 else to_loop + 1
 		power[i] = 1.0 if to_loop <= EXIT else 0.0
 	env.resize(n)
+	approach.resize(n)
+	var distance := 0.0
+	for k in range(2 * n - 1, -1, -1):
+		var i := k % n
+		distance = distance + float(s.tlen[i]) if modes[i] == 1 else 0.0
+		approach[i] = distance
 	for i in n:
 		var cap := V_LOOP if power[i] > 0.5 else V_TOWN
+		# The recorded pilot starts setting up roughly six miles out, is doing ~1,050 m/s
+		# at 4 km and has settled the craft before the town gantry.
+		if modes[i] == 1 and approach[i] < 14500.0:
+			var entry := sqrt(360.0 * 360.0 + 2.0 * 125.0 * approach[i])
+			cap = minf(cap, lerpf(entry, V_LOOP, smoothstep(9000.0, 14500.0, approach[i])))
 		env[i] = minf(cap, sqrt(A_LAT / maxf(absf(kap[i]), 1e-7)))
 	for k in 2 * n:
 		var i := posmod(n - 1 - k, n)
@@ -315,12 +360,18 @@ func lone_lap(f_town: float, f_loop: float, lane: float) -> float:
 	var first := n - 2000
 	var lat := nominal(first, lane)
 	var lat_v := 0.0
+	var speed := env[first] * f_town
 	var t := 0.0
 	for k in range(first, 2 * n):
 		var i := k % n
 		var f := lerpf(f_town, f_loop, mix[i])
 		var v := f * 0.5 * (env[i] + env[(i + 1) % n])
-		var dt: float = sim.tlen[i] * maxf(0.6, 1.0 - kap[i] * lat) / v
+		var ds: float = sim.tlen[i] * maxf(0.6, 1.0 - kap[i] * lat)
+		var accel := push_at(speed, power[i]) * f if v >= speed else -brake(speed)
+		var reachable := sqrt(maxf(1.0, speed * speed + 2.0 * accel * ds))
+		var next := minf(v, reachable) if v >= speed else maxf(v, reachable)
+		var dt := 2.0 * ds / (speed + next)
+		speed = next
 		var limit := LAT_V0 + LAT_VK * v
 		var a := clampf(LAT_K * (nominal(i, lane) - lat) - LAT_C * lat_v, -LAT_A, LAT_A)
 		lat_v = clampf(lat_v + a * dt, -limit, limit)
@@ -345,6 +396,7 @@ func build(v, s = null) -> void:
 	read_course(v.sim if v != null else s)
 	for d: Dictionary in PILOTS:
 		var p := Pilot.new()
+		p.number = pilots.size()
 		p.name = d.name
 		p.colour = d.colour
 		p.lap_target = d.lap
@@ -360,9 +412,23 @@ func build(v, s = null) -> void:
 		t = lone_lap(p.f_town, p.f_loop, p.lane)      # (the line as it will fly it: a few tenths more)
 		p.f_town *= t / p.lap_target
 		p.f_loop *= t / p.lap_target
+		p.base_town = p.f_town
+		p.base_loop = p.f_loop
 		pilots.append(p)
 		if view != null:
 			_build_craft(p)
+	you.name = "YOU"
+	entrants = pilots.duplicate()
+	entrants.append(you)
+	if view != null:
+		_bridge = RaceLights.new()
+		add_child(_bridge)
+		_bridge.build(self)
+		if view.engine_audio != null:
+			_sound = RaceAudio.new()
+			_sound.build(self, pilots.size())
+		if "startup" in view:
+			_startup = view.startup
 	grid()
 	var laps := PackedStringArray()
 	for p: Pilot in pilots:
@@ -372,10 +438,20 @@ func build(v, s = null) -> void:
 
 ## Everyone back on the grid round the pilot's own place (the start line), standing.
 func grid() -> void:
+	if view != null:
+		pace = GameSettings.choice("race_pace", PACES)
+		lap_limit = int(GameSettings.choice("race_laps", DISTANCES))
+	lights = COUNTDOWN
+	if _sound:
+		_sound.reset()
+	false_start = false
+	you.reset_time()
+	you.prog = 0.0
+	_sim_lap = sim.lap
+	sim.obstacles = []  # no stale forcefield can meet the craft on its first step after Y
 	started = false
 	clock = 0.0
 	closest = INF
-	_lap_logged = 0
 	_me_s = -1.0
 	me.prog = 0.0
 	for p: Pilot in pilots:
@@ -386,14 +462,18 @@ func grid() -> void:
 		p.target = p.lat
 		p.v = 0.0
 		p.prog = p.slot.x
-		p.lap = 1 if p.slot.x >= 0.0 else 0
-		p.lap_t0 = -1.0
-		p.last_lap = -1.0
-		p.laps = []
+		p.reset_time()
+		p.alongside = NAN
+		p.lap_target = PILOTS[p.number].lap - PACE_SECONDS[PACES.find(pace)]
+		var scale: float = PILOTS[p.number].lap / p.lap_target
+		p.f_town = p.base_town * scale
+		p.f_loop = p.base_loop * scale
+		_lap_form(p)
 		p.defend = 0.0
 		p.defend_t = 0.0
 		p.defend_cool = 0.0
 		p.push = 0.0
+		p.blocked = false
 		_pose(p)
 	_rank()
 	_page_t = -1.0
@@ -449,14 +529,26 @@ func _read_player() -> void:
 
 func update(delta: float) -> void:
 	step(delta)
+	if _bridge:
+		_bridge.sync(self)
+	if _sound:
+		_sound.sync(self)
 	for p: Pilot in pilots:
 		_draw(p)
 	_feed_obstacles()
 
 
-## The start: they go (the pilot's first move is the start; tests and demos call it themselves).
+## Deterministic per-lap form keeps a rematch reproducible.
+func _lap_form(p: Pilot) -> void:
+	p.form = sin(2.4 * (p.laps.size() + 1) + 1.7 * p.number)
+	if p.number in [0, 4]:
+		p.form *= 0.32  # leave headroom at the edges of the advertised pace band
+## Release on green. Tests and staged pictures can also release the field directly.
 func go() -> void:
 	started = true
+	lights = 0.0
+	if _sound:
+		_sound.green.play()
 	clock = 0.0
 	print("RACE: away, %d pilots and the craft" % pilots.size())
 	for k in pilots.size():
@@ -469,29 +561,35 @@ func go() -> void:
 func step(delta: float) -> void:
 	var dt := clampf(delta, 0.0, 0.05)
 	_read_player()
-	# a restart (the sim's: the lap clock back at nothing, the craft back on the line) is a new grid
-	if started and player.is_empty() and not ghost and sim.lap_start < 0.0 and sim.lap == 0 and absf(me.v) < 1.0 and absf(_gap(0.0, me.s)) < 40.0 and clock > 3.0:
-		grid()
-		_read_player()
 	if not on or dt <= 0.0:
 		return
 	if not started:
-		if ghost or (me.there and absf(me.v) > GO_V):
-			go()
-		else:
-			_rank()
+		_rank()
+		if false_start or (_startup != null and (not _startup.is_hot() or not _startup.message().is_empty())):
 			return
+		if me.there and absf(me.prog) > 6.0:
+			false_start = true
+			return
+		lights = maxf(0.0, lights - dt)
+		if lights > 0.000001:
+			return
+		go()
+		return
 	clock += dt
+	you.prog = me.prog
 	for p: Pilot in pilots:
 		_plan(p, dt)
 	for p: Pilot in pilots:
 		_move(p, dt)
+	if not ghost and not is_finite(you.finish):
+		if player.is_empty():
+			if sim.lap > _sim_lap:
+				you.cross(clock - clampf(sim.time - sim.lap_start, 0.0, dt), lap_limit)
+				_sim_lap = sim.lap
+		elif you.prog >= (you.laps.size() + 1) * length:
+			var over := you.prog - (you.laps.size() + 1) * length
+			you.cross(clock - clampf(over / maxf(me.v, 1.0), 0.0, dt), lap_limit)
 	_rank()
-	# the flight's log: where he stood each time he crossed the line
-	if player.is_empty() and not ghost and int(sim.lap) != _lap_logged:
-		_lap_logged = int(sim.lap)
-		if _lap_logged > 0:
-			print("RACE: lap %d done in %.2f s: %s" % [_lap_logged, float(sim.last_lap), line()])
 
 
 ## Where pilot p wants to be across the road and how fast it may go, from what is round it.
@@ -502,11 +600,13 @@ func _plan(p: Pilot, dt: float) -> void:
 	p.defend_t = maxf(0.0, p.defend_t - dt)
 	if p.defend_t <= 0.0:
 		p.defend = 0.0
-	var line := nominal(i, p.lane)
-	if p.lap <= 1 and clock - p.go_at < START_SETTLE and p.prog < 4000.0:      # off the grid: its own lane first
+	# A wide exit costs road and time. The same rival also has stronger and weaker laps.
+	var line := nominal(i, p.lane) * (1.0 - 0.13 * maxf(0.0, p.form) * (1.0 - mix[i]))
+	if p.laps.is_empty() and clock - p.go_at < START_SETTLE and p.prog < 4000.0:      # off the grid: its own lane first
 		line = lerpf(p.slot.y, line, smoothstep(START_HOLD, START_SETTLE, clock - p.go_at))
 	var nom := clampf(line + p.defend, -use, use)
 	var cap := INF
+	var door_to_door := false
 	var horizon0 := LEN + maxf(LOOK_NEAR, LOOK_V * p.v)
 	# the craft in its window: beside it, or ahead within what it plans for
 	_cands.resize(0)        # [lat, gap, v] of each
@@ -529,6 +629,15 @@ func _plan(p: Pilot, dt: float) -> void:
 			q_v = me.v
 			clear = CLEAR + 4.0     # (him: more room, he is not following a plan)
 		var gap := _gap(p.s, q_s)
+		if k == pilots.size() and absf(gap) < LEN + BEHIND and absf(q_v - p.v) < YIELD_V and absf(p.lat - q_lat) <= SIDE_REACH:
+			# An overlap owns a lane. Keep our lateral position while there is room;
+			# the clearance search below still takes evasive action if squeezed.
+			door_to_door = true
+			if is_nan(p.alongside):
+				p.alongside = p.lat
+			nom = clampf(p.alongside, -use, use)
+			p.defend = 0.0
+			p.defend_t = 0.0
 		var gaining := q_v - p.v        # (of one behind: how fast it is coming)
 		if gap < -(LEN + BEHIND) - maxf(DEFEND_REACH * p.v, gaining * YIELD_S) or gap > horizon0 + maxf(0.0, p.v - q_v) * LOOK_S:
 			continue
@@ -555,6 +664,8 @@ func _plan(p: Pilot, dt: float) -> void:
 		_cands.append(clear)
 		if absf(gap) < LEN:
 			closest = minf(closest, absf(q_lat - p.lat))
+	if not door_to_door:
+		p.alongside = NAN
 	var m := _cands.size() / 4
 	var escape := NAN
 	p.blocked = false
@@ -609,6 +720,11 @@ func _plan(p: Pilot, dt: float) -> void:
 	var u := clampf((p.s - cum[i]) / maxf(1e-6, cum[i + 1] - cum[i]), 0.0, 1.0)
 	var j := (i + 1) % n
 	var f := lerpf(p.f_town, p.f_loop, lerpf(mix[i], mix[j], u))
+	# Across sectors form can be felt through the setup and exit. A whole lap only
+	# drifts a few tenths; a stronger rival never gets a boost for falling behind.
+	f *= 1.0 + p.form * (0.002 + 0.018 * (1.0 - mix[i]) - 0.009 * mix[i])
+	if approach[i] > 0.0 and approach[i] < 12000.0:
+		f *= 1.0 + 0.035 * p.form * sin(PI * approach[i] / 12000.0)
 	var want := minf(f * lerpf(env[i], env[j], u), cap)
 	if clock < p.go_at:
 		want = 0.0
@@ -635,11 +751,10 @@ func _move(p: Pilot, dt: float) -> void:
 	if p.s >= length:
 		p.s -= length
 		p.i = 0
-		if p.lap_t0 >= 0.0:
-			p.last_lap = clock - p.lap_t0
-			p.laps.append(p.last_lap)
-		p.lap_t0 = clock
-		p.lap += 1
+		# Rear rows cross the stripe once just leaving the grid.
+		if p.prog >= length * 0.5 and not is_finite(p.finish):
+			p.cross(clock - dt * p.s / ds, lap_limit)
+			_lap_form(p)
 	p.i = _sample(p.s, p.i)
 	_pose(p)
 
@@ -665,6 +780,7 @@ func _pose(p: Pilot) -> void:
 
 
 func _rank() -> void:
+	overlap = null
 	place = 1
 	ahead = {}
 	behind = {}
@@ -673,7 +789,14 @@ func _rank() -> void:
 	var near_up := INF
 	var near_down := INF
 	for p: Pilot in pilots:
+		if is_finite(you.finish):
+			if p.finish <= you.finish:
+				place += 1
+			continue
 		var d: float = p.prog - float(me.prog)
+		if absf(d) < LEN + BEHIND and absf(p.v - me.v) < YIELD_V and absf(p.lat - me.lat) <= SIDE_REACH and clock > START_SETTLE:
+			if overlap == null or absf(d) < absf(overlap.prog - me.prog):
+				overlap = p
 		if d > 0.0:
 			place += 1
 			if d < near_up:
@@ -694,39 +817,88 @@ static func _gap_text(g: Dictionary) -> String:
 	return "%s  %d S" % [g.name, roundi(float(g.s))]
 
 
-## The glass's page (the checklist's three lines: "ACTION  COUNT", "WHERE > WHAT", "NOTE | STATUS").
+## Finish times sort before any unfinished craft. Exact ties use the roster order.
+func _classified(a: Timing, b: Timing) -> bool:
+	if a.finish != b.finish:
+		return a.finish < b.finish
+	return a.prog > b.prog if not is_finite(a.finish) else entrants.find(a) < entrants.find(b)
+
+
+static func _time(seconds: float) -> String:
+	var cs := roundi(seconds * 100.0)
+	return "%d:%02d.%02d" % [cs / 6000, (cs / 100) % 60, cs % 100]
+
+
+## One result per page fits the glass. Unfinished craft have no gap until they cross.
+func _result_page() -> String:
+	var ranked := entrants.duplicate()
+	ranked.sort_custom(_classified)
+	var elapsed := clock - you.finish
+	var row: int = ranked.find(you) if elapsed < RESULT_HOLD else int((elapsed - RESULT_HOLD) / RESULT_HOLD) % ranked.size()
+	var entry: Timing = ranked[row]
+	var gap := "ON COURSE"
+	if is_finite(entry.finish):
+		gap = _time(entry.finish) if row == 0 else "+%.2f S" % (entry.finish - ranked[0].finish)
+	var best := _time(entry.best) if is_finite(entry.best) else "--"
+	return "FINISH  P%d / %d\n%d  %s   %s\nBEST  %s | Y: AGAIN" % [place, ranked.size(), row + 1, entry.name, gap, best]
+
+
+func calls_glass() -> bool:
+	return not started or clock < 1.3 or is_finite(you.finish) or (not you.laps.is_empty() and clock - you.lap_t0 < RESULT_HOLD)
+
+
 func page() -> String:
 	if not me.there:
 		return ""
-	if _page_t >= 0.0 and (not started or clock - _page_t < PAGE_S) and _was_started == started and _page_place == place:
+	if false_start:
+		return "REGRID  EARLY START\nRETURN TO THE START LINE\nTAP Y TO RESTART | GRID"
+	if not started:
+		return "GRID  %d / %d\n%s   /   %d LAPS\nSTART IN   %d | HOLD" % [place, entrants.size(), pace.to_upper(), lap_limit, ceili(lights)]
+	if _page_t >= 0.0 and clock - _page_t < PAGE_S and _page_place == place and _was_finished == is_finite(you.finish):
 		return _page
-	if _page_place != place or _was_started != started:
+	if _page_place != place:
 		_changed_at = clock
 	_page_t = clock
-	_was_started = started
 	_page_place = place
-	var field := pilots.size() + 1
-	# alone on the road the glass is clear: the race is on it when there is one to read
-	var nearest := minf(float(ahead.get("s", INF)), float(behind.get("s", INF)))
-	_page_up = not started or clock - _changed_at < PAGE_CHANGE or nearest <= (PAGE_FAR if _page_up else PAGE_NEAR)
-	if not _page_up:
-		_page = ""
-		return _page
-	if not started:
-		_page = "GRID  %d / %d\nSTART LINE > THEY GO WHEN YOU GO\n%s AHEAD | READY" % [place, field, "NOBODY" if ahead.is_empty() else String(ahead.name)]
+	_was_finished = is_finite(you.finish)
+	if is_finite(you.finish):
+		_page = _result_page()
+	elif not you.laps.is_empty() and clock - you.lap_t0 < RESULT_HOLD:
+		var title := "FINAL LAP" if you.laps.size() + 1 == lap_limit else "LAP"
+		_page = "%s  %d / %d\nLAST LAP   %s\nBEST   %s | P%d" % [title, you.laps.size() + 1, lap_limit, _time(you.last_lap), _time(you.best), place]
+	elif overlap != null:
+		var side := "LEFT" if overlap.lat > me.lat else "RIGHT"
+		_page = "PLACE  %d / %d\n%s ALONGSIDE %s\nHOLD YOUR LINE | %d / %d" % [place, entrants.size(), overlap.name, side, you.laps.size() + 1, lap_limit]
+	elif clock < 1.3:
+		_page = "GREEN  GO\nERIDANUS   /   LAP 1 OF %d\nRACE LIVE | READY" % lap_limit
 	else:
-		_page = "PLACE  %d / %d\nAHEAD > %s\nBEHIND  %s | LAP %d" % [place, field, _gap_text(ahead), _gap_text(behind), int(sim.lap) + 1]
+		var nearest := minf(float(ahead.get("s", INF)), float(behind.get("s", INF)))
+		_page_up = clock - _changed_at < PAGE_CHANGE or nearest <= (PAGE_FAR if _page_up else PAGE_NEAR)
+		_page = "PLACE  %d / %d\nAHEAD > %s\nBEHIND  %s | %d / %d" % [place, entrants.size(), _gap_text(ahead), _gap_text(behind), you.laps.size() + 1, lap_limit] if _page_up else ""
 	return _page
 
 
-## The same in a line, for a dash or a flat screen.
 func line() -> String:
 	if not me.there:
 		return ""
-	var field := pilots.size() + 1
+	if false_start:
+		return "FALSE START   RESTART TO REGRID"
 	if not started:
-		return "GRID %d OF %d   THEY GO WHEN YOU GO" % [place, field]
-	return "P%d OF %d   AHEAD %s   BEHIND %s" % [place, field, _gap_text(ahead), _gap_text(behind)]
+		return "GRID %d OF %d   START IN %d" % [place, entrants.size(), ceili(lights)]
+	if is_finite(you.finish):
+		return "FINISH P%d OF %d   %s   BEST %s   RESTART TO RACE AGAIN" % [place, entrants.size(), _time(you.finish), _time(you.best)]
+	return "P%d OF %d   LAP %d/%d   AHEAD %s   BEHIND %s" % [place, entrants.size(), you.laps.size() + 1, lap_limit, _gap_text(ahead), _gap_text(behind)]
+
+
+func menu_rows() -> Array:
+	return [{"key": "race_pace", "label": "NEXT RACE PACE", "value": GameSettings.choice("race_pace", PACES).to_upper()},
+		{"key": "race_laps", "label": "NEXT RACE LAPS", "value": GameSettings.choice("race_laps", DISTANCES)}]
+
+
+func next_setting(key: String) -> void:
+	var choices := PACES if key == "race_pace" else DISTANCES
+	var index := choices.find(GameSettings.choice(key, choices))
+	GameSettings.set_choice(key, choices[(index + 1) % choices.size()])
 
 
 ## For the map: each pilot as the Network's racer is marked ([x, y, 4]).
