@@ -34,12 +34,12 @@ def label(d, at, words, size, ink, mono=False):
     d.bitmap((round(at[0] + left * scale), round(at[1] + top)), mask, fill=ink)
 
 
-def brake_card():
-    im, d = card("#172027")
+def brake_card(lamps=False):
+    im, d = card("black" if lamps else "#172027")
     white, red = "#e6e7e2", "#ff6847"
-    d.rectangle((0, 0, 20, 512), fill=red)
+    d.rectangle((0, 0, 20, 512), fill="black" if lamps else red)
     label(d, (264, 73), "BRAKE BIAS", 58, white)
-    d.line((41, 135, 473, 135), fill="#626f74", width=3)
+    d.line((41, 135, 473, 135), fill="black" if lamps else "#626f74", width=3)
     # The physical cursor travels from 13 to 87 percent of the card's width.
     for i in range(21):
         x = round(512 * (.13 + .74*i/20))
@@ -51,8 +51,8 @@ def brake_card():
     return im
 
 
-def compass_card():
-    im, d = card("#183537")
+def compass_card(lamps=False):
+    im, d = card("black" if lamps else "#183537")
     gold, paper = "#d0a669", "#f2e5c6"
     for r in [236, 229, 163]:
         d.ellipse((256-r, 256-r, 256+r, 256+r), outline=gold, width=3)
@@ -72,25 +72,26 @@ def compass_card():
     return im
 
 
-def load_card():
-    im, d = card("#e4d7b9")
+def load_card(lamps=False):
+    im, d = card("black" if lamps else "#e4d7b9")
     black, orange = "#24292a", "#aa3b22"
-    d.rectangle((0, 0, 512, 101), fill=black)
+    ink = "#b9a986" if lamps else black
+    d.rectangle((0, 0, 512, 101), fill="black" if lamps else black)
     label(d, (256, 52), "DRAWBAR LOAD", 46, "#f3ddaf")
     for y, name in [(222, "L"), (351, "R")]:
-        label(d, (49, y), name, 61, black)
-        d.rounded_rectangle((88,y-21,447,y+21), radius=8, fill=black)
+        label(d, (49, y), name, 61, ink)
+        d.rounded_rectangle((88,y-21,447,y+21), radius=8, fill="black" if lamps else black)
         for i in range(11):
             x = 99 + round(335*i/10)
-            d.line((x, y-26, x, y-43 if i%5==0 else y-35), fill=black, width=4)
+            d.line((x, y-26, x, y-43 if i%5==0 else y-35), fill=ink, width=4)
         d.rectangle((375,y-18,436,y+18), fill=orange)
-    label(d, (101, 445), "0", 37, black, True)
-    label(d, (399, 445), "100%", 37, black, True)
+    label(d, (101, 445), "0", 37, ink, True)
+    label(d, (399, 445), "100%", 37, ink, True)
     return im
 
 
-def slip_card():
-    im, d = card("#201c33")
+def slip_card(lamps=False):
+    im, d = card("black" if lamps else "#201c33")
     lilac, white = "#b49aff", "#f2f1ff"
     label(d, (256, 74), "LATERAL G", 57, white)
     path = []
@@ -107,7 +108,8 @@ def slip_card():
 
 
 if __name__ == "__main__":
-    atlas = Image.new("RGB", (1024, 1024))
-    for i, tile in enumerate([brake_card(), compass_card(), load_card(), slip_card()]):
-        atlas.paste(tile, (i % 2 * TILE, i // 2 * TILE))
-    atlas.save(DEST, optimize=True)
+    for lamps, output in [(False, DEST), (True, DEST.with_name("cockpit_meter_lamps.png"))]:
+        atlas = Image.new("RGB", (1024, 1024))
+        for i, draw_card in enumerate([brake_card, compass_card, load_card, slip_card]):
+            atlas.paste(draw_card(lamps), (i % 2 * TILE, i // 2 * TILE))
+        atlas.save(output, optimize=True)

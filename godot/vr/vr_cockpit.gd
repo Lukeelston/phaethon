@@ -2116,10 +2116,11 @@ func _update_hud() -> void:
 		tow_meter.set_shader_parameter("loads", Vector2(craft.cable_strain[0], craft.cable_strain[1]))
 	_read_g()
 	var brakes := _shown_brakes()
+	var panel_level := lerpf(1.0, 0.5, maxf(1.0 if light_preset == "twilight" else 0.0, Outlook.darkness()))
 	if aux_meter:
-		aux_meter.sync(sim.pod.th, brakes, craft.cable_strain, g_turn, startup.power)
+		aux_meter.sync(sim.pod.th, brakes, craft.cable_strain, g_turn, startup.power, panel_level)
 	dashboard.show_state({
-		"mph": kmh / 1.609344, "kmh": kmh, "mach": cues.mach, "backlight": lerpf(1.0, 0.5, maxf(1.0 if light_preset == "twilight" else 0.0, Outlook.darkness())), "mach_line": cues.readout() + boost_text() + autopilot.suffix(), "progress": progress,
+		"mph": kmh / 1.609344, "kmh": kmh, "mach": cues.mach, "backlight": panel_level, "mach_line": cues.readout() + boost_text() + autopilot.suffix(), "progress": progress,
 		"footer": "%s   /   %s" % [handling_text(), ctl],
 		"points": int(_skill_shown.get("points", 0)) if _skill_on else 0, "feat": String(_skill_shown.get("award", "")) if _skill_on else "", "feat_age": float(_skill_shown.get("age", 1e9)),
 		"thr": [inp.thrL * startup.engine_k(0), inp.thrR * startup.engine_k(1)],

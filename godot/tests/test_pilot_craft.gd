@@ -170,6 +170,16 @@ func check_flight_deck(game, id: String) -> void:
 	for i in meter.cursors.size():
 		check(id + " live indicator responds " + str(i), not meter.cursors[i].transform.is_equal_approx(before[i]))
 	check(id + " restores its instrument lighting", meter.card_material.emission_energy_multiplier > .1)
+	var previous_light: String = game.light_preset
+	for preset in ["afternoon", "twilight"]:
+		game.light_preset = preset
+		game._update_hud()
+		check("%s auxiliary illumination matches the main panel at %s" % [id, preset],
+				is_equal_approx(meter.card_material.emission_energy_multiplier, cluster.lamps.backlight.a))
+	game.light_preset = previous_light
+	game._update_hud()
+	check(id + " lights the printed graduations separately from the card stock",
+			meter.card_material.emission_texture != null and meter.card_material.emission_texture != meter.card_material.albedo_texture)
 	if id == Sim.PilotCraft.KILN:
 		meter.sync(0,[0,0],[1,1],0,1)
 		check("load pointers can respond independently", meter.cursors[0].position.x > .05

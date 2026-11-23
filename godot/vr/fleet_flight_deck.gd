@@ -112,38 +112,58 @@ func _arc(x: float, y: float, z: float) -> Vector3:
 	return Kit.on_arc(x, y, z, Layout.R).origin
 
 
-## Sweep a solid panel through vertical sections (arc x, bottom, top). The two narrow
-## edge bands turn back into the face, so the edges catch light when seen from the seat.
+## Clockwise triangles with a separate lighting normal at each corner. This keeps a
+## highlight continuous across the little segments of a rolled lip.
+func _smooth_quad(st: SurfaceTool, points: Array, normals: Array) -> void:
+	var order := [0, 2, 1, 0, 3, 2]
+	if (points[1] - points[0]).cross(points[2] - points[0]).dot(normals[0]) < 0:
+		order = [0, 1, 2, 0, 2, 3]
+	for i in order:
+		st.set_normal(normals[i])
+		st.add_vertex(points[i])
+
+
 func _profile(stations: Array, depth: float, colour: Color, thickness := .032) -> void:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	# The port sprint rack is authored from inboard out, in the opposite direction.
+	var ordered := stations.duplicate()
+	if ordered.front().x > ordered.back().x:
+		ordered.reverse()
 	var previous: Array[Vector3] = []
-	for s: Vector3 in stations:
+	var previous_normals: Array[Vector3] = []
+	for k in ordered.size():
+		var station: Vector3 = ordered[k]
+		var tangent: Vector3 = ordered[mini(k + 1, ordered.size() - 1)] - ordered[maxi(k - 1, 0)]
+		var frame := Kit.on_arc(station.x, 0, depth, Layout.R)
 		var ring: Array[Vector3] = []
-		for yz in [
-			Vector2(s.y, depth - .003),
-			Vector2(s.y + .004, depth),
-			Vector2(s.z - .004, depth),
-			Vector2(s.z, depth - .003),
-			Vector2(s.z, depth - thickness),
-			Vector2(s.y, depth - thickness)
-		]:
-			ring.append(_arc(s.x, yz.x, yz.y))
+		var normals: Array[Vector3] = []
+		var radius := minf(.004, (station.z - station.y) * .24)
+		# Start on the lower back edge and travel round the face to the upper back.
+		for side: float in [-1.0, 1.0]:
+			var height := station.y if side < 0 else station.z
+			var slope := (tangent.y if side < 0 else tangent.z) / tangent.x
+			var edge := (Vector3(-slope, 1, 0) * side).normalized()
+			for step in 5:
+				var index := step if side < 0 else 4 - step
+				var angle := PI * .5 * maxf(index - 1, 0) / 3
+				var y := height - side * radius * (1 - cos(angle))
+				var z := depth - thickness if index == 0 else depth - radius + radius * sin(angle)
+				ring.append(_arc(station.x, y, z))
+				normals.append((frame.basis * (edge * cos(angle) + FRONT * sin(angle))).normalized())
 		if not previous.is_empty():
-			var normals := [Vector3(0, -1, 1), FRONT, Vector3(0, 1, 1), Vector3.UP, -FRONT, Vector3.DOWN]
-			for i in ring.size():
-				var j := (i + 1) % ring.size()
-				Finish._quad(st, previous[i], ring[i], ring[j], previous[j], normals[i])
-		if s == stations.front() or s == stations.back():
+			for i in ring.size() - 1:
+				var j := i + 1
+				_smooth_quad(st, [previous[i], ring[i], ring[j], previous[j]],
+					[previous_normals[i], normals[i], normals[j], previous_normals[j]])
+			Finish._quad(st, previous.back(), ring.back(), ring.front(), previous.front(), -frame.basis.z)
+		if k == 0 or k == ordered.size() - 1:
 			for i in range(1, ring.size() - 1):
-				Finish._triangle(
-					st, ring[0], ring[i], ring[i + 1], Vector3.LEFT if previous.is_empty() else Vector3.RIGHT
-				)
+				Finish._triangle(st, ring[0], ring[i], ring[i + 1], frame.basis.x * (-1 if k == 0 else 1))
 		previous = ring
-	if id == P.ORRERY:
-		panels.append([st.commit(), Transform3D.IDENTITY, colour])
-	else:
-		facing.append([st.commit(), Transform3D.IDENTITY, colour])
+		previous_normals = normals
+	var parts := panels if id == P.ORRERY else facing
+	parts.append([st.commit(), Transform3D.IDENTITY, colour])
 
 
 func _line(stations: Array, z: float, radius: float, colour: Color) -> void:
@@ -160,32 +180,45 @@ func _dial(g: Dictionary) -> void:
 		Vector2(g.rf * .985, g.face - .001),
 		Vector2(g.rf * 1.01, g.face + .002),
 		Vector2(g.rg - .001, g.mouth - Layout.SEAT),
-		Vector2(g.rg, g.mouth - .003),
-		Vector2(g.ro - .001, g.mouth),
-		Vector2(g.ro, g.mouth - .0035),
+		Vector2(g.rg, g.mouth - .0024),
+		Vector2(g.rg + .0006, g.mouth - .0008),
+		Vector2(g.rg + .0020, g.mouth),
+		Vector2(g.ro - .0020, g.mouth),
+		Vector2(g.ro - .0006, g.mouth - .0007),
+		Vector2(g.ro, g.mouth - .0021),
 		Vector2(g.ro, -.014)
 	]
 	var dark := SurfaceTool.new()
 	var metal := SurfaceTool.new()
 	dark.begin(Mesh.PRIMITIVE_TRIANGLES)
 	metal.begin(Mesh.PRIMITIVE_TRIANGLES)
+	const SEGMENTS := 56
+	var circle := PackedVector3Array()
+	for j in SEGMENTS:
+		var angle := TAU * j / SEGMENTS
+		circle.append(Vector3(cos(angle), sin(angle), 0))
+	circle.append(circle[0])
 	for i in section.size() - 1:
 		var a: Vector2 = section[i]
 		var b: Vector2 = section[i + 1]
-		for j in 56:
-			var t := TAU * j / 56.0
-			var u := TAU * (j + 1) / 56.0
-			var va := Vector3(cos(t), sin(t), 0)
-			var vb := Vector3(cos(u), sin(u), 0)
-			var normal := (va + vb).normalized() * (a.y - b.y) + FRONT * (b.x - a.x)
-			Finish._quad(
-				metal if i in [3, 4] else dark,
-				va * a.x + FRONT * a.y,
-				vb * a.x + FRONT * a.y,
-				vb * b.x + FRONT * b.y,
-				va * b.x + FRONT * b.y,
-				normal
-			)
+		# Adjacent bands share a tangent at each ring, including across the metal/paint seam.
+		var before: Vector2 = section[maxi(0, i - 1)]
+		var after: Vector2 = section[mini(section.size() - 1, i + 2)]
+		var along := a.direction_to(b)
+		var start_tangent := (before.direction_to(a) + along).normalized()
+		var end_tangent := (along + b.direction_to(after)).normalized()
+		var surface := metal if i >= 3 and i < section.size() - 2 else dark
+		for j in SEGMENTS:
+			var left := circle[j]
+			var right := circle[j + 1]
+			_smooth_quad(surface,
+				[left * a.x + FRONT * a.y, right * a.x + FRONT * a.y,
+				 right * b.x + FRONT * b.y, left * b.x + FRONT * b.y],
+				[FRONT * start_tangent.x - left * start_tangent.y,
+				 FRONT * start_tangent.x - right * start_tangent.y,
+				 FRONT * end_tangent.x - right * end_tangent.y,
+				 FRONT * end_tangent.x - left * end_tangent.y])
+
 	panels.append([dark.commit(), frame, INK])
 	trim.append([metal.commit(), frame, accent if id in [P.ORRERY, P.VESPER] else STEEL])
 	# Hub over the two needle roots.

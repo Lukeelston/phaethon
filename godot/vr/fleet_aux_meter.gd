@@ -41,7 +41,7 @@ func build(deck, eye: Vector3) -> void:
 		var h := card_size.y
 		_piece(
 			self,
-			Finish.beveled_plate(Vector3(w + .022, .045, h + .024), .007),
+			Kit.rounded_box(Vector3(w + .022, .045, h + .024), 12.0, 20),
 			body,
 			Kit.at(Vector3(0, 0, -.024), face_up)
 		).name = "Case"
@@ -64,7 +64,8 @@ func build(deck, eye: Vector3) -> void:
 	card_material = StandardMaterial3D.new()
 	card_material.albedo_texture = preload("res://art/pilot_fleet/cockpit_meters.png")
 	card_material.emission_enabled = true
-	card_material.emission_texture = card_material.albedo_texture
+	card_material.emission_texture = preload("res://art/pilot_fleet/cockpit_meter_lamps.png")
+	card_material.emission_energy_multiplier = 0.0
 	card_material.roughness = .72
 	card_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
 	_piece(self, _card_mesh(CARDS.find(id), round_case), card_material).name = "PrintedCard"
@@ -117,8 +118,8 @@ func _kite(half_width: float, tip: float, tail: float) -> ArrayMesh:
 	return st.commit()
 
 
-func sync(heading: float, brakes: Array, strain: Array, side_g: float, power: float) -> void:
-	var backlight := .38 * clampf(power, 0, 1)
+func sync(heading: float, brakes: Array, strain: Array, side_g: float, power: float, panel_level := 1.0) -> void:
+	var backlight := clampf(power, 0, 1) * panel_level
 	if not is_equal_approx(card_material.emission_energy_multiplier, backlight):
 		card_material.emission_energy_multiplier = backlight
 	var cursor := cursors[0]
