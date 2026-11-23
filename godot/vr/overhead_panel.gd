@@ -8,7 +8,7 @@
 ##                          is cold: the one thing alight in a dark cockpit.
 ##               2 ENGINE   the same toggle under a red guard, hinged along its top. Lift the guard
 ##                          (a flick up), then throw the switch. The guard falls shut by itself.
-##   right pod   3 START    a broad red button in a ring of two dozen lights (vr/start_ring.gdshader):
+##   right pod   3 START    a broad red button in a ring of two dozen lights (view/start_ring.gdshader):
 ##                          dark without power, breathing amber when a start is on offer, filling
 ##                          clockwise as the engines turn over and catch, green once both run.
 ##               4 PARK     a toggle with a broad yellow paddle: up is set, down is released.
@@ -32,7 +32,7 @@ class_name OverheadPanel
 extends Node3D
 
 const Outlook := preload("res://view/outlook.gd")
-const Ring := preload("res://vr/start_ring.gdshader")
+const Ring := preload("res://view/start_ring.gdshader")
 const FinishShader := preload("res://vr/panel_finish.gdshader")
 const HD := "res://art/cockpit/start_panel_hd.glb"
 const EYE := Vector3(0.0, 0.12, 0.6)            # the seated eye, canopy space (view/approach_projector.gd EYE)
