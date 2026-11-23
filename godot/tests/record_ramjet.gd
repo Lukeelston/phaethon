@@ -2,7 +2,7 @@
 ## boost and back, so the engine's movie writer records what the game itself plays (engines, wind and field,
 ## mixed as a pilot gets them). The picture is the seat's, small; the sound is the point. Run windowed:
 ## --xr-mode off --resolution 320x180 --fixed-fps 120 --write-movie FILE.avi
-## -s res://tests/record_ramjet.gd -- --out=DIR [--plan=run|hold] [--from=MPH] [--mph=MPH] [--solo=ramjet]
+## -s res://tests/record_ramjet.gd -- --out=DIR [--plan=run|hold|layers] [--from=MPH] [--mph=MPH] [--solo=ramjet]
 ## and take the sound out of the film (ffmpeg -i FILE.avi -vn FILE.wav). No --mute.
 ## The craft is flown as the headset's trigger scheme flies it (input/quest_controls.gd's own gearbox, fourth
 ## gear, both triggers fully in, the burner lit from the left stick, the levers under the gate), because that
@@ -10,6 +10,7 @@
 ##   --plan=run   one flight: held at --from (3,000 mph) in fourth gear dry and then on the burner; from the
 ##                moment the ramjet is armed the speed is the sim's own (fourth has no top speed: it climbs for as
 ##                long as it is held); the boost held three seconds, disarmed, the burner out.
+##   --plan=layers  the ramjet lit at --mph and each of the engines' layers alone in turn (wind and field muted)
 ##   --plan=hold  the same stages with the craft's speed pinned at --mph each frame, for measuring the mix's
 ##                loudness at one speed (the sim still steps: mode, boost and the gearbox are its own).
 ## REC lines give the time of each stage from the start of the film's sound; RECT lines the speed, the mode
@@ -111,11 +112,11 @@ func _run() -> void:
 		push_error("Pass --out= and a writable directory.")
 		quit(1)
 		return
-	if plan == "hold" and pin_mph <= 0.0:
-		push_error("--plan=hold wants --mph=.")
+	if plan in ["hold", "layers"] and pin_mph <= 0.0:
+		push_error("--plan=hold and --plan=layers want --mph=.")
 		quit(1)
 		return
-	if plan != "hold":
+	if plan == "run":
 		pin_mph = from_mph        # (let go when the ramjet is armed)
 	Seat._nose_loaded = true        # (the pilot's saved choices stay out of it)
 	Seat._camera_loaded = true
@@ -133,19 +134,22 @@ func _run() -> void:
 		push_error("This needs a monoscopic viewport and sound (no --mute).")
 		quit(1)
 		return
+	var engines_only := plan == "layers"
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--solo="):      # one of the engines' layers alone ("ramjet": its voice), the wind and the field muted
 			seat.engine_audio.solo = arg.trim_prefix("--solo=")
-			for bus: String in ["Wind", "Field", "Boom"]:
-				if AudioServer.get_bus_index(bus) >= 0:
-					AudioServer.set_bus_mute(AudioServer.get_bus_index(bus), true)
+			engines_only = true
+	if engines_only:
+		for bus: String in ["Wind", "Field", "Boom"]:
+			if AudioServer.get_bus_index(bus) >= 0:
+				AudioServer.set_bus_mute(AudioServer.get_bus_index(bus), true)
 	quest = Quest.new()
 	quest.set_gear(Quest.GEARS.size() - 1)
 	_set_speed(pin_mph if pin_mph > 0.0 else from_mph)
 	# the lead-in: the engines spool, the second engine catches, the field seals, the turbines come in (not part of
 	# the recording's count). A hold is on the burner before it begins, so its first stretch is a settled one.
-	burner_want = plan == "hold"
-	for f in roundi((8.0 if plan == "hold" else 4.0) / STEP):
+	burner_want = plan != "run"
+	for f in roundi((4.0 if plan == "run" else 8.0) / STEP):
 		await _tick()
 	print("REC_BEGIN %.3f" % clock)
 	var zero := clock
@@ -163,6 +167,16 @@ func _run() -> void:
 		await _for(2.0, "the boost let go")
 		seat.sim.armed = false
 		await _for(7.0, "disarmed: the burner again")
+	elif plan == "layers":
+		# what each of the engines' layers puts into the mix on the ramjet at this speed: each alone for three
+		# seconds (the limiters are idle on one layer, so these are the levels they are mixed at)
+		seat.sim.armed = true
+		await _for(4.0, "the ramjet armed: all the engines' layers, speed pinned at %.0f mph" % pin_mph)
+		for layer: String in ["v8", "v12", "turbine", "roar", "burner", "second", "rotor", "ramjet", "ramtear"]:
+			seat.engine_audio.solo = layer
+			await _for(3.0, "alone: %s" % layer)
+		seat.engine_audio.solo = ""
+		await _for(4.0, "all the engines' layers again")
 	else:
 		await _for(2.0, "fourth gear, both triggers in, no burner, held at %.0f mph" % from_mph)
 		burner_want = true

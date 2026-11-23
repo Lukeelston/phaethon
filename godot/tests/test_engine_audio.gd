@@ -44,7 +44,7 @@ var end_t := END
 var t := 0.0
 var acc := 0.0
 var log_t := 0.0
-var rows := PackedStringArray(["t,thrL,thrR,mode,outL,outR,sL,sR,v8L,v8R,v12L,v12R,turbL,turbR,mph,secL,secR,secStL,secStR,rotL,rotR,popsL,popsR,secSpL,stage,ramOn,boost,ramL,ramR,ramDb,ramScreamDb,ramAt,ramScreamAt,ramLit,ramOuts,burn"])
+var rows := PackedStringArray(["t,thrL,thrR,mode,outL,outR,sL,sR,v8L,v8R,v12L,v12R,turbL,turbR,mph,secL,secR,secStL,secStR,rotL,rotR,popsL,popsR,secSpL,stage,ramOn,boost,ramL,ramR,ramDb,ramTearDb,ramAt,ramTearAt,ramLit,ramOuts,burn"])
 var started := false
 var clock: AudioStreamPlayer
 
@@ -199,7 +199,7 @@ func _process(_delta: float) -> bool:
 			mph, vl.at.second, vr.at.second,
 			EngineAudioScript.SECOND_STATES.find(vl.sec.state), EngineAudioScript.SECOND_STATES.find(vr.sec.state),
 			vl.at.rotor, vr.at.rotor, vl.pops_n, vr.pops_n, vl.sec.spool, audio.stage,
-			int(sim.mode == "ramjet"), int(sim.boost), vl.ram, vr.ram, vl.ram_db[0], vl.ram_db[1], vl.at.ramjet, vl.at.ramscream,
+			int(sim.mode == "ramjet"), int(sim.boost), vl.ram, vr.ram, vl.ram_db[0], vl.ram_db[1], vl.at.ramjet, vl.at.ramtear,
 			vl.ram_n, vl.ram_outs, vl.burn])
 	if t < end_t:
 		return false

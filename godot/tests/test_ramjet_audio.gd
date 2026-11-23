@@ -1,6 +1,6 @@
 ## The ramjet's own voice (audio/engine_audio.gd), stepped through the sim on the range: nothing of it off
 ## the ramjet (its loops paused, the burner's rumble what it was), the catch as it lights (a shot an engine, the
-## loops straight in and over their mark), the speed followed (the scream more than the roar, both played
+## loops straight in and over their mark), the speed followed (the tear more than the roar, both played
 ## faster), the boost taken, one engine's flameout taking that side's voice alone, the shut-down (a shot, the
 ## note falling, silence inside a second), a blink that earns no second shot, and the solo switch the audio
 ## gate uses. What it sounds like is tools/engine_audio_check.py's business (it measures recordings); this is
@@ -56,7 +56,7 @@ func _fly(seconds: float, boost := false) -> void:
 
 
 func _loops(k: int) -> Array:
-	return audio.voices[k].players.ramjet + audio.voices[k].players.ramscream
+	return audio.voices[k].players.ramjet + audio.voices[k].players.ramtear
 
 
 func _paused(k: int) -> bool:
@@ -91,7 +91,7 @@ func _run() -> void:
 		for s: AudioStreamWAV in streams:
 			loops_ok = loops_ok and s.loop_mode == AudioStreamWAV.LOOP_FORWARD and s.format == AudioStreamWAV.FORMAT_16_BITS and not s.stereo \
 				and absf(float(s.loop_end) / s.mix_rate - float(manifest.layers[layer].seconds)) < 0.01 and float(manifest.layers[layer].seam) < 1.0
-	_check("the bank: a roar and a scream, each one forward-looping 16-bit loop of the length the bake wrote, its seam measured under 1", loops_ok)
+	_check("the bank: a roar and a tear, each one forward-looping 16-bit loop of the length the bake wrote, its seam measured under 1", loops_ok)
 	_check("... and a light-up and a shut-down take for each engine, none of them looping",
 		audio._ram_light.size() == 2 and audio._ram_out.size() == 2 and audio._ram_light[0].loop_mode == AudioStreamWAV.LOOP_DISABLED
 		and audio._ram_out[1].loop_mode == AudioStreamWAV.LOOP_DISABLED and audio._ram_light[0] != audio._ram_light[1])
@@ -127,19 +127,27 @@ func _run() -> void:
 		(vl.players.burner[0] as AudioStreamPlayer).volume_db < burner_db - 5.0)
 	await _fly(2.0)
 	var slow: Array = (vl.ram_db as Array).duplicate()
-	var slow_at: Array = [float(vl.at.ramjet), float(vl.at.ramscream)]
+	var slow_at: Array = [float(vl.at.ramjet), float(vl.at.ramtear)]
 	var slow_mph := _mph()
 	_check("two seconds on the kick has gone (%.2f) and the roar has settled %.1f dB under where it lit (speed %.0f -> %.0f mph)" % [vl.ram_kick, float(kicked[0]) - float(slow[0]), lit_mph, slow_mph],
 		vl.ram_kick < 0.05 and float(kicked[0]) - float(slow[0]) > 1.5)
+	# room for it: the layers in its band step back by TUNE.ram_duck while it is lit (the burner's rumble is the one
+	# whose level does not move with the revs, so it is the one measured: the same loop steps the others back)
+	var room: Dictionary = T.ram_duck
+	var burner_lit: float = (vl.players.burner[0] as AudioStreamPlayer).volume_db
+	_check("room is made for it: the V8, the second engine, the turbines' roar and the burner's rumble step back (the burner's by %.1f dB, as its %.2f gives), the whine and the V12 do not" % [burner_db - burner_lit, room.burner],
+		room.keys().size() == 4 and room.has("v8") and room.has("second") and room.has("roar") and not room.has("turbine") and not room.has("v12")
+		and float(room.v8) < 1.0 and float(room.second) < 1.0 and float(room.roar) < 1.0
+		and absf(burner_lit - (burner_was + linear_to_db(float(room.burner)))) < 0.1)
 
 	# it follows the speed, as flown ...
 	await _fly(9.0)
 	var fast: Array = (vl.ram_db as Array).duplicate()
 	var fast_mph := _mph()
-	_check("it follows the speed as flown: %.0f -> %.0f mph, the roar %+.1f dB, the scream %+.1f dB (more than the roar: it brightens)" % [slow_mph, fast_mph, float(fast[0]) - float(slow[0]), float(fast[1]) - float(slow[1])],
-		fast_mph > slow_mph + 1000.0 and float(fast[0]) - float(slow[0]) > 0.3 and float(fast[1]) - float(slow[1]) > float(fast[0]) - float(slow[0]) + 0.3)
-	_check("... and both are played faster, the scream's note climbing more (roar x%.2f -> x%.2f, scream x%.2f -> x%.2f)" % [slow_at[0], vl.at.ramjet, slow_at[1], vl.at.ramscream],
-		float(vl.at.ramjet) > slow_at[0] * 1.03 and float(vl.at.ramscream) / slow_at[1] > float(vl.at.ramjet) / slow_at[0])
+	_check("it follows the speed as flown: %.0f -> %.0f mph, the roar %+.1f dB, the tear %+.1f dB (more than the roar: it brightens)" % [slow_mph, fast_mph, float(fast[0]) - float(slow[0]), float(fast[1]) - float(slow[1])],
+		fast_mph > slow_mph + 1000.0 and float(fast[0]) - float(slow[0]) > 0.0 and float(fast[1]) - float(slow[1]) > float(fast[0]) - float(slow[0]) + 0.3)
+	_check("... and both are played faster, the tear more (roar x%.2f -> x%.2f, tear x%.2f -> x%.2f)" % [slow_at[0], vl.at.ramjet, slow_at[1], vl.at.ramtear],
+		float(vl.at.ramjet) > slow_at[0] * 1.03 and float(vl.at.ramtear) / slow_at[1] > float(vl.at.ramjet) / slow_at[0])
 	# ... and across the speeds the headset's fourth gear takes it through (the craft set at each: the levers alone top out near 6,000)
 	var at_speed := {}
 	for mph: float in [3000.0, 5000.0, 7000.0]:
@@ -147,23 +155,24 @@ func _run() -> void:
 			body.vx = mph * 0.44704
 			body.vy = 0.0
 		await _fly(2.0 * FRAME)
-		at_speed[mph] = [float(vl.ram_db[0]), float(vl.ram_db[1]), float(vl.at.ramjet), float(vl.at.ramscream)]
-	_check("at 3,000 / 5,000 / 7,000 mph the roar is at %.1f / %.1f / %.1f dB and the scream at %.1f / %.1f / %.1f dB: each louder than the last, the scream gaining on the roar" % [
+		at_speed[mph] = [float(vl.ram_db[0]), float(vl.ram_db[1]), float(vl.at.ramjet), float(vl.at.ramtear)]
+	_check("at 3,000 / 5,000 / 7,000 mph the roar is at %.1f / %.1f / %.1f dB and the tear at %.1f / %.1f / %.1f dB: each louder than the last, the tear gaining on the roar" % [
 		at_speed[3000.0][0], at_speed[5000.0][0], at_speed[7000.0][0], at_speed[3000.0][1], at_speed[5000.0][1], at_speed[7000.0][1]],
-		at_speed[5000.0][0] > at_speed[3000.0][0] + 0.5 and at_speed[7000.0][0] > at_speed[5000.0][0] + 0.5
+		at_speed[5000.0][0] > at_speed[3000.0][0] and at_speed[7000.0][0] > at_speed[5000.0][0]
+		and at_speed[5000.0][1] > at_speed[3000.0][1] + 0.5 and at_speed[7000.0][1] > at_speed[5000.0][1] + 0.5
 		and at_speed[7000.0][1] - at_speed[3000.0][1] > at_speed[7000.0][0] - at_speed[3000.0][0] + 1.0)
-	_check("... and its note climbs with it (the scream played x%.2f / x%.2f / x%.2f)" % [at_speed[3000.0][3], at_speed[5000.0][3], at_speed[7000.0][3]],
+	_check("... and it is played faster with it (the tear x%.2f / x%.2f / x%.2f)" % [at_speed[3000.0][3], at_speed[5000.0][3], at_speed[7000.0][3]],
 		at_speed[5000.0][3] > at_speed[3000.0][3] * 1.05 and at_speed[7000.0][3] > at_speed[5000.0][3] * 1.05 and at_speed[7000.0][2] > at_speed[3000.0][2] * 1.05)
 	await _fly(1.0)
 	_check("its thrust is the ramjet's full (%.2f) and it has not lit a second time" % vl.ram_thr, vl.ram_thr > 0.95 and vl.ram_n == 1 and vl.ram_outs == 0)
 
 	# the boost
 	var before: Array = (vl.ram_db as Array).duplicate()
-	var before_at := float(vl.at.ramscream)
+	var before_at := float(vl.at.ramtear)
 	await _fly(1.0, true)
-	_check("the held boost (the sim's stage %d) pushes it a stage harder: the roar %+.1f dB, the scream %+.1f dB, its note x%.2f" % [sim.boost, float(vl.ram_db[0]) - float(before[0]), float(vl.ram_db[1]) - float(before[1]), float(vl.at.ramscream) / before_at],
+	_check("the held boost (the sim's stage %d) pushes it a stage harder: the roar %+.1f dB, the tear %+.1f dB, played x%.2f faster" % [sim.boost, float(vl.ram_db[0]) - float(before[0]), float(vl.ram_db[1]) - float(before[1]), float(vl.at.ramtear) / before_at],
 		sim.boost == 1 and vl.ram_boost > 0.95 and float(vl.ram_db[0]) - float(before[0]) > float(T.ram_boost_db[0]) - 0.3
-		and float(vl.ram_db[1]) - float(before[1]) > float(T.ram_boost_db[1]) - 0.3 and float(vl.at.ramscream) > before_at * 1.05)
+		and float(vl.ram_db[1]) - float(before[1]) > float(T.ram_boost_db[1]) - 0.3 and float(vl.at.ramtear) > before_at * 1.05)
 	await _fly(1.0)
 	_check("let go, it comes back to where it was (within 0.5 dB of the roar before the boost)", vl.ram_boost < 0.05 and absf(float(vl.ram_db[0]) - float(before[0])) < 0.5)
 
@@ -180,14 +189,14 @@ func _run() -> void:
 	_check("relit, the left engine's ramjet catches again (its second light-up, with its shot)", vl.ram_lit and vl.ram_n == 2 and vl.ram > 0.99 and shot_l.stream == audio._ram_light[0])
 
 	# the shut-down
-	var note := float(vl.at.ramscream)
+	var note := float(vl.at.ramtear)
 	armed = false
 	await _fly(FRAME)
 	_check("disarmed: the sim is back on the burner and both voices shut down, each with its own take of the cut-off",
 		sim.mode == "burner" and not vl.ram_lit and not vr.ram_lit and shot_l.playing and shot_l.stream == audio._ram_out[0] and shot_r.stream == audio._ram_out[1] and vr.ram_outs == 1)
 	await _fly(0.2)
-	_check("a fifth of a second on it is %.0f%% of the way out and its note has fallen to x%.2f" % [100.0 * (1.0 - vl.ram), float(vl.at.ramscream) / note],
-		vl.ram < 0.2 and float(vl.at.ramscream) < note * 0.7)
+	_check("a fifth of a second on it is %.0f%% of the way out and its note has fallen to x%.2f" % [100.0 * (1.0 - vl.ram), float(vl.at.ramtear) / note],
+		vl.ram < 0.2 and float(vl.at.ramtear) < note * 0.7)
 	await _fly(0.8)
 	_check("a second on there is nothing of it: its loops are paused again, and the burner's rumble is back (%.2f dB)" % (vl.players.burner[0] as AudioStreamPlayer).volume_db,
 		vl.ram < 1e-3 and _paused(0) and _paused(1) and absf((vl.players.burner[0] as AudioStreamPlayer).volume_db - burner_was) < 0.3)
@@ -209,7 +218,7 @@ func _run() -> void:
 	var quiet := (vl.players.ramjet[0] as AudioStreamPlayer).volume_db <= -80.0 and _paused(0)
 	audio.solo = "ramjet"
 	await _fly(0.1)
-	_check("solo: another layer alone silences it; solo \"ramjet\" plays its roar and its scream and nothing else",
+	_check("solo: another layer alone silences it; solo \"ramjet\" plays its roar and its tear and nothing else",
 		quiet and _heard(0) and (vl.players.v8[0] as AudioStreamPlayer).volume_db <= -80.0 and (vl.players.turbine[0] as AudioStreamPlayer).volume_db <= -80.0)
 	audio.solo = ""
 

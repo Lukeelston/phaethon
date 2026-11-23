@@ -42,16 +42,18 @@ Then it measures the recordings against the RPM each run logged:
   pops      lifting off at high revs pops (both after the burner drop and through the blips),
             and nothing pops at idle, on the rev, on a hold, in the burner or through the
             flameout; popping stretches stand >= 40 dB over the quiet ones
-  ramjet    the ramjet's own voice: nothing of it on the burner before the ramjet is armed or
-            two seconds after it is disarmed (under -60 dBFS, 30 dB under its level lit); armed, it
-            is up within a quarter of a second and for its first 0.4 s stands 2 to 12 dB over
-            where it settles (one light-up, one shut-down); it follows the speed (its 2-5 kHz
-            band comes up at least 2.5 dB from 3,300 to 6,000 mph, in step with the level the game
-            logs for its scream, and it brightens); the held boost lifts it at least 1.5 dB and
-            letting go drops it back; disarmed it is 12 dB down in half a second. In the mix the
-            ramjet and the burner are told apart (the mix's 2-5 kHz band at least 2 dB higher on
-            the ramjet than on the burner at the same speed), the turbines' whine still stands
-            10 dB proud of it, and the mix does not clip
+  ramjet    the ramjet's own voice (a roar with its weight at 45 to 350 Hz and a tear at 90 to
+            500 Hz): nothing of it on the burner before the ramjet is armed or two seconds after
+            it is disarmed (under -60 dBFS, 30 dB under its level lit); armed, it is up within a
+            quarter of a second and for its first 0.4 s stands 1 to 12 dB over where it settles
+            (one light-up, one shut-down); it follows the speed (from 4,600 to 6,000 mph no quieter,
+            its 180-710 Hz band within 1 dB of the climb the game logs for its tear, and the tear
+            played at least 6% faster); the held boost lifts it (at least 1 dB
+            at 180-710 Hz, the tear played at least 15% faster) and letting go drops it back;
+            disarmed it is 12 dB down in half a second. In the mix the ramjet and the burner are
+            told apart: the voice is at least half of what the mix has between 90 and 710 Hz (the
+            layers that share that band step back for it), the mix is no quieter than on the
+            burner, the turbines' whine still stands 10 dB proud of it, and the mix does not clip
   one tone  flat runs, slow rev: brightness doesn't pulse grossly with band position (no more
             than 100 cents, or 1.5x its typical wander at unrelated spacings, or the most it
             wanders at any of them); the bake's level-correlation gate is the precise guard
@@ -473,6 +475,11 @@ def band(x, sr, lo, hi):
     return signal.sosfilt(signal.butter(4, [lo, hi], "bandpass", fs=sr, output="sos"), x, axis=0)
 
 
+TEAR_BAND = (90.0, 710.0)    # Hz: where the ramjet's tear has its weight, and where a headset's own speakers can play the voice
+VOICE_SHARE_DB = -3.0        # the voice's own level in that band against the mix's: -3 dB is half of what is there
+RIP_BAND = (180.0, 710.0)    # Hz: the upper half of it, where the tear's climb with speed and with the boost shows
+
+
 def check_ramjet(wav, mix_wav, tally):
     """The ramjet's own voice, on the capture of it alone over the ramjet's run (the burner from 1 s, the
     ramjet armed at 1,500 mph and held as the craft runs up to 6,000, the boost three seconds, disarmed):
@@ -489,65 +496,82 @@ def check_ramjet(wav, mix_wav, tally):
     t_off = float(t[len(on) - np.argmax(on[::-1])])
     t_b0 = float(t[np.argmax(boosted)])
     t_b1 = float(t[len(boosted) - np.argmax(boosted[::-1])])
-    scream = band(x, sr, 2000.0, 5000.0)
+    tear = band(x, sr, TEAR_BAND[0], TEAR_BAND[1])
+    rip = band(x, sr, RIP_BAND[0], RIP_BAND[1])
 
     def lvl(t0, t1, y=x):   # each ear's mean power, dB
         a = y[int(t0 * sr):int(t1 * sr)]
         return 10 * np.log10(np.mean(a * a) + 1e-14)
 
     def bright(t0, t1):
+        # (where the voice's weight sits, 45 Hz to 1.4 kHz: over that is its crackle's edge, a hundredth of its energy
+        # and too fitful from second to second to weigh)
         a = x[int(t0 * sr):int(t1 * sr)].mean(axis=1)
         X = np.abs(np.fft.rfft(a * np.hanning(len(a)))) ** 2
         f = np.fft.rfftfreq(len(a), 1 / sr)
-        return float(np.sum(f * X) / np.sum(X))
+        keep = (f >= 45.0) & (f <= 1400.0)
+        return float(np.sum(f[keep] * X[keep]) / np.sum(X[keep]))
     # (the burner is lit from 1 s: what is heard before the ramjet is armed is everything that is not the ramjet's)
     before, after = lvl(1.5, t_on - 0.3), lvl(t_off + 2.0, t[-1] - 0.2)
     steady = lvl(t_b0 - 3.0, t_b0 - 0.2)
     tally.add("ramjet silent off the ramjet: %.0f dBFS on the burner before, %.0f after; %.0f lit" % (before, after, steady),
               int(before <= -60.0 and after <= -60.0 and steady - max(before, after) >= 30.0), 1, 1.0)
     # the light-up. The headless driver mixes in 93 ms bursts, so "at once" is read to a quarter of a second.
-    settled = lvl(t_on + 2.0, t_on + 3.0)
+    settled = lvl(t_on + 2.2, t_on + 3.2)   # (its light-up's shot is 1.9 s long)
     ws = np.arange(t_on - 0.2, t_on + 1.0, 0.01)
     up = np.array([lvl(w, w + 0.05) for w in ws]) >= settled - 3.0
     t_up = float(ws[np.argmax(up)] - t_on) if up.any() else 9.0
     bold = lvl(t_on + 0.1, t_on + 0.5) - settled
     tally.add("ramjet lights: up %.2f s after it is armed, its first 0.4 s %.1f dB over where it settles (%d light-up, %d shut-down)" % (
         t_up, bold, log["ramLit"][-1], log["ramOuts"][-1]),
-        int(-0.15 <= t_up <= 0.25 and 2.0 <= bold <= 12.0 and log["ramLit"][-1] == 1 and log["ramOuts"][-1] == 1), 1, 1.0)
-    # it follows the speed: from two seconds after the light-up (its kick gone) to the boost
-    a0, a1, b0, b1 = t_on + 1.5, t_on + 2.5, t_b0 - 1.2, t_b0 - 0.1
-    rise, rise_s = lvl(b0, b1) - lvl(a0, a1), lvl(b0, b1, scream) - lvl(a0, a1, scream)
-    ws = np.arange(t_on + 2.0, t_b0 - 0.5, 0.5)
-    heard = np.array([lvl(w, w + 0.5, scream) for w in ws])
-    said = np.interp(ws + 0.25, t, log["ramScreamDb"])
-    r = float(np.corrcoef(heard, said)[0, 1])
-    tally.add("ramjet follows the speed: %.0f -> %.0f mph, level %+.1f dB, its 2-5 kHz band %+.1f dB (r %.2f with the game's own figure), brightness x%.2f" % (
-        at(log, "mph", (a0 + a1) / 2), at(log, "mph", (b0 + b1) / 2), rise, rise_s, r, bright(b0, b1) / bright(a0, a1)),
-        int(rise >= 0.5 and rise_s >= 2.5 and r >= 0.9 and bright(b0, b1) > bright(a0, a1)), 1, 1.0)   # (measured 2026-11-22: +1.7 dB, +4.2 dB, r 0.95, x1.44)
-    lift = lvl(t_b0 + 0.5, t_b1 - 0.1) - lvl(t_b0 - 1.5, t_b0 - 0.1)
-    back = lvl(t_b0 + 0.5, t_b1 - 0.1) - lvl(t_b1 + 0.5, t_b1 + 1.5)
-    tally.add("ramjet takes the boost: %+.1f dB while it is held, %.1f dB back down once it is let go" % (lift, back),
-              int(lift >= 1.5 and back >= 1.0), 1, 1.0)
+        int(-0.15 <= t_up <= 0.25 and 1.0 <= bold <= 12.0 and log["ramLit"][-1] == 1 and log["ramOuts"][-1] == 1), 1, 1.0)   # (measured on the lowered voice, three runs: 2.0 to 3.1 dB)
+    # it follows the speed: the first four seconds after its light-up's shot has gone (1.9 s) against the last four
+    # before the boost. Its level hardly moves with the speed (it is as loud at 3,000 mph as the limiters leave room
+    # for); what climbs is the tear, in level and in pace. A 45-700 Hz crackle's level wanders a dB from half second to
+    # half second, which is as much as the climb, so it is read over four seconds; and how bright it measures wanders
+    # by more than the climb, so the pace is taken from the game's own log. What is asked is that the band does not
+    # fall and keeps within a dB of the climb the game logs for the tear; the law itself (so many dB and so much faster
+    # at 3,000, 5,000 and 7,000 mph) is tests/test_ramjet_audio.gd's. (Measured 2026-11-22: level +0.1 dB, the band
+    # +0.4 dB, the game's own figure +0.6 dB, x1.09 faster.)
+    a0, a1, b0, b1 = t_on + 2.2, t_on + 6.2, t_b0 - 4.1, t_b0 - 0.1
+    rise, rise_s = lvl(b0, b1) - lvl(a0, a1), lvl(b0, b1, rip) - lvl(a0, a1, rip)
+    said = at(log, "ramTearDb", (b0 + b1) / 2) - at(log, "ramTearDb", (a0 + a1) / 2)
+    faster = at(log, "ramTearAt", (b0 + b1) / 2) / at(log, "ramTearAt", (a0 + a1) / 2)
+    tally.add("ramjet follows the speed: %.0f -> %.0f mph, level %+.1f dB, its %d-%d Hz band %+.1f dB (the game's own figure for its tear %+.1f dB), its tear played x%.2f faster" % (
+        at(log, "mph", (a0 + a1) / 2), at(log, "mph", (b0 + b1) / 2), rise, RIP_BAND[0], RIP_BAND[1], rise_s, said, faster),
+        int(rise >= -0.5 and rise_s >= -0.2 and said >= 0.3 and abs(rise_s - said) <= 1.0 and faster >= 1.06), 1, 1.0)
+    # the boost: the voice alone is at the Engines bus's limiter already, so a stage harder is heard less as level than as
+    # the tear played faster and harder: read where that shows, in the upper half of its band
+    lift, lift_s = lvl(t_b0 + 0.5, t_b1 - 0.1) - lvl(t_b0 - 1.5, t_b0 - 0.1), lvl(t_b0 + 0.5, t_b1 - 0.1, rip) - lvl(t_b0 - 1.5, t_b0 - 0.1, rip)
+    back_s = lvl(t_b0 + 0.5, t_b1 - 0.1, rip) - lvl(t_b1 + 0.5, t_b1 + 1.5, rip)
+    harder = at(log, "ramTearAt", (t_b0 + t_b1) / 2) / at(log, "ramTearAt", t_b0 - 0.5)
+    tally.add("ramjet takes the boost: %+.1f dB while it is held (%+.1f dB at %d-%d Hz, its tear played x%.2f faster), %.1f dB back down there once it is let go" % (
+        lift, lift_s, RIP_BAND[0], RIP_BAND[1], harder, back_s), int(lift >= 0.0 and lift_s >= 1.0 and back_s >= 1.0 and harder >= 1.15), 1, 1.0)   # (measured: +0.7 to +1.1, +1.8 to +2.0, x1.28, 2.0 to 2.2)
     last = lvl(t_off - 1.0, t_off - 0.1)
     fall, gone = last - lvl(t_off + 0.5, t_off + 0.7), lvl(t_off + 2.0, t_off + 2.5)
-    note = at(log, "ramScreamAt", t_off + 0.4) / at(log, "ramScreamAt", t_off - 0.2)
+    note = at(log, "ramTearAt", t_off + 0.4) / at(log, "ramTearAt", t_off - 0.2)
     tally.add("ramjet dies on the shut-down: %.0f dB down half a second on, %.0f dBFS two seconds on (its loops' note x%.2f as they go)" % (fall, gone, note),
               int(fall >= 12.0 and gone <= -60.0 and note <= 0.8), 1, 1.0)
-    # ... and in the mix: the ramjet against the burner at the same speed (the burner is what is left when it is disarmed)
+    # ... and in the mix. The voice's band is the pistons' and the second engine's too, and they step back for it, so
+    # the band's level hardly moves as the ramjet lights; what changes is whose it is. So: how much of what the mix
+    # has in the tear's band is the voice (its own capture against the mix's, the same stretch of the same run),
+    # and that the mix on the ramjet is no quieter than on the burner (the burner is what is left when it is disarmed).
     mx, msr, mlog = load(mix_wav)
     mt = mlog["t"]
     m_on = mlog["ramOn"] > 0.5
     m_off = float(mt[len(m_on) - np.argmax(m_on[::-1])])
     m_b0 = float(mt[np.argmax(mlog["boost"] > 0.5)])
-    ms = band(mx, msr, 2000.0, 5000.0)
+    ms = band(mx, msr, TEAR_BAND[0], TEAR_BAND[1])
 
     def mlvl(t0, t1, y):
         a = y[int(t0 * msr):int(t1 * msr)]
         return 10 * np.log10(np.mean(a * a) + 1e-14)
     ram, burn = (m_b0 - 2.0, m_b0 - 0.2), (m_off + 1.5, m_off + 2.8)
+    share = lvl(t_b0 - 2.0, t_b0 - 0.2, tear) - mlvl(*ram, ms)
     d_s, d_all = mlvl(*ram, ms) - mlvl(*burn, ms), mlvl(*ram, mx) - mlvl(*burn, mx)
-    tally.add("ramjet told from the burner in the mix: its 2-5 kHz band %+.1f dB, the whole mix %+.1f dB (%.0f against %.0f mph)" % (
-        d_s, d_all, at(mlog, "mph", sum(ram) / 2), at(mlog, "mph", sum(burn) / 2)), int(d_s >= 2.0 and d_all >= -1.0), 1, 1.0)   # (measured 2026-11-22: +3.3 and +0.6 dB; without the voice the two are the same within half a dB)
+    tally.add("ramjet told from the burner in the mix: its voice is %+.1f dB of what the mix has at %d-%d Hz (that band %+.1f dB on the burner's, the whole mix %+.1f dB; %.0f against %.0f mph)" % (
+        share, TEAR_BAND[0], TEAR_BAND[1], d_s, d_all, at(mlog, "mph", sum(ram) / 2), at(mlog, "mph", sum(burn) / 2)),
+        int(share >= VOICE_SHARE_DB and d_all >= -1.0), 1, 1.0)
     # the turbines' whine under it: its blade-pass line still proud of the mix, in each ear
     hits = n = 0
     worst = 99.0

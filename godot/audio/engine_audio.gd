@@ -36,17 +36,22 @@
 ## upshifts still drop the note on the same spring.
 ## flat (tests) switches all three off: it isolates the crossfader.
 ## The ramjet has a voice of its own (Luke, 2026-11-22: "the ram jet needs its own sound signifier. First gut
-## is saying an actual rocket engine - just a low screaming roar"): recordings of real rocket engines, baked
-## by tools/ramjet_bake.py into res://audio/ramjet. Two loops an engine: a low roar (the Space Shuttle's stack
-## climbing away) and, over it, a scream (a shuttle main engine on NASA's test stand, from 500 Hz up). They
-## sound only while the sim is on the ramjet (armed, the burner's gate through) and that engine is alight.
-## It catches: a shot (the shuttle's ignition thump, the test engine's own start) and the loops straight in,
-## a few dB over where they settle. Then it follows the speed (louder, the scream more than the roar, and
-## both played faster, so the scream's note climbs) and that engine's thrust, and each stage of the boost
-## pushes it harder. Disarmed, or the gate left, it dies in a tenth of a second with its note falling, under
-## a shot of the test engine's own cut-off. It sits over the turbines and the pistons, which play on as they
-## did; only the burner's rumble steps back under it (the two fill the same band, and so the burner alone
-## and the ramjet are told apart by ear). Unlit, its loops are paused: nothing of it is mixed.
+## is saying an actual rocket engine - just a low screaming roar"; and when he had flown its first cut, "I
+## like the ramjet sound, but I feel like it's a few octaves too high. It's correct on the ripping/shredding
+## sound", with a launch's raw sound for what he meant): recordings of real rocket engines, baked by
+## tools/ramjet_bake.py into res://audio/ramjet. Two loops an engine: the roar (the Space Shuttle's stack
+## climbing away: half its energy under 70 Hz) and, in it, the tear (a shuttle main engine's crackle from
+## NASA's test stand run three and a half octaves down: 90 to 500 Hz, where a headset's own speakers can
+## play it).
+## They sound only while the sim is on the ramjet (armed, the burner's gate through) and that engine is
+## alight. It catches: a shot (the shuttle's ignition thump, the test engine's crackle) and the loops
+## straight in, a few dB over where they settle. Then it follows the speed (louder, the tear more than the
+## roar, and both played faster) and that engine's thrust, and each stage of the boost pushes it harder.
+## Disarmed, or the gate left, it dies in a tenth of a second with its note falling, under a shot of the
+## test engine's cut-off running down. The voice lives where the pistons, the second engine and the noise
+## beds live, so under a lit ramjet those step back to give it room (TUNE.ram_duck): the V8, the second
+## engine, the turbines' roar and the burner's rumble. The turbines' whine and the V12, which carry the
+## gear's note higher up, play on as they did. Unlit, its loops are paused: nothing of it is mixed.
 ##   add_child(audio); audio.setup(sim)    once, inside the tree
 ##   audio.update(inp, delta)              every frame, after the sim steps
 class_name EngineAudio
@@ -54,9 +59,9 @@ extends Node
 
 const DIR := "res://audio/engines/"
 const RAM_DIR := "res://audio/ramjet/"   # the ramjet's voice has its own bank and manifest (tools/ramjet_bake.py)
-const LAYERS := ["v8", "v12", "turbine", "roar", "burner", "second", "rotor", "ramjet", "ramscream"]
-const RAM_LAYERS := ["ramjet", "ramscream"]   # the ramjet's loops: its low roar, its scream
-const OWN_LEVEL := ["second", "rotor", "ramjet", "ramscream"]   # layers that carry their own level (not level_db's)
+const LAYERS := ["v8", "v12", "turbine", "roar", "burner", "second", "rotor", "ramjet", "ramtear"]
+const RAM_LAYERS := ["ramjet", "ramtear"]   # the ramjet's loops: its roar, its tear
+const OWN_LEVEL := ["second", "rotor", "ramjet", "ramtear"]   # layers that carry their own level (not level_db's)
 const FILTERED := ["v8", "v12", "roar", "second", "rotor"]   # layers with their own low-pass bus under each engine
 const SECOND_STATES := ["off", "wait", "crank", "run", "stop"]
 
@@ -160,26 +165,33 @@ const TUNE := {
 	"pop2_pitch": 0.65, "pop2_db": -7.0,   # the second engine's pops, deeper, through its throat
 	# The ramjet's voice (this file's header). Its loops are baked at -18 dB rms, as the others are; these are
 	# their levels, set by measuring the game's recorded mix with and without them at 3,000, 5,000 and 7,000 mph
-	# (tests/record_ramjet.gd; the figures are in godot/audio/ramjet/CREDITS.md), not by ear.
+	# (tests/record_ramjet.gd; the figures are in godot/audio/ramjet/CREDITS.md), not by ear. In its second cut
+	# (lowered) the mix's rms is held where Luke flew the first: the voice is 2.5 to 4 dB up on the first cut's,
+	# most of that under 90 Hz, and the layers in its band are stepped back for it (ram_duck).
 	"ram_mph": [2500.0, 8000.0],     # its level, brightness and note run with the speed over this (fourth gear has no top speed)
-	"ram_body_db": [-4.0, -2.0],     # the low roar, at ram_mph[0] -> ram_mph[1]
-	"ram_scream_db": [-11.0, -4.0],  # the scream: it comes up more than the roar does, so the voice brightens
+	"ram_body_db": [-2.1, -1.7],     # the roar, at ram_mph[0] -> ram_mph[1]
+	"ram_tear_db": [-2.1, 0.3],      # the tear: it comes up more than the roar does, so the voice brightens
 	"ram_slow_db": -6.0,             # both, at a standstill (a ramjet lit on the line is a weak thing), gone by ram_mph[0]
 	"ram_pitch": [0.92, 1.08],       # the roar's speed of playing, ram_mph[0] -> ram_mph[1]
-	"ram_scream_pitch": [0.85, 1.25],   # the scream's: its lifted resonance runs from 1.95 to 2.9 kHz
+	"ram_tear_pitch": [0.85, 1.2],   # the tear's: the frequency half its energy lies under runs from 107 to 151 Hz
 	"ram_tau": [0.04, 0.1],          # it catches, it dies: time constants, s
 	"ram_fall": 0.55,                # dying, its note falls to this of where it was
-	"ram_kick_db": [4.0, 6.0],       # the light-up: the roar and the scream this much over where they settle ...
+	"ram_kick_db": [3.0, 4.0],       # the light-up: the roar and the tear this much over where they settle ...
 	"ram_kick_s": 0.6,               # ... gone with this time constant
-	"ram_boost_db": [3.0, 5.0],      # each stage of the boost: the roar, the scream
-	"ram_boost_pitch": 0.12,         # ... and the scream's note this much up (the roar's by half as much)
+	"ram_boost_db": [2.0, 3.5],      # each stage of the boost: the roar, the tear
+	# (the voice alone is at the Engines bus's limiter, so a stage harder is heard as pace more than as level)
+	"ram_boost_pitch": 0.25,         # ... and the tear played this much faster (the roar by half as much)
 	"ram_boost_tau": 0.1,
-	"ram_thrust": [0.4, 1.0],        # level scale, this engine's thrust 0 -> the ramjet's full (the scream takes it twice)
+	"ram_thrust": [0.4, 1.0],        # level scale, this engine's thrust 0 -> the ramjet's full (the tear takes it twice)
 	"ram_light_db": 5.0,             # the light-up's shot, over the roar's level at that speed
 	"ram_out_db": -3.0,              # the shut-down's shot, against the roar's level as it was (under it: the loops are still falling)
 	"ram_shot_max_db": 1.0,          # ... neither played over this (the shots peak at -3 dBFS; the Engines bus limits at -1)
 	"ram_relight_s": 0.5,            # a ramjet lit again inside this long of its last light-up gets no second shot
-	"ram_burner": 0.4,               # the burner's rumble under a lit ramjet (x burner_gain): it steps back, the ramjet has that band
+	# Room for it: under a lit ramjet these layers play at this much of their own level (the voice's weight is
+	# 45 to 700 Hz, which is theirs: measured alone on the ramjet at 5,000 mph the second engine put -17 dB
+	# into 90-180 Hz and the first cut of the voice -22, and at 3,000 mph the V8 -18 into every octave from 45
+	# to 700 Hz). The turbines' whine and the V12 sit over 700 Hz and are left alone.
+	"ram_duck": {"v8": 0.75, "second": 0.5, "roar": 0.5, "burner": 0.3},
 }
 
 var sim
@@ -298,7 +310,7 @@ func setup(craft_sim) -> void:
 			"pops": pops, "pops2": pops2, "pop_t": 0.0, "pop_k": 0.0, "pop2_t": 0.0, "pop2_k": 0.0, "pops_n": 0,
 			# the ramjet's voice: how far it is in, lit or not, the light-up's kick, the boost's stages as heard,
 			# this engine's thrust of the ramjet's full, seconds since it last lit, its shots' player, the roar's and the
-			# scream's levels (dB), and how often it has lit and been shut down (with its shot)
+			# tear's levels (dB), and how often it has lit and been shut down (with its shot)
 			"ram": 0.0, "ram_lit": false, "ram_kick": 0.0, "ram_boost": 0.0, "ram_thr": 0.0, "ram_since": 9.0,
 			"ram_shots": ram_shots, "ram_db": [-80.0, -80.0], "ram_n": 0, "ram_outs": 0}
 		for layer in LAYERS:
@@ -546,7 +558,7 @@ func update(inp: Dictionary, delta: float) -> void:
 		var ram_g: float = v.ram * ram_k * v.alive * duck
 		var ram_fall: float = 1.0 if ram_on else lerpf(TUNE.ram_fall, 1.0, v.ram)
 		v.ram_db = [ram_base + TUNE.ram_boost_db[0] * v.ram_boost + TUNE.ram_kick_db[0] * v.ram_kick,
-			ram_base - lerpf(TUNE.ram_body_db[0], TUNE.ram_body_db[1], ram_q) + lerpf(TUNE.ram_scream_db[0], TUNE.ram_scream_db[1], ram_q)
+			ram_base - lerpf(TUNE.ram_body_db[0], TUNE.ram_body_db[1], ram_q) + lerpf(TUNE.ram_tear_db[0], TUNE.ram_tear_db[1], ram_q)
 				+ TUNE.ram_boost_db[1] * v.ram_boost + TUNE.ram_kick_db[1] * v.ram_kick]
 		var n_spool := clampf(layer_at("turbine", s), 0.0, 1.0)
 		var turb := _curve(TUNE.mix_turbine, s)
@@ -559,13 +571,15 @@ func update(inp: Dictionary, delta: float) -> void:
 			"turbine": turb * turbines * lerpf(1.0, TUNE.turbine_full, turbines) * (0.55 + 0.45 * burning) * v.alive,
 			"roar": turb * lerpf(TUNE.roar_piston, 1.0, turbines) * lerpf(TUNE.roar_gain[0], TUNE.roar_gain[1], n_spool)
 				* (0.4 + 0.6 * burning) * v.alive,
-			"burner": TUNE.burner_gain * v.burn * burning * lerpf(1.0, TUNE.ram_burner, v.ram),
+			"burner": TUNE.burner_gain * v.burn * burning,
 			"ramjet": db_to_linear(v.ram_db[0]) * ram_g,
-			"ramscream": db_to_linear(v.ram_db[1]) * ram_g * ram_k,
+			"ramtear": db_to_linear(v.ram_db[1]) * ram_g * ram_k,
 		}
 		var sec_gain := _second(v, k, running_target, dt, duck, rise_rate)
 		gains["second"] = sec_gain * bark * v.alive
 		gains["rotor"] = _rotor(v, lever, mph, dt, duck) * v.alive
+		for layer: String in TUNE.ram_duck:      # under a lit ramjet the layers in its band step back and give it room
+			gains[layer] *= lerpf(1.0, TUNE.ram_duck[layer], v.ram)
 		if short_intakes:
 			# The smaller compressor comes through as the lever opens. Keeping the
 			# low bank under it leaves the relight, brake and overrun cues audible.
@@ -575,7 +589,7 @@ func update(inp: Dictionary, delta: float) -> void:
 			gains.roar *= 0.86
 		if flat:
 			gains = {"v8": burning, "v12": burning, "turbine": 1.0, "roar": 1.0, "burner": v.burn * burning,
-				"second": v.sec.fire, "rotor": 1.0, "ramjet": v.ram, "ramscream": v.ram}
+				"second": v.sec.fire, "rotor": 1.0, "ramjet": v.ram, "ramtear": v.ram}
 		var roar_lp := AudioServer.get_bus_effect(v.subs.roar, 0) as AudioEffectLowPassFilter
 		roar_lp.cutoff_hz = TUNE.roar_hz[1] if flat else lerpf(TUNE.roar_hz[0], TUNE.roar_hz[1], n_spool)
 		var lift: float = 1.0 + TUNE.second_lift * clampf((mph - TUNE.second_on_mph)
@@ -599,8 +613,8 @@ func update(inp: Dictionary, delta: float) -> void:
 					at = 1.0 + 0.1 * maxf(0.0, s - 1.0)
 				"ramjet":
 					at = lerpf(TUNE.ram_pitch[0], TUNE.ram_pitch[1], ram_q) * (1.0 + 0.5 * TUNE.ram_boost_pitch * v.ram_boost) * ram_fall
-				"ramscream":
-					at = lerpf(TUNE.ram_scream_pitch[0], TUNE.ram_scream_pitch[1], ram_q) * (1.0 + TUNE.ram_boost_pitch * v.ram_boost) * ram_fall
+				"ramtear":
+					at = lerpf(TUNE.ram_tear_pitch[0], TUNE.ram_tear_pitch[1], ram_q) * (1.0 + TUNE.ram_boost_pitch * v.ram_boost) * ram_fall
 				"v8", "v12":
 					at = layer_at(layer, s) * twin * shift
 					if short_intakes and layer == "v12":
@@ -746,12 +760,12 @@ func _ram_shot(v: Dictionary, k: int, takes: Array[AudioStreamWAV], db: float) -
 
 
 ## The ramjet's voice as it stands, for a log line: how far each engine's is in, the light-up's kick, the
-## boost as heard, the thrust it follows, and the roar's and the scream's levels (dB) and speeds of playing.
+## boost as heard, the thrust it follows, and the roar's and the tear's levels (dB) and speeds of playing.
 func ram_state() -> String:
 	var parts := PackedStringArray()
 	for v: Dictionary in voices:
-		parts.append("in %.2f kick %.2f boost %.2f thrust %.2f roar %.1f dB x%.2f scream %.1f dB x%.2f" % [v.ram, v.ram_kick, v.ram_boost, v.ram_thr,
-			v.ram_db[0], v.at.get("ramjet", 1.0), v.ram_db[1], v.at.get("ramscream", 1.0)])
+		parts.append("in %.2f kick %.2f boost %.2f thrust %.2f roar %.1f dB x%.2f tear %.1f dB x%.2f" % [v.ram, v.ram_kick, v.ram_boost, v.ram_thr,
+			v.ram_db[0], v.at.get("ramjet", 1.0), v.ram_db[1], v.at.get("ramtear", 1.0)])
 	return " | ".join(parts)
 
 

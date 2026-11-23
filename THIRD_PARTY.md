@@ -32,12 +32,12 @@ Phaethon uses excerpts from the 19 Freesound sources below. Each author publishe
 
 ### The ramjet
 
-`tools/ramjet_bake.py` bakes the ramjet's voice from two recordings of rocket engines. The bake cuts, filters, levels and loops them, and slows the shut-down as a tape runs down. Nothing in the six WAVs in `audio/ramjet/` is synthesised.
+`tools/ramjet_bake.py` bakes the ramjet's voice from two recordings of rocket engines. The bake cuts them, runs them slower as a tape is run slower (pitch and pace together), filters, levels and loops them. Nothing in the six WAVs in `audio/ramjet/` is synthesised.
 
 | Source | Recordist or owner | Terms | Use in Phaethon |
 | --- | --- | --- | --- |
-| [Freesound 220127](https://freesound.org/s/220127/), shuttlelaunch.wav | klangfabrik, a re-edit of NASA’s public-domain recordings of Space Shuttle launches | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | the ramjet’s low roar, the thump as it lights, the weight under its shut-down |
-| [RS-25 Engine Test 2025-11-12](https://images.nasa.gov/details/SSC_2025-11-12_RS-25_Engine_Test), NASA Image and Video Library | NASA Stennis Space Center | NASA’s own film. NASA content is generally not subject to copyright in the United States. [NASA media usage guidelines](https://www.nasa.gov/nasa-brand-center/images-and-media/) | the ramjet’s scream, the engine catching as it lights, its cut-off as it is shut down |
+| [Freesound 220127](https://freesound.org/s/220127/), shuttlelaunch.wav | klangfabrik, a re-edit of NASA’s public-domain recordings of Space Shuttle launches | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | the ramjet’s roar, the thump as it lights, the weight under its shut-down |
+| [RS-25 Engine Test 2025-11-12](https://images.nasa.gov/details/SSC_2025-11-12_RS-25_Engine_Test), NASA Image and Video Library | NASA Stennis Space Center | NASA’s own film. NASA content is generally not subject to copyright in the United States. [NASA media usage guidelines](https://www.nasa.gov/nasa-brand-center/images-and-media/) | the ramjet’s tear (the engine’s crackle, three and a half octaves down), the engine catching as it lights, its cut-off as it is shut down |
 
 NASA does not endorse Phaethon, and nothing here should be read as its endorsement.
 
