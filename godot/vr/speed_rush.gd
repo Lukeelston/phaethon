@@ -11,9 +11,12 @@
 ##                 canopy's frame as the head moves, and longer, more of them and brighter as the speed
 ##                 builds. They stream back along the craft's own way, and none is drawn within CLEAR
 ##                 degrees of dead ahead: the road is looked at through nothing. `build()`, `sync()`.
-## How much: "a little". The craft's own fore-and-aft load does most of it (a launch is 30 g and more),
-## and a smaller steady part grows with the logarithm of the speed, so there is something of it through a
-## whole run and not only off the line (tests/probe_rush.gd is the table these were set by).
+## How much: "a little", and then (Luke, 2026-11-23, having flown it: "turn the parallax up a bit more")
+## half as much again: every length below is one and a half times what it first was, and the two limits on
+## how it moves with them, so it takes the same time to get there. The craft's own fore-and-aft load does
+## most of it (a launch is 30 g and more), and a smaller steady part grows with the logarithm of the speed,
+## so there is something of it through a whole run and not only off the line (tests/probe_rush.gd is the
+## table these were set by).
 ## The quick menu's OPTIONS page switches it (SPEED RUSH, saved; on unless switched off). Off, the cockpit
 ## sits exactly where it did and nothing is drawn.
 extends Node3D
@@ -24,18 +27,18 @@ const MPH := 2.236936
 const SPEED_MPH := Vector2(300.0, 10000.0)   # the speed's share of it: none at the first, all at the second, by the logarithm between
 
 # --- the parallax ---
-const FWD_MAX := 0.035        # m: the cockpit's furthest forward of where it rests (the pilot pressed back) ...
-const AFT_MAX := 0.025        # ... and its furthest back toward him (thrown into the belts): the travel's ends, never passed
-const LOAD_FWD := 0.016       # m: what the craft's pull moves it, at most ...
+const FWD_MAX := 0.0525       # m: the cockpit's furthest forward of where it rests (the pilot pressed back) ...
+const AFT_MAX := 0.0375       # ... and its furthest back toward him (thrown into the belts): the travel's ends, never passed
+const LOAD_FWD := 0.024       # m: what the craft's pull moves it, at most ...
 const LOAD_G := 14.0          # ... two thirds of that by this many g (it saturates: a launch, 30 g, has nearly all of it)
-const LOAD_AFT := 0.026       # m: what braking brings it back, at most (it has the speed's part to take back first) ...
+const LOAD_AFT := 0.039       # m: what braking brings it back, at most (it has the speed's part to take back first) ...
 const BRAKE_G := 40.0         # ... two thirds of that by this many g (a light squeeze at speed is 20 g, a hard one 60)
-const SPEED_FWD := 0.016      # m: the steady part, at SPEED_MPH.y
+const SPEED_FWD := 0.024      # m: the steady part, at SPEED_MPH.y
 const LOAD_T := 0.2           # s: the load is read through this much more smoothing (the g-meter's own is 0.15 s)
 const HZ := 1.2               # the spring: there in about half a second ...
 const ZETA := 1.0             # ... and no bounce
-const RATE_MAX := 0.08        # m/s: never faster than this ...
-const ACCEL_MAX := 0.5        # m/s2: ... nor pushed harder (a twentieth of a g)
+const RATE_MAX := 0.12        # m/s: never faster than this ...
+const ACCEL_MAX := 0.75       # m/s2: ... nor pushed harder (a thirteenth of a g)
 var load_g := 0.0             # the fore-and-aft load as the parallax reads it, g (+ speeding up)
 var surge := 0.0              # the cockpit's place now, m forward of where it rests (- toward the pilot)
 var rate := 0.0               # m/s

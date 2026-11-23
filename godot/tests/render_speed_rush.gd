@@ -136,7 +136,7 @@ func _run() -> void:
 			if rush.streaks.visible:
 				streaks = "%.0f%% out, %.1f m long, strength %.2f" % [float(rush.mat.get_shader_parameter("amount")) * 100.0, float(rush.mat.get_shader_parameter("streak_length")), float(rush.mat.get_shader_parameter("strength"))]
 			print("RUSH_SHOT %s %s  %.0f mph  %.1f g along  shell %.1f mm forward  streaks: %s" % [state[0], "on" if on else "off",
-				seat._kmh() / 1.609344, seat.g_along, -seat.shell.position.z * 1000.0, streaks])
+				seat._kmh() / 1.609344, seat.g_along, -seat._rush_shift.z * 1000.0, streaks])      # (the shell stands at the pod's pose: its own move is the rush's)
 	if sequence > 0:      # the streaks going by: the head turned to the left, the craft held at 3,000 mph
 		await _pose(STATES[2], true)
 		seat.cam.position = Vector3.ZERO

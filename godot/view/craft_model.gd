@@ -190,6 +190,7 @@ var light_meshes: Array[MeshInstance3D] = []
 var pod_frame: Node3D = null          # VR: the cockpit rig stands in for the hidden pod
 var pod_frame_shift := Vector3.ZERO   # ... and its fittings stand this far from their place on it, rig metres (the speed rush eases
                                       # them fore and aft: vr/speed_rush.gd): the tow links hook to the nose where it is
+var pod_frame_pose := Transform3D.IDENTITY   # ... and this is where the pod itself stands on the rig (the cockpit's pitch under the pilot: vr_cockpit.gd POD_PITCH)
 const POD_FRAME_UP := 0.6             # pod mesh centre above the rig floor
 const POD_LIFT := 1.3                 # the pod rides this much higher than the sim's body (looks only:
                                       # Luke wanted it "sitting a bit higher up entirely", then "higher than
@@ -1539,7 +1540,7 @@ func _pod_anchor(sim, k: int) -> Vector3:
 	var left: float = (1.0 if k == 0 else -1.0) * sim.P.podAnchorW * sim.P.podWidth / 2.0
 	var local := Vector3(-left, POD_EYE_H, -sim.P.podLen / 2.0 - 0.1)   # onto the post, just ahead of the sim's nose
 	if pod_frame:
-		return pod_frame.transform * (local + Vector3(0, POD_FRAME_UP, 0) + pod_frame_shift)
+		return pod_frame.transform * (pod_frame_pose * (local + Vector3(0, POD_FRAME_UP, 0) + pod_frame_shift))
 	return pod.transform * local
 
 
@@ -1712,7 +1713,7 @@ static func slope_pitch(v, x: float, y: float, th: float, half: float) -> float:
 ## swinging cable". They sagged with their slack and twanged at 2.2 Hz; a drawbar does neither.)
 ## Their lit parts keep the ropes' light: the thrust glow, amber then red with strain.
 func sync_cables(sim, delta := 1.0 / 72.0) -> void:
-	var pod_basis: Basis = (pod_frame.transform.basis if pod_frame else pod.transform.basis).orthonormalized()
+	var pod_basis: Basis = ((pod_frame.transform.basis * pod_frame_pose.basis) if pod_frame else pod.transform.basis).orthonormalized()
 	for k in 2:
 		var c: Dictionary = sim.cables[k] if k < sim.cables.size() else {}
 		var a: Vector3 = engines[k].transform * ENGINE_EYE

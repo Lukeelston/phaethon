@@ -88,7 +88,8 @@ func _measure(label: String) -> void:
 		for n in ["hardpoint_l", "hardpoint_r"]:
 			eyes.append((c.pod_frame.get_node(n) as Node3D).transform.origin)
 		eyes = [c.pod_frame.transform * eyes[0], c.pod_frame.transform * eyes[1]]
-		pod_up = c.pod_frame.transform.basis.y.normalized()
+		# (the pod's own up: in the headset it stands pitched on the rig, under a pilot whose view stays level)
+		pod_up = (c.pod_frame.transform.basis * c.pod_frame_pose.basis).y.normalized()
 	else:
 		eyes = [c.pod.transform * Vector3(-0.18, c.POD_EYE_H, -2.1), c.pod.transform * Vector3(0.18, c.POD_EYE_H, -2.1)]
 		pod_up = c.pod.transform.basis.y.normalized()

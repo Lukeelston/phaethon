@@ -6,7 +6,11 @@
 ##                stop. The cockpit goes away under the pull, stays out with the speed, comes back under
 ##                the brakes and home at rest: inside its travel, its speed and its push all the way, with
 ##                no bounce. Switched off, the same run never moves it.
-##   the cockpit  the real seat (XR off): only the shell moves, along its own nose, never turned; the rig,
+##   a bit more   (Luke, 2026-11-23: "turn the parallax up a bit more") every length is half as much again
+##                as it first was and the two limits on how it moves with them: frame for frame the run is
+##                the first one's, one and a half times as far, so it is there in the same time.
+##   the cockpit  the real seat (XR off): only the shell moves, from the pod's pose on the rig (pitched under
+##                the pilot: Cockpit.pod_pose) along its own nose, never turned from that; the rig,
 ##                the headset's origin and the camera are where they were, to the last bit; the tow links'
 ##                hooks go with the nose; it adds to the shudder; an outside camera has none of it; switched
 ##                off on the OPTIONS page it eases home and then stands exactly where the shudder alone puts
@@ -33,6 +37,9 @@ const FRAME := 1.0 / 90.0
 # them (a light squeeze at speed is 20 g; a firm one 60), full brakes to a stop, and at rest
 const RUN := [[0.5, 0.0], [3.0, 30.0], [2.0, 22.0], [3.0, 15.0], [3.0, 10.0], [4.0, 4.0], [11.6, 20.0], [4.0, 0.0],
 	[3.0, -20.0], [2.0, 12.0], [2.0, -60.0], [1.0, 0.0], [12.0, -90.0], [4.0, 0.0]]
+# The rush as it first flew (22 November), m, m/s and m/s2: what "a bit more" is half as much again of.
+const FIRST := {"fwd": 0.035, "aft": 0.025, "load_fwd": 0.016, "load_aft": 0.026, "speed_fwd": 0.016, "rate": 0.08, "accel": 0.5}
+const MORE := 1.5
 var failures := 0
 var checks := 0
 var v
@@ -82,7 +89,7 @@ func _scripted(on: bool) -> Dictionary:
 	var rush = Rush.new()
 	var speed := 0.0
 	var g_meter := 0.0
-	var seen := {"ends": [], "mph": [], "fwd": 0.0, "aft": 0.0, "rate": 0.0, "accel": 0.0, "moved": 0.0, "early": 0.0, "rebound": 0.0, "stopped_at": -1}
+	var seen := {"ends": [], "mph": [], "fwd": 0.0, "aft": 0.0, "rate": 0.0, "accel": 0.0, "moved": 0.0, "early": 0.0, "rebound": 0.0, "stopped_at": -1, "trace": []}
 	var was := 0.0
 	var was_rate := 0.0
 	var frame := 0
@@ -93,6 +100,7 @@ func _scripted(on: bool) -> Dictionary:
 			speed = next
 			g_meter += (g - g_meter) * (1.0 - exp(-FRAME / Cockpit.G_TAU))      # as the cockpit's g-meter reads it
 			var at: float = rush.ease_surge(FRAME, g_meter, speed * MPH, on)
+			(seen.trace as Array).append(at)
 			var rate := (at - was) / FRAME
 			seen.fwd = maxf(seen.fwd, at)
 			seen.aft = maxf(seen.aft, -at)
@@ -114,6 +122,36 @@ func _scripted(on: bool) -> Dictionary:
 	return seen
 
 
+## RUN as the rush first flew it: FIRST's lengths and limits on the same spring, the cockpit's place a frame
+## at a time (m forward).
+func _first_run() -> PackedFloat64Array:
+	var out := PackedFloat64Array()
+	var speed := 0.0
+	var g_meter := 0.0
+	var load_g := 0.0
+	var surge := 0.0
+	var rate := 0.0
+	var w := TAU * Rush.HZ
+	for leg in RUN:
+		for k in int(round(float(leg[0]) / FRAME)):
+			var next := maxf(0.0, speed + float(leg[1]) * 9.81 * FRAME)
+			var g := (next - speed) / FRAME / 9.81
+			speed = next
+			g_meter += (g - g_meter) * (1.0 - exp(-FRAME / Cockpit.G_TAU))
+			load_g += (g_meter - load_g) * (1.0 - exp(-FRAME / Rush.LOAD_T))
+			var pull: float = float(FIRST.load_fwd) * (1.0 - exp(-load_g / Rush.LOAD_G)) if load_g >= 0.0 else -float(FIRST.load_aft) * (1.0 - exp(load_g / Rush.BRAKE_G))
+			var want := clampf(pull + float(FIRST.speed_fwd) * Rush.speed_share(speed * MPH), -float(FIRST.aft), float(FIRST.fwd))
+			var remaining := FRAME
+			while remaining > 0.000001:
+				var step := minf(remaining, 1.0 / 240.0)
+				var accel := clampf(w * w * (want - surge) - 2.0 * Rush.ZETA * w * rate, -float(FIRST.accel), float(FIRST.accel))
+				rate = clampf(rate + accel * step, -float(FIRST.rate), float(FIRST.rate))
+				surge += rate * step
+				remaining -= step
+			out.append(surge)
+	return out
+
+
 func _the_run() -> void:
 	_check("the speed's share is by the logarithm: none at 300 mph (%.2f), a third at 1,000 (%.2f), two thirds at 3,000 (%.2f), all at 10,000 (%.2f) and no more past it (%.2f)" % [
 			Rush.speed_share(300.0), Rush.speed_share(1000.0), Rush.speed_share(3000.0), Rush.speed_share(10000.0), Rush.speed_share(14000.0)],
@@ -130,26 +168,49 @@ func _the_run() -> void:
 			last = want
 	_check("what is asked of the cockpit rises with the load at every speed, and is inside the travel whatever the load (%.0f mm forward, %.0f mm back): at 30 g off the line %.1f mm, at 3,000 mph and 15 g %.1f mm, at 10,000 mph and no load %.1f mm, in a light squeeze there %.1f mm" % [
 			Rush.FWD_MAX * 1000.0, Rush.AFT_MAX * 1000.0, Rush.target(30.0, 200.0) * 1000.0, Rush.target(15.0, 3000.0) * 1000.0, Rush.target(0.0, 10000.0) * 1000.0, Rush.target(-20.0, 10000.0) * 1000.0],
-		rising and inside and Rush.FWD_MAX <= 0.04 and Rush.AFT_MAX <= 0.03 and Rush.target(0.0, 0.0) == 0.0)
+		rising and inside and Rush.FWD_MAX <= 0.04 * MORE and Rush.AFT_MAX <= 0.03 * MORE and Rush.target(0.0, 0.0) == 0.0)
 	var run := _scripted(true)
 	var e: Array = run.ends
 	var top: float = run.mph[7]
+	# a bit more: half as much again of every length, the limits with them, and so the first run's own motion
+	var shares := [Rush.FWD_MAX / float(FIRST.fwd), Rush.AFT_MAX / float(FIRST.aft), Rush.LOAD_FWD / float(FIRST.load_fwd), Rush.LOAD_AFT / float(FIRST.load_aft),
+		Rush.SPEED_FWD / float(FIRST.speed_fwd), Rush.RATE_MAX / float(FIRST.rate), Rush.ACCEL_MAX / float(FIRST.accel)]
+	var in_step := true
+	for share: float in shares:
+		in_step = in_step and absf(share - MORE) < 0.001
+	var first := _first_run()
+	var trace: Array = run.trace
+	var apart := 0.0
+	var first_most := 0.0
+	var first_to_half := -1
+	var to_half := -1
+	for i in mini(first.size(), trace.size()):
+		apart = maxf(apart, absf(float(trace[i]) - MORE * first[i]))
+		first_most = maxf(first_most, absf(first[i]))
+		if first_to_half < 0 and first[i] >= 0.5 * float(FIRST.load_fwd):
+			first_to_half = i
+		if to_half < 0 and float(trace[i]) >= 0.5 * Rush.LOAD_FWD:
+			to_half = i
+	_check("a bit more: its travel's ends are %.1f mm forward and %.1f mm back (they were %.0f and %.0f), the pull's part %.1f mm, the brakes' %.1f mm and the speed's %.1f mm, and its limits %.0f mm/s and %.2f m/s2 (%.0f and %.2f): each %.1f times what it was. Frame for frame the run is the first one's, %.1f times as far (never more than %.4f mm from that over %d frames; the first went %.1f mm at most), and half the launch's pull is there in the same time (%.2f s; it was %.2f s)" % [
+			Rush.FWD_MAX * 1000.0, Rush.AFT_MAX * 1000.0, float(FIRST.fwd) * 1000.0, float(FIRST.aft) * 1000.0, Rush.LOAD_FWD * 1000.0, Rush.LOAD_AFT * 1000.0, Rush.SPEED_FWD * 1000.0,
+			Rush.RATE_MAX * 1000.0, Rush.ACCEL_MAX, float(FIRST.rate) * 1000.0, float(FIRST.accel), MORE, MORE, apart * 1000.0, trace.size(), first_most * 1000.0, to_half * FRAME - 0.5, first_to_half * FRAME - 0.5],
+		in_step and trace.size() == first.size() and trace.size() > 4000 and apart < 0.00002 and first_most > 0.02 and to_half == first_to_half and to_half > 0)
 	_check("off the line (30 g) the cockpit eases away: %.1f mm a second into the launch, %.1f mm by 3 s (%.0f mph)" % [float(run.early) * 1000.0, float(e[1]) * 1000.0, float(run.mph[1])],
-		float(run.early) > 0.004 and float(e[1]) > 0.014 and float(e[1]) < 0.028)
+		float(run.early) > 0.004 * MORE and float(e[1]) > 0.014 * MORE and float(e[1]) < 0.028 * MORE)
 	_check("it stays out as the pull fades and the speed builds: %.1f mm at %.0f mph (22 g), %.1f at %.0f (15 g), %.1f at %.0f (10 g), %.1f at %.0f (4 g)" % [
 			float(e[2]) * 1000.0, float(run.mph[2]), float(e[3]) * 1000.0, float(run.mph[3]), float(e[4]) * 1000.0, float(run.mph[4]), float(e[5]) * 1000.0, float(run.mph[5])],
-		float(e[2]) > 0.014 and float(e[3]) > 0.014 and float(e[4]) > 0.012 and float(e[5]) > 0.010)
+		float(e[2]) > 0.014 * MORE and float(e[3]) > 0.014 * MORE and float(e[4]) > 0.012 * MORE and float(e[5]) > 0.010 * MORE)
 	_check("holding %.0f mph with no load it stands at the speed's own part: %.1f mm (%.1f asked)" % [top, float(e[7]) * 1000.0, Rush.speed_part(top) * 1000.0],
-		top > 9900.0 and absf(float(e[7]) - Rush.speed_part(top)) < 0.0005 and float(e[7]) > 0.012)
+		top > 9900.0 and absf(float(e[7]) - Rush.speed_part(top)) < 0.0005 and float(e[7]) > 0.012 * MORE)
 	_check("a light squeeze of the air brakes (20 g) brings it %.1f mm back toward the pilot (to %.1f mm); on the throttle again it goes out (%.1f mm); a firm squeeze (60 g) brings it %.1f mm back (to %.1f mm)" % [
 			(float(e[7]) - float(e[8])) * 1000.0, float(e[8]) * 1000.0, float(e[9]) * 1000.0, (float(e[9]) - float(e[10])) * 1000.0, float(e[10]) * 1000.0],
-		float(e[7]) - float(e[8]) > 0.005 and float(e[7]) - float(e[8]) < 0.016 and float(e[9]) > float(e[7]) and float(e[10]) < float(e[8]) - 0.003)
+		float(e[7]) - float(e[8]) > 0.005 * MORE and float(e[7]) - float(e[8]) < 0.016 * MORE and float(e[9]) > float(e[7]) and float(e[10]) < float(e[8]) - 0.003 * MORE)
 	_check("full brakes to a stop, and at rest it is home: %.2f mm, having come no further than %.2f mm past its rest on the way" % [float(e[13]) * 1000.0, float(run.rebound) * 1000.0],
 		float(run.mph[12]) == 0.0 and absf(float(e[13])) < 0.0003 and float(run.rebound) < 0.0003)
 	_check("all the way it is inside its travel (%.1f mm forward at most of %.0f, %.1f mm back of %.0f), never faster than %.0f mm/s (%.1f) and never pushed harder than %.2f m/s2 (%.3f)" % [
 			float(run.fwd) * 1000.0, Rush.FWD_MAX * 1000.0, float(run.aft) * 1000.0, Rush.AFT_MAX * 1000.0, Rush.RATE_MAX * 1000.0, float(run.rate) * 1000.0, Rush.ACCEL_MAX, float(run.accel)],
-		float(run.fwd) <= Rush.FWD_MAX and float(run.aft) <= Rush.AFT_MAX and float(run.fwd) > 0.015 and float(run.aft) > 0.002
-		and float(run.rate) <= Rush.RATE_MAX * 1.001 and float(run.accel) <= Rush.ACCEL_MAX * 1.02 and Rush.RATE_MAX <= 0.1 and Rush.ACCEL_MAX <= 0.6)
+		float(run.fwd) <= Rush.FWD_MAX and float(run.aft) <= Rush.AFT_MAX and float(run.fwd) > 0.015 * MORE and float(run.aft) > 0.002 * MORE
+		and float(run.rate) <= Rush.RATE_MAX * 1.001 and float(run.accel) <= Rush.ACCEL_MAX * 1.02 and Rush.RATE_MAX <= 0.1 * MORE and Rush.ACCEL_MAX <= 0.6 * MORE)
 	var off := _scripted(false)
 	_check("switched off, the same run never moves it (%.6f mm at most)" % (float(off.moved) * 1000.0), float(off.moved) == 0.0)
 
@@ -190,18 +251,34 @@ var skewed_frames := 0         # frames in which the shell was turned, or off it
 var worst_rate := 0.0
 func _fly(seconds: float, g: float) -> void:
 	var until := clock + seconds
+	var pose: Transform3D = Cockpit.pod_pose()
 	while clock < until:
-		var before: float = v.shell.position.z
+		var before: float = _out()
 		var delta: float = await _frame(g)
 		if delta <= 0.0:
 			continue
 		if v.rig.transform != rig_at or v.origin.transform != Transform3D(Basis.IDENTITY, Cockpit.EYE) or v.cam.global_transform != cam_at:
 			moved_frames += 1
-		var place: Vector3 = v.shell.position - v._shake
-		if v.shell.transform.basis != Basis.IDENTITY or place.x != 0.0 or place.y != 0.0 or v.shell.position != v._shake + Vector3(0.0, 0.0, -v.rush.surge):
+		# (to the last bit: at the pod's pose, turned no further, and from it only by the shudder and by the rush along its own nose)
+		if v.shell.transform.basis != pose.basis or v._rush_shift.x != 0.0 or v._rush_shift.y != 0.0 or v.shell.transform != pose * Transform3D(Basis.IDENTITY, v._shake + Vector3(0.0, 0.0, -v.rush.surge)):
 			skewed_frames += 1
 		if v._shake == Vector3.ZERO:
-			worst_rate = maxf(worst_rate, absf(v.shell.position.z - before) / delta)
+			worst_rate = maxf(worst_rate, absf(_out() - before) / delta)
+
+
+## Where the shell stands from its place on the rig (the pod's pose), in the pod's own frame, m ...
+func _off() -> Vector3:
+	return Cockpit.pod_pose().affine_inverse() * (v.shell.position as Vector3)
+
+
+## ... and how far forward along its own nose that is.
+func _out() -> float:
+	return -_off().z
+
+
+## Is the shell exactly where this much of a move from the pod's pose puts it?
+func _stands(moved: Vector3) -> bool:
+	return v.shell.transform == Cockpit.pod_pose() * Transform3D(Basis.IDENTITY, moved)
 
 
 func _the_cockpit() -> void:
@@ -219,19 +296,22 @@ func _the_cockpit() -> void:
 	var anchors := [v.craft._pod_anchor(v.sim, 0), v.craft._pod_anchor(v.sim, 1)]
 	var hooks := [v._hardpoints[0].position, v._hardpoints[1].position]
 	await _fly(0.6, 0.0)
-	_check("at rest the shell stands exactly at its place (%s), the origin on the eye point" % v.shell.position, v.shell.position == Vector3.ZERO and v.origin.transform == Transform3D(Basis.IDENTITY, Cockpit.EYE))
+	var pose: Transform3D = Cockpit.pod_pose()
+	var hooked: bool = hooks[0] == pose * (v._hardpoint_at[0] as Vector3) and hooks[1] == pose * (v._hardpoint_at[1] as Vector3)
+	_check("at rest the shell stands exactly at its place, the pod's pose on the rig (%.1f degrees nose-down about the eye point; %s from it), the hooks on its nose, the origin on the eye point" % [rad_to_deg(Cockpit.POD_PITCH), _off()],
+		_stands(Vector3.ZERO) and hooked and v.origin.transform == Transform3D(Basis.IDENTITY, Cockpit.EYE))
 	# a launch: 30 g for 3 s
 	await _fly(3.0, 30.0)
-	var launched: float = -v.shell.position.z
+	var launched: float = _out()
 	var launch_mph := mps * MPH
-	_check("a launch (30 g for 3 s, to %.0f mph) eases the shell %.1f mm forward along its own nose" % [launch_mph, launched * 1000.0], launched > 0.012 and launched < 0.028)
+	_check("a launch (30 g for 3 s, to %.0f mph) eases the shell %.1f mm forward along its own nose" % [launch_mph, launched * 1000.0], launched > 0.012 * MORE and launched < 0.028 * MORE)
 	var hook_ok := true
 	var hook_worst := 0.0
 	for k in 2:
 		var shift: Vector3 = v._rush_shift
-		hook_ok = hook_ok and v._hardpoints[k].position == (hooks[k] as Vector3) + shift
-		hook_worst = maxf(hook_worst, (v.craft._pod_anchor(v.sim, k) - ((anchors[k] as Vector3) + v.rig.transform.basis * shift)).length())
-	_check("the tow links' hooks have gone with the nose (the links' ends %.4f mm off it at worst)" % (hook_worst * 1000.0), hook_ok and hook_worst < 1e-5 and v._rush_shift.z < -0.012)
+		hook_ok = hook_ok and v._hardpoints[k].position == pose * ((v._hardpoint_at[k] as Vector3) + shift)
+		hook_worst = maxf(hook_worst, (v.craft._pod_anchor(v.sim, k) - ((anchors[k] as Vector3) + v.rig.transform.basis * (pose.basis * shift))).length())
+	_check("the tow links' hooks have gone with the nose, along the pod's own line (the links' ends %.4f mm off it at worst)" % (hook_worst * 1000.0), hook_ok and hook_worst < 1e-5 and v._rush_shift.z < -0.012 * MORE)
 	# the streaks at speed
 	var rush = v.rush
 	var streak_at: Vector3 = rush.transform.origin
@@ -243,11 +323,11 @@ func _the_cockpit() -> void:
 		and streak_at.distance_to(v.rig.transform * Cockpit.EYE) < 1e-5 and way.angle_to(flown) < deg_to_rad(0.6) and rush.streaks.material_override == rush.mat)
 	# held: the speed's part alone
 	await _fly(2.5, 0.0)
-	var held: float = -v.shell.position.z
+	var held: float = _out()
 	_check("holding %.0f mph it settles at the speed's part: %.1f mm (%.1f asked)" % [mps * MPH, held * 1000.0, Rush.speed_part(mps * MPH) * 1000.0], absf(held - Rush.speed_part(mps * MPH)) < 0.001 and held > 0.005)
 	# the air brakes
 	await _fly(2.0, -25.0)
-	var braked: float = -v.shell.position.z
+	var braked: float = _out()
 	_check("the air brakes (25 g for 2 s, down to %.0f mph) bring it %.1f mm back toward the pilot (to %.1f mm)" % [mps * MPH, (held - braked) * 1000.0, braked * 1000.0], held - braked > 0.005)
 	# with the shudder: the gear's grab jolts the shell while the rush has it out
 	await _fly(1.0, 12.0)
@@ -258,7 +338,7 @@ func _the_cockpit() -> void:
 	for i in 12:
 		await _frame(12.0)
 		jolted = maxf(jolted, v._shake.length())
-		summed = summed and v.shell.position == v._shake + v._rush_shift and v._rush_shift.z < -0.004
+		summed = summed and _stands(v._shake + v._rush_shift) and v._rush_shift.z < -0.004
 	_check("it adds to the shudder: a gear's grab jolts the shell %.1f mm about where the rush has it (%.1f mm forward)" % [jolted * 1000.0, -v._rush_shift.z * 1000.0], jolted > 0.001 and summed)
 	while v._grab > 0.0:      # (the jolt dies away)
 		await _frame(0.0)
@@ -270,10 +350,10 @@ func _the_cockpit() -> void:
 	var until := clock + 2.5
 	while clock < until:
 		await _frame(0.0)
-	_check("an outside camera has none of it: the shell is home (%s) and the streaks are in" % v.shell.position, chase_origin and v.shell.position == Vector3.ZERO and not rush.streaks.visible)
+	_check("an outside camera has none of it: the shell is home (%s from its place) and the streaks are in" % _off(), chase_origin and _stands(Vector3.ZERO) and not rush.streaks.visible)
 	Cockpit.camera = "cockpit"
 	await _fly(2.0, 0.0)
-	_check("back in the seat it is out again (%.1f mm) and so are they" % (-v.shell.position.z * 1000.0), -v.shell.position.z > 0.004 and rush.streaks.visible)
+	_check("back in the seat it is out again (%.1f mm) and so are they" % (_out() * 1000.0), _out() > 0.004 and rush.streaks.visible)
 	_check("through all of that the rig, the headset's origin and the camera were exactly where they began (%d frames in which one was not), and the shell was never turned nor off its nose's line (%d frames); it never moved faster than %.0f mm/s (%.1f)" % [
 			moved_frames, skewed_frames, Rush.RATE_MAX * 1000.0, worst_rate * 1000.0],
 		moved_frames == 0 and skewed_frames == 0 and worst_rate <= Rush.RATE_MAX * 1.05 and worst_rate > 0.005)
@@ -286,14 +366,14 @@ func _the_cockpit() -> void:
 	_check("the OPTIONS page has SPEED RUSH, on (%s); chosen, it reads OFF and is saved (\"%s\")" % [line_on, _saved().get("rush", "")], line_on and line_off and not Cockpit.speed_rush and _saved().get("rush", "") == "off")
 	v.menu_open(false)
 	# switched off at speed: home, and then exactly where the shudder alone puts it
-	var out_before: float = -v.shell.position.z
+	var out_before: float = _out()
 	until = clock + 2.5
 	var home_at := -1.0
 	while clock < until:
 		await _frame(0.0)
-		if home_at < 0.0 and v.shell.position == Vector3.ZERO:
+		if home_at < 0.0 and _stands(Vector3.ZERO):
 			home_at = clock - (until - 2.5)
-	_check("switched off at %.0f mph the shell eases home from %.1f mm (there in %.1f s) and the streaks go" % [mps * MPH, out_before * 1000.0, home_at], out_before > 0.004 and home_at > 0.2 and v.shell.position == Vector3.ZERO and not rush.streaks.visible)
+	_check("switched off at %.0f mph the shell eases home from %.1f mm (there in %.1f s) and the streaks go" % [mps * MPH, out_before * 1000.0, home_at], out_before > 0.004 and home_at > 0.2 and _stands(Vector3.ZERO) and not rush.streaks.visible)
 	var strayed := 0
 	v._grab = 1.0
 	v._grab_t = 0.0
@@ -302,7 +382,7 @@ func _the_cockpit() -> void:
 	while clock < until:      # another launch's worth of load, and a gear's grab, switched off
 		await _frame(30.0)
 		shaken = maxf(shaken, v._shake.length())
-		if v.shell.position != v._shake or v._rush_shift != Vector3.ZERO or rush.streaks.visible or v._hardpoints[0].position != hooks[0] or v.craft._pod_anchor(v.sim, 0) != anchors[0]:
+		if not _stands(v._shake) or v._rush_shift != Vector3.ZERO or rush.streaks.visible or v._hardpoints[0].position != hooks[0] or v.craft._pod_anchor(v.sim, 0) != anchors[0]:
 			strayed += 1
 	_check("off, a 30 g pull to %.0f mph leaves the shell exactly where the shudder alone puts it (%d frames in which it was not; the grab still jolts it %.1f mm), the hooks where they were and no streak drawn" % [mps * MPH, strayed, shaken * 1000.0],
 		strayed == 0 and shaken > 0.001 and mps * MPH > 1000.0)

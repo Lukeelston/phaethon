@@ -9,6 +9,9 @@
 ##   away from the triggers")
 ##   the MODE switch on the right console: push it up for SPEEDCRAFT, down for STARFIGHTER (live,
 ##   mid-lap; STARFIGHTER takes below 1,250 mph). Y hold 1 s flips it too. Y tap: restart
+##   the SLIDE / GRIP switch on the left console: whether the cockpit steps out in a turn; and behind it
+##   the drift slider (vr/drift_slider.gd): how far. A controller's tip rested on its knob takes hold of
+##   it, and it goes fore and aft with the hand (forward is more)
 ##   menu tap: quick menu (driving partner, controls, camera: the seat or a chase view) Â· menu hold
 ##   1.5 s: main menu / map selection
 ##   the start panel across the windscreen's header (vr/overhead_panel.gd): 1 BATT, 2 ENGINE under its
@@ -31,7 +34,20 @@ const SEAT := Vector3(0.0, 0.72, 0.6)  # eye point in pod space (pod forward = -
 # recentred pilot's eyes are, and where the headset's origin stands. The header rail is then 0.26 m over
 # the eye and 0.30 m ahead of it (it was 0.35 over), the hood's liner still clear of the head behind it.
 const SEAT_RISE := 0.089
-const EYE := SEAT + Vector3(0.0, SEAT_RISE, 0.0)
+# ... and SEAT_FWD ahead of it (Luke, 2026-11-23, from the seat: "move the pilot forward about an inch"):
+# every fitting is that much nearer him (the header rail now 0.275 m ahead of the eye).
+const SEAT_FWD := 0.025
+const EYE := SEAT + Vector3(0.0, SEAT_RISE, -SEAT_FWD)
+# The pod's pitch under the pilot (Luke, the same day: "Can you also angle the vehicle down a few degrees? I
+# like the nose being enclosed, but it does make it tough to see the road in turns"). The pod and all that is
+# in it (the shell: hull, nose, coaming, dash, consoles, canopy) stand POD_PITCH nose-down on the rig, turned
+# about the pilot's own eye point (pod_pose): the nose and the coaming are that much lower in his view, and
+# the road shows over them sooner. The rig, the headset's origin on it, and so the camera, the world and the
+# horizon are not touched: this is the cockpit's attitude under a head that stays level. The engines keep
+# theirs, and the tow links hook to the nose where it now is (CraftModel.pod_frame_pose).
+# About the eye, not his hips: a pod turned about the hips carries its fittings 28 mm forward at eye height
+# (the eye is 0.53 m over them), which would have taken back the inch he asked for in the same breath.
+const POD_PITCH := deg_to_rad(3.0)
 const FLOOR_H := 0.7                    # pod floor above the ground
 const QuestControlsScript := preload("res://input/quest_controls.gd")
 const SeatFinish := preload("res://view/craft_materials.gd")
@@ -53,6 +69,7 @@ const StartupScript := preload("res://vr/startup_sequence.gd")
 const OverheadPanelScript := preload("res://vr/overhead_panel.gd")
 const StartupAudioScript := preload("res://audio/startup_audio.gd")
 const SpeedRushScript := preload("res://vr/speed_rush.gd")
+const DriftSliderScript := preload("res://vr/drift_slider.gd")
 const TacticalScript := preload("res://view/tactical_display.gd")   # the tactical display: the road ahead, the traffic and the exits marked out in the world
 var _brake_trace: RefCounted
 static var require_neutral_on_entry := false
@@ -95,6 +112,11 @@ const SLIDE_SCRUB := 0.22                 # the scrub in your hands while it mov
 var _rim_flashing := false
 static var slide_feel := true             # the SLIDE / GRIP switch on the left console (false: the cockpit keeps the sim's heading exactly)
 static var _slide_loaded := false         # (its saved setting is read once a run, as the camera's)
+# How much of it (Luke, 2026-11-23: "add a physical slider or knob in the cockpit to adjust the amount of
+# drift in real time"): the drift slider behind that switch (vr/drift_slider.gd) sets this, from none to
+# DriftSlider.AMOUNT_MAX of SLIDE_MAX. At 1 the cockpit steps out exactly as it did before there was a
+# slider; saved as "slide_amount", read with the switch's own.
+static var slide_amount := 1.0
 static var map_whole := true              # the map's GLOBAL / LOCAL switch, on its pod: the whole country (false: the roads round the craft, heading up)
 static var map_scheme := 0                # ... and its colour button: which of MinimapPanel.SCHEMES the screen is drawn in
 static var map_hud := false               # ... and its HUD switch: the map in the windscreen too (view/minimap_glass.gd)
@@ -146,6 +168,8 @@ var _b_held := 0.0
 var _boost_tick := 0.0
 var _menu_page := ""                      # "" the quick menu's first page, "options" its second
 var slide_switch                          # vr/mode_switch.gd again: SLIDE up, GRIP down
+var drift_slider                          # vr/drift_slider.gd: how far it steps out (slide_amount)
+var _slide_stop := 0.0                    # the slide's overshoot is stopped here (it goes out with the amount past 1)
 var _slide := 0.0
 var _slide_rate := 0.0
 var _slide_load := 0.0                    # the cornering load, smoothed, g (+ a left turn)
@@ -251,7 +275,11 @@ func _ready() -> void:
 	_nose_loaded = true
 	if not _slide_loaded and prefs.has("slide"):
 		slide_feel = prefs.slide != "off"
+	if not _slide_loaded and typeof(prefs.get("slide_amount")) in [TYPE_FLOAT, TYPE_INT]:
+		slide_amount = clampf(float(prefs.slide_amount), 0.0, DriftSliderScript.AMOUNT_MAX)
 	_slide_loaded = true
+	if drift_slider:      # (its knob stands where the amount is)
+		drift_slider.amount = slide_amount
 	if not _rush_loaded and prefs.has("rush"):
 		speed_rush = prefs.rush != "off"
 	_rush_loaded = true
@@ -343,6 +371,7 @@ func _save_prefs() -> void:
 	if f:
 		f.store_string(JSON.stringify({"scheme": quest.scheme, "handling": handling_ask if handling_ask != "" else sim.P.handling, "camera": camera,
 			"nose": "closed" if CraftModelScript.nose_closed else "open", "slide": "on" if slide_feel else "off",
+			"slide_amount": snappedf(slide_amount, 0.001),
 			"startup": "cold" if cold_start else "hot", "school": "on" if school else "done",
 			"consumables": "on" if consumables else "off", "powerups": "on" if power_ups_on else "off",
 			"field": "on" if avoid_on else "off", "rush": "on" if speed_rush else "off", "tactical": "on" if TacticalScript.wanted else "off",
@@ -396,7 +425,7 @@ func _apply_shudder(delta: float) -> void:
 	var tremble := _startup_shake(delta)
 	if not wind_audio:
 		_shake = _grab_jolt(delta) + tremble
-		shell.position = _shake + _rush_shift
+		_place_shell()
 		return
 	var s: Array = wind_audio.shudder
 	var w: Array = wind_audio.shake
@@ -409,7 +438,23 @@ func _apply_shudder(delta: float) -> void:
 	var up: float = s[0] * w[0] + s[1] * w[1]
 	var side: float = s[0] * w[0] - s[1] * w[1]
 	_shake = Vector3(0.6 * side, up, 0.0) * SHAKE_M + _grab_jolt(delta) + tremble
-	shell.position = _shake + _rush_shift      # (the speed rush's easing fore and aft: _ease_rush)
+	_place_shell()      # (with the speed rush's easing fore and aft: _ease_rush)
+
+
+## Where the pod stands on the rig: POD_PITCH nose-down, turned about the pilot's eye point. That point is
+## the one place that is the same in the rig's frame and in the pod's: EYE is where he sits in either.
+static func pod_pose() -> Transform3D:
+	var pitched := Basis(Vector3.RIGHT, -POD_PITCH)
+	return Transform3D(pitched, EYE - pitched * EYE)
+
+
+## Stand the shell on the rig: at the pod's pose, and from there where the shudder and the speed rush have
+## it, along its own lines. The tow links' hooks go with the pose and the rush (not with the shudder).
+func _place_shell() -> void:
+	var pose := pod_pose()
+	shell.transform = pose * Transform3D(Basis.IDENTITY, _shake + _rush_shift)
+	for k in _hardpoints.size():
+		_hardpoints[k].position = pose * (_hardpoint_at[k] + _rush_shift)
 
 
 ## The gear's grab: the cockpit jolts fore and aft (a little up), GRAB_HZ, dying over GRAB_DECAY.
@@ -508,6 +553,7 @@ func _make_view() -> void:
 		m.material_override = _mat(Color(0.2, 0.22, 0.25))
 		c.add_child(m)
 	_build_cockpit()
+	_place_shell()                    # (pitched under the pilot from the first frame: POD_PITCH)
 	rush = SpeedRushScript.new()      # the speed rush's streaks: in the air round the cockpit, not on the rig (they do not lean with it)
 	add_child(rush)
 	rush.build(self)
@@ -515,7 +561,8 @@ func _make_view() -> void:
 		TerminalLighting.mark_craft(rig)
 	_build_fade(xr_cam)
 	pod_mesh.visible = false   # you are sitting inside it
-	craft.pod_frame = rig      # so the cables hook to the cockpit's own nose
+	craft.pod_frame = rig      # so the cables hook to the cockpit's own nose ...
+	craft.pod_frame_pose = pod_pose()      # ... where the pod's pitch has it
 	# Entering from the menu preserves an already-focused OpenXR session, so
 	# session_focussed will not fire again to place the player in the new seat.
 	if live and hands_live:
@@ -542,6 +589,8 @@ func _set_hands(on: bool) -> void:
 		return
 	hands_live = on
 	print("CONTROLS: Quest controllers ", "live" if on else "let go (the session isn't focused)")
+	if not on and drift_slider:
+		drift_slider.let_go()
 	if not on:
 		quest.thr_l = 0.0
 		quest.thr_r = 0.0
@@ -762,6 +811,13 @@ func _build_cockpit() -> void:
 	shell.add_child(slide_switch)
 	slide_switch.transform = ModeSwitchScript.mount(-1.0)
 	slide_switch.build()
+	# ... and how far it steps out: the drift slider, a fader in a rail on the same console's inboard
+	# shoulder, behind the switch and out of the box where a hand throws it (vr/drift_slider.gd).
+	drift_slider = DriftSliderScript.new()
+	shell.add_child(drift_slider)
+	drift_slider.transform = DriftSliderScript.mount()
+	drift_slider.build()
+	drift_slider.amount = slide_amount
 	canopy = CanopyScript.build()
 	canopy.position = Vector3(0, CraftModelScript.POD_FRAME_UP, 0)
 	shell.add_child(canopy)
@@ -1012,6 +1068,10 @@ func _read_input(delta: float) -> void:
 			if thrown != "":
 				set_slide(thrown == "slide")
 				_buzz(hand, 0.9, 0.06)
+	# ... and the drift slider behind it: a tip rested on its knob has it, and it goes with the hand
+	if drift_slider and hands_live and not _await_neutral_controls:
+		for hand in [l, r]:
+			_work_slider(drift_slider.poke(hand, delta), hand)
 	# the map's own switch and button, on its pod
 	if minimap_panel and hands_live and not _await_neutral_controls:
 		for hand in [l, r]:
@@ -1218,6 +1278,8 @@ func _menu(down: bool, delta: float) -> String:
 func menu_open(on: bool) -> void:
 	if on == menu.open:
 		return
+	if drift_slider:      # (a hand that had the slider's knob has let it go)
+		drift_slider.let_go()
 	_a_held = 0.0
 	_a_fired = false
 	_y_held = 0.0
@@ -1878,18 +1940,46 @@ func set_slide(on: bool) -> void:
 	print("SLIDE: ", "on" if on else "off")
 
 
+## How far the cockpit steps out, of what it did before the drift slider (0 none .. DriftSlider.AMOUNT_MAX):
+## set it, stand the slider's knob there, and remember it.
+func set_slide_amount(a: float) -> void:
+	slide_amount = clampf(a, 0.0, DriftSliderScript.AMOUNT_MAX)
+	if drift_slider:
+		drift_slider.amount = slide_amount
+	_save_prefs()
+	print("SLIDE: amount %.2f" % slide_amount)
+
+
+## What a hand did at the drift slider this frame (DriftSlider.poke), acted on: the amount follows the knob
+## as it goes, the hand feels it take hold, each detent, the notch at the amount it had before the slider
+## and either end, and when the hand lets go what it was left at is saved.
+func _work_slider(did: String, hand: XRController3D = null) -> void:
+	if did == "":
+		return
+	slide_amount = drift_slider.amount
+	var felt := {"held": [0.5, 0.03], "tick": [0.3, 0.02], "notch": [0.9, 0.05], "end": [0.7, 0.04]}
+	if hand and felt.has(did):
+		_buzz(hand, float(felt[did][0]), float(felt[did][1]))
+	if did == "let_go" and drift_slider.take_changed():
+		_save_prefs()
+		print("SLIDE: amount %.2f" % slide_amount)
+
+
 ## The slide's angle now, radians, + = the nose further left (a left turn): toward what the
 ## cornering load asks for, on a spring (see SLIDE_MAX).
 func _ease_slide(delta: float) -> float:
 	_slide_load += (turn_load() - _slide_load) * (1.0 - exp(-clampf(delta, 0.0, 0.05) / SLIDE_LOAD_T))
 	var asked := signf(_slide_load) * smoothstep(SLIDE_LOAD.x, SLIDE_LOAD.y, absf(_slide_load))
-	var target := asked * SLIDE_MAX if slide_feel else 0.0
+	var target := asked * SLIDE_MAX * slide_amount if slide_feel else 0.0      # (the drift slider's amount: at 1, as it was)
+	# its overshoot's stop goes out with an amount past 1, and comes back in no faster than the slide itself moves
+	var stop := SLIDE_MAX * 1.25 * maxf(1.0, slide_amount)
 	var w := TAU * SLIDE_HZ
 	var remaining := clampf(delta, 0.0, 0.05)
 	while remaining > 0.000001:
 		var step := minf(remaining, 1.0 / 240.0)
 		_slide_rate = clampf(_slide_rate + (w * w * (target - _slide) - 2.0 * SLIDE_ZETA * w * _slide_rate) * step, -SLIDE_RATE, SLIDE_RATE)
-		_slide = clampf(_slide + _slide_rate * step, -SLIDE_MAX * 1.25, SLIDE_MAX * 1.25)
+		_slide_stop = maxf(stop, _slide_stop - SLIDE_RATE * step)
+		_slide = clampf(_slide + _slide_rate * step, -_slide_stop, _slide_stop)
 		remaining -= step
 	return _slide
 
@@ -1968,10 +2058,8 @@ func _ease_rush(delta: float) -> void:
 		return
 	var forward: float = rush.ease_surge(delta, g_along, _kmh() / 1.609344, speed_rush and camera == "cockpit")
 	_rush_shift = Vector3(0.0, 0.0, -forward)
-	shell.position = _shake + _rush_shift
 	craft.pod_frame_shift = _rush_shift
-	for k in _hardpoints.size():
-		_hardpoints[k].position = _hardpoint_at[k] + _rush_shift
+	_place_shell()
 
 
 ## ... and its streaks, a frame (after the camera is placed: theirs is the air's frame it worked out). In the
@@ -2014,6 +2102,8 @@ func _process(delta: float) -> void:
 	if slide_switch:
 		slide_switch.power = startup.power
 		slide_switch.show_state(not slide_feel, 0.0 if slide_feel else 1.0, false)
+	if drift_slider:
+		drift_slider.show_state(slide_feel, startup.power)
 	# Crash: fade to black, respawn happens in the dark, fade back up.
 	var target := 1.0 if sim.crash_t > 0.0 else 0.0
 	fade_v = move_toward(fade_v, target, delta * 4.0)

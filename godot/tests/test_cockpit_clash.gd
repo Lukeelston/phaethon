@@ -3,7 +3,8 @@
 ## sides of it"). In the production cockpit, with every mesh's real triangles (tests/clash_kit.gd):
 ##   the map's pod and the SLIDE switch stand apart, from the seat neither hides the other, and neither
 ##   stands where a hand works the other;
-##   the levers' grips pass the switches through their whole travel;
+##   the levers' grips pass the switches and the drift slider through their whole travel, and never stand
+##   between the seat and the slider's knob, legends or ramp; nothing of the slider is in the SLIDE switch's box;
 ##   no gauge's tube stands inside its neighbour's bore (the open space between a dial and its glass);
 ##   the map's controls strip is out of the roof's pillar, and the switches' panels out of the coaming;
 ##   and no two fittings pass through each other that are not on the list of those joined on purpose.
@@ -20,6 +21,7 @@ const ClashKit := preload("res://tests/clash_kit.gd")
 const Layout := preload("res://vr/gauge_layout.gd")
 const Switch := preload("res://vr/mode_switch.gd")
 const MapPanel := preload("res://vr/minimap_panel.gd")
+const Drift := preload("res://vr/drift_slider.gd")
 # Which gauge's tube stands under which bigger neighbour's wall (tools/gauge_layout.py OVER).
 const OVER := {1: 0, 2: 0, 3: 1, 4: 2}
 # Fittings that are joined on purpose, one sunk into or standing on the other. Anything else that
@@ -32,6 +34,7 @@ const JOINED := [
 	["seat_cushion", "cockpit_interior/SeatTub"], ["seat_cushion", "cockpit_interior/HarnessWebbing"],
 	["seat_cushion", "cockpit_interior/MachinedHardware"],                              # the lap belt and its buckle lie in the cushion
 	["cockpit_interior/ConsoleR", "mode_switch/MeshInstance3D"], ["cockpit_interior/ConsoleL", "SlideSwitch/MeshInstance3D"],   # the switches' panels are let into the consoles
+	["cockpit_interior/ConsoleL", "DriftSlider/rail"],                                  # the drift slider's rail sits over the console's inboard shoulder, its foot let into the top
 ]
 var failures := 0
 var checks := 0
@@ -88,25 +91,49 @@ func _run() -> void:
 		if arg == "--slide-mirrored":
 			slide.position.z = mode.position.z
 
-	# ---- the levers pass the switches, through their whole travel
-	var least := [ClashKit.REACH, ClashKit.REACH]
-	for step in 5:
-		for pivot: Node3D in cockpit.lever_pivots:
-			pivot.rotation.x = deg_to_rad(lerpf(30.0, -30.0, step / 4.0))      # (idle to full burner: the live cockpit's swing)
-		var near := ClashKit.new()
-		for part in cockpit.lever_pivots + [slide, mode]:
-			near.gather_part(rig, part)
-		near.arm(root)
-		await physics_frame
-		await physics_frame
-		least[0] = minf(least[0], float(near.gap(root.world_3d.direct_space_state, "PilotGrip", "SlideSwitch")[0]))
-		least[1] = minf(least[1], float(near.gap(root.world_3d.direct_space_state, "PilotGrip", "shell/mode_switch")[0]))
-		near.free_bodies()
-		await physics_frame
+	# ---- the levers pass the switches and the drift slider, through their whole travel
+	var slider: Node3D = cockpit.drift_slider
+	_check("the cockpit has its drift slider", slider != null and slider.get_script() == Drift)
+	if slider == null:
+		print("COCKPIT CLASH FAIL (%d failures)" % failures)
+		quit(1)
+		return
+	# what of the slider is looked at from the seat: its knob at the ends and in its notch, its legends, its ramp's ends (panel metres)
+	var slider_face := {"OFF legend": Vector3(Drift.place(0.0), -0.0128, 0.004), "DRIFT legend": Vector3(-0.014, -0.0128, 0.004), "MAX legend": Vector3(Drift.place(Drift.AMOUNT_MAX), -0.0128, 0.004),
+		"ramp at OFF": Vector3(Drift.place(0.0), 0.007, 0.004), "ramp at MAX": Vector3(Drift.place(Drift.AMOUNT_MAX), 0.0107, 0.004),
+		"knob at OFF": Vector3(Drift.place(0.0), 0.0, Drift.CAP_Z + Drift.CAP.z * 0.5 + 0.001), "knob in its notch": Vector3(Drift.place(Drift.STANDARD), 0.0, Drift.CAP_Z + Drift.CAP.z * 0.5 + 0.001),
+		"knob at MAX": Vector3(Drift.place(Drift.AMOUNT_MAX), 0.0, Drift.CAP_Z + Drift.CAP.z * 0.5 + 0.001)}
+	var least := [ClashKit.REACH, ClashKit.REACH, ClashKit.REACH]
+	var behind_grip := []
+	for at_amount in [Drift.AMOUNT_MAX, 0.0]:      # (the knob at each end of its slot: the forward end is the one the grips come nearest)
+		slider.amount = at_amount
+		slider.show_state(true, 1.0)
+		for step in 5:
+			for pivot: Node3D in cockpit.lever_pivots:
+				pivot.rotation.x = deg_to_rad(lerpf(30.0, -30.0, step / 4.0))      # (idle to full burner: the live cockpit's swing)
+			var near := ClashKit.new()
+			for part in cockpit.lever_pivots + [slide, mode, slider]:
+				near.gather_part(rig, part)
+			near.arm(root)
+			await physics_frame
+			await physics_frame
+			least[0] = minf(least[0], float(near.gap(root.world_3d.direct_space_state, "PilotGrip", "SlideSwitch")[0]))
+			least[1] = minf(least[1], float(near.gap(root.world_3d.direct_space_state, "PilotGrip", "shell/mode_switch")[0]))
+			least[2] = minf(least[2], float(near.gap(root.world_3d.direct_space_state, "PilotGrip", "DriftSlider")[0]))
+			for what: String in slider_face:
+				for part in near.sight(root.world_3d.direct_space_state, VR.EYE, to_rig * (slider.global_transform * (slider_face[what] as Vector3))):
+					if not part.contains("DriftSlider"):
+						behind_grip.append("%s behind %s, lever %d of 4" % [what, part, step])
+						break
+			near.free_bodies()
+			await physics_frame
+	slider.amount = Drift.STANDARD
+	slider.show_state(true, 1.0)
 	for pivot: Node3D in cockpit.lever_pivots:
 		pivot.rotation.x = 0.0
-	_check("the levers' grips pass the SLIDE switch by %s mm at the least through their travel, and the handling switch by %s mm" % [_mm(least[0]), _mm(least[1])],
-		least[0] >= 0.012 and least[1] >= 0.012)
+	_check("the levers' grips pass the SLIDE switch by %s mm at the least through their travel, the handling switch by %s mm and the drift slider by %s mm" % [_mm(least[0]), _mm(least[1]), _mm(least[2])],
+		least[0] >= 0.012 and least[1] >= 0.012 and least[2] >= 0.012)
+	_check("and from the seat no lever, anywhere in its travel, stands before the drift slider's knob, legends or ramp (hidden: %s)" % [behind_grip], behind_grip.is_empty())
 
 	# ---- everything else, as built (the two switches' levers thrown up, toward the map's pod)
 	for sw in [slide, mode]:
@@ -162,6 +189,21 @@ func _run() -> void:
 				in_toggle += 1
 	_check("nothing of the map stands in the box before the SLIDE switch where a hand throws it (%d of its vertices), nor of the switch in the box before the map's toggle (%d)" % [in_slide, in_toggle],
 		in_slide == 0 and in_toggle == 0)
+	# ---- the drift slider: out of the SLIDE switch's box, and in sight from the seat with everything else in the cockpit in place
+	var slider_in_slide := 0
+	for i in kit.group("DriftSlider"):
+		for p in kit.soups[i]:
+			var q := into_slide * p
+			if absf(q.x) < Switch.ZONE.x and absf(q.y) < Switch.ZONE.y and q.z > -0.01 and q.z < Switch.ZONE.z:
+				slider_in_slide += 1
+	hidden = []
+	for what: String in slider_face:
+		for part in kit.sight(space, eye, to_rig * (slider.global_transform * (slider_face[what] as Vector3))):
+			if not part.contains("DriftSlider"):
+				hidden.append("%s behind %s" % [what, part])
+				break
+	_check("nothing of the drift slider stands in the box before the SLIDE switch (%d of its vertices), and from the seat nothing in the cockpit hides its knob, legends or ramp (hidden: %s)" % [slider_in_slide, hidden],
+		slider_in_slide == 0 and hidden.is_empty())
 	var legend_z := INF
 	for child in cockpit.interior.get_children():
 		if child is Label3D and (child as Label3D).text == "AUX PWR":
