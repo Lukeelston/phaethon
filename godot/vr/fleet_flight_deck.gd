@@ -470,10 +470,10 @@ func fit_cabin(interior: Node3D) -> void:
 					var z := -.15 + k * .24
 					panels.append(
 						[
-							Kit.rounded_box(Vector3(.044, .066, .29), 4.0, 8),
+							Kit.rounded_box(Vector3(.044, .066, .224), 4.0, 8),
 							Kit.at(Vector3(s * .724, .449, z + .13), Vector3(-.15, 0, s * .18)),
 							paint
 						]
 					)
-					_bar(trim, Vector3(s * .699, .438, z + .015), Vector3(s * .699, .463, z + .24), .0035, accent)
+					_bar(trim, Vector3(s * .699, .438, z + .032), Vector3(s * .699, .463, z + .228), .0035, accent)
 	_flush(interior, "SillFittings")

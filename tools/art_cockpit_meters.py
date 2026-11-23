@@ -23,7 +23,15 @@ def card(base):
 
 
 def label(d, at, words, size, ink, mono=False):
-    d.text(at, words, font=typeface(size, mono), fill=ink, anchor="mm")
+    # The square atlas tile stretches across a 184 x 100 mm plate.
+    # Compress the ink horizontally before printing so the mounted type has its intended proportions.
+    font = typeface(size, mono)
+    left, top, right, bottom = font.getbbox(words, anchor="mm")
+    mask = Image.new("L", (right - left, bottom - top))
+    ImageDraw.Draw(mask).text((-left, -top), words, font=font, fill=255, anchor="mm")
+    scale = 100 / 184
+    mask = mask.resize((max(1, round(mask.width * scale)), mask.height), Image.Resampling.LANCZOS)
+    d.bitmap((round(at[0] + left * scale), round(at[1] + top)), mask, fill=ink)
 
 
 def brake_card():
@@ -55,12 +63,12 @@ def compass_card():
                fill=paper if i % 6 == 0 else gold, width=5 if i % 6 == 0 else 2)
     for a, title in enumerate("NESW"):
         angle = radians(a*90-90)
-        label(d, (256+156*cos(angle), 256+156*sin(angle)), title, 45, paper)
+        d.text((256+150*cos(angle), 256+150*sin(angle)), title, font=typeface(45), fill=paper, anchor="mm")
     for deg in (45, 135, 225, 315):
         a = radians(deg)
         for r in [50, 90]:
             d.line((256+(r-20)*cos(a), 256+(r-20)*sin(a), 256+r*cos(a), 256+r*sin(a)), fill=gold, width=2)
-    label(d, (256, 323), "AZIMUTH", 19, gold)
+    d.text((256, 323), "AZIMUTH", font=typeface(25), fill=paper, anchor="mm")
     return im
 
 

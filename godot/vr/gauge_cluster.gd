@@ -460,6 +460,21 @@ func _text(name: String, window: Array, y: float, size: int, colour: Color, vali
 	labels[name] = l
 
 
+## Keep each message within its half of the glass, including multiline checklist prompts.
+## Measure only on a text change. Label3D uses this same font to shape the displayed line.
+func _strip_text(label: Label3D, value: String) -> void:
+	if label.text == value:
+		return
+	label.text = value
+	if not flight_deck or value.is_empty():
+		return
+	var font := label.font if label.font else ThemeDB.fallback_font
+	var bounds := font.get_multiline_string_size(value, HORIZONTAL_ALIGNMENT_CENTER, -1, label.font_size)
+	label.autowrap_mode = TextServer.AUTOWRAP_OFF
+	var available_height := .031 if label == labels.progress else .025
+	label.pixel_size = minf(PX, minf(label.width * PX / maxf(bounds.x, 1), available_height / maxf(bounds.y, 1)))
+
+
 func _build_text() -> void:
 	var status: Array = Layout.WINDOWS[0]
 	var systems: Array = Layout.WINDOWS[1]
@@ -655,9 +670,9 @@ func show_state(d: Dictionary) -> void:
 		labels.speed.text = Classic._grouped(shown)
 		_digit_mat.set_shader_parameter("speed", shown)
 	labels.units.text = "MPH"
-	labels.mach.text = d.mach_line
-	labels.progress.text = d.progress
-	labels.footer.text = d.footer
+	_strip_text(labels.mach, d.mach_line)
+	_strip_text(labels.progress, d.progress)
+	_strip_text(labels.footer, d.footer)
 	# the points counter, and the feat beside it while it is fresh
 	set_points(int(d.get("points", 0)))
 	(labels.points as Readout).text = str(points)
@@ -674,7 +689,7 @@ func show_state(d: Dictionary) -> void:
 	feat_label.visible = fresh
 	(labels.footer as Label3D).visible = not fresh
 	if fresh:
-		feat_label.text = feat
+		_strip_text(feat_label, feat)
 		feat_label.modulate = Color(GREEN, lerpf(1.0, 0.5, smoothstep(FEAT_BRIGHT, FEAT_BRIGHT + 0.8, age)))
 	var blink: bool = d.blink
 	var backlight: float = float(d.get("backlight", 1.0)) * _power

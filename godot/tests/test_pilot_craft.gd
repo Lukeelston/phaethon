@@ -177,6 +177,17 @@ func check_flight_deck(game, id: String) -> void:
 	if id == Sim.PilotCraft.ORRERY:
 		check("compass reads north with the north-up map", is_zero_approx(meter.cursors[0].rotation.z))
 	check_sight_lines(game)
+	# A long status and a two-line checklist share the strip with the repair hint or step rail.
+	for key in ["progress", "mach", "footer", "feat"]:
+		var label: Label3D = cluster.labels[key]
+		var saved := label.text
+		for message in ["CHECK THE STARBOARD TURBINE AND RESET THE IGNITION BEFORE RESTARTING", "ENGINE START CHECKLIST\nSTARBOARD TURBINE READY", "READY"]:
+			cluster._strip_text(label, message)
+			var font := label.font if label.font else ThemeDB.fallback_font
+			var bounds := font.get_multiline_string_size(message, HORIZONTAL_ALIGNMENT_CENTER, -1, label.font_size) * label.pixel_size
+			check("%s %s fits its LCD row" % [id, key], bounds.x <= .3661 and bounds.y <= (.0311 if key == "progress" else .0251))
+		check("%s %s restores full type size" % [id, key], is_equal_approx(label.pixel_size, cluster.PX))
+		cluster._strip_text(label, saved)
 
 
 func check_sight_lines(game) -> void:
@@ -189,6 +200,18 @@ func check_sight_lines(game) -> void:
 			obstacles.append(hull.get_node(name))
 	obstacles.append_array(game.aux_meter.find_children("*","MeshInstance3D",true,false))
 	var targets: Array[Vector3] = []
+	var card_targets: Array[Vector3] = []
+	var meter = game.aux_meter
+	for x in [-.46, -.25, 0.0, .25, .46]:
+		for y in [-.45, -.25, 0.0, .25, .45]:
+			if meter.id == Sim.PilotCraft.ORRERY and Vector2(x,y).length() > .47:
+				continue
+			card_targets.append(meter.to_global(Vector3(x * meter.card_size.x, y * meter.card_size.y, .001)))
+	for window in cluster.Layout.WINDOWS:
+		var xf: Transform3D = cluster.Kit.on_arc(window[1],window[2],0,cluster.R)
+		for x in [-.96, 0.0, .96]:
+			for y in [-.82, 0.0, .82]:
+				targets.append(cluster.to_global(xf * Vector3(x * window[3],y * window[4],window[5] + .0014)))
 	for g: Dictionary in cluster.gauges:
 		var frame: Transform3D = cluster.Kit.on_arc(g.x,g.y,0,cluster.R)
 		for offset: Vector2 in [Vector2(-.55,.20),Vector2(.55,.20),Vector2(0,.65),Vector2(0,-.55)]:
@@ -200,19 +223,26 @@ func check_sight_lines(game) -> void:
 		targets.append(cluster.to_global(at.origin))
 	for x in [-.20,.20]:
 		targets.append(game.shell.to_global(Vector3(x,.16,-.16)))
+	for group in [game.interior,game.slide_switch,game.mode_switch]:
+		for label: Label3D in group.find_children("*","Label3D",true,false):
+			if label.is_visible_in_tree() and not label.text.is_empty():
+				targets.append(label.global_position)
 	var seen := true
 	for fitting: MeshInstance3D in obstacles:
 		var surface := fitting.mesh.generate_triangle_mesh()
 		for eye_x in [-.033,.033]:
 			for drop in [0.0,.04]:
 				var eye := fitting.to_local(game.shell.to_global(game.EYE+Vector3(eye_x,-drop,0)))
-				for target in targets:
+				var samples := targets.duplicate()
+				if not meter.cursors.has(fitting.get_parent()):
+					samples.append_array(card_targets)
+				for target in samples:
 					var dial := fitting.to_local(target)
 					var hit := surface.intersect_ray(eye,eye.direction_to(dial))
 					if hit and eye.distance_to(hit.position) < eye.distance_to(dial)-.002:
 						seen = false
 						print("Sight line blocked ",game.sim.P.vehicle," ",fitting.name," to ",cluster.to_local(target))
-	check(game.sim.P.vehicle + " both eyes see the gauges, lower displays and footwells at both heights",seen)
+	check(game.sim.P.vehicle + " both eyes see the meters, displays, console legends and footwells at both heights",seen)
 
 
 func _run() -> void:

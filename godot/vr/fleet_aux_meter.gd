@@ -23,7 +23,7 @@ func _piece(parent: Node3D, mesh: Mesh, material: Material, at := Transform3D.ID
 
 func build(deck, eye: Vector3) -> void:
 	id = deck.id
-	position = Vector3(.545, .445, -.135)
+	position = Vector3(.468, .535, -.105)
 	basis = Basis.looking_at(position - eye, Vector3.UP)
 	card_size = Vector2(.184, .100)
 	var round_case := id == P.ORRERY
@@ -34,7 +34,7 @@ func build(deck, eye: Vector3) -> void:
 	var face_up := Vector3(PI / 2, 0, 0)
 	var pieces := []
 	if round_case:
-		_piece(self, Kit.cyl(.077, .062, .043, 56), alloy, Kit.at(Vector3(0, 0, -.022), face_up))
+		_piece(self, Kit.cyl(.077, .062, .043, 56), alloy, Kit.at(Vector3(0, 0, -.022), face_up)).name = "Case"
 		pieces.append([Finish.washer(.069, .076, .006, 64), Kit.at(Vector3.ZERO, face_up), deck.accent])
 	else:
 		var w := card_size.x
@@ -44,7 +44,7 @@ func build(deck, eye: Vector3) -> void:
 			Finish.beveled_plate(Vector3(w + .022, .045, h + .024), .007),
 			body,
 			Kit.at(Vector3(0, 0, -.024), face_up)
-		)
+		).name = "Case"
 		for x in [-1, 1]:
 			for y in [-1, 1]:
 				pieces.append(
@@ -54,27 +54,25 @@ func build(deck, eye: Vector3) -> void:
 						Color.SILVER
 					]
 				)
-	# A fixed mounting shoe under the case runs back into the dashboard cheek.
-	pieces.append(
-		[
-			Finish.beveled_plate(Vector3(.059, .032, .095)),
-			Kit.at(Vector3(0, -card_size.y * .36, -.065)),
-			deck.upholstery
-		]
-	)
-	_piece(self, Kit.compound(pieces), Finish.satin())
+	_piece(self, Kit.compound(pieces), Finish.satin()).name = "RimHardware"
+	# Keep the rear foot on the dashboard while raising the printed face above the coaming.
+	var foot := basis.inverse() * (Vector3(.586, .372 if round_case else .391, -.173) - position)
+	var back := Vector3(0, -card_size.y * .25, -.042)
+	var strut := Kit.at((foot + back) * .5)
+	strut.basis = Basis.looking_at(foot - back, Vector3.UP)
+	_piece(self, Finish.beveled_plate(Vector3(.044, .020, foot.distance_to(back))), body, strut).name = "Bracket"
 	card_material = StandardMaterial3D.new()
 	card_material.albedo_texture = preload("res://art/pilot_fleet/cockpit_meters.png")
 	card_material.emission_enabled = true
 	card_material.emission_texture = card_material.albedo_texture
 	card_material.roughness = .72
 	card_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
-	_piece(self, _card_mesh(CARDS.find(id), round_case), card_material)
+	_piece(self, _card_mesh(CARDS.find(id), round_case), card_material).name = "PrintedCard"
 	var pointer := Finish.tinted("powder", Color("#ff7546") if id != P.VESPER else Color("#eddbff"))
 	for i in 2 if id == P.KILN else 1:
 		var pivot := Node3D.new()
 		pivot.name = "Pointer%d" % i
-		pivot.position.z = .003
+		pivot.position.z = .007 if id == P.VESPER else .003
 		cursors.append(pivot)
 		add_child(pivot)
 		match id:
@@ -143,5 +141,5 @@ func sync(heading: float, brakes: Array, strain: Array, side_g: float, power: fl
 			cursor.position = Vector3(
 				card_size.x * .37 * fraction,
 				card_size.y * (.5 - (302.0 - 57.0 * fraction * fraction) / 512.0),
-				.005
+				.007
 			)
