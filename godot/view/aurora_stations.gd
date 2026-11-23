@@ -38,7 +38,7 @@ extends Node3D
 const Tube := preload("res://sim/pressure_surface.gd")
 const Kit := preload("res://view/mesh_kit.gd")
 const Marks := preload("res://view/aurora_marks.gdshader")
-const Ring := preload("res://vr/start_ring.gdshader")
+const Ring := preload("res://view/start_ring.gdshader")
 const BAR := 400.0              # m outside the seal: the stop bar (from it the bore's middle is 22 degrees up and the whole lock is in a pilot's view)
 const ROAD_CHEVRONS := 4        # chevrons to the bar from the road, 60 m apart ...
 const SEAL_CHEVRONS := 5        # ... and from the seal, 55 m apart

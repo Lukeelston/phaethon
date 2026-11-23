@@ -357,6 +357,8 @@ func _sim_step() -> void:
 
 
 func _load_prefs() -> Dictionary:
+	if benchmark_flight:
+		return {}
 	if FileAccess.file_exists(PREFS):
 		var d = JSON.parse_string(FileAccess.get_file_as_string(PREFS))
 		if d is Dictionary:
@@ -365,6 +367,8 @@ func _load_prefs() -> Dictionary:
 
 
 func _save_prefs() -> void:
+	if benchmark_flight:
+		return
 	var f := FileAccess.open(PREFS, FileAccess.WRITE)
 	if f:
 		f.store_string(JSON.stringify({"scheme": quest.scheme, "handling": handling_ask if handling_ask != "" else sim.P.handling, "camera": camera,
@@ -2108,6 +2112,8 @@ func _process(delta: float) -> void:
 	fade_mat.albedo_color = Color(0, 0, 0, fade_v)
 	if dawn and dawn.burn > 0.0:   # caught by the dawn: burn to white instead
 		fade_mat.albedo_color = Color(1.0, 0.97, 0.9, dawn.burn)
+	if benchmark_flight:   # replay delta is virtual; only the benchmark has wall-clock timings
+		return
 	frame_ms.append(delta * 1000.0)
 	_w_cpu.append((Time.get_ticks_usec() - t_in) / 1000.0)
 	var vp := get_viewport().get_viewport_rid()
@@ -2299,6 +2305,8 @@ func _exit_tree() -> void:
 	if _brake_trace:
 		_brake_trace.close()
 	super()
+	if benchmark_flight:
+		return
 	_report()
 	if wag_all.t > 0.0:
 		print(wag_all.report().replace("WAG:", "WAG (the whole flight):"))

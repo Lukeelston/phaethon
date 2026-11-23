@@ -9,6 +9,12 @@ func _enter_tree() -> void:
 	print("PCVR STAGE: boot scene ready at engine +", Time.get_ticks_msec(), " ms")
 
 func _ready() -> void:
+	if "--benchmark" in OS.get_cmdline_user_args():
+		var xr := XRServer.find_interface("OpenXR")
+		print("PCVR BOOT: benchmark=true xr_ready=", xr != null and xr.is_initialized())
+		var runner = preload("res://release/flight_benchmark.gd").new()
+		add_child(runner)
+		return
 	_start.call_deferred()
 
 static func selected_track(args: PackedStringArray) -> String:

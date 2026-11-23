@@ -164,3 +164,7 @@ A161km closed circuit built from the Network S5 road's sweeping curves.
 Starts in Speedcraft. Chase clean laps with ramjet power and progressive
 air brakes; the200m road rewards an accurate line. Approach boards show
 feet to the next bend. Lap records and skill scores save separately.
+
+FLIGHT BENCHMARK
+Run Phaethon.exe -- --benchmark to replay Eridanus and the Network and quit.
+The report is %APPDATA%\ElstonWorks\Phaethon\flight_benchmark.json.

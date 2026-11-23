@@ -2,17 +2,23 @@ extends Control
 
 const View := preload("res://view/craft_view.gd")
 const UI := preload("res://release/release_config.gd")
+const CraftSelector := preload("res://release/craft_selector.gd")
 const Title := preload("res://release/title_stage.gd")
 const SPINE := 500.0          # in the title, the menu's column down the left edge is this wide (of the window's 1280) ...
 const STRIP := 150.0          # ... and the controls' strip along the bottom of the rest this high: the picture has what is left
 
 var collision_checkbox: CheckBox
 var partner_checkbox: CheckBox
-var craft_selector := preload("res://release/craft_selector.gd").new()
+var craft_selector: CraftSelector
 var stage: Node3D             # the title: the scene the menu lies over (release/title_stage.gd; null with Title.enabled off)
 var art := Rect2()            # ... and the part of the window its picture is composed in
 
 func _ready() -> void:
+	if "--benchmark" in OS.get_cmdline_user_args():
+		var runner = preload("res://release/flight_benchmark.gd").new()
+		add_child(runner)
+		return
+	craft_selector = CraftSelector.new()
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	theme = UI.make_theme()
 	stage = Title.make("flat")

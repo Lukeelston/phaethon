@@ -87,6 +87,7 @@ var skill_audio
 var _skill_display := SkillDisplayScript.new()
 var _skill_label: Label
 var _skill_award_label: Label
+var benchmark_flight := false
 var replay: Array = []
 var replay_i := 0
 var shot_path := ""
@@ -292,7 +293,7 @@ func _ready() -> void:
 		sim.respawn(-1, start_at)
 	if branch_at >= 0 and not sim.branches.is_empty():
 		_place_on_branch(branch_at)
-	if sim.kind != "circuit":
+	if sim.kind != "circuit" and not benchmark_flight:
 		replay = []
 	levers = LeverInputScript.new()
 	minimap = MiniMapScript.new()
@@ -375,6 +376,8 @@ func _sim_step() -> void:
 	if not replay.is_empty() and sub % 8 == 0:
 		var u: Array = replay[mini(replay_i, replay.size() - 1)]
 		inp = {"thrL": u[0], "thrR": u[1], "brkL": u[2], "brkR": u[3], "repair": false, "reignite": true}
+		if u.size() == 5:   # recorded courses carry the handling request as a fifth channel
+			handling_ask = ["", "speed", "starfighter"][int(u[4])]
 		replay_i += 1
 	sub += 1
 	if handling_ask != "":
@@ -467,7 +470,7 @@ func _best_path() -> String:
 	if GP_BIOME.has(sim.track_name):
 		return "user://%s_best_%s.json" % [sim.track_name, h]
 	if sim.course:
-		return "user://%s_best.json" % sim.track_name   # one record: every lap flies both modes
+		return best_dir + "%s_best.json" % sim.track_name   # one record: every lap flies both modes
 	return "user://sprint_best.json" if h == "speed" else "user://sprint_best_%s.json" % h
 
 

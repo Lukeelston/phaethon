@@ -716,3 +716,40 @@ arduino-cli compile --fqbn rp2040:rp2040:rpipico --output-dir firmware/build fir
 - A loop seam test that compares the jump to the loop's step distribution misfires on a nearly pure tone. Compare curvature across the join to its 23 ms surroundings instead.
 - `AudioStreamWAV.data` is a getter that copies the whole buffer. Read it once, not per sample.
 - The loops load raw with `AudioStreamWAV.load_from_file`, so an exported build needs `audio/engines/*` in the export's non-resource include filter.
+
+## Flight benchmark
+
+Run `Phaethon.exe -- --benchmark` or `PhaethonVR.exe -- --benchmark` from an
+export. To measure the PC VR cockpit in a window, use
+`PhaethonVR.exe --xr-mode off -- --benchmark`. A live OpenXR run reports
+per-eye render size and headset refresh. The XR-off run reports the window and
+monitor. Add `--benchmark-out=C:\bench\flight.json` after `--benchmark` to
+choose an existing output directory. The default is `flight_benchmark.json`
+in the edition's user-data directory. The game exits after writing the report.
+
+The benchmark first flies Eridanus and Network once to populate world resources.
+It then alternates the same two flights three more times. It
+waits for background audio synthesis before each warm-up. Both courses use
+the first 1,980 frames of their checked-in recording. The
+first 180 warm the scene, then 1,800 are timed. Every draw advances eight
+1/480-second physics steps regardless of the frame's elapsed wall time.
+Default flight settings come from a disposable profile. Desktop vsync and the
+engine FPS cap are disabled for the benchmark. An active XR runtime can still
+pace the frames.
+
+The summary pools all 5,400 measured frames per course across the three
+steady passes. It reports the initial conditioning pass separately and keeps
+all three steady pass results. FPS uses total frames divided by total elapsed
+wall time. Frame, GPU and main-thread times are in
+milliseconds with the mean and nearest-rank p50/p95/p99. Main-thread time
+covers the flight update and the remaining idle-process callbacks. GPU time
+covers the root viewport as reported by the renderer. RAM is the Windows
+process working set and VRAM is Godot's video-memory use, both sampled at the
+end of each pass along with scene node and loaded resource counts. The summary
+shows the final steady pass snapshot. Unavailable counters are JSON null.
+
+Run `python tools/check_flight_benchmark.py first.json second.json` to check
+both reports, the endpoints against the independent reference sim, and the
+two-run FPS spread (absolute difference divided by their mean, target 2% per
+course). Compare on the same hardware, display mode and resolution after the
+shader cache has warmed.
