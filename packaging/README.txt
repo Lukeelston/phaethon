@@ -1,5 +1,5 @@
 PHAETHON
-Experimental Desktop Racer - Windows x64 - v0.4.0
+Experimental Desktop Racer - Windows x64 - v0.5.0
 ElstonWorks
 
 The twin engines now have rolled intakes, ribbed air brakes and heat-stained
@@ -44,6 +44,17 @@ GET IN
 2. Keep Phaethon.exe and Phaethon.pck together.
 3. Double-click Phaethon.exe. Choose the 100-mile sprint first.
 No Godot editor, account, headset, or online connection is required to play.
+
+NEW IN 0.5.0
+- Three more craft: Orrery IX, Kiln Six and Vesper. Choose your craft on the
+  main menu.
+- The engines' fins turn with the craft.
+- The Network's bends are banked.
+- Hold R (or pad Y) for a boost. A tap still arms the ramjet.
+- The ramjet's voice is deeper.
+- City towers keep their shapes as you pass them, and the scenic roads show
+  their aprons from far off.
+- Power-up gates keep clear of the exit lanes.
 
 NEW IN 0.4.0
 - The menu stands in a scene of its own: the title over a road at sunset.
@@ -144,7 +155,7 @@ transfer the game's copyright. Third-party components and the CC BY engine
 audio retain their own licenses and permissions. See THIRD_PARTY.md and
 licenses/. Adapted engine audio is also supplied separately in audio/engines/.
 
-Build: 0.4.0-experimental | 2026-11-23
+Build: 0.5.0-experimental | 2026-11-23
 
 IN THIS LOCAL BUILD
 Central highway transfers and long side-road sweeps now alternate bends with

@@ -1,5 +1,5 @@
 PHAETHON - EXPERIMENTAL PC VR EDITION
-Windows x64 / OpenXR - v0.4.0 - ElstonWorks
+Windows x64 / OpenXR - v0.5.0 - ElstonWorks
 
 Watch the engines ahead during a fast braking turn. Their ribbed flaps flutter
 under load, the jet follows its steering vanes, and the trailing pod swings
@@ -36,6 +36,29 @@ are cleaner. Cockpit fittings have better clearance and real throttle slots.
 Geological detail, fractured rocks, branched trees, stepped city towers and
 settlement hardware add character. Road decoration streams more efficiently.
 VR cockpit lean is gentler, with slower rotation and smooth air-brake reversals.
+
+NEW IN 0.5.0
+- Three more craft: Orrery IX, Kiln Six and Vesper. Choose your craft on the
+  main menu.
+- In a turn the cockpit swings wide behind the engine on the outside of it,
+  like a tube towed behind a boat. A slider on the left console, behind the
+  SLIDE switch, sets how much: rest a controller's tip on its knob until it
+  ticks, then move it. Forward is more.
+- The engines' fins turn with the craft.
+- The Network's bends are banked.
+- You sit an inch further forward and the nose stands lower, so more of the
+  road shows. The speed rush moves the cockpit further.
+- The map pod has a HUD switch: it shows the map in the windscreen as well.
+  LOCAL shows more of the road ahead.
+- The quick menu's OPTIONS page has a TACTICAL DISPLAY: the road ahead, the
+  traffic and the exits, marked in the world. It is off until you turn it on.
+- The ramjet's voice is deeper.
+- City towers keep their shapes as you pass them.
+- The autopilot allows for long freight, and power-up gates keep clear of the
+  exit lanes.
+- PhaethonVR.exe is now a small launcher. It starts the game, and starts it
+  once more if OpenXR stalls on the way to the menu. The game itself is
+  PhaethonVR.engine: keep the three files together.
 
 NEW IN 0.4.0
 - A flight starts cold. Reach up to the overhead panel: BATT, ENGINE under its
@@ -205,7 +228,7 @@ transfer the game's copyright. Third-party components and the CC BY engine
 audio retain their own licenses and permissions. See THIRD_PARTY.md and
 licenses/. Adapted engine audio is supplied separately in audio/engines/.
 
-Build: 0.4.0-experimental | 2026-11-23
+Build: 0.5.0-experimental | 2026-11-23
 
 IN THIS LOCAL BUILD
 Central highway transfers and long side-road sweeps now alternate bends with
