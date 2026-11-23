@@ -37,6 +37,8 @@ const MAST := 400.0                # the mast of light over the beam, m ...
 const MAST_WIDE := 10.0            # ... and across (3 pixels of a headset's from 5 km)
 const POST := 2.4                  # a post's side, m
 const LANES := [-0.18, 0.0, 0.18]  # a gate's middle, of the road's width left of its centreline
+# These outer-lane gates crossed green exit rails. Keep their kilometre and use the middle lane.
+const CENTRE_LANE_AT := {"E1": 9250, "E2": 20580, "N1": 20740, "N2": 20570, "N3": 19400}
 const SPAN := 0.09                 # its half-span, of the road's width ...
 const SPAN_MIN := 14.0             # ... and never under or over these, m
 const SPAN_MAX := 36.0
@@ -79,11 +81,14 @@ static func network_gates(s, r: int) -> Array:
 	var d := END_CLEAR + fmod(float(r) * 7919.0, SPACING * 0.5)      # (a phase a road: they do not line up across the country)
 	while d < total - END_CLEAR:
 		var i := int(round(d / step))
+		if R.name == "S6" and i == 1396: # the sign span here crosses the beacon above the gate
+			i += 1
 		if _network_ok(s, r, R, i):
 			var w: float = R.w[i]
 			var hw := _span(w)
 			var flat: float = maxf(0.0, w / 2.0 - s.net_edge_span(w) - hw)      # (the whole gate on the road's flat, clear of its edges' ramps)
-			out.append({"road": r, "i": i, "lat": clampf(float(LANES[posmod(r + k, LANES.size())]) * w, -flat, flat), "hw": hw, "k": k})
+			var lane := 0.0 if CENTRE_LANE_AT.get(R.name, -1) == i else float(LANES[posmod(r + k, LANES.size())])
+			out.append({"road": r, "i": i, "lat": clampf(lane * w, -flat, flat), "hw": hw, "k": k})
 			k += 1
 		d += SPACING
 	return out
