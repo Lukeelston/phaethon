@@ -60,6 +60,23 @@ const RAM_PIN := Vector3(0.2323, 0.4690, 0.80)     # the lug's pin, in the fin's
 const RAM_BASE := Vector3(0.30, 0.5907, 0.80)      # the bracket's pin, engine-local (outboard +x)
 const RAM_BARREL := 0.52               # the cylinder, pin to gland
 const RAM_ROD := 0.65                  # the rod, pin to piston
+# The fins answer a turn as well (Luke: "The engine fins should rotate left/right as well as up/down with
+# turning"; view/fin_steering.gd has what they answer and how it is eased).
+# Left and right: the fin is in two parts. The stub keeps the hinge and the ram and does what the whole fin
+# did. The panel above it (from PANEL_CUT up the fin: the upper half of what stands clear of the engine) stands on a spindle
+# up the fin's own line through the stub's head, and a rotary actuator round the spindle swings it, trailing
+# edge into the turn as a rudder goes: the drum at the stub's head, its two lines down the stub's inboard
+# face. Nothing else could turn: the hinge's tube lies in three saddles along the engine, so the whole fin
+# cannot; the cut is over the ram's lug so the ram never meets the panel; and the spindle is at the station
+# where the engine's own air-brake leaf, open, stands nearest the fin, so the panel hardly moves there.
+# Up and down: in a turn the inside engine's fin lays out FIN_LEAN further and the outside engine's stands
+# up as much, on top of the speed's cant: the two lean into the turn together. Never past the ram's own
+# travel (FIN_REST to FIN_FAST), so parked only the inside fin moves, and flat out only the outside one.
+const PANEL_CUT := 0.70                # m up the fin from its hinge: the stub's head, the panel's foot
+const PANEL_Z := 1.45                  # the spindle's station along the engine
+const PANEL_SWING := deg_to_rad(20.0)  # as far as the panel swings either way, in the hardest turn
+const PANEL_SLEW := deg_to_rad(60.0)   # ... and no faster than this, a second
+const FIN_LEAN := 0.20                 # rad: the hardest turn's share of the cant
 
 
 ## Where the fin stands at a speed: rad from upright.
@@ -82,13 +99,29 @@ static func fin_solve(out: float, cant: float) -> Dictionary:
 		"hinge": hinge, "pin": pin, "base": base, "span": span, "showing": span - RAM_BARREL, "piston": span - RAM_ROD}
 
 
-## The fin's tip in its own frame (about its hinge), and the nav lamp that rides there.
+## The fin's tip in its own frame (about its hinge), unswung.
 static func fin_tip_local(out: float) -> Vector3:
 	return fin_tip(out) - Vector3(out * FIN_HINGE.x, FIN_HINGE.y, FIN_HINGE.z)
 
 
+## The foot of the panel's spindle, in the fin's own frame.
+static func panel_foot(out: float) -> Vector3:
+	return Vector3(out * PANEL_CUT * sin(FIN_CANT), PANEL_CUT * cos(FIN_CANT), PANEL_Z)
+
+
+## The panel on its spindle, in the fin's own frame: swung `swing` rad about the fin's own line
+## (+ = its trailing edge to the engine's right, a right turn's).
+static func panel_place(out: float, swing: float) -> Transform3D:
+	return Transform3D(Basis(Vector3(out * sin(FIN_CANT), cos(FIN_CANT), 0.0), swing), panel_foot(out))
+
+
+## The fin's tip in the panel's own frame (about its spindle's foot), and the nav lamp that rides there.
+static func panel_tip(out: float) -> Vector3:
+	return fin_tip_local(out) - panel_foot(out)
+
+
 static func fin_lamp(out: float) -> ArrayMesh:
-	return Kit.compound([[Kit.ball(0.057, 10), Kit.at(fin_tip_local(out) + Vector3(-0.08*out, -0.09, 0.09)),
+	return Kit.compound([[Kit.ball(0.057, 10), Kit.at(panel_tip(out) + Vector3(-0.08*out, -0.09, 0.09)),
 		Color("#ef413b") if out < 0 else Color("#49dc91")]])
 
 

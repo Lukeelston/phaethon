@@ -23,7 +23,8 @@
 ## tailpipe you can see up, a nozzle whose flaps open and shut with the power, and three vanes that
 ## steer the jet; the jet is a volume of gas (view/flame.gdshader) on a centre line traced here
 ## (_trace_plume). What they do, and what in real engines each part of that rests on, is
-## view/jet_exhaust.gd's.
+## view/jet_exhaust.gd's. The fins answer a turn as well: the Phaethon's rudders and stabilisers, the
+## Shrike's fin panels and rams (view/fin_steering.gd, view/shrike_airframe.gd).
 ##   add_child(model); model.build(view)          once
 ##   model.sync(sim, inp, delta)                  every frame, after the floating origin moves
 extends Node3D
@@ -32,6 +33,7 @@ const Kit := preload("res://view/mesh_kit.gd")
 const Fairings := preload("res://view/craft_fairings.gd")
 const Finishes := preload("res://view/craft_materials.gd")
 const TowLink := preload("res://view/tow_link.gd")
+const Fins := preload("res://view/fin_steering.gd")
 const STEEL := Color(0.60, 0.65, 0.70)
 const HOT := Color(1.0, 0.54, 0.16)
 const WHITE := Color(1.0, 0.96, 0.86)
@@ -113,9 +115,18 @@ var jets: Array = []                 # per engine: its nozzle and its gas (view/
 var nozzle_flaps := [[], []]         # per engine: its upper and lower flaps' hinges (they open and shut with the power)
 var metal_mats: Array[ShaderMaterial] = []   # per engine: the liner, the vanes and the flaps' faces (they glow when hot)
 var strobes: Array[Node3D] = []      # the fin-tip strobes (double flash)
-var fin_parts: Array = []            # the Shrike's: per engine [fin, ram cylinder, ram rod] (view/shrike_airframe.gd)
-var fin_cant := Shrike.FIN_REST      # ... where its fins stand now, rad from upright: tall at rest, laid out at speed
+var fin_parts: Array = []            # the Shrike's: per engine [fin (its stub), ram cylinder, ram rod, the fin's outer panel] (view/shrike_airframe.gd)
+var fin_cant := Shrike.FIN_REST      # ... where the speed stands its fins now, rad from upright: tall at rest, laid out at speed
+var fin_stand := [Shrike.FIN_REST, Shrike.FIN_REST]   # ... where each engine's stands: that, and the turn's lean (the inside one laid out, the outside one stood up)
 var fin_ram := [0.0, 0.0]            # ... and how much rod each ram shows, m (tests read it)
+# The fins in a turn (view/fin_steering.gd; tests read these).
+var fin_drive := 0.0                 # what they answer: g toward the right, eased
+var fin_swing := 0.0                 # the rudders (the Shrike's fin panels): rad, + = trailing edges right, a right turn
+var fin_pitch := 0.0                 # the Phaethon's stabilisers: rad, + = a right turn's (the starboard engine's trailing edge up, the port's down)
+var rudders: Array[Node3D] = []      # the Phaethon's: per engine, where the dorsal fin's rudder stands on its post ...
+var stabilisers: Array[Node3D] = []  # ... and the outboard fin's panel on its spindle (pivots: nothing is drawn at them)
+var fin_batches: Array[MultiMesh] = []   # ... and what is drawn there: [both engines' rudders, both stabiliser panels], each pair one thing to draw
+var _fin_posed := [0.0, 0.0]         # how the parts were last put (the Shrike: each panel's swing; the Phaethon: swing, pitch)
 var binder_mats: Array[StandardMaterial3D] = []   # the binder emitters' glowing cores
 const FlameShader := preload("res://view/flame.gdshader")
 const FlowTexture := preload("res://art/engine/jet_flow.png")
@@ -211,6 +222,31 @@ func build(v) -> void:
 	var flap_liner: ArrayMesh = Jets.flap_liner(Jets.EXIT_Z - Jets.THROAT_Z)
 	var wall_skins: ArrayMesh = Jets.wall_skins()
 	var hot_mesh: ArrayMesh = Jets.opened(Kit.rounded_box(Vector3(ENG_W - 0.2, ENG_H - 0.16, 2.2), 5.0), 2.9)
+	# The binder emitter's ring and the nozzle's two side walls (whose gas side is in the tailpipe's own mesh):
+	# one fixed mesh in the one finish, and the same mesh on both engines, the port engine's turned half round
+	# about the engine's own line (the walls are the same either way up; the ring comes round to the inboard
+	# side). The renderer draws a mesh that stands twice as one thing, so this is one thing to draw where the
+	# two rings and the walls were three: it pays for the fins' moving parts (tests/probe_fins_cost.gd counts).
+	var emitter_at := Kit.at(Vector3(-(ENG_W / 2.0 + 0.04), 0.0, -2.9), Vector3(0.0, 0.0, PI / 2.0))      # the starboard engine's: cylinders' axis (Y) across the gap
+	var ring_and_walls := Kit.compound([
+		[Kit.cyl(0.34, 0.34, 0.08, 24), emitter_at, DARK.lightened(0.35)],
+		[Kit.cyl(0.38, 0.38, 0.03, 24), emitter_at * Kit.at(Vector3(0, -0.03, 0)), Livery.coat("engine")],
+		[wall_skins, Transform3D.IDENTITY, Color.WHITE, true],
+	])
+	if not shrike:
+		# The Phaethon's rudders and stabiliser panels: one mesh of each for both engines, and each pair drawn
+		# as one batch (with the ring and walls, the engines draw no more things than they did). The batches
+		# are the model's own, since each spans both engines: sync() puts their two where the engines are.
+		for mesh in [Fins.rudder_mesh(STEEL, Livery.coat("engine"), DARK), Fins.stabiliser_mesh(STEEL, DARK)]:
+			var batch := MultiMeshInstance3D.new()
+			batch.name = "Rudders" if fin_batches.is_empty() else "Stabilisers"
+			batch.multimesh = MultiMesh.new()
+			batch.multimesh.transform_format = MultiMesh.TRANSFORM_3D
+			batch.multimesh.mesh = mesh
+			batch.multimesh.instance_count = 2
+			batch.material_override = Finishes.painted_metal()
+			add_child(batch)
+			fin_batches.append(batch.multimesh)
 	for k in 2:
 		var out := -1.0 if k == 0 else 1.0   # outboard side, engine-local X (eL rides on the left)
 		var eng := Node3D.new()
@@ -218,7 +254,7 @@ func build(v) -> void:
 		engines.append(eng)
 		var body := MeshInstance3D.new()
 		body.name = "ShrikeFairing" if shrike else "PhaethonFairing"
-		body.mesh = Shrike.part(&"Port" if k == 0 else &"Starboard") if shrike else _engine_body(out)
+		body.mesh = Shrike.part(&"Port" if k == 0 else &"Starboard") if shrike else _engine_body(out, false)      # (its rudder and stabiliser are their own parts)
 		if not shrike:
 			body.material_override = Finishes.painted_metal()
 		eng.add_child(body)
@@ -244,12 +280,17 @@ func build(v) -> void:
 		light_meshes.append(lights)
 		var fin: MeshInstance3D = null
 		if shrike:
-			# The fin on its hinge, the ram that moves it, and the nav lamp at its tip (view/shrike_airframe.gd:
-			# sync() stands the fin up or lays it out with the speed).
+			# The fin on its hinge, its outer panel on the spindle at the fin's head, the ram that moves the fin,
+			# and the nav lamp at the tip (view/shrike_airframe.gd: sync() stands the fin up or lays it out with
+			# the speed and the turn, and swings the panel with the turn).
 			fin = MeshInstance3D.new()
 			fin.name = "ShrikeFin"
 			fin.mesh = Shrike.part(&"PortFin" if k == 0 else &"StarboardFin")
 			eng.add_child(fin)
+			var panel := MeshInstance3D.new()
+			panel.name = "ShrikeFinPanel"
+			panel.mesh = Shrike.part(&"PortFinPanel" if k == 0 else &"StarboardFinPanel")
+			fin.add_child(panel)
 			var ram := MeshInstance3D.new()
 			ram.name = "FinRam"
 			ram.mesh = Shrike.part(&"FinRam")
@@ -264,9 +305,9 @@ func build(v) -> void:
 			tip_lamp.mesh = Shrike.fin_lamp(out)
 			tip_lamp.material_override = lit_mat
 			tip_lamp.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-			fin.add_child(tip_lamp)
+			panel.add_child(tip_lamp)
 			light_meshes.append(tip_lamp)
-			fin_parts.append([fin, ram, rod])
+			fin_parts.append([fin, ram, rod, panel])
 			_place_fin(k, fin_cant)
 		# hot section: its own material, coloured by heat
 		var hot := MeshInstance3D.new()
@@ -341,6 +382,18 @@ func build(v) -> void:
 			legend.rotation.x = -PI / 2.0
 			legend.position = Vector3(0, ENG_H / 2.0 + 0.036, -0.15)
 			eng.add_child(legend)
+			# Where the dorsal fin's rudder stands on its post and the outboard fin's panel on its spindle
+			# (view/fin_steering.gd: sync() turns them with the turn). What they stand on is in the engine's fixed mesh.
+			var rudder := Node3D.new()
+			rudder.name = "Rudder"
+			rudder.position = Vector3(0.0, ENG_H / 2.0, Fins.RUDDER_Z)
+			eng.add_child(rudder)
+			rudders.append(rudder)
+			var stabiliser := Node3D.new()
+			stabiliser.name = "Stabiliser"
+			stabiliser.transform = Fins.stabiliser_place(out, ENG_W / 2.0, 0.0)
+			eng.add_child(stabiliser)
+			stabilisers.append(stabiliser)
 		# split air brakes, two on top and two underneath: hinged at the front edge, the trailing
 		# edge swings up (or down) into the airflow
 		for fa in FLAPS_AT:
@@ -403,33 +456,28 @@ func build(v) -> void:
 			face.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 			hinge.add_child(face)
 			nozzle_flaps[k].append(hinge)
-		var side_walls := MeshInstance3D.new()      # (their gas side is in the tailpipe's own mesh)
-		side_walls.mesh = wall_skins
-		side_walls.material_override = finish
-		eng.add_child(side_walls)
-		# the fin-tip strobe
+		# the fin-tip strobe: it rides the fin's tip (the Shrike's fin panel, the Phaethon's rudder)
 		var strobe := MeshInstance3D.new()
 		strobe.mesh = Kit.ball(0.08, 10)
 		strobe.material_override = view._mat(Color(1.0, 1.0, 1.0), true)
-		strobe.position = Shrike.fin_tip_local(out) if shrike else Vector3(0, 1.08, 1.35)
+		strobe.position = Shrike.panel_tip(out) if shrike else Vector3(0, 1.08 - ENG_H / 2.0, 1.35 - Fins.RUDDER_Z)
 		strobe.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		if shrike:
-			fin.add_child(strobe)      # (it rides the fin's tip)
+			(fin_parts[k][3] as Node3D).add_child(strobe)
 		else:
-			eng.add_child(strobe)
+			rudders[k].add_child(strobe)
 		strobes.append(strobe)
 		# the upgraded binder emitter on the inboard face: a ring round a glowing core, facing across
 		var em := Node3D.new()
 		em.position = Vector3(-out * (ENG_W / 2.0 + 0.04), 0.0, -2.9)
 		em.rotation.z = PI / 2.0   # cylinders' axis (Y) across the gap
 		eng.add_child(em)
-		var ring_m := MeshInstance3D.new()
-		ring_m.mesh = Kit.compound([
-			[Kit.cyl(0.34, 0.34, 0.08, 24), Kit.at(Vector3.ZERO), DARK.lightened(0.35)],
-			[Kit.cyl(0.38, 0.38, 0.03, 24), Kit.at(Vector3(0, -out * 0.03, 0)), Livery.coat("engine")],
-		])
+		var ring_m := MeshInstance3D.new()      # (with the nozzle's side walls: ring_and_walls above)
+		ring_m.name = "RingAndWalls"
+		ring_m.mesh = ring_and_walls
+		ring_m.rotation.z = 0.0 if out > 0.0 else PI
 		ring_m.material_override = finish
-		em.add_child(ring_m)
+		eng.add_child(ring_m)
 		var core_m := MeshInstance3D.new()
 		core_m.mesh = Kit.cyl(0.24, 0.24, 0.1, 20)
 		core_m.position.y = -out * 0.02
@@ -525,6 +573,7 @@ func build(v) -> void:
 		hinge.add_child(pm)
 		pod_flaps.append(hinge)
 
+	_place_fin_batches()
 	link_rod = TowLink.rod_for(sim.P.cableLen)
 	for k in 2:      # the tow links: four rigid parts each, placed every frame (sync_cables), their meshes made once
 		var cm: StandardMaterial3D = TowLink.lit(view._mat(Color(0.2, 0.21, 0.23)))   # energized: glows with its engine's thrust (cable_glow)
@@ -570,9 +619,19 @@ static func _take_brake_mesh(shell: Node3D, part: String) -> Mesh:
 ## livery band and pinstripe, dorsal fin, outboard stabiliser, binder housing, cable lug and eye;
 ## plus access covers with rivets, side intake louvres, top exhaust ports, coolant louvres and the
 ## nozzle's upper and lower lips.
-static func _engine_body(out: float) -> ArrayMesh:
+## `fins` false: without the dorsal fin's rudder and the stabiliser's panel, which the pilot's own craft
+## carries as parts that move (view/fin_steering.gd); what they stand on is here in their place.
+static func _engine_body(out: float, fins := true) -> ArrayMesh:
 	var top := ENG_H / 2.0
 	var side := ENG_W / 2.0
+	var surfaces := [
+		[Fairings.fin(PackedVector2Array([Vector2(0,-0.65), Vector2(0.64,0.95), Vector2(0.59,1.45), Vector2(0,1.15)]), 0.07), Kit.at(Vector3(0, top, 0)), STEEL],
+		[Fairings.fin(PackedVector2Array([Vector2(0.49,0.65), Vector2(0.64,0.95), Vector2(0.59,1.45), Vector2(0.49,1.35)]), 0.075), Kit.at(Vector3(0, top, 0)), Livery.coat("engine")],
+		[Fairings.fin(PackedVector2Array([Vector2(0,-0.3),Vector2(1.05,0.95),Vector2(0.99,1.38),Vector2(0,1.05)]), 0.065), Kit.at(Vector3(out*side,-0.1,0), Vector3(0,0,-out*PI/2)), STEEL],
+	]
+	if not fins:
+		surfaces = Fins.rudder_fittings(top, STEEL, DARK, SILVER)
+		surfaces.append_array(Fins.stabiliser_fittings(out, side, STEEL, DARK))
 	var parts := [
 		[Fairings.nacelle(), Transform3D.IDENTITY, STEEL],
 		[Kit.rounded_box(Vector3(ENG_W + 0.1, ENG_H + 0.1, 0.45), 6.0), Kit.at(Vector3(0, 0, -3.6)), DARK.lightened(0.15)],   # intake lip
@@ -580,13 +639,13 @@ static func _engine_body(out: float) -> ArrayMesh:
 		[Kit.box(Vector3(0.08, ENG_H - 0.22, 0.06)), Kit.at(Vector3(0, 0, -3.85)), DARK.lightened(0.3)],         # splitter between the twin intakes
 		[Kit.rounded_box(Vector3(ENG_W + 0.06, ENG_H + 0.06, 0.6), 6.0), Kit.at(Vector3(0, 0, -2.5)), Livery.coat("engine")],    # band
 		[Kit.rounded_box(Vector3(ENG_W + 0.04, ENG_H + 0.04, 0.25), 6.0), Kit.at(Vector3(0, 0, 0.6)), Livery.coat("engine")],    # pinstripe
-		[Fairings.fin(PackedVector2Array([Vector2(0,-0.65), Vector2(0.64,0.95), Vector2(0.59,1.45), Vector2(0,1.15)]), 0.07), Kit.at(Vector3(0, top, 0)), STEEL],
-		[Fairings.fin(PackedVector2Array([Vector2(0.49,0.65), Vector2(0.64,0.95), Vector2(0.59,1.45), Vector2(0.49,1.35)]), 0.075), Kit.at(Vector3(0, top, 0)), Livery.coat("engine")],
-		[Fairings.fin(PackedVector2Array([Vector2(0,-0.3),Vector2(1.05,0.95),Vector2(0.99,1.38),Vector2(0,1.05)]), 0.065), Kit.at(Vector3(out*side,-0.1,0), Vector3(0,0,-out*PI/2)), STEEL],
+	]
+	parts.append_array(surfaces)      # the dorsal fin, its painted tip and the stabiliser (or what their moving parts stand on)
+	parts.append_array([
 		[Kit.rounded_box(Vector3(0.18, 0.72, 1.1), 5.0), Kit.at(Vector3(-out * (side - 0.02), 0.0, -2.9)), DARK.lightened(0.25)],   # binder housing
 		[Kit.box(Vector3(ENG_W - 0.2, 0.06, 0.4)), Kit.at(Vector3(0, 0.36, 4.0)), DARK.lightened(0.2)],          # nozzle lips
 		[Kit.box(Vector3(ENG_W - 0.2, 0.06, 0.4)), Kit.at(Vector3(0, -0.36, 4.0)), DARK.lightened(0.2)],
-	]
+	])
 	parts.append_array(_lug())
 	# access covers: raised panels on top and both sides, a dark seam round each, rivets at the corners
 	var cover := DARK.lightened(0.42)
@@ -1228,13 +1287,25 @@ func _update_bank(sim, delta: float) -> void:
 			roll_rate_peak = maxf(roll_rate_peak, absf(bank[k] - was) / delta)
 
 
-## One of the Shrike's fins stood at a cant, its ram's cylinder and rod with it (Shrike.fin_solve).
-func _place_fin(k: int, cant: float) -> void:
-	var at: Dictionary = Shrike.fin_solve(-1.0 if k == 0 else 1.0, cant)
+## The Phaethon's rudders and stabiliser panels drawn where their pivots are on the engines, as the engines stand.
+func _place_fin_batches() -> void:
+	for k in rudders.size():
+		fin_batches[0].set_instance_transform(k, engines[k].transform * rudders[k].transform)
+		fin_batches[1].set_instance_transform(k, engines[k].transform * stabilisers[k].transform)
+
+
+## One of the Shrike's fins stood at a cant, its ram's cylinder and rod with it (Shrike.fin_solve), and
+## its outer panel swung on its spindle (`swing` rad; left out: as far as the turn has it, fin_swing).
+func _place_fin(k: int, cant: float, swing := NAN) -> void:
+	var out := -1.0 if k == 0 else 1.0
+	var at: Dictionary = Shrike.fin_solve(out, cant)
 	(fin_parts[k][0] as Node3D).transform = at.fin
 	(fin_parts[k][1] as Node3D).transform = at.barrel
 	(fin_parts[k][2] as Node3D).transform = at.rod
+	_fin_posed[k] = fin_swing if is_nan(swing) else swing
+	(fin_parts[k][3] as Node3D).transform = Shrike.panel_place(out, _fin_posed[k])
 	fin_ram[k] = at.showing
+	fin_stand[k] = cant
 
 
 func sync(sim, inp: Dictionary, delta: float) -> void:
@@ -1250,13 +1321,32 @@ func sync(sim, inp: Dictionary, delta: float) -> void:
 		vane_angle = Jets.slew(vane_angle, Jets.command(steer, turn_g, 0.5 * (sim.eL.thrust + sim.eR.thrust)), delta)
 	for lights in light_meshes:
 		lights.visible = lights_on
-	if not fin_parts.is_empty():      # the Shrike's fins: with the craft's speed, no faster than their rams
+	# The fins answer the turn (view/fin_steering.gd): the levers' split at once and the turn's own load,
+	# eased, as a share of each surface's travel. Nothing while the battery is off.
+	if delta > 0.0:
+		fin_drive = Fins.ease(fin_drive, Fins.ask(steer, turn_g) if lights_on else 0.0, delta)
+	var share: float = Fins.share(fin_drive)
+	if not fin_parts.is_empty():      # the Shrike's fins: with the craft's speed and the turn, no faster than their rams
 		var mph: float = 0.5 * (Vector2(sim.eL.vx, sim.eL.vy).length() + Vector2(sim.eR.vx, sim.eR.vy).length()) * 2.2369363
 		var want: float = Shrike.fin_cant(mph)
 		if want != fin_cant:
 			fin_cant = want if delta <= 0.0 else move_toward(fin_cant, want, Shrike.FIN_SLEW * delta)
-			for k in fin_parts.size():
-				_place_fin(k, fin_cant)
+		if delta > 0.0:
+			fin_swing = move_toward(fin_swing, Shrike.PANEL_SWING * share, Shrike.PANEL_SLEW * delta)
+		for k in fin_parts.size():      # (the inside engine's lays out and the outside engine's stands up, inside the ram's travel)
+			var stand: float = clampf(fin_cant + (-1.0 if k == 0 else 1.0) * Shrike.FIN_LEAN * share, Shrike.FIN_REST, Shrike.FIN_FAST)
+			if delta > 0.0:
+				stand = move_toward(fin_stand[k], stand, Shrike.FIN_SLEW * delta)
+			if stand != fin_stand[k] or fin_swing != _fin_posed[k]:
+				_place_fin(k, stand)
+	elif not rudders.is_empty() and delta > 0.0:      # the Phaethon's: its rudders and its stabilisers
+		fin_swing = move_toward(fin_swing, Fins.SWING_MAX * share, Fins.SWING_SLEW * delta)
+		fin_pitch = move_toward(fin_pitch, Fins.PITCH_MAX * share, Fins.PITCH_SLEW * delta)
+		if fin_swing != _fin_posed[0] or fin_pitch != _fin_posed[1]:
+			_fin_posed = [fin_swing, fin_pitch]
+			for k in 2:
+				rudders[k].rotation.y = fin_swing
+				stabilisers[k].transform = Fins.stabiliser_place(-1.0 if k == 0 else 1.0, ENG_W / 2.0, fin_pitch)
 	# On a deck road (Mount Hyperion's) the craft's pitch is the deck's own under the pod, moving or stopped
 	# (its climb is not its vz over its speed there, and a craft stopped on an 80 degree wall is not level).
 	var on_deck: bool = sim.kind == "network" and not sim.pod.off_road and sim.roads[sim.pod.path].deck
@@ -1364,6 +1454,7 @@ func sync(sim, inp: Dictionary, delta: float) -> void:
 			nozzle_mats[k].set_shader_parameter("flash", jet.flash)
 			nozzle_mats[k].set_shader_parameter("teb", jet.teb)
 
+	_place_fin_batches()      # (after the engines: the Phaethon's rudders and stabiliser panels go where they are)
 	CanopyScript.update(canopy, sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy), sim.hblend, sim.mode, delta)
 	pod.position = view.wz(sim.pod.x, sim.pod.y, sim.pod.z - 0.2 + POD_LIFT)
 	var pvh: float = sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy)

@@ -126,9 +126,11 @@ def collar(mesh, z, w, h, depth, region, center=0, exponent=0.7, bias=0):
     )
 
 
-def aerofoil(mesh, base, side, span, cant, sweep, chord, region="fin"):
+def aerofoil(mesh, base, side, span, cant, sweep, chord, region="fin", v0=0.0, v1=1.0, rows=8):
     """Closed tapered foil. Roots are thick and rounded, tips nearly knife edged.
-    Both faces carry the number upright with leading edge forward."""
+    Both faces carry the number upright with leading edge forward.
+    `v0` to `v1` of its span (all of it by default), in `rows` rows: a part of the foil is closed where
+    it is cut, and carries the same paint as the whole foil does there."""
     base = np.array(base)
     spread = vec(side * math.sin(cant), math.cos(cant), 0)
     cross = vec(math.cos(cant), -side * math.sin(cant), 0)
@@ -142,20 +144,25 @@ def aerofoil(mesh, base, side, span, cant, sweep, chord, region="fin"):
             + cross * face * (thickness + 0.007)
         )
 
+    def station(t):
+        return v0 + (v1 - v0) * t
+
     for face in (-1, 1):
         mesh.grid(
             14,
-            8,
-            lambda u, v, face=face: point(u, v, face),
+            rows,
+            lambda u, t, face=face: point(u, station(t), face),
             region,
             reverse=face > 0,
-            uv=lambda u, v, face=face: (1 - u if face > 0 else u, 1 - v),
+            uv=lambda u, t, face=face: (1 - u if face > 0 else u, 1 - station(t)),
         )
     for u in (0, 1):
         mesh.grid(
-            1, 8, lambda t, v, u=u: point(u, v, 2 * t - 1), "metal" if u == 0 else "carbon", reverse=u == 0
+            1, rows, lambda t, w, u=u: point(u, station(w), 2 * t - 1), "metal" if u == 0 else "carbon", reverse=u == 0
         )
-    mesh.grid(14, 1, lambda u, t: point(u, 1, 2 * t - 1), "bronze", reverse=True)
+    mesh.grid(14, 1, lambda u, t: point(u, v1, 2 * t - 1), "bronze" if v1 >= 1.0 else "carbon", reverse=True)
+    if v0 > 0.0:
+        mesh.grid(14, 1, lambda u, t: point(u, v0, 2 * t - 1), "carbon")
 
 
 # The engine fin turns on a hinge along its root, moved by one hydraulic ram (Luke: "animate its engine
@@ -173,6 +180,20 @@ RAM_BASE_UP = 0.10  # ... its pin this far over the skin
 RAM_BARREL = 0.52  # the cylinder, pin to gland
 RAM_ROD = 0.65  # the rod, pin to piston
 RAM_EYE = 0.040  # half the width of an eye between its clevis's cheeks
+# The fin's outer panel turns left and right as well (Luke: "The engine fins should rotate left/right as well
+# as up/down with turning"). The fin is cut across PANEL_CUT up from its hinge: below, the stub, which keeps
+# the hinge and the ram's lug and turns on the hinge as the whole fin did; above, the panel, its own part,
+# drawn about the foot of a spindle that stands up the fin's own line through the stub's head at PANEL_Z.
+# A rotary actuator on the spindle turns it: the drum under the stub's head, standing out of its inboard face
+# (the fin's number is on the other), its two lines into the skin below it. A bearing plate each side of the cut.
+# The cut is over the lug's pad, so the ram never meets the panel; the spindle is where the open air-brake
+# leaf beside the fin comes nearest it, so the panel hardly moves there (tests/test_fins_turn.gd measures it).
+PANEL_CUT = 0.70  # m up the fin from its hinge: the stub's head
+PANEL_Z = 1.45  # the spindle's station along the engine
+PANEL_GAP = 0.006  # between the stub's head and the panel's foot
+DRUM = 0.056  # the actuator drum's radius ...
+DRUM_OUT = 0.030  # ... and how far its own line stands inboard of the foil's middle: proud of the inboard face, under the other
+PLATE = 0.082  # the bearing plates' radius: their rims show at both faces
 NACELLE = [(-0.72, 1.11, 0.535), (0, 1.13, 0.54), (0.7, 1.17, 0.501), (1.2, 1.16, 0.470), (1.72, 1.085, 0.454)]
 
 
@@ -230,12 +251,28 @@ def clevis(mesh, pin, feet, region="carbon", cheek=0.018):
         mesh.pipe(pin + vec(0, 0, z), pin + vec(0, 0, z + 0.008), 0.038, "bronze", 6)
 
 
+def panel_cut():
+    """Where the fin is cut, as a share of the foil's span."""
+    return (FIN_HINGE_UP + PANEL_CUT) / FIN_SPAN
+
+
 def fin(side):
-    """The engine's fin about its hinge line: the foil as it was, a hinge tube through its root, and the
-    ram's lug on its inboard face."""
+    """The engine's fin about its hinge line: the foil's stub (to PANEL_CUT: the panel above it is
+    fin_panel()), a hinge tube through its root, the ram's lug on its inboard face, and at its head the
+    drum of the actuator that turns the panel, with its two lines."""
     m = Mesh()
     hinge = fin_hinge(side)
-    aerofoil(m, vec(side * FIN_ROOT[0], FIN_ROOT[1], FIN_ROOT[2]) - hinge, side, FIN_SPAN, FIN_CANT, FIN_SWEEP, FIN_CHORD)
+    aerofoil(
+        m,
+        vec(side * FIN_ROOT[0], FIN_ROOT[1], FIN_ROOT[2]) - hinge,
+        side,
+        FIN_SPAN,
+        FIN_CANT,
+        FIN_SWEEP,
+        FIN_CHORD,
+        v1=panel_cut() - 0.5 * PANEL_GAP / FIN_SPAN,
+        rows=5,
+    )
     m.pipe((0, 0, -0.50), (0, 0, 1.47), 0.058, "metal", 14)
     for z0, z1 in [(-0.38, -0.12), (0.30, 0.74), (0.86, 1.30)]:  # its own knuckles, between the saddles
         m.pipe((0, 0, z0), (0, 0, z1), 0.074, "bronze", 14)
@@ -245,6 +282,41 @@ def fin(side):
     clevis(m, ram_pin(side), feet)
     pad = [along * (RAM_REACH + k) + inboard * (face + 0.004) + vec(0, 0, RAM_Z + dz) for k, dz in [(-0.17, -0.12), (0.17, -0.12), (0.17, 0.12), (-0.17, 0.12)]]
     m.panel(pad, inboard, "metal", 0.012)
+    # the spindle's bearing plate on the stub's head ...
+    head = along * (PANEL_CUT - 0.5 * PANEL_GAP) + vec(0, 0, PANEL_Z)
+    m.pipe(head - along * 0.014, head, PLATE, "metal", 20)
+    # ... the panel's actuator under it: a drum on the spindle, out of the inboard face, a flange at its foot ...
+    drum = head + inboard * DRUM_OUT
+    m.pipe(drum - along * 0.170, drum - along * 0.014, DRUM, "carbon", 18)
+    m.pipe(drum - along * 0.196, drum - along * 0.170, DRUM + 0.010, "bronze", 18)
+    m.pipe(drum - along * 0.230, drum - along * 0.196, 0.030, "metal", 12, DRUM)
+    # ... and its two lines: out of the flange, down the face and into the skin
+    for dz in (-0.046, -0.018):  # (on its fore side: the air brake's leaf opens just aft of here)
+        port = drum - along * 0.183 + inboard * 0.036 + vec(0, 0, dz)
+        foot = along * (PANEL_CUT - 0.31) + inboard * (fin_thickness(PANEL_CUT - 0.31, PANEL_Z + dz) - 0.006) + vec(0, 0, PANEL_Z + dz)
+        m.pipe(port, foot, 0.010, "bronze", 6)
+    return m
+
+
+def fin_panel(side):
+    """The fin's all-moving outer panel, about the foot of its spindle (PANEL_CUT up the fin from its
+    hinge, at PANEL_Z), as it stands at FIN_CANT unswung: the foil from the cut to the tip, and the boss
+    that rides the spindle over the stub's drum."""
+    m = Mesh()
+    along, inboard = fin_frame(side)
+    foot = fin_hinge(side) + along * PANEL_CUT + vec(0, 0, PANEL_Z)
+    aerofoil(
+        m,
+        vec(side * FIN_ROOT[0], FIN_ROOT[1], FIN_ROOT[2]) - foot,
+        side,
+        FIN_SPAN,
+        FIN_CANT,
+        FIN_SWEEP,
+        FIN_CHORD,
+        v0=panel_cut() + 0.5 * PANEL_GAP / FIN_SPAN,
+        rows=4,
+    )
+    m.pipe(along * 0.5 * PANEL_GAP, along * (0.5 * PANEL_GAP + 0.014), PLATE - 0.006, "bronze", 20)
     return m
 
 
@@ -972,6 +1044,8 @@ if __name__ == "__main__":
             "Starboard": engine(1),
             "PortFin": fin(-1),
             "StarboardFin": fin(1),
+            "PortFinPanel": fin_panel(-1),
+            "StarboardFinPanel": fin_panel(1),
             "FinRam": ram_barrel(),
             "FinRamRod": ram_rod(),
             "Compressor": impeller(),

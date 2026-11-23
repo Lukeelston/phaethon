@@ -8,7 +8,9 @@
 ##              bracket's pin and the hinge's saddles on the nacelle, the cylinder and rod as long
 ##   flown      a Shrike on the Range, standing, then at set speeds and under its own power: the fins
 ##              follow the law no faster than the ram strokes, every pin in its hole on every frame,
-##              the tip's lamp and strobe riding the fin; and a Phaethon has none of it
+##              the tip's lamp and strobe riding the fin's outer panel; and a Phaethon has none of it
+## (The fin is in two parts since push 39: the stub on the hinge, with the ram's lug, and the outer panel on
+## a spindle at the stub's head, which swings in a turn: tests/test_fins_turn.gd. Here the panel is unswung.)
 ## --headless --xr-mode off --audio-driver Dummy -s res://tests/test_shrike_fins.gd -- --mute
 ## Prints SHRIKE FINS PASS.
 extends SceneTree
@@ -135,11 +137,12 @@ func _the_parts() -> void:
 		var tube: Array = _round_pin(fin, Vector3.ZERO, 0.06, -0.6, 1.5)
 		var off_lug: float = (lug[0] as Vector2).distance_to(Vector2(out * Shrike.RAM_PIN.x, Shrike.RAM_PIN.y))
 		var off_bracket: float = (bracket[0] as Vector2).distance_to(Vector2(out * Shrike.RAM_BASE.x, Shrike.RAM_BASE.y))
-		var tip: Vector3 = Shrike.fin_tip_local(out)
-		var fb: AABB = fin.get_aabb().grow(0.3)
+		var panel: Mesh = Shrike.part(&"PortFinPanel" if k == 0 else &"StarboardFinPanel")      # the fin's outer part, about its spindle's foot
+		var tip: Vector3 = Shrike.panel_tip(out)
+		var fb: AABB = panel.get_aabb().grow(0.3)
 		seen.append("%s: lug's pin %.4f m off, bracket's %.4f m off, %d points of hinge tube and %d of saddle, the engine now %.2f m tall" % ["port" if k == 0 else "starboard", off_lug, off_bracket, tube[1], saddle[1], body.get_aabb().end.y])
 		ok = ok and int(lug[1]) >= 12 and off_lug < 0.002 and int(bracket[1]) >= 12 and off_bracket < 0.002 and int(tube[1]) >= 14 and int(saddle[1]) >= 32
-		ok = ok and body.get_aabb().end.y < 0.75 and fb.has_point(tip) and fin.get_aabb().end.y > 0.9
+		ok = ok and body.get_aabb().end.y < 0.75 and fb.has_point(tip) and absf(fin.get_aabb().end.y - Shrike.panel_foot(out).y) < 0.12 and panel.get_aabb().end.y > 0.4      # (the stub to the cut, the panel on to the tip)
 	_check("the authored parts are where the numbers say (%s)" % "; ".join(seen), ok)
 
 
@@ -177,13 +180,13 @@ func _run() -> void:
 	v.inp = idle
 	v._sync_craft(FRAME)
 	var at: Array = _standing(craft)
-	var lamp: Node3D = (craft.fin_parts[1][0] as Node3D).get_node_or_null("FinLamp")
+	var lamp: Node3D = (craft.fin_parts[1][3] as Node3D).get_node_or_null("FinLamp")      # (on the fin's outer panel, which carries the tip)
 	var strobe: Node3D = craft.strobes[1]
-	var tip_now: Vector3 = (craft.fin_parts[1][0] as Node3D).transform * Shrike.fin_tip_local(1.0)
+	var tip_now: Vector3 = (craft.fin_parts[1][0] as Node3D).transform * (craft.fin_parts[1][3] as Node3D).transform * Shrike.panel_tip(1.0)
 	_check("a Shrike standing on the Range (%s): two fins on their hinges, standing tall at %.1f deg from upright, every pin in its hole (%.7f); the tip's nav lamp and strobe are the fin's own (the strobe %.3f m from the tip)" % [
-		v.sim.P.vehicle, rad_to_deg(at[1]), at[0], strobe.position.distance_to(Shrike.fin_tip_local(1.0))],
+		v.sim.P.vehicle, rad_to_deg(at[1]), at[0], strobe.position.distance_to(Shrike.panel_tip(1.0))],
 		v.sim.P.vehicle == "shrike" and craft.fin_parts.size() == 2 and absf(float(at[1]) - Shrike.FIN_REST) < 1e-4 and float(at[0]) < 1e-5 and lamp != null
-		and strobe.get_parent() == craft.fin_parts[1][0] and strobe.position.distance_to(Shrike.fin_tip_local(1.0)) < 1e-4 and craft.light_meshes.has(lamp)
+		and strobe.get_parent() == craft.fin_parts[1][3] and strobe.position.distance_to(Shrike.panel_tip(1.0)) < 1e-4 and craft.light_meshes.has(lamp)
 		and tip_now.y > Shrike.fin_tip(1.0).y + 0.15 and tip_now.x < Shrike.fin_tip(1.0).x - 0.2)
 	# held at each speed in turn: the fins go to the law's angle, no faster than the ram strokes
 	var worst := 0.0
@@ -237,8 +240,9 @@ func _run() -> void:
 	p.set_process(false)
 	p.inp = idle
 	p._sync_craft(FRAME)
-	_check("a Phaethon has no such fins: no hinged parts, its strobes on its engines as they were",
-		p.sim.P.vehicle == "phaethon" and p.craft.fin_parts.is_empty() and p.craft.strobes[0].get_parent() == p.craft.engines[0] and not p.craft.engines[0].has_node("ShrikeFin"))
+	_check("a Phaethon has no such fins and no rams: its own are a rudder and a stabiliser panel on each engine (view/fin_steering.gd), its strobe on the rudder's tip",
+		p.sim.P.vehicle == "phaethon" and p.craft.fin_parts.is_empty() and p.craft.strobes[0].get_parent() == p.craft.rudders[0] and p.craft.rudders[0].get_parent() == p.craft.engines[0]
+		and p.craft.stabilisers.size() == 2 and not p.craft.engines[0].has_node("ShrikeFin"))
 	p.queue_free()
 	await process_frame
 	View.vehicle_override = ""
