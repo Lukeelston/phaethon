@@ -71,9 +71,15 @@ func build(deck, eye: Vector3) -> void:
 	var body := Finish.tinted("powder", deck.paint)
 	var face_up := Vector3(PI / 2, 0, 0)
 	var pieces := []
+	var screw := Finish.socket_screw(.003, Color("#b8bfc0"))
 	if round_case:
 		_piece(self, Kit.cyl(.077, .062, .043, 56), alloy, Kit.at(Vector3(0, 0, -.022), face_up)).name = "Case"
 		pieces.append([Finish.washer(.069, .076, .006, 64), Kit.at(Vector3.ZERO, face_up), deck.accent])
+		var brass_screw := Finish.socket_screw(.0022, Color("#ccaa73"))
+		for i in 3:
+			var angle := TAU * i / 3 + PI / 2
+			var seat := Vector3(.073 * cos(angle), .073 * sin(angle), .003)
+			pieces.append([brass_screw, Kit.at(seat, face_up), Color.WHITE, true])
 	else:
 		var w := card_size.x
 		var h := card_size.y
@@ -81,10 +87,14 @@ func build(deck, eye: Vector3) -> void:
 		var centre_z := -.024
 		_piece(self, _rounded_housing(size, .006), body, Kit.at(Vector3(0, 0, centre_z), face_up)).name = "Case"
 		var face_z := centre_z + size.y * .5
+		# A compressed black seal backs the card across the gap to the casting.
+		var seal := Finish.beveled_plate(Vector3(w + .002, .0022, h + .002), .0007)
+		_piece(self, seal, Finish.tinted("rubber", Color("#222425")),
+			Kit.at(Vector3(0, 0, face_z + .0011), face_up)).name = "CardSeal"
 		for x in [-1, 1]:
 			for y in [-1, 1]:
-				var seat := Vector3(x * (w * .5 - .006), y * (h * .5 + .0035), face_z)
-				pieces.append([Finish.slotted_screw(.003), Kit.at(seat, face_up), Color.SILVER])
+				var seat := Vector3(x * (w * .5 - .006), y * (h * .5 + .0043), face_z)
+				pieces.append([screw, Kit.at(seat, face_up), Color.WHITE, true])
 	_piece(self, Kit.compound(pieces), Finish.satin()).name = "RimHardware"
 	# Keep the rear foot on the dashboard while raising the printed face above the coaming.
 	var foot := basis.inverse() * (Vector3(.586, .372 if round_case else .391, -.173) - position)

@@ -162,6 +162,32 @@ func check_flight_deck(game, id: String) -> void:
 				var hit := surface.intersect_ray(housing.transform.affine_inverse() * corner, Vector3.DOWN)
 				supported = supported and not hit.is_empty() and hit.normal.y > .99
 		check(id + " supports all four corners of the meter card on its flat face", supported)
+	var welt := game.interior.get_node_or_null("SegmentedCoaming/StitchedWelt") as MeshInstance3D
+	var left := 0
+	var right := 0
+	if welt and welt.mesh.get_surface_count() == 2:
+		var thread_vertices := welt.mesh.surface_get_arrays(1)[Mesh.ARRAY_VERTEX] as PackedVector3Array
+		for point in thread_vertices:
+			if point.x < -.28:
+				left += 1
+			if point.x > .28:
+				right += 1
+	check(id + " has raised thread along both padded cheeks", left > 100 and right > 100)
+	# Probe the assembled screw, since a high backing plate can hide a perfectly good socket.
+	var radial := .0022 if id == Sim.PilotCraft.ORRERY else .003
+	var screw_centre := Vector3(0,.073,.003) if id == Sim.PilotCraft.ORRERY else Vector3(.086,.0543,-.0015)
+	var hardware: MeshInstance3D = meter.get_node("RimHardware")
+	# TriangleMesh's intersection tolerance can skip sub-millimetre facets at game scale.
+	var millimetres := hardware.mesh.get_faces()
+	for i in millimetres.size():
+		millimetres[i] *= 1000
+	var surface := TriangleMesh.new()
+	surface.create_from_faces(millimetres)
+	var origin := (screw_centre + Vector3.BACK * .01 + Vector3.UP * .00011) * 1000
+	var bottom := surface.intersect_ray(origin,Vector3.FORWARD)
+	var crown := surface.intersect_ray(origin + Vector3.RIGHT * radial * 1000 * .57,Vector3.FORWARD)
+	check(id + " meter screws have a recessed drive below the crown", not bottom.is_empty() and not crown.is_empty()
+			and crown.position.z - bottom.position.z > radial * 1000 * .25)
 	var before: Array = []
 	meter.sync(0, [0,1], [0,1], -20, 0)
 	for cursor in meter.cursors:
@@ -214,7 +240,7 @@ func check_sight_lines(game) -> void:
 	var cluster = game.dashboard
 	var hull: MeshInstance3D = game.shell.get_node("PodHull")
 	var obstacles := [hull, game.canopy.get_node("roof"), game.interior.get_node("SegmentedCoaming"),
-			game.interior.get_node("Dashboard"), game.interior.get_node("SillFittings"), cluster.get_node("binnacle")]
+			game.interior.get_node("Dashboard"), game.interior.get_node("SillFittings"), game.interior.get_node("SegmentedCoaming/StitchedWelt"), cluster.get_node("binnacle")]
 	for name in ["FleetSeat","ServiceBonnet"]:
 		if hull.has_node(name):
 			obstacles.append(hull.get_node(name))

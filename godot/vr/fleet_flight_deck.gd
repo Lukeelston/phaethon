@@ -283,6 +283,7 @@ func fit_cluster(parent: Node3D, gauges: Array) -> void:
 				accent
 			)
 		P.KILN:
+			var screw := Finish.socket_screw(.005, STEEL)
 			# Three replaceable castings. Each side cartridge contains one bank's two gauges.
 			for span: Vector2 in [Vector2(-.466, -.115), Vector2(-.108, .108), Vector2(.115, .466)]:
 				var left := span.x
@@ -302,9 +303,9 @@ func fit_cluster(parent: Node3D, gauges: Array) -> void:
 					for y in [-.059, .094]:
 						trim.append(
 							[
-								Finish.slotted_screw(.005),
-								Kit.on_arc(x, y, .004, Layout.R) * Kit.at(Vector3.ZERO, FACE_UP),
-								STEEL
+								screw,
+								Kit.on_arc(x, y, .001, Layout.R) * Kit.at(Vector3.ZERO, FACE_UP),
+								Color.WHITE, true
 							]
 						)
 			for side in [-1.0, 1.0]:
@@ -372,6 +373,7 @@ func _punched_bay() -> ArrayMesh:
 ## Replace the two pressed tread panels and the narrow brightwork at the throttle slots
 ## as a unit. The continuous walking deck and open quadrant gates below them stay in place.
 func _floor() -> ArrayMesh:
+	var screw := Finish.socket_screw(.004, STEEL)
 	for side: float in [-1.0, 1.0]:
 		var cx := side * .201
 		var plate := Finish.beveled_plate(Vector3(.378, .008, 1.035), .003)
@@ -421,8 +423,8 @@ func _floor() -> ArrayMesh:
 					var b := Vector3(x + side * .029, .149, .414 - .045 * j)
 					_bar(trim, a, b, .007, accent if j == 1 else paint)
 		for z in [-.482, .482]:
-			for dx in [-.159, .159]:
-				trim.append([Finish.slotted_screw(.004), Kit.at(Vector3(cx + dx, .150, z)), STEEL])
+			for dx in [-.179, .179]:
+				trim.append([screw, Kit.at(Vector3(cx + dx, .145, z)), Color.WHITE, true])
 		for edge in [-1, 1]:
 			trim.append(
 				[
@@ -457,6 +459,119 @@ func _glare_shield_return(interior: Node3D) -> void:
 				Finish._quad(st, previous[j], row[j], row[j + 1], previous[j + 1], Vector3(0, .35, 1))
 		previous = row
 	panels.append([st.commit(), Transform3D.IDENTITY, upholstery])
+
+
+## Welt on the pilot-facing side of the actual fitted coaming. A shallow channel
+## runs under each row of thread. The end of each stitch enters the leather.
+func fit_stitched_rim(rim: MeshInstance3D) -> void:
+	var shell := rim.mesh.generate_triangle_mesh()
+	if shell == null:
+		return
+	var skin := SurfaceTool.new()
+	skin.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var stitches := []
+	var thread := _stitch_mesh()
+	var yarn := accent.lerp(Color("#c6b397"), .54)
+	var double_row := id in [P.ORRERY, P.VESPER]
+	for side: float in [-1, 1]:
+		var previous := []
+		var previous_normals := []
+		var tracks := [Curve3D.new(), Curve3D.new()]
+		# Across the seam in metres: turned edge, crown, compressed stitch
+		# channel, centre, and the matching return along the opposite edge.
+		var section := [Vector2(-.013,-.001), Vector2(-.012,.0018), Vector2(-.009,.0038),
+			Vector2(-.006,.0028), Vector2(0,.0042), Vector2(.006,.0028),
+			Vector2(.009,.0038), Vector2(.012,.0018), Vector2(.013,-.001)]
+		for i in 33:
+			var t := i / 32.0
+			var x := side * lerpf(.282, .508, t)
+			var y := (.597 - .010 * t) if id == P.SHRIKE else (.593 + .005 * t)
+			var hit := shell.intersect_ray(Vector3(x, y, 0), Vector3.FORWARD)
+			if hit.is_empty():
+				continue
+			var centre: Vector3 = hit.position
+			var normal: Vector3 = hit.normal
+			var up := Vector3.UP.slide(normal).normalized()
+			var end_scale := smoothstep(0, .075, minf(t, 1 - t))
+			var row := []
+			for yz: Vector2 in section:
+				var across := centre + up * yz.x * lerpf(.24, 1, end_scale)
+				var contact := shell.intersect_ray(across + normal * .03, -normal)
+				var base: Vector3 = contact.get("position", across)
+				var facing_out: Vector3 = contact.get("normal", normal)
+				row.append(base + facing_out * lerpf(-.0008, yz.y, end_scale))
+			var normals := []
+			var along := Vector3.UP.cross(normal).normalized()
+			for j in row.size():
+				var across: Vector3 = row[mini(j + 1, row.size()-1)] - row[maxi(j-1, 0)]
+				normals.append(along.cross(across).normalized())
+			if not previous.is_empty():
+				for j in section.size() - 1:
+					var k := j + 1
+					_smooth_quad(skin, [previous[j], row[j], row[k], previous[k]],
+						[previous_normals[j], normals[j], normals[k], previous_normals[k]])
+			if i >= 2 and i <= 30:
+				tracks[0].add_point(row[3] if double_row else row[4])
+				tracks[1].add_point(row[5])
+			previous = row
+			previous_normals = normals
+		for row_index in (2 if double_row else 1):
+			var path: Curve3D = tracks[row_index]
+			path.bake_interval = .002
+			var length := path.get_baked_length()
+			var count := floori(length / .0072)
+			for i in count:
+				var distance := (i + .5) * length / count
+				var start := path.sample_baked(distance - .0025)
+				var end := path.sample_baked(distance + .0025)
+				var along := start.direction_to(end)
+				var middle := (start + end) * .5
+				var hit := shell.intersect_ray(Vector3(middle.x, middle.y, 0), Vector3.FORWARD)
+				var support: Vector3 = hit.get("normal", along.cross(Vector3.UP) * side)
+				var out := support.slide(along).normalized()
+				var up := out.cross(along).normalized()
+				stitches.append([thread, Transform3D(Basis(along, up, out), middle), yarn])
+	if stitches.is_empty():
+		return
+	var mesh := skin.commit()
+	mesh.surface_set_material(0, Finish.tinted("leather", upholstery))
+	Kit.compound(stitches, mesh)
+	mesh.surface_set_material(1, Finish.webbing())
+	var pad := MeshInstance3D.new()
+	pad.name = "StitchedWelt"
+	pad.mesh = mesh
+	rim.add_child(pad)
+
+
+func _stitch_mesh() -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var previous := []
+	var previous_normals := []
+	# Each curved strand narrows into the punctures. Smooth normals carry the
+	# highlight along its crown even when the light grazes the leather.
+	for i in 7:
+		var t := i / 6.0
+		var arch := sin(PI * t)
+		var centre := Vector3(lerpf(-.0025,.0025,t), lerpf(-.00028,.00028,t), -.00065 + .0014 * arch)
+		var axis := Vector3(.005, .00056, .0014 * PI * cos(PI * t)).normalized()
+		var across := Vector3.UP.slide(axis).normalized()
+		var outward := axis.cross(across)
+		var row := []
+		var normals := []
+		for j in 6:
+			var angle := TAU * j / 6
+			var normal := across * cos(angle) + outward * sin(angle)
+			normals.append(normal)
+			row.append(centre + normal * lerpf(.00032, .00059, arch))
+		if not previous.is_empty():
+			for j in 6:
+				var k := (j + 1) % 6
+				_smooth_quad(st, [previous[j], row[j], row[k], previous[k]],
+					[previous_normals[j], normals[j], normals[k], previous_normals[k]])
+		previous = row
+		previous_normals = normals
+	return st.commit()
 
 
 func fit_cabin(interior: Node3D) -> void:

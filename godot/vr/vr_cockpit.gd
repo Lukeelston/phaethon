@@ -764,6 +764,8 @@ func _build_cockpit() -> void:
 		rim.set_surface_override_material(0, null)
 	if sim != null and sim.P.vehicle == CraftModelScript.PilotCraft.SHRIKE:
 		tow_meter = CraftModelScript.Shrike.dress_coaming(interior.get_node("SegmentedCoaming"), CockpitInteriorScript.hd_parts and ResourceLoader.exists(CockpitInteriorScript.HD_PARTS.Coaming))
+	if deck:
+		deck.fit_stitched_rim(interior.get_node("SegmentedCoaming"))
 	mode_switch = ModeSwitchScript.new()   # SPEEDCRAFT / STARFIGHTER, on the front of the right console
 	shell.add_child(mode_switch)
 	mode_switch.transform = ModeSwitchScript.mount()

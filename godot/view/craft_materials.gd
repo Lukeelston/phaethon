@@ -204,6 +204,34 @@ static func _knurl_point(i: int, row: int, radius: float, height: float) -> Vect
 	return Vector3(cos(angle) * r, -height * 0.5 + height * row / 4.0, sin(angle) * r)
 
 
+## Button-head fastener. The six flat socket walls end above the mounting face,
+## so the surrounding panel cannot fill the recess. Vertex colour shades its bore.
+static func socket_screw(radius: float, finish: Color) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for segment in 24:
+		var rings := []
+		for j: int in [segment, segment + 1]:
+			var angle := TAU * j / 24.0
+			var radial := Vector3(cos(angle), 0, sin(angle))
+			var flat := .36 / cos(fposmod(angle, PI / 3) - PI / 6)
+			var points := []
+			for section: Vector2 in [Vector2(1, -.04), Vector2(1, .14), Vector2(.88, .30),
+					Vector2(.65, .37), Vector2(flat + .065, .37), Vector2(flat, .29), Vector2(flat, .035)]:
+				points.append((radial * section.x + Vector3.UP * section.y) * radius)
+			rings.append(points)
+		for i in 6:
+			st.set_color(finish.darkened(.52) if i == 5 else finish)
+			var direction := (rings[0][i] as Vector3).slide(Vector3.UP).normalized()
+			if i >= 4:
+				direction = -direction
+			_quad(st, rings[0][i], rings[1][i], rings[1][i+1], rings[0][i+1],
+				Vector3.UP + direction if i != 5 else direction)
+		st.set_color(finish.darkened(.78))
+		_triangle(st, Vector3.UP * radius * .035, rings[0][6], rings[1][6], Vector3.UP)
+	return st.commit()
+
+
 ## Two head halves leave an actual recessed screwdriver slot. The tapered outer edge seats
 ## into a countersink; use a dark backing washer beneath it to reveal the recess.
 static func slotted_screw(radius := 0.004) -> ArrayMesh:
