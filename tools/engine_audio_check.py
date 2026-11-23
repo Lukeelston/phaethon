@@ -1,11 +1,13 @@
 """EngineAudio gate: does the sound actually follow the levers?
 
-Runs godot/tests/test_engine_audio.gd thirteen times in parallel: V8, V12 and turbine solo, the
+Runs godot/tests/test_engine_audio.gd fifteen times in parallel: V8, V12 and turbine solo, the
 same three --flat (every gain held at 1, low-pass open, and no twin detune, pops or bark, so
 only the crossfader can move the level), the overrun pops solo, the full mix, the second
 engine's own run (--profile=second) with the second engine solo, the bass rotor solo, and
-everything mixed, and the turbines' own run (--profile=turbine: flat out through turbine_mph,
-then the air brakes) with the turbines solo and the V8 solo.
+everything mixed, the turbines' own run (--profile=turbine: flat out through turbine_mph,
+then the air brakes) with the turbines solo and the V8 solo, and the ramjet's run (--profile=ramjet:
+the burner, the ramjet armed at 1,500 mph and held to 6,000, the boost three seconds, disarmed) with
+the ramjet's voice solo and with everything mixed.
 The lever run tops out near 3,700 mph, under the 4,500 the turbines light at, so its turbine
 solo holds the run-up's turbine test on from 9.5 s (--runup-turbines): the voice's own checks
 (pitch, split, pan, flameout) are made there, and where it lights is checked on its own run.
@@ -40,6 +42,16 @@ Then it measures the recordings against the RPM each run logged:
   pops      lifting off at high revs pops (both after the burner drop and through the blips),
             and nothing pops at idle, on the rev, on a hold, in the burner or through the
             flameout; popping stretches stand >= 40 dB over the quiet ones
+  ramjet    the ramjet's own voice: nothing of it on the burner before the ramjet is armed or
+            two seconds after it is disarmed (under -60 dBFS, 30 dB under its level lit); armed, it
+            is up within a quarter of a second and for its first 0.4 s stands 2 to 12 dB over
+            where it settles (one light-up, one shut-down); it follows the speed (its 2-5 kHz
+            band comes up at least 2.5 dB from 3,300 to 6,000 mph, in step with the level the game
+            logs for its scream, and it brightens); the held boost lifts it at least 1.5 dB and
+            letting go drops it back; disarmed it is 12 dB down in half a second. In the mix the
+            ramjet and the burner are told apart (the mix's 2-5 kHz band at least 2 dB higher on
+            the ramjet than on the burner at the same speed), the turbines' whine still stands
+            10 dB proud of it, and the mix does not clip
   one tone  flat runs, slow rev: brightness doesn't pulse grossly with band position (no more
             than 100 cents, or 1.5x its typical wander at unrelated spacings, or the most it
             wanders at any of them); the bake's level-correlation gate is the precise guard
@@ -93,12 +105,14 @@ def godot_exe():
 def capture(out_dir):
     procs = {}
     for run in ["v8", "v12", "turbine", "v8_flat", "v12_flat", "turbine_flat", "pops", "all", "second", "rotor",
-                "second_all", "turbine_run", "v8_run"]:
+                "second_all", "turbine_run", "v8_run", "ramjet", "ramjet_all"]:
         wav = os.path.join(out_dir, "engine_%s.wav" % run)
         args = [godot_exe(), "--headless", "--path", os.path.join(ROOT, "godot"), "-s",
                 "res://tests/test_engine_audio.gd", "--", "--out=" + wav.replace("\\", "/")]
-        if run not in ("all", "second_all"):
+        if run not in ("all", "second_all", "ramjet_all"):
             args.append("--solo=" + run.split("_")[0])
+        if run.startswith("ramjet"):   # the ramjet's run: the burner, the ramjet armed and held, the boost, disarmed
+            args.append("--profile=ramjet")
         if run.endswith("_flat"):
             args.append("--flat")
         if run.startswith("second") or run == "rotor":
@@ -453,6 +467,102 @@ def check_shift(wav, tally):
     tally.add("... and by then is well over where it shifted to", int(climbed >= 1.15), 1, 1.0)
 
 
+def band(x, sr, lo, hi):
+    """x between lo and hi Hz (4th-order Butterworth)."""
+    from scipy import signal
+    return signal.sosfilt(signal.butter(4, [lo, hi], "bandpass", fs=sr, output="sos"), x, axis=0)
+
+
+def check_ramjet(wav, mix_wav, tally):
+    """The ramjet's own voice, on the capture of it alone over the ramjet's run (the burner from 1 s, the
+    ramjet armed at 1,500 mph and held as the craft runs up to 6,000, the boost three seconds, disarmed):
+    silent off the ramjet, up at once and boldly as it lights, following the speed, taking the boost, and
+    dying as it is shut down. Then the same run with everything mixed: the ramjet told from the burner."""
+    print("[ramjet]")
+    x, sr, log = load(wav)
+    t = log["t"]
+    on, boosted = log["ramOn"] > 0.5, log["boost"] > 0.5
+    if not on.any() or not boosted.any() or on[-1]:
+        tally.add("the run lights the ramjet, holds the boost and shuts it down", 0, 1, 1.0)
+        return
+    t_on = float(t[np.argmax(on)])
+    t_off = float(t[len(on) - np.argmax(on[::-1])])
+    t_b0 = float(t[np.argmax(boosted)])
+    t_b1 = float(t[len(boosted) - np.argmax(boosted[::-1])])
+    scream = band(x, sr, 2000.0, 5000.0)
+
+    def lvl(t0, t1, y=x):   # each ear's mean power, dB
+        a = y[int(t0 * sr):int(t1 * sr)]
+        return 10 * np.log10(np.mean(a * a) + 1e-14)
+
+    def bright(t0, t1):
+        a = x[int(t0 * sr):int(t1 * sr)].mean(axis=1)
+        X = np.abs(np.fft.rfft(a * np.hanning(len(a)))) ** 2
+        f = np.fft.rfftfreq(len(a), 1 / sr)
+        return float(np.sum(f * X) / np.sum(X))
+    # (the burner is lit from 1 s: what is heard before the ramjet is armed is everything that is not the ramjet's)
+    before, after = lvl(1.5, t_on - 0.3), lvl(t_off + 2.0, t[-1] - 0.2)
+    steady = lvl(t_b0 - 3.0, t_b0 - 0.2)
+    tally.add("ramjet silent off the ramjet: %.0f dBFS on the burner before, %.0f after; %.0f lit" % (before, after, steady),
+              int(before <= -60.0 and after <= -60.0 and steady - max(before, after) >= 30.0), 1, 1.0)
+    # the light-up. The headless driver mixes in 93 ms bursts, so "at once" is read to a quarter of a second.
+    settled = lvl(t_on + 2.0, t_on + 3.0)
+    ws = np.arange(t_on - 0.2, t_on + 1.0, 0.01)
+    up = np.array([lvl(w, w + 0.05) for w in ws]) >= settled - 3.0
+    t_up = float(ws[np.argmax(up)] - t_on) if up.any() else 9.0
+    bold = lvl(t_on + 0.1, t_on + 0.5) - settled
+    tally.add("ramjet lights: up %.2f s after it is armed, its first 0.4 s %.1f dB over where it settles (%d light-up, %d shut-down)" % (
+        t_up, bold, log["ramLit"][-1], log["ramOuts"][-1]),
+        int(-0.15 <= t_up <= 0.25 and 2.0 <= bold <= 12.0 and log["ramLit"][-1] == 1 and log["ramOuts"][-1] == 1), 1, 1.0)
+    # it follows the speed: from two seconds after the light-up (its kick gone) to the boost
+    a0, a1, b0, b1 = t_on + 1.5, t_on + 2.5, t_b0 - 1.2, t_b0 - 0.1
+    rise, rise_s = lvl(b0, b1) - lvl(a0, a1), lvl(b0, b1, scream) - lvl(a0, a1, scream)
+    ws = np.arange(t_on + 2.0, t_b0 - 0.5, 0.5)
+    heard = np.array([lvl(w, w + 0.5, scream) for w in ws])
+    said = np.interp(ws + 0.25, t, log["ramScreamDb"])
+    r = float(np.corrcoef(heard, said)[0, 1])
+    tally.add("ramjet follows the speed: %.0f -> %.0f mph, level %+.1f dB, its 2-5 kHz band %+.1f dB (r %.2f with the game's own figure), brightness x%.2f" % (
+        at(log, "mph", (a0 + a1) / 2), at(log, "mph", (b0 + b1) / 2), rise, rise_s, r, bright(b0, b1) / bright(a0, a1)),
+        int(rise >= 0.5 and rise_s >= 2.5 and r >= 0.9 and bright(b0, b1) > bright(a0, a1)), 1, 1.0)   # (measured 2026-11-22: +1.7 dB, +4.2 dB, r 0.95, x1.44)
+    lift = lvl(t_b0 + 0.5, t_b1 - 0.1) - lvl(t_b0 - 1.5, t_b0 - 0.1)
+    back = lvl(t_b0 + 0.5, t_b1 - 0.1) - lvl(t_b1 + 0.5, t_b1 + 1.5)
+    tally.add("ramjet takes the boost: %+.1f dB while it is held, %.1f dB back down once it is let go" % (lift, back),
+              int(lift >= 1.5 and back >= 1.0), 1, 1.0)
+    last = lvl(t_off - 1.0, t_off - 0.1)
+    fall, gone = last - lvl(t_off + 0.5, t_off + 0.7), lvl(t_off + 2.0, t_off + 2.5)
+    note = at(log, "ramScreamAt", t_off + 0.4) / at(log, "ramScreamAt", t_off - 0.2)
+    tally.add("ramjet dies on the shut-down: %.0f dB down half a second on, %.0f dBFS two seconds on (its loops' note x%.2f as they go)" % (fall, gone, note),
+              int(fall >= 12.0 and gone <= -60.0 and note <= 0.8), 1, 1.0)
+    # ... and in the mix: the ramjet against the burner at the same speed (the burner is what is left when it is disarmed)
+    mx, msr, mlog = load(mix_wav)
+    mt = mlog["t"]
+    m_on = mlog["ramOn"] > 0.5
+    m_off = float(mt[len(m_on) - np.argmax(m_on[::-1])])
+    m_b0 = float(mt[np.argmax(mlog["boost"] > 0.5)])
+    ms = band(mx, msr, 2000.0, 5000.0)
+
+    def mlvl(t0, t1, y):
+        a = y[int(t0 * msr):int(t1 * msr)]
+        return 10 * np.log10(np.mean(a * a) + 1e-14)
+    ram, burn = (m_b0 - 2.0, m_b0 - 0.2), (m_off + 1.5, m_off + 2.8)
+    d_s, d_all = mlvl(*ram, ms) - mlvl(*burn, ms), mlvl(*ram, mx) - mlvl(*burn, mx)
+    tally.add("ramjet told from the burner in the mix: its 2-5 kHz band %+.1f dB, the whole mix %+.1f dB (%.0f against %.0f mph)" % (
+        d_s, d_all, at(mlog, "mph", sum(ram) / 2), at(mlog, "mph", sum(burn) / 2)), int(d_s >= 2.0 and d_all >= -1.0), 1, 1.0)   # (measured 2026-11-22: +3.3 and +0.6 dB; without the voice the two are the same within half a dB)
+    # the turbines' whine under it: its blade-pass line still proud of the mix, in each ear
+    hits = n = 0
+    worst = 99.0
+    for tc in np.arange(ram[0], ram[1], 0.1):
+        for side, ch in (("L", mx[:, 0]), ("R", mx[:, 1])):
+            f = expect("turbine", mlog, side, tc)
+            _, _, prom = line_strength(seg(ch, msr, tc), msr, f)
+            n += 1
+            hits += prom >= 10.0
+            worst = min(worst, prom)
+    tally.add("the turbines' whine still stands proud of the mix under the ramjet (10 dB or more; least %.0f dB)" % worst, hits, n)
+    peak = 20 * np.log10(np.abs(mx).max() + 1e-12)
+    tally.add("the mix on the ramjet and the boost does not clip (peak %.1f dBFS)" % peak, int(peak < -0.05), 1, 1.0)
+
+
 def check_second(wav, tally):
     """The second engine's run (solo): when it lights, how it catches, that it follows the lever,
     that it dies, and that it is rumbly."""
@@ -694,6 +804,7 @@ def main():
         check_layer(layer, wavs[layer], wavs[layer + "_flat"], tally)
     check_turbines(wavs["turbine_run"], tally)
     check_shift(wavs["v8_run"], tally)
+    check_ramjet(wavs["ramjet"], wavs["ramjet_all"], tally)
     check_second(wavs["second"], tally)
     check_rotor(wavs["rotor"], tally)
     check_polish(wavs["v8"], wavs["v8_flat"], wavs["pops"], tally, wavs["v12"], wavs["v12_flat"])

@@ -1,8 +1,9 @@
-"""Keep engine loop frame counts valid: imported resources must be mono PCM16."""
+"""Keep engine loop frame counts valid: imported resources must be mono PCM16.
+(The ramjet's bank, godot/audio/ramjet, is read the same way by EngineAudio and is kept the same way.)"""
 from pathlib import Path
 import wave
 root = Path(__file__).resolve().parents[1]
-files = list((root/'godot/audio/engines').glob('*.wav'))
+files = list((root/'godot/audio/engines').glob('*.wav')) + list((root/'godot/audio/ramjet').glob('*.wav'))
 for wav in files:
     with wave.open(str(wav)) as source:
         assert source.getnchannels() == 1 and source.getsampwidth() == 2, wav.name

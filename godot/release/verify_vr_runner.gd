@@ -104,6 +104,7 @@ func _run() -> void:
 	var sample := load("res://audio/engines/v8_mip0.wav") as AudioStreamWAV
 	check("VR engine audio PCM16 resource is present", sample != null and sample.format == AudioStreamWAV.FORMAT_16_BITS)
 	check("VR engine manifest is present", FileAccess.file_exists("res://audio/engines/manifest.json"))
+	check("VR ramjet manifest is present", FileAccess.file_exists("res://audio/ramjet/manifest.json"))   # (the engine audio loads it with the engines': without it the game is silent)
 	var expected_scheme := "triggers"
 	if FileAccess.file_exists(Cockpit.PREFS):
 		var prefs = JSON.parse_string(FileAccess.get_file_as_string(Cockpit.PREFS))

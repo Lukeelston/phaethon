@@ -2,8 +2,8 @@
 ## and logs each layer's RPM, so tools/engine_audio_check.py can confirm the pitch follows
 ## the levers. Real time (the audio thread runs at wall-clock pace), about 31 s.
 ## Run: Godot_v4.7.1-stable_win64_console.exe --headless --audio-output-latency 10 --max-fps 90 --path godot -s res://tests/test_engine_audio.gd
-##        -- --out=C:/path/capture.wav [--solo=v8|v12|turbine|roar|burner|second|rotor|pops] [--flat]
-##           [--profile=second|turbine] [--runup-turbines]
+##        -- --out=C:/path/capture.wav [--solo=v8|v12|turbine|roar|burner|second|rotor|pops|ramjet] [--flat]
+##           [--profile=second|turbine|ramjet] [--runup-turbines]
 ## --flat holds every gain at 1 and the low-pass open, so only the band crossfades move the level.
 ## --profile=second flies the second engine's run instead: accelerate through second_on_mph, blip,
 ## then brake below second_off_mph (22.5 s).
@@ -13,6 +13,10 @@
 ## --runup-turbines holds the run-up's turbine test on from 9.5 s (EngineAudio.test_stage, the
 ## preflight's own switch: the second stage in whatever the airspeed), so the turbine voice can be
 ## heard following the levers, the split and the flameout.
+## --profile=ramjet flies the ramjet's run: both levers through the gate from 1 s (the burner), the ramjet
+## armed at 3 s (about 1,500 mph: on the levers it lights at any speed) and held as the craft runs up to its
+## 6,000 mph, the boost held from 17 s to 20 s, disarmed at 22 s (the burner again), the air brakes from 25 s
+## (27.5 s). --solo=ramjet hears the ramjet's own voice alone: its two loops and its shots.
 ## Writes capture.wav and capture.csv. Exit code 0 = streams loaded, audio captured, no clipping.
 extends SceneTree
 
@@ -22,6 +26,10 @@ const DT := 1.0 / 480.0
 const END := 30.5
 const END_SECOND := 22.5
 const END_TURBINE := 25.5
+const END_RAMJET := 27.5
+const RAM_ARM := [3.0, 22.0]      # the ramjet armed from, to (s)
+const RAM_BOOST := [17.0, 20.0]   # the boost held from, to
+const RAM_BRAKE := 25.0
 const RUNUP_AT := 9.5
 
 var sim
@@ -36,7 +44,7 @@ var end_t := END
 var t := 0.0
 var acc := 0.0
 var log_t := 0.0
-var rows := PackedStringArray(["t,thrL,thrR,mode,outL,outR,sL,sR,v8L,v8R,v12L,v12R,turbL,turbR,mph,secL,secR,secStL,secStR,rotL,rotR,popsL,popsR,secSpL,stage"])
+var rows := PackedStringArray(["t,thrL,thrR,mode,outL,outR,sL,sR,v8L,v8R,v12L,v12R,turbL,turbR,mph,secL,secR,secStL,secStR,rotL,rotR,popsL,popsR,secSpL,stage,ramOn,boost,ramL,ramR,ramDb,ramScreamDb,ramAt,ramScreamAt,ramLit,ramOuts,burn"])
 var started := false
 var clock: AudioStreamPlayer
 
@@ -102,6 +110,18 @@ static func profile_turbine(time: float) -> Dictionary:
 	return {"thrL": l, "thrR": l, "brkL": brk, "brkR": brk, "repair": false, "reignite": false}
 
 
+## The ramjet's run: both levers through the gate from 1 s to RAM_BRAKE, then full air brakes; the boost held
+## over RAM_BOOST. (Arming is the sim's own switch, thrown in _process over RAM_ARM.) Measured on the range:
+## 1,500 mph as it is armed, 5,900 by 14 s, 6,000 as the boost comes in, 6,680 as it goes.
+static func profile_ramjet(time: float) -> Dictionary:
+	var l := 1.0 if time >= 1.0 and time < RAM_BRAKE else 0.0
+	var brk := 1.0 if time >= RAM_BRAKE else 0.0
+	var out := {"thrL": l, "thrR": l, "brkL": brk, "brkR": brk, "repair": false, "reignite": false}
+	if time >= RAM_BOOST[0] and time < RAM_BOOST[1]:
+		out["boost"] = true
+	return out
+
+
 func _initialize() -> void:
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--out="):
@@ -118,6 +138,8 @@ func _initialize() -> void:
 		end_t = END_SECOND
 	elif prof == "turbine":
 		end_t = END_TURBINE
+	elif prof == "ramjet":
+		end_t = END_RAMJET
 	sim = CraftSimScript.new({"track": "range", "vehicle": CraftSimScript.PilotCraft.resolve(OS.get_cmdline_user_args(), "")})
 	rec = AudioEffectRecord.new()
 	AudioServer.add_bus_effect(0, rec)
@@ -153,7 +175,9 @@ func _process(_delta: float) -> bool:
 	if now > t:
 		delta = now - t
 		t = now
-	var inp := profile_second(t) if prof == "second" else (profile_turbine(t) if prof == "turbine" else profile(t))
+	var inp := profile_second(t) if prof == "second" else (profile_turbine(t) if prof == "turbine" else (profile_ramjet(t) if prof == "ramjet" else profile(t)))
+	if prof == "ramjet":
+		sim.armed = t >= RAM_ARM[0] and t < RAM_ARM[1]
 	if runup and t >= RUNUP_AT:
 		audio.test_stage = 1.0
 	if prof == "default" and t >= 21.0 and t - delta < 21.0:
@@ -169,12 +193,14 @@ func _process(_delta: float) -> bool:
 		var vl: Dictionary = audio.voices[0]
 		var vr: Dictionary = audio.voices[1]
 		var mph: float = sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy) * 2.23694
-		rows.append("%.3f,%.3f,%.3f,%s,%d,%d,%.4f,%.4f,%.1f,%.1f,%.1f,%.1f,%.4f,%.4f,%.1f,%.1f,%.1f,%d,%d,%.4f,%.4f,%d,%d,%.4f,%.4f" % [t, inp.thrL, inp.thrR,
+		rows.append("%.3f,%.3f,%.3f,%s,%d,%d,%.4f,%.4f,%.1f,%.1f,%.1f,%.1f,%.4f,%.4f,%.1f,%.1f,%.1f,%d,%d,%.4f,%.4f,%d,%d,%.4f,%.4f,%d,%d,%.4f,%.4f,%.2f,%.2f,%.4f,%.4f,%d,%d,%.4f" % [t, inp.thrL, inp.thrR,
 			sim.mode, int(sim.eL.flameout), int(sim.eR.flameout), vl.spool, vr.spool,
 			vl.at.v8, vr.at.v8, vl.at.v12, vr.at.v12, vl.at.turbine, vr.at.turbine,
 			mph, vl.at.second, vr.at.second,
 			EngineAudioScript.SECOND_STATES.find(vl.sec.state), EngineAudioScript.SECOND_STATES.find(vr.sec.state),
-			vl.at.rotor, vr.at.rotor, vl.pops_n, vr.pops_n, vl.sec.spool, audio.stage])
+			vl.at.rotor, vr.at.rotor, vl.pops_n, vr.pops_n, vl.sec.spool, audio.stage,
+			int(sim.mode == "ramjet"), int(sim.boost), vl.ram, vr.ram, vl.ram_db[0], vl.ram_db[1], vl.at.ramjet, vl.at.ramscream,
+			vl.ram_n, vl.ram_outs, vl.burn])
 	if t < end_t:
 		return false
 	rec.set_recording_active(false)

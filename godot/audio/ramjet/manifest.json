@@ -1,0 +1,46 @@
+{
+	"rate": 48000,
+	"rms_db": -18.0,
+	"layers": {
+		"ramjet": {
+			"unit": "speed",
+			"bands": [
+				{
+					"file": "ramjet_body.wav",
+					"at": 1.0
+				}
+			],
+			"seconds": 9.0,
+			"seam": 0.033,
+			"seam_level_db": 0.45,
+			"seam_cents": 318.5,
+			"peak_db": -4.45,
+			"centroid_hz": 329
+		},
+		"ramscream": {
+			"unit": "speed",
+			"bands": [
+				{
+					"file": "ramjet_scream.wav",
+					"at": 1.0
+				}
+			],
+			"seconds": 7.0,
+			"seam": 0.053,
+			"seam_level_db": 0.27,
+			"seam_cents": 44.8,
+			"peak_db": -0.54,
+			"centroid_hz": 2072
+		}
+	},
+	"oneshots": {
+		"light": [
+			"ramjet_light_0.wav",
+			"ramjet_light_1.wav"
+		],
+		"out": [
+			"ramjet_out_0.wav",
+			"ramjet_out_1.wav"
+		]
+	}
+}
