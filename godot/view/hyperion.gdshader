@@ -4,8 +4,13 @@
 // off as the eye is. Beyond PULL_FROM its corners are pulled toward the eye along their own lines of sight,
 // to inside the camera's reach (120 km): each stays where it was on the screen (and in each eye), and in
 // order of distance, so the mountain shows whole from across the map with nothing else asked to draw further.
+// No shadow is asked of it: the sun's shadows reach 450 m, and within Hyperion.FACE (2.4 km) of the road's
+// line this mesh lies under the road's own land, so none of it that shows is ever that near a craft on the
+// road. The asking is not free (the renderer reads the sun's shadow map for every lit pixel, however far
+// off: down the wall, where this mesh is half of what the glass shows, 0.11 to 0.16 ms of 4.6 at two eyes'
+// worth of pixels; tests/test_far_land.gd holds the distances).
 shader_type spatial;
-render_mode fog_disabled;
+render_mode fog_disabled, shadows_disabled;
 #include "res://view/noise.gdshaderinc"
 #include "res://view/air.gdshaderinc"
 

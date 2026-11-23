@@ -198,6 +198,9 @@ func setup_ground(ground_material: ShaderMaterial) -> void:
 	for region in REGIONS:
 		centers.append(Vector3(region[1].x,region[1].y,region[2]))
 		colors.append(region[3])
+	# (the Network's floor has a shader of its own: view/ground.gdshader's answer for the Network and nothing
+	# else, no shadow asked of it. From Mount Hyperion's brink that plane is the whole country below)
+	ground_material.shader = preload("res://view/ground_network.gdshader")
 	ground_material.set_shader_parameter("network_on",true)
 	ground_material.set_shader_parameter("regions",centers)
 	ground_material.set_shader_parameter("region_colors",colors)
