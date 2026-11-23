@@ -152,6 +152,16 @@ func check_flight_deck(game, id: String) -> void:
 	check(id + " has its own dial layout, side fittings and auxiliary instrument",
 			cluster.flight_deck.id == id and cluster.gauges != cluster.Layout.GAUGES
 			and game.interior.has_node("SillFittings") and meter.id == id)
+	if id != Sim.PilotCraft.ORRERY:
+		var housing: MeshInstance3D = meter.get_node("Case")
+		var surface := housing.mesh.generate_triangle_mesh()
+		var supported := true
+		for side in [-1, 1]:
+			for end in [-1, 1]:
+				var corner := Vector3(side * meter.card_size.x * .5, end * meter.card_size.y * .5, .01)
+				var hit := surface.intersect_ray(housing.transform.affine_inverse() * corner, Vector3.DOWN)
+				supported = supported and not hit.is_empty() and hit.normal.y > .99
+		check(id + " supports all four corners of the meter card on its flat face", supported)
 	var before: Array = []
 	meter.sync(0, [0,1], [0,1], -20, 0)
 	for cursor in meter.cursors:

@@ -98,9 +98,13 @@ static func _finish(key: String, metal: float, rough: float, contrast: float) ->
 		mat.uv1_triplanar_sharpness = 4.0
 		mat.uv1_scale = Vector3.ONE / 0.128
 		match key:
-			"walnut": mat.uv1_scale = Vector3(4, 3, 1.3)
+			"walnut":
+				mat.uv1_scale = Vector3(4, 3, 1.3)
+				mat.normal_scale = .25
 			"carbon": mat.uv1_scale = Vector3.ONE * 11.0
-			"casting": mat.uv1_scale = Vector3.ONE * 6.0
+			"casting":
+				mat.uv1_scale = Vector3.ONE * 6.0
+				mat.normal_scale = .45
 		mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
 		_finishes[key] = mat
 		return mat

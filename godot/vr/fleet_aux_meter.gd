@@ -21,6 +21,44 @@ func _piece(parent: Node3D, mesh: Mesh, material: Material, at := Transform3D.ID
 	return mi
 
 
+## A cast enclosure with a flat land for the card and screws. Only the outer
+## six millimetres of each face turn into the adjacent face. Adjacent patches
+## share analytic normals so the corner highlight continues round all three sides.
+func _rounded_housing(size: Vector3, radius: float) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var half := size * .5
+	var core := half - Vector3.ONE * radius
+	var grid := [-1.0, -.5, 0.0, 0.0, .5, 1.0]
+	for axis in 3:
+		var u := (axis + 1) % 3
+		var v := (axis + 2) % 3
+		for side: float in [-1, 1]:
+			var points := PackedVector3Array()
+			var normals := PackedVector3Array()
+			for i in grid.size():
+				for j in grid.size():
+					var box := Vector3.ZERO
+					box[axis] = side * half[axis]
+					box[u] = (-core[u] if i < 3 else core[u]) + radius * grid[i]
+					box[v] = (-core[v] if j < 3 else core[v]) + radius * grid[j]
+					var nearest := box.clamp(-core, core)
+					var normal := nearest.direction_to(box)
+					points.append(nearest + normal * radius)
+					normals.append(normal)
+			for i in grid.size() - 1:
+				for j in grid.size() - 1:
+					var a := i * grid.size() + j
+					var b := a + grid.size()
+					var c := a + 1
+					var d := b + 1
+					var order := [a, c, b, b, c, d] if side > 0 else [a, b, c, b, d, c]
+					for k in order:
+						st.set_normal(normals[k])
+						st.add_vertex(points[k])
+	return st.commit()
+
+
 func build(deck, eye: Vector3) -> void:
 	id = deck.id
 	position = Vector3(.468, .535, -.105)
@@ -39,21 +77,14 @@ func build(deck, eye: Vector3) -> void:
 	else:
 		var w := card_size.x
 		var h := card_size.y
-		_piece(
-			self,
-			Kit.rounded_box(Vector3(w + .022, .045, h + .024), 12.0, 20),
-			body,
-			Kit.at(Vector3(0, 0, -.024), face_up)
-		).name = "Case"
+		var size := Vector3(w + .022, .045, h + .024)
+		var centre_z := -.024
+		_piece(self, _rounded_housing(size, .006), body, Kit.at(Vector3(0, 0, centre_z), face_up)).name = "Case"
+		var face_z := centre_z + size.y * .5
 		for x in [-1, 1]:
 			for y in [-1, 1]:
-				pieces.append(
-					[
-						Finish.slotted_screw(.003),
-						Kit.at(Vector3(x * (w * .5 + .004), y * (h * .5 + .003), .0003), face_up),
-						Color.SILVER
-					]
-				)
+				var seat := Vector3(x * (w * .5 - .006), y * (h * .5 + .0035), face_z)
+				pieces.append([Finish.slotted_screw(.003), Kit.at(seat, face_up), Color.SILVER])
 	_piece(self, Kit.compound(pieces), Finish.satin()).name = "RimHardware"
 	# Keep the rear foot on the dashboard while raising the printed face above the coaming.
 	var foot := basis.inverse() * (Vector3(.586, .372 if round_case else .391, -.173) - position)
