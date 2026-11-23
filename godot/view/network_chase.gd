@@ -230,7 +230,7 @@ func _gone() -> void:
 func _pose() -> void:
 	x = car.x + car.hx * car.v * car.owed
 	y = car.y + car.hy * car.v * car.owed
-	z = sim.net_height(car.road, car.f) + float(sim.P.rideH)
+	z = sim.net_deck(car.road, car.f, car.lat) + float(sim.P.rideH)
 	th = atan2(car.hy, car.hx)
 	bank = 0.0
 	visible = true

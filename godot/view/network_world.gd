@@ -744,10 +744,15 @@ func roofed(r: int, f: float) -> float:
 
 
 ## A point `off` m left of road r's sample i, `h` up, against the chunk origin (ox, oy).
+## On a banked bend (CraftSim.NET_BANKS) `h` is over the banked deck there: the bank's lift at `off` is added
+## (past either edge, that edge's), so whatever is placed with this stands on the road as it leans: its walls
+## and their caps, its lines and paint, its masts, fins and slab, the land brought up beside it, the far ribbon.
 func _p(R: CraftSim.TrackPath, ox: float, oy: float, i: int, off: float, h: float) -> Vector3:
 	if _smap.has(R) and shaft.on(_smap[R], float(i)):
 		var A: Array = shaft.at(_smap[R], float(i))
 		return Vector3(float(A[0]) - ox, A[2], -(float(A[1]) - oy)) + (A[4] as Vector3) * off + (A[5] as Vector3) * (h - float(A[2]))
+	if R.banked:
+		h += CraftSim.net_bank_lift(R, i, 0.0, off)
 	return Vector3(R.px[i] + R.nx[i] * off - ox, h, -(R.py[i] + R.ny[i] * off - oy))
 
 
@@ -941,6 +946,8 @@ func _deco_template_key(J: Dictionary, R: CraftSim.TrackPath) -> String:
 	for i in range(start, finish + 1):
 		if R.tx[i] != R.tx[start] or R.ty[i] != R.ty[start] or R.w[i] != R.w[start] or R.mode[i] != R.mode[start] or _h(J.r, i) != height or absf(R.len[i] - R.len[start]) > 0.0000001:
 			return ""
+		if R.banked and R.bank[i] != 0.0:      # (a bank eases out along the straight after its bend: no two of those rows are alike)
+			return ""
 		if J.joins and (_open(J.r, i, -1.0) != left_open or _open(J.r, i, 1.0) != right_open):
 			return ""
 	# Supports are baked into the reused furniture. Equal deck shapes can cross different
@@ -1051,7 +1058,7 @@ func pillar_specs(r: int, i: int) -> Array:
 		var off: float = (-1.0 if side == 0 else 1.0) * (R.w[i] / 2.0 - 30.0)
 		var pillar := {"id": -(r * 1000000 + i * 2 + side + 1), "r": 0.0, "halfSize": thick / 2.0,
 			"x": R.px[i] + R.nx[i] * off, "y": R.py[i] + R.ny[i] * off,
-			"zMin": footing, "zMax": h - DECK, "vx": 0.0, "vy": 0.0}
+			"zMin": footing, "zMax": h - DECK + CraftSim.net_bank_lift(R, i, 0.0, off), "vx": 0.0, "vy": 0.0}
 		if not _support_clearance.blocks(r,pillar) and not pierces_tube(pillar):
 			out.append(pillar)
 	_pillar_specs_cache[key] = out
@@ -1207,6 +1214,17 @@ func _sample(J: Dictionary, R: CraftSim.TrackPath, i: int) -> void:
 				_quad(lglow, [fa + _up * (fin_i - 0.7), fb + up_j * (fin_j - 0.7), fb + up_j * fin_j, fa + _up * fin_i], STRIP_LIGHT)
 				if posmod(i, MAST_EVERY) == 0:
 					_box(deco, fa + Vector3.UP * ((fin_i + 6.0) / 2.0), Vector3(5.0, fin_i + 6.0, 5.0), Color(0.42, 0.43, 0.45))
+	# A banked bend on the ground: its outside edge stands up to 21 m over where it lay. A face under that
+	# edge, from the wall's foot down to below the land (a deck's slab has its own; a scenic road's land comes up to it).
+	if R.banked and (R.bank[i] != 0.0 or R.bank[j] != 0.0) and hi <= 4.0 and hj <= 4.0 and not scenic_here and not on_shaft:
+		for sgn in [-1.0, 1.0]:
+			var lift_i := CraftSim.net_bank_lift(R, i, 0.0, sgn * hw)
+			var lift_j := CraftSim.net_bank_lift(R, j, 0.0, sgn * hw_j)
+			if lift_i < 0.25 and lift_j < 0.25:
+				continue
+			var ua := _p(R, ox, oy, i, sgn * hw, hi)
+			var ub := _p(R, ox, oy, j, sgn * hw_j, hj)
+			_quad(deco, [ua - Vector3.UP * (lift_i + DECK), ub - Vector3.UP * (lift_j + DECK), ub + Vector3.UP * te_j, ua + Vector3.UP * te], Color(0.5, 0.5, 0.48))
 	if in_hall:
 		_hall(J, R, i, hw, hi + te, hj + te)
 	if on_shaft and i % HOOP_EVERY == 0:
@@ -1712,7 +1730,7 @@ func _bank_row(J: Dictionary, R: CraftSim.TrackPath, i: int, sgn: float) -> Arra
 		base -= 0.52
 		height *= 0.55
 	var offs := [foot, foot + 0.45 * run, foot + run, foot + run + BANK_BACK * k]
-	var ys := [base, base + 0.62 * height, base + height, BANK_FLOOR]
+	var ys := [base, base + 0.62 * height, base + height, BANK_FLOOR - CraftSim.net_bank_lift(R, i, 0.0, sgn * hw)]      # (_p lifts all four with a banked bend's edge: the far foot stays under the land)
 	var out := []
 	for m in 4:
 		out.append(_p(R, J.ox, J.oy, i, sgn * float(offs[m]), float(ys[m])))
@@ -1862,9 +1880,12 @@ func _flank_row(J: Dictionary, R: CraftSim.TrackPath, i: int, left: bool) -> Dic
 	var p := PackedVector3Array()
 	var normals := PackedVector3Array()
 	var colours := PackedColorArray()
+	var edge_lift: float = CraftSim.net_bank_lift(R, i, 0.0, sgn * R.w[i] / 2.0)      # (a banked bend: _p lifts every point by its edge's)
 	for m in count:
 		var off := pairs[m * 2]
 		var y := pairs[m * 2 + 1]
+		if edge_lift != 0.0:
+			y -= edge_lift * smoothstep(60.0, 700.0, off - R.w[i] / 2.0)
 		p.append(_p(R, J.ox, J.oy, i, sgn * off, y))
 		var a := maxi(m - 1, 0)
 		var b := mini(m + 1, count - 1)
@@ -2645,6 +2666,12 @@ func _sign(node: Node3D, R: CraftSim.TrackPath, r: int, ox: float, oy: float, sp
 	if up != Vector3.UP:   # on Helios's face a gantry stands square to the deck, its boards with it
 		facing = Basis(facing.x, up, facing.x.cross(up))
 	var mid := _p(R, ox, oy, i, 0.0, h0)
+	if R.banked and R.bank[i] != 0.0:   # over a banked bend it leans with the road: both its feet on the deck's edges
+		var lean: float = R.bank[i]
+		var road_left := Vector3(R.nx[i], 0.0, -R.ny[i])
+		var across := (road_left * cos(lean) - Vector3.UP * sin(lean)) * (1.0 if facing.x.dot(road_left) >= 0.0 else -1.0)
+		up = Vector3.UP * cos(lean) + road_left * sin(lean)
+		facing = Basis(across, up, across.cross(up))
 	if kind == "terminal":   # a lit line across the road, and a gantry with the city's name
 		var st := SurfaceTool.new()
 		st.begin(Mesh.PRIMITIVE_TRIANGLES)
@@ -2905,7 +2932,16 @@ func _road_row(J: Dictionary, R: CraftSim.TrackPath, sec: Dictionary, s: int, h:
 	var rn: PackedVector3Array = J.rn
 	var ru: PackedVector2Array = J.ru
 	var openings := 0
-	if not J.joins or _joining_at(int(J.r), s).is_empty():
+	var bank: float = R.bank[s] if R.banked else 0.0
+	if bank != 0.0 and (not J.joins or _joining_at(int(J.r), s).is_empty()):
+		# a banked bend (CraftSim.net_bank_lift): the section leans about its inside edge, its normals with it
+		var tilt := CraftSim.bank_tan(bank)      # (the sims' own tangent of it)
+		var rise: float = R.w[s] / 2.0 * absf(tilt)
+		for k in o.size():
+			rv.append(mid + left * o[k] + up * (hh[k] + rise - o[k] * tilt))
+			rn.append((up * cc[k] - left * (ss[k] - tilt * cc[k])).normalized())
+			ru.append(Vector2(u, o[k]))
+	elif not J.joins or _joining_at(int(J.r), s).is_empty():
 		for k in o.size():
 			rv.append(mid + left * o[k] + up * hh[k])
 			rn.append(up * cc[k] - left * ss[k])
@@ -2990,7 +3026,7 @@ func _apron_arrays(J: Dictionary, R: CraftSim.TrackPath) -> Array:
 	var uv := PackedVector2Array()
 	var uv2 := PackedVector2Array()
 	var idx := PackedInt32Array()
-	var cols := EDGE_SEGS + 2      # the old ramp's foot, then the ramp's own points
+	var cols := EDGE_SEGS + 3      # the old ramp's foot, the old edge (where a banked bend's lean stops and the apron runs on level), then the ramp's own points
 	for sgn: float in [-1.0, 1.0]:
 		var base := {}             # sample -> its row's first point
 		for a in int(J.rows) - 1:
@@ -3008,16 +3044,23 @@ func _apron_arrays(J: Dictionary, R: CraftSim.TrackPath) -> Array:
 				var left := Vector3(R.nx[s], 0.0, -R.ny[s])
 				var mid := Vector3(R.px[s] - J.ox, _h(r, s) + 0.02, -(R.py[s] - J.oy))
 				var u: float = J.u0 + _s[r][s]
-				v.append(mid + left * (sgn * (hw - E)))
+				v.append(mid + left * (sgn * (hw - E)) + Vector3.UP * CraftSim.net_bank_lift(R, s, 0.0, sgn * (hw - E)))
 				n.append(Vector3.UP)
 				uv.append(Vector2(u, sgn * (hw - E)))
 				# (the glass's lattice has a line along the road every 10 of this: across the level apron that is every 30 m,
 				# not the ramp's every 10. Eighteen lines at the eye's height over 180 m of deck were a blind across the view)
 				uv2.append(Vector2(E + out / 3.0, 1.0))
+				# the old edge: on a banked bend the deck leans as far as this and the apron runs on level from it
+				# (CraftSim.net_bank_lift). No further out than the ramp's foot, where the apron is narrower than a ramp.
+				var kink := minf(hw, hw - E + out)
+				v.append(mid + left * (sgn * kink) + Vector3.UP * CraftSim.net_bank_lift(R, s, 0.0, sgn * kink))
+				n.append(Vector3.UP)
+				uv.append(Vector2(u, sgn * kink))
+				uv2.append(Vector2(E + maxf(0.0, out - E) / 3.0, 1.0))
 				for k in EDGE_SEGS + 1:
 					var d := E * float(k) / EDGE_SEGS
 					var e := CraftSim.net_edge(w, hw - E + d)
-					v.append(mid + left * (sgn * (hw - E + d + out)) + Vector3.UP * e.x)
+					v.append(mid + left * (sgn * (hw - E + d + out)) + Vector3.UP * (e.x + CraftSim.net_bank_lift(R, s, 0.0, sgn * (hw - E + d + out))))
 					n.append(Vector3.UP * cos(e.y) - left * (sgn * sin(e.y)))
 					uv.append(Vector2(u, sgn * (hw - E + d + out)))
 					uv2.append(Vector2(E - d, 1.0))

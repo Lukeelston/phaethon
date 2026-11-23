@@ -1,7 +1,7 @@
 """Write the Network (tools/design_network.py) into both sims: a <network> block in sim-core.js and
 in godot/sim/craft_sim.gd (roads as segment lists walked from their poses, the junction table, the
 cities, the roads' heights (keys [sample, m, slope], Hermite between: real in both sims, the deck
-lock), the jumps and the on-ramps from the open ground).
+lock), the jumps and the on-ramps from the open ground, the bends' banks).
 
 Usage: python tools/sync_network.py
 """
@@ -19,6 +19,7 @@ scenic = dn.scenic_table(roads)
 widths = dn.width_table(roads)
 decks = dn.deck_table(roads)
 aprons = dn.apron_table(roads)
+banks = dn.bank_rows
 leaps = dn.leaps
 tube = next((i, *r.tube_span) for i, r in enumerate(roads) if r.kind == "tube")
 
@@ -35,6 +36,10 @@ def num(v):
 def apron_rows():
     return ", ".join("[%d, [%s], [%s]]" % (r, ", ".join("[%d, %s]" % (k[0], num(k[1])) for k in left), ", ".join("[%d, %s]" % (k[0], num(k[1])) for k in right))
                      for r, left, right in aprons)
+
+
+def bank_rows():
+    return ", ".join("[%d, %d, [%s]]" % (r, box, ", ".join("[%d, %d, %s]" % (a, b, num(deg)) for a, b, deg in runs)) for r, box, runs in banks)
 
 
 def seg(s, q):
@@ -91,6 +96,8 @@ def js_block():
     out.append("  const NET_DECK = [" + ", ".join(str(r) for r in decks) + "];")
     out.append("  // [road, [[sample, m], ...] on its left, the same on its right]: the open edges' aprons (the deck runs on level that much further before its ramp and wall; a smoothstep from key to key, none outside them)")
     out.append("  const NET_APRONS = [" + apron_rows() + "];")
+    out.append("  // [road, box, [[first sample, the sample after its last, degrees], ...]]: the bends' banks, + down to the left (a left-hander). Each road's runs go into a row of zeros, eased by two passes of a box `box` samples either side (buildNetwork)")
+    out.append("  const NET_BANKS = [" + bank_rows() + "];")
     out.append("  // </network>")
     return "\n".join(out)
 
@@ -142,6 +149,8 @@ def gd_block():
     out.append("const NET_DECK := [" + ", ".join(str(r) for r in decks) + "]")
     out.append("# [road, [[sample, m], ...] on its left, the same on its right]: the open edges' aprons (the deck runs on level that much further before its ramp and wall; a smoothstep from key to key, none outside them)")
     out.append("const NET_APRONS := [" + apron_rows() + "]")
+    out.append("# [road, box, [[first sample, the sample after its last, degrees], ...]]: the bends' banks, + down to the left (a left-hander). Each road's runs go into a row of zeros, eased by two passes of a box `box` samples either side (_build_network)")
+    out.append("const NET_BANKS := [" + bank_rows() + "]")
     out.append("# </network>")
     return "\n".join(out)
 

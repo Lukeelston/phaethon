@@ -210,7 +210,9 @@ func _run() -> void:
 		s3.events.clear()
 		if not off:
 			s3._nearest_on(drop, s3.pod.x, s3.pod.y, s3.pod.hint, 4)
-			worst_gap = maxf(worst_gap, absf(s3.pod.z - s3.P.rideH - s3.road_h(drop, float(s3._n_i) + s3._n_t) - s3.net_edge(D.w[s3._n_i], s3._n_lat).x))
+			# (the deck: its height, its edge's ramp, and round the banked bends after the dive the bank's lift where the craft is)
+			worst_gap = maxf(worst_gap, absf(s3.pod.z - s3.P.rideH - s3.road_h(drop, float(s3._n_i) + s3._n_t) - s3.net_edge(D.w[s3._n_i], s3._n_lat).x
+				- CraftSimScript.net_bank_lift(s3.roads[drop], int(s3._n_i), float(s3._n_t), float(s3._n_lat))))
 	check("off the rim at 2,000 mph the craft rides the deck all the way down: %.0f m lower after 20 s, never more than %.2f m off it" % [z0 - s3.pod.z, worst_gap],
 		not off and not crashed and z0 - s3.pod.z > 1500.0 and worst_gap < 1.0)
 	print("SCENIC ROADS ", "PASS" if failures == 0 and checks == 11 else "FAIL (%d failed of %d)" % [failures, checks])

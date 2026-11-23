@@ -192,7 +192,7 @@ const geom = T.roads.map((R) => {
   want.add(R.N - 1);
   for (const k of R.jx) { const J = T.junctions[k]; for (const i of (J.a === T.roads.indexOf(R) ? [J.a0, J.a1] : [J.b0, J.b1])) want.add(i); }
   const r = T.roads.indexOf(R);
-  const samples = [...want].sort((a, b) => a - b).map((i) => { const p = R.pts[i]; return [i, p.x, p.y, p.tx, p.ty, p.len, p.w, p.mode === 'sf' ? 0 : 1, rec.sim.netHeight(r, i)]; });
+  const samples = [...want].sort((a, b) => a - b).map((i) => { const p = R.pts[i]; return [i, p.x, p.y, p.tx, p.ty, p.len, p.w, p.mode === 'sf' ? 0 : 1, rec.sim.netHeight(r, i), p.bank]; });   // (the last: its bank there, radians: tests/test_network_banks.gd holds the GD sim's to it)
   return { name: R.name, N: R.N, length: R.length, samples };
 });
 const P = rec.sim.S.pod;

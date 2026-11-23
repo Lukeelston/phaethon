@@ -93,7 +93,8 @@ func _replay(X: Dictionary, side: float) -> Array:
 		var f: float = float(sim._n_i) + float(sim._n_t)
 		var apron: float = 0.0 if R.apl.is_empty() else float(R.apl[q] if side > 0.0 else R.apr[q])
 		if lat < float(R.w[q]) / 2.0 + apron - CraftSimScript.net_edge_span(R.w[q]) - 1.0:      # (short of the ramp's foot: the level deck)
-			high = maxf(high, absf(p.z - sim.P.rideH - sim.road_h(r, f)))
+			# (the deck there: its height, and on a banked bend the bank's lift where the craft is across it, which on an apron is the edge's)
+			high = maxf(high, absf(p.z - sim.P.rideH - sim.road_h(r, f) - CraftSimScript.net_bank_lift(R, int(sim._n_i), float(sim._n_t), lat * side)))
 		if k % 240 == 239:
 			var s: Array = X.samples[n]
 			n += 1
@@ -342,8 +343,11 @@ func _run() -> void:
 			var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
 			for q in idx:
 				glass_out = [minf(glass_out[0], uv[q].y), maxf(glass_out[1], uv[q].y)]
-			if verts.size() % (world.EDGE_SEGS + 2) == 0:      # (the apron's own surface: each row its foot, then the ramp's points)
-				high_at_edge = verts[world.EDGE_SEGS + 1].y - verts[0].y
+			if verts.size() % (world.EDGE_SEGS + 3) == 0:      # (the apron's own surface: each row its foot, the old edge, then the ramp's points)
+				high_at_edge = verts[world.EDGE_SEGS + 2].y - verts[0].y
+				# (on a banked bend the deck leans on from the foot to the old edge: that taken off, the ramp's own rise is what is left)
+				var c0: int = k * world.CH
+				high_at_edge -= CraftSimScript.net_bank_lift(C, c0, 0.0, C.w[c0] / 2.0) - CraftSimScript.net_bank_lift(C, c0, 0.0, C.w[c0] / 2.0 - CraftSimScript.net_edge_span(C.w[c0]))
 		elif s == 0:
 			for q in idx:
 				paved_out = maxf(paved_out, uv[q].y)
@@ -384,7 +388,10 @@ func _run() -> void:
 	for n in 960:
 		s3.step({"thrL": 0.0, "thrR": 0.0, "brkL": 1.0, "brkR": 1.0, "repair": false, "reignite": true}, DT)
 		held = held and not s3.pod.off_road and int(s3.pod.path) == range_r
-		sag = maxf(sag, absf(s3.pod.z - s3.P.rideH - s3.road_h(range_r, s3._road_f(s3.pod))))
+		var f3: float = s3._road_f(s3.pod)
+		var i3: int = s3.pod.hint
+		var lat3: float = (s3.pod.x - R.px[i3]) * R.nx[i3] + (s3.pod.y - R.py[i3]) * R.ny[i3]
+		sag = maxf(sag, absf(s3.pod.z - s3.P.rideH - s3.road_h(range_r, f3) - CraftSimScript.net_bank_lift(s3.roads[range_r], i3, f3 - float(i3), lat3)))      # (the deck's height: on a banked bend, with the bank's lift there)
 		s3.events.clear()
 	var out_now: float = (s3.pod.x - R.px[4600]) * R.nx[4600] + (s3.pod.y - R.py[4600]) * R.ny[4600]
 	var below: float = sim.net_height(range_r, 4600.0) - _flank_h(scenic.row(range_r, 4600, true), 300.0)

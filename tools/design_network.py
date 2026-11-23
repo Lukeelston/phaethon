@@ -73,6 +73,12 @@ literally jet for some odd tens of miles"): J21 and K21 at the cliff's foot, J22
 (add_hyperion_leaps, LEAP_LANE): a launch lane beside SHyperion's centreline, inside its deck, to a lip half a
 degree up, and a landing field (a catch deck) under the whole flight. Built last of all; the sims have them
 as NET_LEAPS, beside the interchanges' NET_JUMPS.
+The banks (Luke, 2026-11-22: "I think most roads would benefit from being at least slightly banked on curves,
+just so that the pilot can see what's coming"): a bend leans into its turn, 2 degrees on the highways' 45 km
+sweepers and more the tighter it is (as the root of its tightness, 6 at most), eased in and out as the
+courses' banks are (two passes of a box), and flat wherever roads meet or cross, on an exit's lane, in a
+city, on the jumps' roads, the shafts, the on-ramps, Mount Hyperion and the Aurora tube (bank_table, BANK_*).
+The sims have them as NET_BANKS: each road's raw runs, which they ease themselves.
 Roads are sampled exactly as the sims sample them (NET_STEP: straights in equal steps, arcs in
 exact chords, a last point at the end). Junction zones are found by walking: a road's end samples
 whose corridor overlaps its parent's (plus a margin), against the parent's nearest samples.
@@ -1769,6 +1775,199 @@ def deck_table(roads):
     return [r for r, R in enumerate(roads) if R.deck]
 
 
+# The banks (Luke, 2026-11-22: "I think most roads would benefit from being at least slightly banked on curves, just so
+# that the pilot can see what's coming"). From a seat a metre or two over a flat road a bend ahead is a thin line;
+# leaned toward him, its surface shows. A bend's bank pivots on its inside edge, as the courses' do (the inside edge
+# stays where it was and the outside climbs: nothing sinks into the land), so a 400 m highway at 2 degrees shows him
+# 14 m of road at its far edge, and a 200 m road at 4 the same.
+BANK_AT = (2.0, 45 * KM, 6.0)     # degrees at this radius (the highways' sweepers), growing as the root of radius-over-this as a bend tightens; the most
+BANK_KINDS = ("highway", "ramp", "city", "side", "backroad", "scenic", "stunt")
+# (not the jumps' roads: a launch spur is an aimed run at a lip and a catch deck is a landing, and four of the decks'
+# roads roll right over in the view; not the shafts' ("turn": their plan's bulb is a vertical loop in the world); not
+# the on-ramps from the open ground; not the Aurora tube ("tube"); not a deck road (Mount Hyperion's) or its leaps)
+BANK_BOX = (52, 30)               # the easing: two passes of a box this many samples either side, on a highway (a bank comes in over 5 km: 2.2 s at 5,000 mph) and on any other road (2.9 km)
+BANK_JOIN = 8                     # samples of flat road past each end of every junction zone (the view shapes the shoulders 4 past it)
+BANK_LANE = (333, 40)             # an exit's lane on its parent road, and on along the exit past the stretch they share (view/network_world.gd LANE_SAMPLES, LANE_ON)
+BANK_STEEP = 0.20                 # none where the road climbs steeper than this (Helios's Face, the Drop's dive: its lift is straight up, and "up" there is mostly along the road)
+BANK_CROSS = (60.0, 100.0, 100)   # none where another road lies within this of its edge in plan and less than this above or below it (so no deck comes nearer a road than it was by more than a bank's lift leaves room for); samples past a junction zone where its own partner does not count
+BANK_PAD = 60                     # samples of flat road either side of a starting pad
+BANK_PADS = (("SWash", 130), ("SFrost", 140), ("SReed", 135), ("SRed", 130), ("SNeedle", 96), ("SHammer", 92), ("N3", 300),
+             ("SHelios", 1540), ("SHelios", 7244), ("SCaucasus", 4534))      # godot/release/release_config.gd INSERTIONS (the cities' are in their zones; the scenic roads' own: their land's first station + 40)
+BANK_SHOWS = 0.25                 # degrees: a bank under this is not counted as one (the printout)
+
+
+bank_rows = []     # bank_table's rows and each banked road's eased bank (degrees), set by main()
+bank_eased = {}
+
+
+def bank_deg(radius):
+    """A bend's bank, degrees, by its radius."""
+    return min(BANK_AT[2], BANK_AT[0] * math.sqrt(BANK_AT[1] / radius))
+
+
+def bank_smooth(a, r):
+    """One pass of the box, as the sims run it (nothing beyond the road's ends)."""
+    pre = np.concatenate([[0.0], np.cumsum(a)])
+    n = len(a)
+    i = np.arange(n)
+    return (pre[np.minimum(n, i + r + 1)] - pre[np.maximum(0, i - r)]) / (2 * r + 1)
+
+
+def bank_flat(roads, J, overlaps, tw):
+    """Per road, the samples that must stay flat: [bool] * N for each road that may bank at all, None for the rest."""
+    flat = [np.zeros(R.N, dtype=bool) if R.kind in BANK_KINDS and not R.deck and R.role == "" else None for R in roads]
+
+    def ban(r, a, b):
+        if flat[r] is not None:
+            flat[r][max(0, a):max(0, b + 1)] = True
+    for r, R in enumerate(roads):
+        if flat[r] is None:
+            continue
+        flat[r][R.mode == 0] = True      # a city (its hall, its terminal, its towers: and a quarter of the speed)
+        h = hermite_all(R.keys, R.N) if R.keys else np.zeros(R.N)
+        grade = np.abs(np.gradient(h)) / STEP
+        flat[r][grade > BANK_STEEP] = True
+    for j in list(J) + list(overlaps):
+        ban(j[0], j[1] - BANK_JOIN, j[2] + BANK_JOIN)
+        ban(j[3], j[4] - BANK_JOIN, j[5] + BANK_JOIN)
+    # the exits' lanes, as view/network_world.gd _index_exits lays them
+    for p, a0, a1, c, b0, b1, sense in J:
+        P, C = roads[p], roads[c]
+        if C.role != "" or C.name.startswith("T"):
+            continue
+        start = b0 == 0
+        end = 0 if start else C.N - 1
+        way = sense * (1 if start else -1)
+        d = np.hypot(P.p[a0:a1 + 1, 0] - C.p[end, 0], P.p[a0:a1 + 1, 1] - C.p[end, 1])
+        mouth = a0 + int(np.argmin(d))
+        back = min(max(mouth - way * BANK_LANE[0], 0), P.N - 1)
+        ban(p, min(back, mouth), max(back, mouth))
+        reach = min(abs(b1 - b0) + BANK_LANE[1], C.N - 1)
+        first = 0 if start else C.N - 1 - reach
+        ban(c, first, first + reach)
+    for r, a, b, _ in tw:
+        ban(r, a - BANK_JOIN, b + BANK_JOIN)
+    names = {R.name: r for r, R in enumerate(roads)}
+    for name, i in BANK_PADS:
+        ban(names[name], i - BANK_PAD, i + BANK_PAD)
+    for r, spec in scenic_roads:
+        if "land" in spec:
+            i = land_rows(roads[r], spec)[0][0] + 40
+            ban(r, i - BANK_PAD, i + BANK_PAD)
+    # where roads cross, or run close: a bank lifts an edge by up to 21 m
+    zone = {}
+    for j in list(J) + list(overlaps):
+        zone.setdefault((j[0], j[3]), []).append((j[1], j[2]))
+        zone.setdefault((j[3], j[0]), []).append((j[4], j[5]))
+    sub, cell = 4, 2000.0
+    heights = [hermite_all(R.keys, R.N) if R.keys else np.zeros(R.N) for R in roads]
+    grid = {}
+    for ri, R in enumerate(roads):
+        for i in range(0, R.N, sub):
+            grid.setdefault((int(R.p[i, 0] // cell), int(R.p[i, 1] // cell)), []).append((ri, i))
+    for (cx, cy), items in grid.items():
+        near = []
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                near += grid.get((cx + dx, cy + dy), [])
+        for ri, i in items:
+            if flat[ri] is None:
+                continue
+            A = roads[ri]
+            for rj, j in near:
+                if rj == ri:
+                    continue
+                B = roads[rj]
+                if math.hypot(A.p[i, 0] - B.p[j, 0], A.p[i, 1] - B.p[j, 1]) - (A.w(i) + B.w(j)) / 2 >= BANK_CROSS[0] + sub * STEP:
+                    continue
+                if abs(heights[ri][i] - heights[rj][j]) >= BANK_CROSS[1]:
+                    continue
+                if any(z[0] - BANK_CROSS[2] <= i <= z[1] + BANK_CROSS[2] for z in zone.get((ri, rj), [])):
+                    continue   # (its own partner at a junction: the zone is flat already, and past it the two have walls)
+                ban(ri, i - sub, i + sub)
+    return flat
+
+
+def bank_table(roads, J, overlaps, tw):
+    """[[road, box, [[first sample, the sample after its last, degrees], ...]], ...]: each banked road's raw runs, + for
+    a left-hander (the road tilted down to its left, as the courses' banks are signed). The sims write the runs into a
+    row of zeros and ease it with two passes of the box (nothing beyond the road's ends): that row is the road's
+    bank. A run stays 2 x box + 1 samples clear of every sample that must be flat, which is as far as the easing
+    reaches: so the flat samples are exactly flat, and a bank begins at a junction's edge and is all there 4 boxes on.
+    -> (the table, {road: its eased bank in degrees}, the flat samples)."""
+    flat = bank_flat(roads, J, overlaps, tw)
+    table, banks = [], {}
+    for r, R in enumerate(roads):
+        if flat[r] is None:
+            continue
+        box = BANK_BOX[0] if R.width >= W_HWY else BANK_BOX[1]
+        raw = np.zeros(R.N)
+        i = 0
+        for s in R.segs:
+            n = seg_samples(s)
+            if s[0] in "LR":
+                raw[i:i + n] = (1.0 if s[0] == "L" else -1.0) * bank_deg(s[1])
+            i += n
+        # 2 x box + 1 clear of the flat samples
+        gap = np.full(R.N, R.N, dtype=int)
+        last = -R.N
+        for i in range(R.N):
+            if flat[r][i]:
+                last = i
+            gap[i] = i - last
+        last = 2 * R.N
+        for i in range(R.N - 1, -1, -1):
+            if flat[r][i]:
+                last = i
+            gap[i] = min(gap[i], last - i)
+        raw[gap <= 2 * box] = 0.0
+        runs = []
+        i = 0
+        while i < R.N:
+            if raw[i] == 0.0:
+                i += 1
+                continue
+            k = i
+            while k < R.N and raw[k] == raw[i]:
+                k += 1
+            runs.append([i, k, float(raw[i])])
+            i = k
+        if not runs:
+            continue
+        eased = bank_smooth(bank_smooth(raw, box), box)
+        assert not np.any(eased[flat[r]] != 0.0), f"{R.name}: a bank reaches a sample that must be flat"
+        assert eased[0] == 0.0 and eased[-1] == 0.0, f"{R.name}: banked at an end"
+        table.append([r, box, runs])
+        banks[r] = eased
+    return table, banks, flat
+
+
+def bank_report(roads, banks):
+    """The printout: how much of the Network's bends is banked, by kind."""
+    kinds = {}
+    for r, R in enumerate(roads):
+        arc = np.zeros(R.N, dtype=bool)
+        i = 0
+        for s in R.segs:
+            n = seg_samples(s)
+            if s[0] in "LR":
+                arc[i:i + n] = True
+            i += n
+        b = np.abs(banks[r]) if r in banks else np.zeros(R.N)
+        k = kinds.setdefault(R.kind, [0.0, 0.0, 0.0, 0.0])
+        k[0] += float(R.len[arc].sum())
+        k[1] += float(R.len[arc & (b >= BANK_SHOWS)].sum())
+        k[2] += float(R.len[b >= BANK_SHOWS].sum())
+        k[3] = max(k[3], float(b.max()))
+    bends = sum(k[0] for k in kinds.values())
+    banked = sum(k[1] for k in kinds.values())
+    print(f"  banks: {len(banks)} roads; {banked / KM:.0f} km of the {bends / KM:.0f} km of bends banked {BANK_SHOWS} deg or more ({100 * banked / bends:.0f}%), "
+          f"{sum(k[2] for k in kinds.values()) / KM:.0f} km of road in all")
+    for kind, (arcs, on, total, most) in kinds.items():
+        print(f"    {kind:<9} {on / KM:6.0f} of {arcs / KM:6.0f} km of bends ({100 * on / max(arcs, 1.0):3.0f}%), {total / KM:6.0f} km banked, {most:.2f} deg at most")
+    return banked, bends
+
+
 def junction(roads, c, end, p):
     """The zone where road c's end `end` joins road p: [p, a0, a1, c, b0, b1, sense]."""
     C, P = roads[c], roads[p]
@@ -2099,6 +2298,9 @@ def main():
     if km - tube_km > 10200 or N - tube_samples > 432000 or tube_km > 980 or tube_samples > 41000:
         ok = False
         print(f"  BAD  too big: {km:.0f} km, {N} samples")
+    global bank_rows, bank_eased
+    bank_rows, bank_eased, _ = bank_table(roads, J, overlaps, twists(roads, jumps))
+    bank_report(roads, bank_eased)
     print("NETWORK DESIGN OK" if ok else "NETWORK DESIGN NOT OK")
     if "--plot" in sys.argv:
         plot(roads, cities, sys.argv[sys.argv.index("--plot") + 1] if len(sys.argv) > sys.argv.index("--plot") + 1 else "network.png")

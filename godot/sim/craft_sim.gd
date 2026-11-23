@@ -34,6 +34,11 @@ const DEFAULTS := {
 	"obstacleCollisions": true, # pillars/traffic only; the release menu defaults this to off
 	"towLongK": 2.0e6, "towLongC": 8.0e4, "towLongSlack": 0.3,   # pod stand-off: never closer to the engines than its taut-cable spot
 	"bank": 1.0, "bankDown": 3.9e-4,   # banked corners: downforce per (m/s)^2, as g, presses you into the bank (~8 g at 1,000 mph)
+	# the Network's banked bends' share of that push (1: as a course's corner; 0: the deck leans, a craft rides it and
+	# leans with it, and nothing pushes). 0 as shipped (2026-11-23): at 1 a 2 degree bank does 62% of the steering round
+	# the highways' 45 km sweepers at any speed (the route pilot's levers' split there 0.12 -> 0.06 at 3,000 mph, 0.26 ->
+	# 0.08 at 5,000) and a ring can be taken clean some 800 mph faster: bends he would call different. Mirrors sim-core.js.
+	"roadBank": 0.0,
 	"towAudit": true, "towAuditG": 3.0,   # tow-bar energy audit: drag on the speed, never harder than this (g) ...
 	"towIntF0": 0.05, "towIntF1": 0.3, "towIntMax": 60.0,   # ... shifting onto the swing and spin as their share of the energy grows
 	"heatThrottle": 0.15, "heatBurner": 0.12, "heatRamjet": 0.35, "coolBase": 0.05, "coolSpeed": 0.10,
@@ -497,6 +502,8 @@ const NET_WIDTHS := [[128, [[0, 200.0], [544, 200.0], [764, 800.0], [7624, 800.0
 const NET_DECK := [128]
 # [road, [[sample, m], ...] on its left, the same on its right]: the open edges' aprons (the deck runs on level that much further before its ramp and wall; a smoothstep from key to key, none outside them)
 const NET_APRONS := [[116, [[1536, 0.0], [1736, 150.0], [8773, 150.0], [8973, 0.0]], []], [117, [[1586, 0.0], [1786, 150.0], [4718, 150.0], [4918, 0.0]], [[4347, 0.0], [4547, 150.0], [4718, 150.0], [4918, 0.0]]], [129, [[2996, 0.0], [3076, 60.0], [3156, 0.0], [4353, 0.0], [4553, 150.0], [4732, 150.0], [4932, 0.0], [5174, 0.0], [5374, 150.0], [5561, 150.0], [5761, 0.0]], [[707, 0.0], [907, 150.0], [1926, 150.0], [2126, 0.0], [3264, 0.0], [3464, 150.0], [6535, 150.0], [6735, 0.0]]]]
+# [road, box, [[first sample, the sample after its last, degrees], ...]]: the bends' banks, + down to the left (a left-hander). Each road's runs go into a row of zeros, eased by two passes of a box `box` samples either side (_build_network)
+const NET_BANKS := [[0, 52, [[5000, 5524, 2.0], [6833, 7881, -2.0], [13545, 13890, -2.0], [15377, 16228, 2.0], [17715, 18141, -2.0]]], [3, 52, [[5000, 5557, 2.0], [6807, 7640, -2.0], [9170, 9647, 2.0], [13558, 14099, -2.0], [15853, 16476, 2.0], [17609, 18231, -2.0]]], [5, 52, [[5081, 5426, 2.0], [6913, 7667, -2.0], [9251, 9597, 2.0], [13508, 14082, -2.0], [15156, 16465, 2.0], [17539, 18194, -2.0]]], [6, 30, [[202, 585, -3.872983346207417]]], [7, 30, [[202, 585, 3.872983346207417]]], [8, 30, [[202, 585, 3.872983346207417]]], [9, 30, [[202, 585, -3.872983346207417]]], [10, 30, [[218, 585, -3.872983346207417]]], [11, 30, [[202, 569, 3.872983346207417]]], [12, 30, [[202, 569, 3.872983346207417]]], [13, 30, [[218, 585, -3.872983346207417]]], [14, 30, [[202, 585, -3.872983346207417]]], [15, 30, [[202, 585, 3.872983346207417]]], [16, 30, [[202, 585, 3.872983346207417]]], [17, 30, [[202, 585, -3.872983346207417]]], [18, 30, [[218, 585, -3.872983346207417]]], [19, 30, [[202, 569, 3.872983346207417]]], [20, 30, [[202, 569, 3.872983346207417]]], [21, 30, [[218, 585, -3.872983346207417]]], [22, 30, [[218, 585, -3.872983346207417]]], [23, 30, [[202, 569, 3.872983346207417]]], [24, 30, [[202, 569, 3.872983346207417]]], [25, 30, [[218, 585, -3.872983346207417]]], [26, 30, [[218, 585, -3.872983346207417]]], [27, 30, [[202, 569, 3.872983346207417]]], [28, 30, [[202, 569, 3.872983346207417]]], [29, 30, [[218, 585, -3.872983346207417]]], [30, 30, [[202, 585, -3.872983346207417]]], [31, 30, [[202, 585, 3.872983346207417]]], [32, 30, [[202, 569, 3.872983346207417]]], [33, 30, [[202, 585, -3.872983346207417]]], [34, 30, [[218, 585, -3.872983346207417]]], [35, 30, [[202, 569, 3.872983346207417]]], [36, 30, [[202, 569, 3.872983346207417]]], [37, 30, [[218, 585, -3.872983346207417]]], [38, 30, [[202, 585, -3.872983346207417]]], [39, 30, [[202, 585, 3.872983346207417]]], [40, 30, [[202, 585, 3.872983346207417]]], [41, 30, [[202, 585, -3.872983346207417]]], [42, 30, [[181, 306, -5.0709255283711], [1209, 1335, -5.0709255283711]]], [43, 30, [[181, 306, 5.0709255283711], [1209, 1335, 5.0709255283711]]], [44, 30, [[181, 306, -5.0709255283711], [1209, 1335, -5.0709255283711]]], [45, 30, [[181, 306, -5.0709255283711], [1209, 1335, -5.0709255283711]]], [46, 30, [[181, 306, 5.0709255283711], [1209, 1335, 5.0709255283711]]], [99, 30, [[216, 303, 3.3541019662496847], [428, 731, -3.3541019662496847], [731, 906, 4.743416490252569], [906, 978, -5.477225575051661], [978, 985, 5.477225575051661], [1004, 1011, 5.477225575051661], [1011, 1155, -5.477225575051661], [1155, 1162, 5.477225575051661], [1181, 1188, 5.477225575051661], [1188, 1260, -5.477225575051661], [1260, 1435, 4.743416490252569], [1561, 1736, 4.743416490252569], [1736, 1808, -5.477225575051661], [1808, 1815, 5.477225575051661], [1834, 1841, 5.477225575051661], [1841, 1985, -5.477225575051661], [1985, 1992, 5.477225575051661], [2011, 2018, 5.477225575051661], [2018, 2090, -5.477225575051661], [2090, 2265, 4.743416490252569], [2265, 2568, -3.3541019662496847], [2693, 2781, 3.3541019662496847]]], [100, 30, [[216, 303, -3.3541019662496847], [428, 731, 3.3541019662496847], [898, 1013, -5.477225575051661], [1013, 1019, 5.477225575051661], [1034, 1040, 5.477225575051661], [1040, 1270, -5.477225575051661], [1270, 1276, 5.477225575051661], [1291, 1297, 5.477225575051661], [1297, 1412, -5.477225575051661], [1496, 1611, 5.477225575051661], [1611, 1617, -5.477225575051661], [1632, 1638, -5.477225575051661], [1638, 1868, 5.477225575051661], [1868, 1874, -5.477225575051661], [1889, 1895, -5.477225575051661], [1895, 2010, 5.477225575051661], [2260, 2375, 5.477225575051661], [2375, 2381, -5.477225575051661], [2396, 2402, -5.477225575051661], [2402, 2632, 5.477225575051661], [2632, 2638, -5.477225575051661], [2653, 2659, -5.477225575051661], [2659, 2774, 5.477225575051661], [2858, 2973, -5.477225575051661], [2973, 2979, 5.477225575051661], [2994, 3000, 5.477225575051661], [3000, 3230, -5.477225575051661], [3230, 3236, 5.477225575051661], [3251, 3257, 5.477225575051661], [3257, 3372, -5.477225575051661], [3539, 3842, 3.3541019662496847], [3967, 4055, -3.3541019662496847]]], [101, 30, [[216, 303, 3.3541019662496847], [428, 731, -3.3541019662496847], [1231, 1384, 5.477225575051661], [1384, 1690, -5.477225575051661], [1690, 1843, 5.477225575051661], [2343, 2496, 5.477225575051661], [2496, 2802, -5.477225575051661], [2802, 2955, 5.477225575051661], [3455, 3758, -3.3541019662496847], [3883, 3971, 3.3541019662496847]]], [102, 30, [[216, 303, -3.3541019662496847], [428, 731, 3.3541019662496847], [731, 857, -4.008918628686366], [857, 871, 4.008918628686366], [913, 927, 4.008918628686366], [927, 1179, -4.008918628686366], [1179, 1193, 4.008918628686366], [1235, 1249, 4.008918628686366], [1249, 1375, -4.008918628686366], [1584, 1655, 5.3452248382484875], [1655, 1663, -5.3452248382484875], [1687, 1695, -5.3452248382484875], [1695, 1837, 5.3452248382484875], [1837, 1845, -5.3452248382484875], [1869, 1877, -5.3452248382484875], [1877, 1948, 5.3452248382484875], [2116, 2187, 5.3452248382484875], [2187, 2195, -5.3452248382484875], [2219, 2227, -5.3452248382484875], [2227, 2369, 5.3452248382484875], [2369, 2377, -5.3452248382484875], [2401, 2409, -5.3452248382484875], [2409, 2480, 5.3452248382484875], [2689, 2815, -4.008918628686366], [2815, 2829, 4.008918628686366], [2871, 2885, 4.008918628686366], [2885, 3137, -4.008918628686366], [3137, 3151, 4.008918628686366], [3193, 3207, 4.008918628686366], [3207, 3333, -4.008918628686366], [3333, 3636, 3.3541019662496847], [3761, 3849, -3.3541019662496847]]], [103, 30, [[216, 303, 3.3541019662496847], [428, 731, -3.3541019662496847], [731, 862, 4.242640687119285], [987, 1249, -4.242640687119285], [1374, 1636, 4.242640687119285], [1761, 2023, -4.242640687119285], [2148, 2410, 4.242640687119285], [2535, 2797, -4.242640687119285], [2922, 3053, 4.242640687119285], [3053, 3356, -3.3541019662496847], [3481, 3569, 3.3541019662496847]]], [104, 30, [[216, 303, -3.3541019662496847], [428, 731, 3.3541019662496847], [731, 823, -5.477225575051661], [823, 828, 5.477225575051661], [841, 846, 5.477225575051661], [846, 1030, -5.477225575051661], [1030, 1035, 5.477225575051661], [1048, 1053, 5.477225575051661], [1053, 1237, -5.477225575051661], [1237, 1242, 5.477225575051661], [1255, 1260, 5.477225575051661], [1260, 1352, -5.477225575051661], [1352, 1478, 4.834937784152282], [1478, 1492, -4.834937784152282], [1533, 1547, -4.834937784152282], [1547, 1799, 4.834937784152282], [1799, 1813, -4.834937784152282], [1854, 1868, -4.834937784152282], [1868, 2120, 4.834937784152282], [2120, 2134, -4.834937784152282], [2175, 2189, -4.834937784152282], [2189, 2315, 4.834937784152282], [2483, 2609, 4.834937784152282], [2609, 2623, -4.834937784152282], [2664, 2678, -4.834937784152282], [2678, 2930, 4.834937784152282], [2930, 2944, -4.834937784152282], [2985, 2999, -4.834937784152282], [2999, 3251, 4.834937784152282], [3251, 3265, -4.834937784152282], [3306, 3320, -4.834937784152282], [3320, 3446, 4.834937784152282], [3446, 3538, -5.477225575051661], [3538, 3543, 5.477225575051661], [3556, 3561, 5.477225575051661], [3561, 3745, -5.477225575051661], [3745, 3750, 5.477225575051661], [3763, 3768, 5.477225575051661], [3768, 3952, -5.477225575051661], [3952, 3957, 5.477225575051661], [3970, 3975, 5.477225575051661], [3975, 4067, -5.477225575051661], [4067, 4370, 3.3541019662496847], [4495, 4583, -3.3541019662496847]]], [105, 30, [[216, 303, 3.3541019662496847], [428, 731, -3.3541019662496847], [898, 1013, 5.477225575051661], [1013, 1019, -5.477225575051661], [1034, 1040, -5.477225575051661], [1040, 1270, 5.477225575051661], [1270, 1276, -5.477225575051661], [1291, 1297, -5.477225575051661], [1297, 1412, 5.477225575051661], [1496, 1611, -5.477225575051661], [1611, 1617, 5.477225575051661], [1632, 1638, 5.477225575051661], [1638, 1868, -5.477225575051661], [1868, 1874, 5.477225575051661], [1889, 1895, 5.477225575051661], [1895, 2010, -5.477225575051661], [2260, 2375, -5.477225575051661], [2375, 2381, 5.477225575051661], [2396, 2402, 5.477225575051661], [2402, 2632, -5.477225575051661], [2632, 2638, 5.477225575051661], [2653, 2659, 5.477225575051661], [2659, 2774, -5.477225575051661], [2858, 2973, 5.477225575051661], [2973, 2979, -5.477225575051661], [2994, 3000, -5.477225575051661], [3000, 3230, 5.477225575051661], [3230, 3236, -5.477225575051661], [3251, 3257, -5.477225575051661], [3257, 3372, 5.477225575051661], [3539, 3842, -3.3541019662496847], [3967, 4055, 3.3541019662496847]]], [106, 30, [[216, 303, -3.3541019662496847], [428, 731, 3.3541019662496847], [731, 906, -4.743416490252569], [906, 978, 5.477225575051661], [978, 985, -5.477225575051661], [1004, 1011, -5.477225575051661], [1011, 1155, 5.477225575051661], [1155, 1162, -5.477225575051661], [1181, 1188, -5.477225575051661], [1188, 1260, 5.477225575051661], [1260, 1435, -4.743416490252569], [1561, 1736, -4.743416490252569], [1736, 1808, 5.477225575051661], [1808, 1815, -5.477225575051661], [1834, 1841, -5.477225575051661], [1841, 1985, 5.477225575051661], [1985, 1992, -5.477225575051661], [2011, 2018, -5.477225575051661], [2018, 2090, 5.477225575051661], [2090, 2256, -4.743416490252569], [2417, 2568, 3.3541019662496847], [2693, 2781, -3.3541019662496847]]], [107, 30, [[216, 303, 3.3541019662496847], [428, 731, -3.3541019662496847], [731, 823, 5.477225575051661], [823, 828, -5.477225575051661], [841, 846, -5.477225575051661], [846, 1030, 5.477225575051661], [1030, 1035, -5.477225575051661], [1048, 1053, -5.477225575051661], [1053, 1237, 5.477225575051661], [1237, 1242, -5.477225575051661], [1255, 1260, -5.477225575051661], [1260, 1352, 5.477225575051661], [1352, 1478, -4.834937784152282], [1478, 1492, 4.834937784152282], [1533, 1547, 4.834937784152282], [1547, 1799, -4.834937784152282], [1799, 1813, 4.834937784152282], [1854, 1868, 4.834937784152282], [1868, 2120, -4.834937784152282], [2120, 2134, 4.834937784152282], [2175, 2189, 4.834937784152282], [2189, 2315, -4.834937784152282], [2483, 2609, -4.834937784152282], [2609, 2623, 4.834937784152282], [2664, 2678, 4.834937784152282], [2678, 2930, -4.834937784152282], [2930, 2944, 4.834937784152282], [2985, 2999, 4.834937784152282], [2999, 3251, -4.834937784152282], [3251, 3265, 4.834937784152282], [3306, 3320, 4.834937784152282], [3320, 3446, -4.834937784152282], [3446, 3538, 5.477225575051661], [3538, 3543, -5.477225575051661], [3556, 3561, -5.477225575051661], [3561, 3745, 5.477225575051661], [3745, 3750, -5.477225575051661], [3763, 3768, -5.477225575051661], [3768, 3952, 5.477225575051661], [3952, 3957, -5.477225575051661], [3970, 3975, -5.477225575051661], [3975, 4067, 5.477225575051661], [4067, 4370, -3.3541019662496847], [4495, 4583, 3.3541019662496847]]], [108, 30, [[216, 303, -3.3541019662496847], [428, 731, 3.3541019662496847], [1231, 1384, -5.477225575051661], [1384, 1690, 5.477225575051661], [1690, 1843, -5.477225575051661], [2343, 2496, -5.477225575051661], [2496, 2802, 5.477225575051661], [2802, 2955, -5.477225575051661], [3455, 3758, 3.3541019662496847], [3883, 3971, -3.3541019662496847]]], [109, 30, [[216, 303, 3.3541019662496847], [428, 731, -3.3541019662496847], [731, 862, 4.242640687119285], [987, 1249, -4.242640687119285], [1374, 1636, 4.242640687119285], [1761, 2023, -4.242640687119285], [2148, 2410, 4.242640687119285], [2535, 2797, -4.242640687119285], [2922, 3053, 4.242640687119285], [3053, 3356, -3.3541019662496847], [3481, 3569, 3.3541019662496847]]], [110, 30, [[216, 303, -3.3541019662496847], [428, 731, 3.3541019662496847], [731, 857, -4.008918628686366], [857, 871, 4.008918628686366], [913, 927, 4.008918628686366], [927, 1179, -4.008918628686366], [1179, 1193, 4.008918628686366], [1235, 1249, 4.008918628686366], [1249, 1375, -4.008918628686366], [1584, 1655, 5.3452248382484875], [1655, 1663, -5.3452248382484875], [1687, 1695, -5.3452248382484875], [1695, 1837, 5.3452248382484875], [1837, 1845, -5.3452248382484875], [1869, 1877, -5.3452248382484875], [1877, 1948, 5.3452248382484875], [2116, 2187, 5.3452248382484875], [2187, 2195, -5.3452248382484875], [2219, 2227, -5.3452248382484875], [2227, 2369, 5.3452248382484875], [2369, 2377, -5.3452248382484875], [2401, 2409, -5.3452248382484875], [2409, 2480, 5.3452248382484875], [2689, 2815, -4.008918628686366], [2815, 2829, 4.008918628686366], [2871, 2885, 4.008918628686366], [2885, 3137, -4.008918628686366], [3137, 3151, 4.008918628686366], [3193, 3207, 4.008918628686366], [3207, 3333, -4.008918628686366], [3333, 3636, 3.3541019662496847], [3761, 3849, -3.3541019662496847]]], [116, 30, [[216, 466, -3.3541019662496847], [675, 1025, 3.3541019662496847], [1275, 1293, -3.585685828003181], [1534, 2090, -3.585685828003181], [2340, 2532, 3.872983346207417], [2532, 2852, -4.242640687119285], [3061, 3411, 3.872983346207417], [3703, 4070, -3.585685828003181], [4070, 4319, 4.47213595499958], [4486, 4870, -3.872983346207417], [5120, 5679, 3.3541019662496847], [5679, 5999, -4.0451991747794525], [6208, 6470, 4.242640687119285], [6595, 7011, -3.721042037676254], [7011, 7557, 3.4641016151377544], [7724, 8088, -4.242640687119285], [8088, 8368, 3.3541019662496847], [8732, 9445, -3.585685828003181], [10195, 10213, -3.3541019662496847]]], [117, 30, [[216, 408, -3.3541019662496847], [1033, 1429, -3.585685828003181], [1843, 2062, 3.872983346207417], [2062, 2499, -3.872983346207417], [2499, 2718, 3.872983346207417], [3052, 3271, -4.242640687119285], [3271, 3708, 4.242640687119285], [3708, 3927, -4.242640687119285], [4136, 4320, 3.585685828003181], [5112, 5345, 3.3541019662496847], [5345, 5811, -3.3541019662496847], [5811, 6137, 3.3541019662496847], [6387, 6693, -3.585685828003181], [6693, 7040, 3.585685828003181], [7040, 7346, -3.585685828003181], [7513, 7740, -3.872983346207417], [7740, 7967, 3.872983346207417], [8212, 8925, -3.585685828003181], [10175, 10193, -3.3541019662496847]]], [118, 30, [[251, 266, -4.0451991747794525], [1358, 1490, -4.0451991747794525], [2267, 2978, -4.0451991747794525], [3778, 3976, -4.0451991747794525], [5027, 5432, 4.0451991747794525]]], [119, 30, [[261, 534, 3.585685828003181], [893, 1050, -3.585685828003181], [1050, 1316, 3.585685828003181], [2506, 3017, -3.585685828003181], [4181, 4219, -3.585685828003181], [5503, 5643, 3.585685828003181], [5643, 5691, -3.585685828003181], [7325, 7496, 3.585685828003181], [7657, 7849, 3.585685828003181]]], [120, 30, [[256, 353, 4.242640687119285], [724, 1354, 4.242640687119285], [2362, 2452, 4.242640687119285], [3757, 4324, -4.242640687119285], [4537, 4955, -4.242640687119285], [6374, 6596, 4.242640687119285], [7776, 7988, 4.242640687119285]]], [121, 30, [[251, 292, -3.872983346207417], [1047, 1190, -3.872983346207417], [2529, 2594, -3.872983346207417], [2594, 2619, 3.872983346207417], [3184, 4002, -3.872983346207417], [4899, 5092, -3.872983346207417], [6416, 6841, 3.872983346207417]]], [124, 30, [[217, 304, -4.6017899330842225], [859, 975, -4.6017899330842225]]], [125, 30, [[745, 911, 5.0709255283711]]], [127, 30, [[190, 235, 4.47213595499958], [1366, 1420, 4.47213595499958], [1661, 1721, 4.47213595499958], [2721, 5470, -2.9277002188455996], [5470, 6520, -3.4641016151377544], [6520, 6552, -6.0], [7937, 7968, 6.0], [7968, 9018, 3.4641016151377544], [9018, 10393, 2.9277002188455996], [10393, 11484, 1.7320508075688772], [11484, 12126, -4.47213595499958], [13070, 13359, 4.47213595499958]]], [129, 30, [[209, 510, -3.585685828003181], [775, 1330, -3.872983346207417], [1497, 2188, 4.242640687119285], [2397, 3125, -4.242640687119285], [3292, 3932, 4.0451991747794525], [4141, 4414, -3.872983346207417], [4655, 4927, -3.872983346207417], [5136, 5864, 4.242640687119285], [6114, 6794, -4.0451991747794525], [6961, 7616, 3.872983346207417], [7741, 8432, -4.242640687119285], [8599, 9036, 3.872983346207417], [9235, 9948, -3.585685828003181], [10282, 10300, -3.3541019662496847]]]]
 # </network>
 # The courses: widths per mode (else GP_WIDTH, constant); width_r: the width-easing box (samples);
 # banks: per mode, degrees (else GP_BANK in the corners), each eased by two passes of its own box,
@@ -594,6 +601,8 @@ class TrackPath:
 	var dth := PackedFloat64Array() # ... and that pitch, radians (deck_sine, deck_f)
 	var apl := PackedFloat64Array() # ... per sample, its open apron on the left (NET_APRONS: m of level deck more before that side's ramp and wall; empty with none)
 	var apr := PackedFloat64Array() # ... and on the right
+	var banked := false             # ... a road with banked bends (NET_BANKS: `bank` is its lean at each sample, radians, + down to the left)
+	var btan := PackedFloat64Array() # ... and that lean's tangent at each sample (bank_tan): the deck's rise across it, a metre for a metre
 
 
 var P: Dictionary
@@ -967,12 +976,28 @@ func _rail_hover(b: Body, dt: float, after_move := false) -> void:
 	var vl := b.vx * R.nx[i] + b.vy * R.ny[i]
 	var along := clampf(f - float(i), 0.0, 1.0)      # (for an open apron's width there: net_lat)
 	var h := road_h(b.path, f) + net_edge(R.w[i], net_lat(R, i, lat, along)).x
+	# a bend's bank: the deck leans under it. net_bank_lift's own sums, written out (every body, 960 times a
+	# second): nothing on a road with no bank, a look at two numbers on a banked road's straights.
+	var tan_here := 0.0
+	var tan_by := 0.0
+	var half := 0.0
+	if R.banked:
+		tan_here = R.btan[i]
+		tan_by = R.btan[mini(i + 1, R.N - 1)] - tan_here
+		if tan_here != 0.0 or tan_by != 0.0:
+			half = R.w[i] / 2.0
+			var tn: float = tan_here + tan_by * (f - float(i))
+			h += half * absf(tn) - clampf(lat, -half, half) * tn
 	var vs := b.vx * R.tx[i] + b.vy * R.ty[i]
 	var run: float = R.len[i]
 	if R.deck and deck_rule:   # (a deck road: over the map, its speed along the deck by the cosine of the deck's pitch)
 		vs *= sqrt(1.0 - pow(deck_sine(b.path, f), 2.0))
 		run = R.len[clampi(int(floor(f)), 0, R.N - 1)]      # (... and the sample it is over, which is not always the hint's: _road_f)
-	var dhdt := (road_h(b.path, f + vs * dt / run) + net_edge(R.w[i], net_lat(R, i, lat + vl * dt, along)).x - h) / dt
+	var h1 := road_h(b.path, f + vs * dt / run) + net_edge(R.w[i], net_lat(R, i, lat + vl * dt, along)).x
+	if half != 0.0:
+		var tn1: float = tan_here + tan_by * (f - float(i) + vs * dt / run)
+		h1 += half * absf(tn1) - clampf(lat + vl * dt, -half, half) * tn1
+	var dhdt := (h1 - h) / dt
 	if b.lock:
 		if not after_move:
 			# Surface following carries the deck's slope/curvature acceleration;
@@ -1066,7 +1091,7 @@ func _free_contact(b: Body, circles: Array, dt: float) -> void:
 			continue
 		var i: int = n[1]
 		var u := clampf(((b.x - R.px[i]) * R.tx[i] + (b.y - R.py[i]) * R.ty[i]) / R.len[i], -1.0, 2.0)
-		var h := road_h(n[0], float(i) + u) + net_edge(float(n[3]), float(n[2])).x
+		var h := road_h(n[0], float(i) + u) + net_edge(float(n[3]), float(n[2])).x + net_bank_lift(R, i, u, float(n[2]))
 		var dz: float = b.z - h - P.rideH
 		# a catch deck only takes what's flying along it: crossing another way's deck you fly on through
 		if R.role == "catch" and absf(b.vx * R.tx[i] + b.vy * R.ty[i]) < 0.7 * sqrt(b.vx * b.vx + b.vy * b.vy):
@@ -1084,7 +1109,7 @@ func _free_contact(b: Body, circles: Array, dt: float) -> void:
 		if dz >= (-JC_REACH if linked_catch else -3.0) and dz <= (JC_REACH if R.role == "catch" else 2.5):
 			var vs := b.vx * R.tx[i] + b.vy * R.ty[i]
 			var vl := b.vx * R.nx[i] + b.vy * R.ny[i]
-			var dhdt := (road_h(n[0], float(i) + u + vs * dt / R.len[i]) + net_edge(float(n[3]), float(n[2]) + vl * dt).x - h) / dt
+			var dhdt := (road_h(n[0], float(i) + u + vs * dt / R.len[i]) + net_edge(float(n[3]), float(n[2]) + vl * dt).x + net_bank_lift(R, i, u + vs * dt / R.len[i], float(n[2]) + vl * dt) - h) / dt
 			b.off_road = false
 			b.path = n[0]
 			b.hint = i
@@ -1099,7 +1124,7 @@ func _free_contact(b: Body, circles: Array, dt: float) -> void:
 		if R.role == "catch" and dz < -3.0 and dz > -80.0:   # under the deck's lip: turned down
 			var vs2 := b.vx * R.tx[i] + b.vy * R.ty[i]
 			var vl2 := b.vx * R.nx[i] + b.vy * R.ny[i]
-			var dhdt2 := (road_h(n[0], float(i) + u + vs2 * dt / R.len[i]) + net_edge(float(n[3]), float(n[2]) + vl2 * dt).x - h) / dt
+			var dhdt2 := (road_h(n[0], float(i) + u + vs2 * dt / R.len[i]) + net_edge(float(n[3]), float(n[2]) + vl2 * dt).x + net_bank_lift(R, i, u + vs2 * dt / R.len[i], float(n[2]) + vl2 * dt) - h) / dt
 			if dz > -8.0:
 				b.z = h + P.rideH - 8.0
 			if b.vz > dhdt2 - 2.0:
@@ -1109,7 +1134,7 @@ func _free_contact(b: Body, circles: Array, dt: float) -> void:
 		if n[6]:
 			continue
 		var R: TrackPath = roads[n[0]]
-		var h := net_height(n[0], float(n[1])) + net_edge(float(n[3]), float(n[3]) / 2.0).x   # (at the wall's foot: the ramp's top)
+		var h := net_height(n[0], float(n[1])) + net_edge(float(n[3]), float(n[3]) / 2.0).x + net_bank_lift(R, int(n[1]), 0.0, float(n[2]))   # (at the wall's foot: the ramp's top, and on a banked bend that side's lift)
 		# An elevated crossing deck ignores its forcefield as well as its surface,
 		# mirroring sim-core.js. Ground-level catch guardrails remain solid.
 		var ni: int = n[1]
@@ -1422,6 +1447,28 @@ func _build_network() -> void:
 				Ra.apl = wide
 			else:
 				Ra.apr = wide
+	# the bends' banks: each road's raw runs, eased by two passes of its box (mirroring sim-core.js)
+	for bk in (NET_BANKS if net_banks else []):
+		var Rb: TrackPath = roads[int(bk[0])]
+		var raw := PackedFloat64Array()
+		raw.resize(Rb.N)
+		raw.fill(0.0)
+		for run: Array in bk[2]:
+			for i in range(int(run[0]), int(run[1])):
+				raw[i] = float(run[2]) * PI / 180.0
+		# (eased only as far as the runs reach, two boxes past the first and the last: all the rest is zeros, and
+		# comes out the zeros it would have. Read from end to end, 230,000 samples took 60 ms of a 530 ms build.)
+		var box := int(bk[1])
+		var first := int(bk[2][0][0])
+		var last := int(bk[2][bk[2].size() - 1][1]) - 1
+		Rb.bank = _smooth_open(_smooth_open(raw, box, first - box, last + box), box, first - 2 * box, last + 2 * box)
+		Rb.btan.resize(Rb.N)
+		Rb.btan.fill(0.0)
+		for i in range(maxi(0, first - 2 * box), mini(Rb.N - 1, last + 2 * box) + 1):
+			var lean: float = Rb.bank[i]      # (bank_tan's own sums, written out: a call a sample was most of what the banks cost to build)
+			var q := lean * lean
+			Rb.btan[i] = lean * (1.0 + q * (1.0 / 3.0 + q * (2.0 / 15.0 + q * (17.0 / 315.0))))
+		Rb.banked = true
 	for c in NET_CITIES:
 		cities.append({"name": c[0], "biome": c[1], "cx": float(c[2]), "cy": float(c[3]), "road": int(c[4]), "i": int(c[5])})
 	for hk in NET_HEIGHTS:
@@ -1595,6 +1642,9 @@ func net_slope(road: int, i: float) -> float:
 ## times the cosine of that pitch: so along the deck it is the same speed all the way, and the pitch turns
 ## at one rate. At the samples themselves nothing has moved.
 var deck_rule := true
+## (net_banks: off, a Network built after it has no banked bend: every road as flat across as all were before
+## 2026-11-22. A test's switch, and the pictures' "before": tests/test_network_banks.gd, tests/render_banks.gd.)
+static var net_banks := true
 
 
 func deck_sine(road: int, f: float) -> float:
@@ -1668,6 +1718,80 @@ static func net_lat(R: TrackPath, i: int, lat: float, t := 0.0) -> float:
 	if lat > 0.0:
 		return maxf(0.0, lat - lerpf(R.apl[i], R.apl[j], t))
 	return minf(0.0, lat + lerpf(R.apr[i], R.apr[j], t))
+
+
+## The Network's bends lean into the turn (NET_BANKS; Luke, 2026-11-22: "I think most roads would benefit from
+## being at least slightly banked on curves, just so that the pilot can see what's coming"). A road's bank at
+## each sample is `bank` (radians, + tilted down to its left: a left-hander, as the courses' tb), and it pivots
+## on its inside edge as the courses' corners do (bank_height): that edge stays where it was and the outside
+## climbs, so nothing sinks into the land. This is how far the bank lifts the deck `lat` m left of the
+## centreline, `t` of the way along sample i (the bank's tangent, btan, runs straight from one sample's to
+## the next's). Past either edge (an apron, the wall's foot, the land's) it is that edge's. Added to the
+## deck's height (road_h) and the edge's ramp (net_edge) wherever a height is wanted: the hover (which has
+## these same sums written out: _rail_hover), a landing, the views. Mirrors sim-core.js netBankLift.
+static func net_bank_lift(R: TrackPath, i: int, t: float, lat: float) -> float:
+	if not R.banked:
+		return 0.0
+	var tn: float = R.btan[i] + (R.btan[mini(i + 1, R.N - 1)] - R.btan[i]) * t
+	if tn == 0.0:
+		return 0.0
+	var hw: float = R.w[i] / 2.0
+	return hw * absf(tn) - clampf(lat, -hw, hw) * tn
+
+
+## The tangent and the sine of a bank (radians: a few degrees at most), by their series. The same sums in
+## both sims, so the same to the last bit, which the engines' own tan and sin need not be: and a craft on a
+## banked bend is pushed by these 480 times a second. (At 6 degrees the tangent's is right to 3 parts in
+## 10^10.) Mirrors sim-core.js bankTan, bankSin.
+static func bank_tan(a: float) -> float:
+	var q := a * a
+	return a * (1.0 + q * (1.0 / 3.0 + q * (2.0 / 15.0 + q * (17.0 / 315.0))))
+
+
+static func bank_sin(a: float) -> float:
+	var q := a * a
+	return a * (1.0 - q * (1.0 / 6.0 - q * (1.0 / 120.0 - q * (1.0 / 5040.0))))
+
+
+## ... and the bank itself there, radians.
+static func net_bank(R: TrackPath, i: int, t: float) -> float:
+	if not R.banked:
+		return 0.0
+	return R.bank[i] + (R.bank[mini(i + 1, R.N - 1)] - R.bank[i]) * t
+
+
+## For the views: road `road`'s deck at (fractional) sample f, `lat` m left of its centreline: its height
+## (net_height) and, on a banked bend, the bank's lift there. Not the edge's ramp (net_edge).
+func net_deck(road: int, f: float, lat: float) -> float:
+	var R: TrackPath = roads[road]
+	if not R.banked:
+		return net_height(road, f)
+	var i := clampi(int(floor(f)), 0, R.N - 2)
+	return net_height(road, f) + net_bank_lift(R, i, f - float(i), lat)
+
+
+## One pass of the banks' easing: each sample the mean of the 2 r + 1 about it, with nothing beyond the
+## road's ends (a road is open, where a course is a loop: _smooth_run). A running sum, so a stretch of
+## zeros comes out exactly zero. Mirrors sim-core.js smoothOpen, which works every sample out: here only
+## samples lo to hi are (the rest are zeros), which is the same to the last bit so long as `a` is all zeros
+## before sample lo - r (the running sum up to there is then exactly nothing, as it is here).
+static func _smooth_open(a: PackedFloat64Array, r: int, lo := 0, hi := -1) -> PackedFloat64Array:
+	var n := a.size()
+	lo = maxi(lo, 0)
+	hi = n - 1 if hi < 0 else mini(hi, n - 1)
+	var from := maxi(0, lo - r)
+	var to := mini(n, hi + r + 1)
+	var pre := PackedFloat64Array()
+	pre.resize(to - from + 1)
+	pre[0] = 0.0
+	for i in range(from, to):
+		pre[i - from + 1] = pre[i - from] + a[i]
+	var out := PackedFloat64Array()
+	out.resize(n)
+	out.fill(0.0)
+	for i in range(lo, hi + 1):
+		out[i] = (pre[mini(n, i + r + 1) - from] - pre[maxi(0, i - r) - from]) / float(2 * r + 1)
+	return out
 
 
 ## ... and past its ends (a body off its last sample, the step before it's freed), on at the end's slope.
@@ -2019,9 +2143,9 @@ func _point_vel(b: Body, px: float, py: float) -> void:
 ## On a branch (path k + 1): its centreline's height (branch_height) and no bank (the turn over is
 ## roll_at's).
 func surface_at(x: float, y: float, hint: int, path := 0) -> Vector2:
-	if kind == "network":   # the deck's height (the flyovers), and the edges' ramps (net_edge: banked
-		# toward the middle, + = down to the left as the GP's); the ramp from the hint's own sample
-		# (no search: its width and frame are the same for metres around)
+	if kind == "network":   # the deck's height (the flyovers), the edges' ramps (net_edge: banked
+		# toward the middle, + = down to the left as the GP's) and a bend's own bank (net_bank_lift); the
+		# ramp and the bank from the hint's own sample (no search: its width and frame are the same for metres around)
 		var e := Vector2.ZERO
 		if path >= 0 and path < roads.size():
 			var R: TrackPath = roads[path]
@@ -2029,6 +2153,10 @@ func surface_at(x: float, y: float, hint: int, path := 0) -> Vector2:
 			var lat := (x - R.px[ih]) * R.nx[ih] + (y - R.py[ih]) * R.ny[ih]
 			e = net_edge(R.w[ih], net_lat(R, ih, lat, clampf(((x - R.px[ih]) * R.tx[ih] + (y - R.py[ih]) * R.ty[ih]) / R.len[ih], 0.0, 1.0)) if not R.apl.is_empty() else lat)
 			e.y *= -signf(lat)
+			if R.banked:      # (a bend's bank: its lift there, and its lean with the ramp's)
+				var along := clampf(((x - R.px[ih]) * R.tx[ih] + (y - R.py[ih]) * R.ty[ih]) / R.len[ih], 0.0, 1.0)
+				e.x += net_bank_lift(R, ih, along, lat)
+				e.y += net_bank(R, ih, along)
 		if not _deck_between(path, hint - 40, hint + 41):   # no flyover the search could reach: the ground,
 			return e                                       # without the search (~35 us; the view asks ~20 times a frame)
 		_nearest_on(path, x, y, hint, 40)
@@ -2175,6 +2303,8 @@ func _place(ax: float, ay: float, atx: float, aty: float, anx: float, any: float
 		b.path = path
 		b.contact = [false, false]
 		b.z = (net_height(path, float(idx)) if kind == "network" else ground(b.x, b.y)) + P.rideH
+		if kind == "network" and roads[path].banked:      # (on a banked bend: on its deck where the body stands)
+			b.z += net_bank_lift(roads[path], idx, 0.0, (b.x - roads[path].px[idx]) * roads[path].nx[idx] + (b.y - roads[path].py[idx]) * roads[path].ny[idx])
 		b.vz = 0.0
 		b.grip = 1.0
 		b.off_road = false
@@ -2847,6 +2977,13 @@ func step(inp: Dictionary, dt: float) -> void:
 				continue
 			var RB: TrackPath = roads[b.path]
 			var ib := b.hint
+			# a bend's bank (NET_BANKS): the courses' push, toward the inside of the turn
+			if RB.banked and P.roadBank != 0.0 and RB.bank[ib] != 0.0:
+				var bkr: float = RB.bank[ib]
+				var v2r := b.vx * b.vx + b.vy * b.vy
+				var fr: float = P.bank * P.roadBank * b.m * (G * bank_tan(bkr) + P.bankDown * v2r * bank_sin(bkr)) * b.grip
+				b.fx += fr * RB.nx[ib]
+				b.fy += fr * RB.ny[ib]
 			var latb := (b.x - RB.px[ib]) * RB.nx[ib] + (b.y - RB.py[ib]) * RB.ny[ib]
 			var bke := net_edge(RB.w[ib], net_lat(RB, ib, latb, clampf(((b.x - RB.px[ib]) * RB.tx[ib] + (b.y - RB.py[ib]) * RB.ty[ib]) / RB.len[ib], 0.0, 1.0)) if not RB.apl.is_empty() else latb).y
 			if bke == 0.0:

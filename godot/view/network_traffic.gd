@@ -235,6 +235,12 @@ class Car:
 			lamp_nose = TRACTOR_NOSE if kind == TRANSPORT else lamps.z
 			lamp_tail = lamps.z + ((TRAIN - 1) * TRAIN_GAP if kind == TRANSPORT else 0.0)
 			lamp_tail_color = TAIL[kind]
+		var banked: Simulation.TrackPath = frame.roads[road]
+		if banked.banked:
+			var at := clampi(int(f), 0, banked.N - 2)
+			if banked.bank[at] != 0.0 or banked.bank[at + 1] != 0.0:
+				draw_banked(frame, batch, cx, cy, banked)
+				return
 		var spans := frame.grade_spans[road]
 		if flat_road == road and is_same(flat_spans, spans) and f >= flat_from and f < flat_to:
 			draw_flat(frame, batch, cx, cy, flat_height)
@@ -306,6 +312,33 @@ class Car:
 		if shaft_on:      # round a shaft's bulb the vehicle's own left-to-right is the bulb's, not the map's
 			lamp_basis = (frame.shaft.frame(road, f) * Basis(Vector3.UP, PI if dir < 0 else 0.0)) * Basis.from_scale(LAMPS[kind])
 			draw_hx = INF      # (and its heading's own frame is found again when it comes off the bulb)
+
+	## On a banked bend (CraftSim.NET_BANKS) every body stands on the deck as it leans there: at the deck's
+	## height at its own place along the road, lifted by the bank where it is across it, rolled with the
+	## bank and nosed along the grade. Its lamp rides at its own end's height.
+	func draw_banked(frame: FleetFrame, batch: Batch.Writer, cx: float, cy: float, R: Simulation.TrackPath) -> void:
+		var last: float = R.N - 1.0
+		var step: float = dir * TRAIN_GAP / 24.0   # samples from one body's centre to the next
+		var board: float = NUMBER_BOARDS.get(name, 0.0) if kind == RACER else 0.0
+		for k in (0 if craft else (TRAIN if kind == TRANSPORT else 1)):
+			var back := k * TRAIN_GAP
+			var fk := clampf(f - step * k, 0.0, last)
+			var ik := clampi(int(fk), 0, R.N - 2)
+			var h: float = frame.height(road, fk) + 1.0 + Simulation.net_bank_lift(R, ik, fk - ik, lat)
+			var pitch := 0.0
+			if frame.grade:
+				pitch = atan((frame.height(road, clampf(fk + step, 0.0, last)) - frame.height(road, clampf(fk - step, 0.0, last))) / (2.0 * TRAIN_GAP))
+			var body_basis := (draw_yaw * Basis(Vector3.RIGHT, pitch) * Basis(Vector3.BACK, Simulation.net_bank(R, ik, fk - ik) * dir)).scaled(Vector3.ONE * SCALE)
+			var unit: Batch.Writer = frame.tractor if kind == TRANSPORT and k == 0 else batch
+			unit.put(Transform3D(body_basis, Vector3(cx - hx * back - frame.ox, h, -(cy - hy * back - frame.oy))), frame.eye, col, board)
+		var coming: bool = hx * (frame.eye_x - cx) + hy * (frame.eye_y - cy) > 0.0
+		var off := -lamp_nose if coming else lamp_tail
+		var fl := clampf(f - dir * off / 24.0, 0.0, last)
+		var il := clampi(int(fl), 0, R.N - 2)
+		lamp_position = Vector3(cx - hx * off - frame.ox, frame.height(road, fl) + 1.0 + 1.2 * SCALE + Simulation.net_bank_lift(R, il, fl - il, lat), -(cy - hy * off - frame.oy))
+		lamp_color = HEAD if coming else lamp_tail_color
+		if chase == "pursuer":
+			lamp_color = Color(1.0, 0.1, 0.08) if int(Time.get_ticks_msec() / 200) % 2 == 0 else Color(0.15, 0.35, 1.0)
 
 	## In a constant Hermite span, every axle and the lights share one deck height.
 	## The cached interval allows the entire train plus the grade lookahead.
@@ -1451,6 +1484,11 @@ func _feed() -> void:
 				h = _drawing.height(c.road, f)
 			elif grade and sim._net_h.has(c.road):
 				h = _drawing.height(c.road, clampf(c.f - c.dir * back / 24.0, 0.0, sim.roads[c.road].N - 1.0))
+			if sim.roads[c.road].banked:      # (on a banked bend it stands on the deck as it leans there, as it is drawn)
+				var road_banked = sim.roads[c.road]
+				var fb := clampf(c.f - c.dir * back / 24.0, 0.0, road_banked.N - 1.0)
+				var ib := clampi(int(fb), 0, road_banked.N - 2)
+				h += Simulation.net_bank_lift(road_banked, ib, fb - ib, c.lat)
 			if Vector2(x - px, y - py).length_squared() > reach * reach:      # (the far cars of a near train)
 				continue
 			obs.append({"id": c.id * 32 + q, "r": radius, "x": x, "y": y,

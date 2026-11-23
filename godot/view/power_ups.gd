@@ -220,13 +220,16 @@ func gate_xf(g: Dictionary) -> Transform3D:
 	var t: Vector2
 	var n: Vector2
 	var h := 0.0
+	var up := Vector3.UP
 	if sim.kind == "network":
 		var R = sim.roads[int(g.road)]
 		px = R.px[i]
 		py = R.py[i]
 		t = Vector2(R.tx[i], R.ty[i])
 		n = Vector2(R.nx[i], R.ny[i])
-		h = sim.net_height(int(g.road), float(i)) + sim.net_edge(R.w[i], float(g.lat)).x
+		h = sim.net_deck(int(g.road), float(i), float(g.lat)) + sim.net_edge(R.w[i], float(g.lat)).x
+		if R.banked and R.bank[i] != 0.0:      # (on a banked bend it stands square to the deck)
+			up = Vector3.UP * cos(R.bank[i]) + Vector3(n.x, 0.0, -n.y) * sin(R.bank[i])
 	else:
 		px = sim.tpx[i]
 		py = sim.tpy[i]
@@ -235,7 +238,7 @@ func gate_xf(g: Dictionary) -> Transform3D:
 		h = sim.surface_at(px + n.x * float(g.lat), py + n.y * float(g.lat), i, 0).x
 	var x := px + n.x * float(g.lat)
 	var y := py + n.y * float(g.lat)
-	return Transform3D(Basis.looking_at(Vector3(t.x, 0.0, -t.y), Vector3.UP), Vector3(x - view.org_x, h, -(y - view.org_y)))
+	return Transform3D(Basis.looking_at(Vector3(t.x, 0.0, -t.y), up), Vector3(x - view.org_x, h, -(y - view.org_y)))
 
 
 ## A frame: gates crossed since the last are taken, the nearest are drawn.

@@ -218,7 +218,7 @@ func _target_clear(a: float, offset: float) -> bool:
 	for c in traffic.cars:
 		var same_road: bool = c.road == sim.pod.path
 		var relative := Vector2(c.x - sim.pod.x, c.y - sim.pod.y)
-		if not same_road and (relative.length_squared() > 36000000.0 or absf(sim.net_height(c.road, c.f) - sim.pod.z) > 20.0):
+		if not same_road and (relative.length_squared() > 36000000.0 or absf(sim.net_deck(c.road, c.f, c.lat) - sim.pod.z) > 20.0):
 			continue
 		var lateral: float = c.lat * frame.dir - frame.lat if same_road else relative.dot(lf)
 		var gap: float = (c.f - frame.f) * frame.dir * 24.0 if same_road else relative.dot(fw)
@@ -424,7 +424,7 @@ func _traffic_escape(desired: Vector2, center: Vector2, radius: float, body_radi
 	var velocity := (Vector2(sim.eL.vx, sim.eL.vy) + Vector2(sim.eR.vx, sim.eR.vy)) * 0.25 + Vector2(sim.pod.vx, sim.pod.vy) * 0.5
 	for c in traffic.cars:
 		var relative := Vector2(c.x, c.y) - center
-		if relative.length_squared() > 1000000.0 or absf(sim.net_height(c.road, c.f) - sim.pod.z) > 20.0:
+		if relative.length_squared() > 1000000.0 or absf(sim.net_deck(c.road, c.f, c.lat) - sim.pod.z) > 20.0:
 			continue
 		var heading := Vector2(c.hx, c.hy)
 		var reach := 275.0 if c.kind == 3 else 9.0

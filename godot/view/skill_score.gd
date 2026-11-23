@@ -234,7 +234,7 @@ func observe_traffic(cars: Array, dt: float) -> void:
 			continue
 		var along := (car_pos - pos).dot(fw)
 		var entry: Dictionary = _cars.get(c.id, {"pos": car_pos, "along": along, "near": INF, "blocked": false, "approached": along > 60.0, "time": time})
-		var h: float = sim.net_height(c.road, c.f)
+		var h: float = sim.net_deck(c.road, c.f, c.lat)
 		var valid: bool = usable and _cars.has(c.id) and time - entry.time <= 0.5 and car_pos.distance_to(entry.pos) <= c.v * dt * 1.5 + 40.0
 		if valid:
 			var heading := Vector2(c.hx, c.hy)

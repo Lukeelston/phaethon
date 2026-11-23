@@ -1712,7 +1712,7 @@ func _sync_world() -> void:
 			var cars := []
 			for c in traffic_net.cars:
 				if absf(c.x - sim.pod.x) < 3000.0 and absf(c.y - sim.pod.y) < 3000.0:
-					cars.append([c.id, c.x, c.y, sim.net_height(c.road, c.f) + 2.0, c.v * c.hx, c.v * c.hy])
+					cars.append([c.id, c.x, c.y, sim.net_deck(c.road, c.f, c.lat) + 2.0, c.v * c.hx, c.v * c.hy])
 			traffic_audio.set_speed(pv.length())
 			traffic_audio.update(Vector2(sim.pod.x, sim.pod.y), pv.normalized() if pv.length() > 1.0 else Vector2.ZERO, cars, wz, get_process_delta_time())
 		if traffic_net.race_result != "":
