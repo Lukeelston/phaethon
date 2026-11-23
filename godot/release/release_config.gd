@@ -218,7 +218,7 @@ static func controls_panel() -> PanelContainer:
 		["X", "Cut both throttles"],
 		["Space", "Reignite engines"],
 		["H", "Hold to repair"],
-		["R", "Arm ramjet"],
+		["R / Pad Y", "Tap to arm ramjet\nHold for 1.3× boost"],
 		["M", "Switch handling mode"],
 		["Backspace", "Reset to track; keeps throttle"],
 		["Esc", "Pause / resume"]
@@ -257,7 +257,7 @@ static func controls_strip() -> PanelContainer:
 	for row in [
 		["E / D", "Both throttles up / down"], ["W / S", "Left throttle up / down"], ["↑ / ↓", "Right throttle up / down"],
 		["A / →", "Left / right air brake"], ["X", "Cut both throttles"], ["Space", "Reignite engines"],
-		["H", "Hold to repair"], ["R", "Arm ramjet"], ["M", "Switch handling mode"],
+		["H", "Hold to repair"], ["R / Pad Y", "Tap to arm ramjet\nHold for 1.3× boost"], ["M", "Switch handling mode"],
 		["Backspace", "Reset to track; keeps throttle"], ["Esc", "Pause / resume"], ["Pad", "Gamepad: experimental"]
 	]:
 		grid.add_child(label(row[0], 13, AMBER))

@@ -57,6 +57,7 @@ const DrivingPartnerScript := preload("res://view/driving_partner.gd")
 const RacePilotsScript := preload("res://view/race_pilots.gd")
 const MainMenuScript := preload("res://view/main_menu.gd")
 const DT := 1.0 / 480.0
+const BOOST_HOLD := 0.35
 const HAZE := Color(0.78, 0.66, 0.52)
 const GROUND_PERIOD := 4096.0             # view/ground.gdshader's PERIOD
 const SUN_ROT := Vector3(-30, 52, 0)       # the primary sun (DirectionalLight3D rotation, degrees)
@@ -75,6 +76,8 @@ const TWILIGHT_EXPOSURE := 1.3                      # ... and the eye opened up 
 
 var sim
 var levers
+var _arm_held := 0.0
+var boosting := false
 var engine_audio
 var wind_audio
 var course_audio             # the halls' and canopy's acoustics, the emergency run's sounds (audio/course_audio.gd)
@@ -934,6 +937,8 @@ func _menu_items() -> Array:
 func menu_open(on: bool) -> void:
 	if on == menu.open:
 		return
+	_arm_held = 0.0
+	boosting = false
 	if on:
 		_menu_was_muted = AudioServer.is_bus_mute(0)
 		AudioServer.set_bus_mute(0, true)
@@ -974,6 +979,20 @@ func _exit_tree() -> void:
 		AudioServer.set_bus_mute(0, _menu_was_muted)
 
 
+## The same gesture on the flat screen and in the cockpit. A tap arms on release.
+## A hold reports its onset once (for haptics) and boosts until release.
+func arm_button(down: bool, delta: float) -> String:
+	if down:
+		_arm_held += delta
+		var was := boosting
+		boosting = _arm_held >= BOOST_HOLD
+		return "boost" if boosting and not was else ""
+	var tapped := _arm_held > 0.0 and not boosting
+	_arm_held = 0.0
+	boosting = false
+	return "arm" if tapped else ""
+
+
 ## Overridable: fill `inp` for this frame and handle arm/respawn edges.
 func _read_input(delta: float) -> void:
 	if menu.open:
@@ -981,8 +1000,10 @@ func _read_input(delta: float) -> void:
 	var p: Dictionary = levers.poll(delta)
 	inp = {"thrL": p.thrL, "thrR": p.thrR, "brkL": p.brkL, "brkR": p.brkR, "repair": p.repair, "reignite": p.reignite}
 	_autopilot_hands(maxf(p.thrL, p.thrR), maxf(p.brkL, p.brkR))
-	if p.arm:
+	if arm_button(p.arm_down, delta) == "arm":
 		sim.armed = not sim.armed
+	if boosting and sim.crash_t <= 0.0:
+		inp.boost = true
 	if p.respawn:
 		_respawn()
 

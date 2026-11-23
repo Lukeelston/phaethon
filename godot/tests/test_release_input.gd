@@ -3,6 +3,7 @@
 extends SceneTree
 
 const LI := preload("res://input/lever_input.gd")
+const View := preload("res://view/craft_view.gd")
 const PAD := 7
 var fails := 0
 
@@ -56,8 +57,74 @@ func _initialize() -> void:
 		_axis(8, pair[0], pair[1])
 	out = li.poll(0.1)
 	_check(_levers(out, 0.3, 0.2, 0.0, 0.0), "printed levers outrank an earlier-enumerated gamepad")
+	_axes(0.0, 0.0, 0.0, 0.0)
+	_test_arm(false)
+	_test_arm(true)
 	print("RELEASE INPUT ", "PASS" if fails == 0 else "FAIL (%d)" % fails)
 	quit(0 if fails == 0 else 1)
+
+
+func _test_arm(gamepad: bool) -> void:
+	var device := "pad Y" if gamepad else "keyboard R"
+	var view := View.new()
+	view.levers = TestInput.new()
+	# Exercise the flight's input reader and fixed sim step on a known course.
+	var course := {"track": "range", "startY": -3000.0}
+	view.sim = View.CraftSimScript.new(course)
+	if gamepad:
+		_axes(0.45, 0.45, 0.0, 0.0)
+	else:
+		_key(KEY_E, true)
+		view._read_input(0.5)
+		_key(KEY_E, false)
+	_arm(gamepad, true)
+	view._read_input(0.1)
+	_check(not view.sim.armed and not view.inp.get("boost", false), device + " press waits for tap or hold")
+	_arm(gamepad, false)
+	view._read_input(0.01)
+	_check(view.sim.armed and not view.inp.get("boost", false), device + " tap arms on release")
+	view._read_input(0.01)
+	_check(view.sim.armed, device + " idle frame preserves the arm state")
+
+	_arm(gamepad, true)
+	view._read_input(0.34)
+	_check(view.sim.armed and not view.inp.get("boost", false), device + " stays below boost at 0.34 s")
+	view._read_input(0.01)
+	var plain := View.CraftSimScript.new(course)
+	plain.armed = true
+	var reference := view.inp.duplicate()
+	reference.erase("boost")
+	plain.step(reference, View.DT)
+	view._sim_step()
+	var thrust: float = view.sim.eL.thrust
+	_check(view.sim.boost == 1 and plain.eL.thrust > 0 and is_equal_approx(thrust, plain.eL.thrust * 1.3),
+		"%s at 0.35 s gives one stage and 1.3x thrust (%.6f vs %.6f)" % [device, thrust, plain.eL.thrust])
+	view._read_input(0.2)
+	view._sim_step()
+	_check(view.sim.boost == 1 and view.sim.armed, device + " sustains boost without toggling ramjet")
+	_arm(gamepad, false)
+	view._read_input(0.01)
+	view._sim_step()
+	_check(view.sim.boost == 0 and view.sim.armed, device + " release stops boost without toggling ramjet")
+	_arm(gamepad, true)
+	view._read_input(0.05)
+	_arm(gamepad, false)
+	view._read_input(0.01)
+	_check(not view.sim.armed, device + " next tap disarms")
+	_axes(0.0, 0.0, 0.0, 0.0)
+	view.free()
+
+
+func _arm(gamepad: bool, down: bool) -> void:
+	if not gamepad:
+		_key(KEY_R, down)
+		return
+	var event := InputEventJoypadButton.new()
+	event.device = PAD
+	event.button_index = JOY_BUTTON_Y
+	event.pressed = down
+	Input.parse_input_event(event)
+	Input.flush_buffered_events()
 
 
 func _axes(left: float, right: float, brake_left: float, brake_right: float) -> void:

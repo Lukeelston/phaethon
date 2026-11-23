@@ -143,10 +143,6 @@ var _rush_shift := Vector3.ZERO           # ... and the speed rush's part of its
 var _rush_flow := Transform3D.IDENTITY    # the air's frame for the streaks, in this node's space: its origin the seated eye, its -Z the craft's way, level
 var _hardpoints: Array[Marker3D] = []     # where the tow links hook: on the rig, carried with the rush's shift (not with the shudder)
 var _hardpoint_at: Array[Vector3] = []
-# The boost (Luke: "Holding the ramjet arm button should give an extra boost"): B tapped arms or
-# disarms the ramjet as it always has (on the way up now, not the way down); held past BOOST_HOLD it
-# is the sims' inp.boost for as long as it is held, and arms nothing.
-const BOOST_HOLD := 0.35
 # The autopilot (view/autopilot.gd; Luke: "Add autopilot."). Every button on the two controllers has a job
 # (X repairs, Y restarts and flips the handling, A relights and picks the target, B arms and boosts, the stick
 # clicks recentre, the menu button is the menu) and so have the sticks up and down (the burner, the gears). Across
@@ -163,8 +159,6 @@ var _auto_flick := false             # the left stick is out from a flick: no mo
 var _auto_nudge := false             # ... and the right, from a nudge
 var _auto_shift_t := 0.0             # s till it may shift again (its flick is seen to come back between)
 const BOOST_TICK := 0.12                  # s between the ticks in both hands while it burns
-var boosting := false                     # B is being held past BOOST_HOLD
-var _b_held := 0.0
 var _boost_tick := 0.0
 var _menu_page := ""                      # "" the quick menu's first page, "options" its second
 var slide_switch                          # vr/mode_switch.gd again: SLIDE up, GRIP down
@@ -1183,21 +1177,6 @@ func _autopilot_shift(airspeed: float, delta: float) -> float:
 	return 0.0
 
 
-## The ramjet ARM button, a frame: -> "arm" as a tap ends (it came up inside BOOST_HOLD), "boost"
-## on the frame a hold becomes the boost, "" otherwise. `boosting` is true while it is held past
-## BOOST_HOLD; letting go of a boost arms nothing.
-func arm_button(down: bool, delta: float) -> String:
-	if down:
-		_b_held += delta
-		var was := boosting
-		boosting = _b_held >= BOOST_HOLD
-		return "boost" if boosting and not was else ""
-	var tapped := _b_held > 0.0 and not boosting
-	_b_held = 0.0
-	boosting = false
-	return "arm" if tapped else ""
-
-
 ## The boost held: the sims' inp.boost once the craft is released and whole, a tick in both hands
 ## while the sim is giving it (not when the battery it needs is flat). And the consumables' one
 ## housekeeping: a burner left lit on a flat battery is put out, as the pilot would (it will not
@@ -1284,8 +1263,6 @@ func menu_open(on: bool) -> void:
 	_a_fired = false
 	_y_held = 0.0
 	_y_fired = false
-	_b_held = 0.0
-	boosting = false
 	_menu_page = ""
 	menu.title = "FLIGHT HOLD"
 	if on:

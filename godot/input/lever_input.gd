@@ -15,15 +15,14 @@ var _pad_device := -1
 var _blocked_device := -1
 
 
-## Returns {thrL, thrR, brkL, brkR, repair, reignite, arm, respawn}; arm and respawn are
-## true only on the frame the control is first pressed.
+## arm and respawn are press edges; arm_down stays true throughout the press.
 func poll(delta: float) -> Dictionary:
 	var held := {"repair": false, "reignite": false, "arm": false, "respawn": false}
 	if not _poll_pad(held, _keys_active()):
 		source = "Keyboard"
 		_poll_keys(delta, held)
 	var out := {"thrL": thr_l, "thrR": thr_r, "brkL": brk_l, "brkR": brk_r,
-		"repair": held.repair, "reignite": held.reignite}
+		"repair": held.repair, "reignite": held.reignite, "arm_down": held.arm}
 	for k in ["arm", "respawn"]:
 		out[k] = held[k] and not _latch.get(k, false)
 		_latch[k] = held[k]
