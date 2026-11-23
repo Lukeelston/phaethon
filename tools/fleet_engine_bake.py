@@ -67,7 +67,8 @@ def shrike(rng):
     intake = exhaust - 0.52 * np.roll(exhaust, round(0.0023 * RATE))
     piston = 0.63 * exhaust + 0.72 * np.tanh(1.45 * intake) + 0.09 * air(rng, 520, 0.8) * (1 + 0.6 * sine(64))
     # Compressor teeth passing a short intake bell with a separate dry induction hiss.
-    rotor = TAU * 28 * turn + 0.06 * sine(3)
+    # Rotor inertia keeps crank variation out of the high-order blade tone.
+    rotor = TAU * 28 * turn + 0.010 * sine(3)
     compressor = 0.48 * np.sin(19 * rotor + 0.17 * np.sin(4 * rotor)) + 0.23 * np.sin(11 * rotor + 0.5)
     turbine = (
         compressor + 0.17 * np.sin(6 * rotor) + 0.18 * air(rng, 670, 1.1) * (0.83 + 0.17 * np.sin(4 * rotor))
@@ -82,12 +83,12 @@ def orrery(rng):
     field = np.zeros(FRAMES)
     for index, order in enumerate((5, 7, 11)):
         azimuth = index * TAU / 3
-        field += (0.54 + 0.21 * np.cos(shaft + azimuth)) * np.sin(
-            order * shaft + azimuth + 0.72 * np.sin(3 * shaft - azimuth)
+        field += (0.54 + 0.065 * np.cos(shaft + azimuth)) * np.sin(
+            order * shaft + azimuth + 0.27 * np.sin(3 * shaft - azimuth)
         )
     primary = field + 0.38 * np.sin(3 * shaft + 0.14 * sine(5)) + 0.050 * air(rng, 210, 0.78)
     # Interleaved flux carriers sharing a low-order yoke resonance.
-    ph = TAU * 24 * turn + 0.032 * sine(3)
+    ph = TAU * 24 * turn + 0.008 * sine(3)
     turbine = (
         0.44 * np.sin(13 * ph + 0.88 * np.sin(2 * ph))
         + 0.34 * np.sin(20 * ph + 0.67 * np.sin(3 * ph + 0.7))
@@ -112,9 +113,10 @@ def kiln(rng):
     primary += 0.27 * np.roll(primary, round(0.0097 * RATE)) - 0.17 * np.roll(primary, round(0.0161 * RATE))
     primary = np.tanh(0.94 * primary) + 0.10 * air(rng, 265, 0.88) * (0.7 + 0.3 * sine(48))
     # A small turbulent power-recovery turbo is driven by the exhaust train.
-    # Its vanes speed up and relax a little inside each cylinder interval.
-    rotor = TAU * 35 * turn + 0.16 * sine(48) + 0.028 * sine(8)
-    flutter = 1 + 0.21 * sine(48) + 0.13 * sine(24, 0.41)
+    # The collector takes up individual pressure pulses. A heavy shaft keeps
+    # the turbo tone steady while the exhaust underneath still has six beats.
+    rotor = TAU * 35 * turn + 0.013 * sine(48) + 0.008 * sine(8)
+    flutter = 1 + 0.055 * sine(48) + 0.026 * sine(24, 0.41)
     turbine = flutter * (
         0.36 * np.sin(9 * rotor) + 0.22 * np.sin(17 * rotor + 0.36 * np.sin(rotor)) + 0.22 * air(rng, 420, 1.1)
     ) + 0.21 * sine(96, 0.3)
@@ -122,25 +124,26 @@ def kiln(rng):
 
 
 def vesper(rng):
-    # Two ducts carry independent blade trains. Shared air and slight beating
-    # weave their close tones together without the exhaust thump of the racers.
-    a = TAU * 18 * turn + 0.036 * sine(2)
-    b = TAU * 19 * turn + 0.031 * sine(3, 0.4)
+    # Two ducts share one drive. Different blade counts and duct resonances
+    # identify the two paths. Twin carriers a few Hz apart would cancel and
+    # return several times a second, increasingly fast as playback speeds up.
+    a = TAU * 18 * turn + 0.010 * sine(2)
+    b = a + 0.009 * sine(3, 0.4)
     breath = air(rng, 340, 1.16)
     primary = (
-        0.58 * np.sin(5 * a + 0.34 * np.sin(2 * a))
-        + 0.48 * np.sin(5 * b + 0.26 * np.sin(3 * b))
-        + 0.22 * np.sin(8 * a + 0.85)
-        + 0.19 * np.sin(9 * b - 0.52)
-        + 0.13 * breath
+        0.65 * np.sin(5 * a + 0.13 * np.sin(2 * a))
+        + 0.37 * np.sin(9 * b + 0.14 * np.sin(3 * b))
+        + 0.16 * np.sin(13 * a + 0.85)
+        + 0.11 * np.sin(17 * b - 0.52)
+        + 0.15 * breath
     )
-    left = TAU * 31 * turn + 0.014 * sine(3)
-    right = TAU * 32 * turn + 0.017 * sine(2)
+    left = TAU * 31 * turn + 0.007 * sine(3)
+    right = left + 0.008 * sine(2)
     turbine = (
         0.40 * np.sin(17 * left + 0.17 * np.sin(left))
-        + 0.37 * np.sin(17 * right + 0.2 * np.sin(right))
-        + 0.26 * np.sin(9 * left)
-        + 0.21 * np.sin(9 * right)
+        + 0.35 * np.sin(13 * right + 0.12 * np.sin(right))
+        + 0.24 * np.sin(8 * left)
+        + 0.18 * np.sin(5 * right)
         + 0.19 * air(rng, 840, 0.94)
         + 0.15 * air(rng, 245, 0.7)
     )

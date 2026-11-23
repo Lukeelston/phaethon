@@ -18,17 +18,17 @@
         {
           "file": "v8_mip2.wav",
           "at": 3200.0,
-          "rho_next": 0.9985
+          "rho_next": 0.9978
         },
         {
           "file": "v8_mip3.wav",
           "at": 6400.0,
-          "rho_next": 0.9921
+          "rho_next": 0.9889
         },
         {
           "file": "v8_mip4.wav",
           "at": 12800.0,
-          "rho_next": 0.9908
+          "rho_next": 0.9867
         },
         {
           "file": "v8_mip5.wav",
@@ -49,17 +49,17 @@
         {
           "file": "turbine_mip0.wav",
           "at": 0.25,
-          "rho_next": 0.9919
+          "rho_next": 0.9914
         },
         {
           "file": "turbine_mip1.wav",
           "at": 1.25,
-          "rho_next": 0.9669
+          "rho_next": 0.9647
         },
         {
           "file": "turbine_mip2.wav",
           "at": 2.5,
-          "rho_next": 1.0
+          "rho_next": 1
         },
         {
           "file": "turbine_mip3.wav",

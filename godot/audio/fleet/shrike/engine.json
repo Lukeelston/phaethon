@@ -54,12 +54,12 @@
         {
           "file": "turbine_mip1.wav",
           "at": 1.25,
-          "rho_next": 0.9748
+          "rho_next": 0.9749
         },
         {
           "file": "turbine_mip2.wav",
           "at": 2.5,
-          "rho_next": 1.0
+          "rho_next": 1
         },
         {
           "file": "turbine_mip3.wav",

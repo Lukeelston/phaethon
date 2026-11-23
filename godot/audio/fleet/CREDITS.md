@@ -1,6 +1,6 @@
 # Fleet sound banks
 
-The primary drives and turbines are original performances synthesized by `tools/fleet_engine_bake.py`. Shrike RS uses paired short-intake impulses, Orrery IX three rotating coil groups, Kiln Six six unevenly spaced pressure pulses, and Vesper two near-synchronous blade trains. Each performance has sample-aligned bandwidth-limited copies for playback across the rev range.
+The primary drives and turbines are original performances synthesized by `tools/fleet_engine_bake.py`. Shrike RS pairs a short intake echo with a steady compressor whine. Orrery IX has three rotating coil groups around a common shaft. Kiln Six fires six unevenly spaced exhaust pulses into unequal headers that feed its turbo. Vesper's twin ducts share one shaft and use different blade counts. Each performance has sample-aligned, bandwidth-limited copies for playback across the rev range.
 
 The staged starts, catches and chimes combine original synthesis with recorded machine sounds. The second-bank engagements and lift-off sounds use new edits of the same field-recording collection. The source takes include the 12 V solenoid, BMW M6 starter, fuel pump, air release, Dremel, server fan and large electrical relay. Artist credits, original recording links and CC0 terms are in [the startup recording credits](../startup/CREDITS.md). The bakes are `tools/fleet_startup_bake.py` and `tools/fleet_exhaust_bake.py`.
 

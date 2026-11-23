@@ -4,6 +4,7 @@ extends SceneTree
 const Sim := preload("res://sim/craft_sim.gd")
 const Pilot := preload("res://sim/pilot_craft.gd")
 const Engines := preload("res://audio/engine_audio.gd")
+const Glide := preload("res://audio/fleet_pitch_glide.gd")
 const Cockpit := preload("res://audio/startup_audio.gd")
 var failures := 0
 
@@ -41,12 +42,23 @@ func _engine_check(audio: Engines, manifest: Dictionary, bank_dir: String, id: S
 		var voice: Dictionary = audio.voices[k]
 		for layer: String in manifest.layers:
 			var bands: Array = manifest.layers[layer].bands
+			var bus := side + "_" + layer if layer in Engines.FILTERED else side
+			if id != Pilot.STANDARD and layer in ["v8", "turbine"]:
+				var glide := voice.glides.get(layer) as Glide
+				_check("%s %s %s uses a single continuous voice" % [id, side, layer],
+						glide != null and glide.bus == bus and voice.players.get(layer, []).is_empty())
+				if glide == null:
+					continue
+				_check("%s %s %s decoded band count" % [id, side, layer], glide.sources.size() == bands.size())
+				for i in mini(glide.sources.size(), bands.size()):
+					_check("%s %s %s band %d matches PCM" % [id, side, layer, i],
+							_same_take(glide.sources[i], bank_dir + bands[i].file))
+				continue
 			var players: Array = voice.players[layer]
 			_check("%s %s %s band count" % [id, side, layer], players.size() == bands.size())
 			for i in mini(players.size(), bands.size()):
 				var player: AudioStreamPlayer = players[i]
 				var tone := player.stream as AudioStreamWAV
-				var bus := side + "_" + layer if layer in Engines.FILTERED else side
 				_check("%s %s %s band %d" % [id, side, layer, i],
 						_same_take(tone, bank_dir + bands[i].file) and player.bus == bus
 						and tone.loop_mode == AudioStreamWAV.LOOP_FORWARD
@@ -62,7 +74,56 @@ func _engine_check(audio: Engines, manifest: Dictionary, bank_dir: String, id: S
 		for i in mini(files.size(), pops.streams_count):
 			_check("%s %s pop %d" % [id, side, i], _same_take(pops.get_stream(i), bank_dir + files[i]))
 
+# Measure periods in emitted samples. A pitch setter stepped at game-frame rate
+# can pass target/RPM tests while jumping straight from one period to another.
+func _check_glide_waveform() -> void:
+	var wav := AudioStreamWAV.new()
+	wav.mix_rate = Glide.RATE
+	wav.format = AudioStreamWAV.FORMAT_16_BITS
+	var bytes := PackedByteArray()
+	var frames := Glide.RATE / 10  # 100 exact cycles in the loop
+	bytes.resize(2*frames)
+	for i in frames:
+		bytes.encode_s16(2*i, roundi(20000*sin(TAU*100*i/frames)))
+	wav.data = bytes
+	var player := Glide.new()
+	root.add_child(player)
+	_check("calibrated pitch probe loads", player.configure([wav,wav], .98))
+	var low := PackedFloat64Array([1,0])
+	var high := PackedFloat64Array([0,1])
+	player.drive(1, 1, low)
+	player._render(4096)
+	for rising in [true, false]:
+		player.drive(3 if rising else 1, 1, high if rising else low)
+		player._render(4096)
+		var block := player._block
+		var prev_cross := -1.0
+		var last_hz := 0.0
+		var intermediate := 0
+		var continuous := true
+		for i in range(1, block.size()):
+			var prev := block[i-1].x
+			var next := block[i].x
+			if prev >= 0 or next < 0:
+				continue
+			var cross := i-1 - prev/(next-prev)
+			if prev_cross >= 0:
+				var hz := Glide.RATE / (cross-prev_cross)
+				if hz > 1150 and hz < 2750:
+					intermediate += 1
+				if last_hz > 0:
+					continuous = continuous and absf(log(hz/last_hz)) < .16
+					continuous = continuous and (hz > last_hz*.985 if rising else hz < last_hz*1.015)
+				last_hz = hz
+			prev_cross = cross
+		var expected := 3000.0 if rising else 1000.0
+		_check("rendered note glides to %.0f Hz through intermediate periods across the mip seam" % expected,
+				continuous and intermediate >= 4 and absf(last_hz/expected-1) < .015)
+	player.stop()
+	player.free()
+
 func _run() -> void:
+	_check_glide_waveform()
 	# Build Phaethon last so any accidental contamination of the shared startup bank is visible.
 	var seen := {}
 	for id: String in [Pilot.SHRIKE, Pilot.ORRERY, Pilot.KILN, Pilot.VESPER, Pilot.STANDARD]:
