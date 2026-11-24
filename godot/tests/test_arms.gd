@@ -9,8 +9,8 @@
 ##                set_deploy(0) and set_deploy(1)
 ##   riding       what set_deploy moves or shows that rides on the pod is under the arms node (flat view); in the VR
 ##                seat none of it is left on the hidden pod, and something it brings out is drawn
-##   no mount     craft.weapon is still null for the Phaethon and the Talon (task 8 makes their mounts), and with the
-##                GUN switch never armed no fire control is made
+##   the mount    craft.weapon is the fixed guns' mount on these arms for the Phaethon and the Talon
+##                (view/weapons/fixed_guns_mount.gd), and with the GUN switch never armed no fire control is made
 ## The STAND-INS' (only where the arms script says `const STAND_IN := true`; Codex's art drops that line):
 ##   their parts  a "Barrel" with a sibling "Housing" under each gun node: one cannon on each Phaethon engine, two guns
 ##                on the Talon's pod; the barrels' glow (a StandardMaterial3D's emission) follows the heat
@@ -28,6 +28,7 @@ const View := preload("res://view/craft_view.gd")
 const Seat := preload("res://vr/vr_cockpit.gd")
 const Livery := preload("res://view/livery.gd")
 const TurretScript := preload("res://view/turret.gd")
+const FixedGunsMountScript := preload("res://view/weapons/fixed_guns_mount.gd")
 const PREFS := "user://vr_prefs.json"
 const IDLE := {"thrL": 0.0, "thrR": 0.0, "brkL": 0.0, "brkR": 0.0, "repair": false, "reignite": true}
 const ROWS := {
@@ -140,7 +141,9 @@ func check_contract(id: String, craft) -> void:
 		if "heat" in arms and typeof(arms.heat) == TYPE_FLOAT:
 			has.append("heat")
 	check("%s carries arms with the contract's four members (%s)" % [id, has], has.size() == 4)
-	check("%s: no mount is made for them yet (craft.weapon is task 8's)" % id, craft.get("weapon") == null)
+	var mount = craft.get("weapon")
+	check("%s: its weapon is the fixed guns' mount on these arms (%s)" % [id, mount], mount != null and mount.get_script() == FixedGunsMountScript
+		and mount.get("arms") == arms)
 	if has.size() < 4:
 		sections += 1
 		return

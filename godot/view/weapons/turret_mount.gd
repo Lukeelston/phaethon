@@ -82,7 +82,12 @@ func node() -> Node3D:
 	return turret
 
 
-# --- the turret's own, for the gaze sight (view/gunnery.gd _draw): not every mount has these ---------------
+## Yes: stowed, its sight ball still follows the gaze, and its lens and coils follow the battery (view/turret.gd step).
+func steps_stowed() -> bool:
+	return true
+
+
+# --- for the gaze sight (view/gunnery.gd _draw): the turret's own answers to WeaponMount's defaults -----------
 
 ## The aim lies outside its stops (it holds at its stop).
 func limited() -> bool:

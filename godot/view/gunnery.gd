@@ -1,22 +1,30 @@
 ## The fire control: it fires a craft's weapon through its mount (view/weapons/weapon_mount.gd; the Basilisk's is
-## its gaze-slaved turret, view/weapons/turret_mount.gd on view/turret.gd). Each frame:
+## its gaze-slaved turret, view/weapons/turret_mount.gd on view/turret.gd; the Phaethon's and the Talon's are fixed
+## guns, view/weapons/fixed_guns_mount.gd on view/arms/<craft>_arms.gd, aimed by pointing the craft). Each frame:
 ##   1. the aim's ray: the mount's (the turret's is the gaze: down the middle of the pilot's view, the headset's
-##      or the flat view's camera)
-##   2. what it is on: the first vehicle it meets (view/network_traffic.gd ray_pick), else the ground
-##      (the Network's land and the craft's own road; elsewhere the course's surface), else the sky
-##   3. the sight is drawn there, at that distance and a fixed size over everything (view/gun_sight.gdshader)
+##      or the flat view's camera; fixed guns' is their bore, the craft's way)
+##   2. what it is on: the first vehicle it meets (view/network_traffic.gd ray_pick); else, for fixed guns when that
+##      is no raider, the assist's raider (_assist: the nearest whose lead lies within the craft's assist cone of the
+##      bore, in sight); else the ground (the Network's land and the craft's own road; elsewhere the course's
+##      surface), else the sky (fixed guns: their reach)
+##   3. the sight is drawn there, at that distance and a fixed size over everything (view/gun_sight.gdshader). Fixed
+##      guns' is a small boresight ring BORESIGHT m out along the bore, and a lead pip where the bolts are laid on a raider
 ##   4. the mount is laid on it, leading a vehicle by the bolt's time of flight, and fires while the
 ##      trigger is held, the mount is on the aim, and its line is clear of the craft (the turret's: its cab and engines)
-##   5. bolts fly; where they land, a flash and a puff of dust; a vehicle takes HP hits and is gone
+##   5. bolts fly; where they land, a flash and a puff of dust; a raider takes HOSTILE_HP hits and is gone
+## The weapon's figures are the craft's (sim/pilot_craft.gd TRAITS[..].weapon: rate, boltV, hits, reach, fireS, coolS);
+## where it has none of them, RATE, BOLT_V, one hit a bolt, REACH, and its power's heat (the Basilisk's).
 ## Bolts and bursts are kept in the sims' frame (x, y, height) and drawn about the floating origin.
-## The switch (deploy) and the trigger are the cockpit's: vr/vr_cockpit.gd, or K and F in the flat view.
+## The switch (deploy) and the trigger are the cockpit's: vr/vr_cockpit.gd, or K and F in the flat view. Fixed guns'
+## fire control is made the first time the GUN is armed: a flight that never arms them builds none of it (a turret's
+## is made at once, as its sight ball and glow are stepped while it is stowed).
 ##   gunnery = Gunnery.frame(view, gunnery, delta)        # once per frame, after the camera and the world
 class_name Gunnery
 extends Node3D
 
 const Sim := preload("res://sim/craft_sim.gd")
+const PilotCraft := preload("res://sim/pilot_craft.gd")
 const WeaponMountScript := preload("res://view/weapons/weapon_mount.gd")
-const TurretMountScript := preload("res://view/weapons/turret_mount.gd")
 const SightShader := preload("res://view/gun_sight.gdshader")
 const GlowShader := preload("res://view/gun_glow.gdshader")
 const SmokeShader := preload("res://view/gun_smoke.gdshader")
@@ -27,7 +35,11 @@ const SKY := 2000.0               # ... and with nothing there, it stands this f
 const SIGHT_DEG := 3.2            # the sight's width, degrees of view (a vehicle's brackets are its own size, at the least this)
 const BRACKET := {0: 30.0, 1: 34.0, 2: 30.0, 3: 46.0, 4: 30.0}   # m across a vehicle's brackets, by kind (a transport's round its tractor)
 const BOLT_V := 1100.0            # m/s: a bolt's speed over the ground (a tracer's: slow enough to be seen going) ...
-const RATE := 12.0                # shots a second, the two emitters turn about
+const RATE := 12.0                # shots a second, the two emitters turn about (both: a craft's weapon row may have its own)
+const BORESIGHT := 600.0          # m: fixed guns' boresight ring stands this far out along the bore ...
+const BORE_DEG := 1.6             # ... this wide, degrees of view
+const PIP_DEG := 1.3              # ... and the lead pip on a raider, this wide
+const ASSIST_LOOKS := 2           # the assist looks for a clear line to at most this many raiders a frame, nearest first
 const SPREAD := deg_to_rad(0.12)  # each shot's scatter about the aim
 const LOCK_S := 0.35              # s a vehicle holds under the sight to be locked (the brackets close)
 const LOCK_EASE := 3.0            # ... and the lock lost a second with none under it
@@ -50,8 +62,13 @@ var power := 1.0                   # the battery bus
 var aim_sim := Vector3.ZERO        # what the gaze is on (sims' frame), and how far
 var aim_dist := SKY
 var aim_kind := "sky"              # "sky", "ground", "vehicle"
-var aim_car = null                 # the vehicle under the sight
+var aim_car = null                 # the vehicle under the sight (fixed guns: or the assist's raider)
+var aim_lead := Vector3.ZERO       # where the bolts are laid (sims' frame): a vehicle's lead, else the aim
 var lock := 0.0                    # 0..1: how long it has held there
+var rate := RATE                   # the weapon's figures (build: the craft's weapon row, these where it has none)
+var bolt_v := BOLT_V
+var reach := REACH
+var bolt_hits := 1                 # hits a bolt does
 var fouled := false                # the line of fire would cross the craft
 var on_aim := false                # the mount is on the (led) aim
 var shots := 0                     # tests and the log read these
@@ -74,8 +91,10 @@ var _lock_car = null               # the vehicle the lock is on
 var _bolts: Array = []             # {a: Vector3, b: Vector3, t, dur, car, id}
 var _fx: Array = []                # {p: Vector3, kind, t, dur, size}
 var _rng := RandomNumberGenerator.new()
-var sight: MeshInstance3D
+var sight: MeshInstance3D          # the gaze sight (fixed guns: the lead pip)
 var sight_mat: ShaderMaterial
+var bore_ring: MeshInstance3D      # fixed guns' boresight ring (null for a turret)
+var bore_mat: ShaderMaterial
 var _bolt_mm: MultiMesh
 var _flash_mm: MultiMesh
 var _smoke_mm: MultiMesh
@@ -87,11 +106,15 @@ var _was_out := false
 var _was_moving := false
 
 
-## Once per frame. Creates itself the first time the craft has a weapon.
+## Once per frame. Creates itself, if the craft has a weapon, the first time its GUN is armed (`gun_wanted`): a
+## flight that never arms its fixed guns builds no fire control (its batches, its sounds). A turret's is made at
+## once: stowed, it is still stepped (its mount's steps_stowed). Once made, it steps on.
 static func frame(v, g, delta: float):
 	if v == null or v.craft == null or v.craft.weapon == null:
 		return g
 	if g == null:
+		if not v.gun_wanted and not v.craft.weapon.steps_stowed():
+			return g
 		g = load("res://view/gunnery.gd").new()
 		v.add_child(g)
 		g.build(v)
@@ -104,19 +127,17 @@ func build(v) -> void:
 	name = "Gunnery"
 	mount = v.craft.weapon
 	_rng.seed = 7
-	sight_mat = ShaderMaterial.new()
-	sight_mat.shader = SightShader
-	sight_mat.render_priority = 120
-	sight = MeshInstance3D.new()
-	sight.name = "GunSight"
-	var quad := QuadMesh.new()
-	quad.size = Vector2(1, 1)
-	sight.mesh = quad
-	sight.material_override = sight_mat
-	sight.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	sight.extra_cull_margin = 16384.0
-	sight.visible = false
-	add_child(sight)
+	var row: Dictionary = v.sim.traits.get("weapon", {})
+	rate = float(row.get("rate", RATE))
+	bolt_v = float(row.get("boltV", BOLT_V))
+	reach = float(row.get("reach", REACH))
+	bolt_hits = int(row.get("hits", 1))
+	sight = _sight_quad("GunSight")
+	sight_mat = sight.material_override
+	if mount.boresight():
+		sight_mat.set_shader_parameter("shape", 1)     # (the lead pip)
+		bore_ring = _sight_quad("GunBoresight")
+		bore_mat = bore_ring.material_override
 	_bolt_mm = _batch("GunBolts", _bolt_mesh(), _glow_material(true), MAX_BOLTS)
 	_flash_mm = _batch("GunFlashes", _disc(), _glow_material(false), MAX_FX)
 	_smoke_mm = _batch("GunSmoke", _disc(), _smoke_material(), MAX_FX)
@@ -124,14 +145,33 @@ func build(v) -> void:
 		var path: String = AUDIO_DIR + n + ".wav"
 		if ResourceLoader.exists(path):
 			_sounds[n] = load(path)
-	_servo = _player(mount.node(), -2.0)
+	var at: Node = mount.node() if mount.node() != null else self      # (a mount with no node of its own: here)
+	_servo = _player(at, -2.0)
 	for i in 3:
-		_gun_audio.append(_player(mount.node(), 1.0))
+		_gun_audio.append(_player(at, 1.0))
 	for i in 6:
 		var p := _player(self, 4.0)
 		p.unit_size = 60.0
 		p.max_distance = 6000.0
 		_world_audio.append(p)
+
+
+## A sight's quad, hidden: drawn facing the eye, over everything (view/gun_sight.gdshader), its own material.
+func _sight_quad(n: String) -> MeshInstance3D:
+	var mat := ShaderMaterial.new()
+	mat.shader = SightShader
+	mat.render_priority = 120
+	var mi := MeshInstance3D.new()
+	mi.name = n
+	var quad := QuadMesh.new()
+	quad.size = Vector2(1, 1)
+	mi.mesh = quad
+	mi.material_override = mat
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mi.extra_cull_margin = 16384.0
+	mi.visible = false
+	add_child(mi)
+	return mi
 
 
 func _player(parent: Node, db: float) -> AudioStreamPlayer3D:
@@ -194,6 +234,7 @@ func step(delta: float) -> void:
 	var target := aim_sim
 	if aim_car != null:
 		target = _lead(aim_car)
+	aim_lead = target
 	var target_r := to_render(target)
 	mount.power = power
 	mount.step(delta, out_ok, target_r if live else null, gaze_d)
@@ -206,7 +247,7 @@ func step(delta: float) -> void:
 	if firing:
 		while _cool <= 0.0:
 			_fire(target)
-			_cool += 1.0 / RATE
+			_cool += 1.0 / rate
 	_heat_step(delta, was_firing)
 	_sounds_step(out_ok)
 	_fly(delta)
@@ -214,15 +255,17 @@ func step(delta: float) -> void:
 
 
 ## The gun's heat, a frame: fire on end counted (and told a second at a time), overheated at fireS, cooled coolS
-## later. The figures are the craft's power's (the Basilisk's row); with none, the gun never overheats.
+## later. The figures are the craft's weapon's (its row), else its power's (the Basilisk's: its gun is its power, and
+## is told as its power, "POWER: Basilisk Gaze Turret ..."; another craft's is told as its gun, "GUN: Phaethon
+## cannons ..."); with none, the gun never overheats.
 func _heat_step(delta: float, was_firing: bool) -> void:
+	var row: Dictionary = view.sim.traits.get("weapon", {})
 	var pw: Dictionary = view.sim.traits.get("power", {})
-	var fire_max := float(pw.get("fireS", INF))
-	var title: String = view.power_title() if view.has_method("power_title") else "Gun"
+	var fire_max := float(row.get("fireS", pw.get("fireS", INF)))
 	if hot > 0.0:
 		hot = maxf(0.0, hot - delta)
 		if hot == 0.0:
-			print("POWER: %s ready (cooled)" % title)
+			_tell("ready (cooled)")
 			if view.has_method("_power_say"):
 				view._power_say("GUN READY")
 		return
@@ -230,30 +273,41 @@ func _heat_step(delta: float, was_firing: bool) -> void:
 		if not was_firing:
 			fire_s = 0.0
 			_fire_shown = 0
-			print("POWER: %s fired" % title)
+			_tell("fired")
 		fire_s += delta
 		if floori(fire_s) > _fire_shown:
 			_fire_shown = floori(fire_s)
-			print("POWER: %s active %d s of fire" % [title, _fire_shown])
+			_tell("active %d s of fire" % _fire_shown)
 		if fire_s >= fire_max:
-			hot = float(pw.get("coolS", 3.0))
+			hot = float(row.get("coolS", pw.get("coolS", 3.0)))
 			firing = false
-			print("POWER: %s ended (overheated after %.1f s of fire: %.0f s to cool)" % [title, fire_s, hot])
+			_tell("ended (overheated after %.1f s of fire: %.0f s to cool)" % [fire_s, hot])
 			if view.has_method("_power_say"):
 				view._power_say("GUN HOT")
 			fire_s = 0.0
 	elif was_firing:
-		print("POWER: %s ended after %.1f s of fire" % [title, fire_s])
+		_tell("ended after %.1f s of fire" % fire_s)
 		fire_s = 0.0
 
 
-## What the gaze is on: the first vehicle, else the ground, else the sky.
+## The gun's heat told in the log: the Basilisk's as its power ("POWER: Basilisk Gaze Turret fired"), another
+## craft's as its gun ("GUN: Phaethon cannons fired").
+func _tell(what: String) -> void:
+	if String(view.sim.traits.get("power", {}).get("id", "")) == "turret":
+		print("POWER: %s %s" % [view.power_title() if view.has_method("power_title") else "Gun", what])
+		return
+	var id: String = view.sim.P.vehicle
+	print("GUN: %s %s %s" % [PilotCraft.NAMES.get(id, id.capitalize()), PilotCraft.weapon_of(id).replace("_", " "), what])
+
+
+## What the aim is on: the first vehicle, else (fixed guns, when that is no raider) the assist's raider, else the
+## ground, else the sky (a turret's sight stands SKY out; fixed guns' bolts fly on to their reach).
 func _find(o: Vector3, d: Vector3, delta: float) -> void:
 	var car_t := INF
 	var picked := {}
 	var traffic = view.traffic_net
 	if traffic and traffic.has_method("ray_pick"):
-		picked = traffic.ray_pick(o, d, REACH)
+		picked = traffic.ray_pick(o, d, reach)
 		if not picked.is_empty():
 			car_t = float(picked.t)
 		# A locked vehicle keeps the sight while the gaze stays inside the sight's ring of it, though
@@ -261,11 +315,11 @@ func _find(o: Vector3, d: Vector3, delta: float) -> void:
 		if _lock_car != null and (picked.is_empty() or picked.car != _lock_car) and traffic.cars.has(_lock_car):
 			var gate := maxf(2.0, aim_dist * tan(deg_to_rad(SIGHT_DEG) * 0.3))
 			var held: float = traffic.ray_car(_lock_car, o, d, gate)
-			if held >= 0.0 and held < REACH:
+			if held >= 0.0 and held < reach:
 				picked = {"car": _lock_car, "t": held}
 				car_t = held
 	var t0 := Time.get_ticks_usec()
-	var ground_t := march(o, d, minf(REACH, car_t))
+	var ground_t := march(o, d, minf(reach, car_t))
 	march_ms = (Time.get_ticks_usec() - t0) / 1000.0
 	if car_t < INF and (ground_t < 0.0 or car_t <= ground_t):
 		aim_car = picked.car
@@ -278,10 +332,13 @@ func _find(o: Vector3, d: Vector3, delta: float) -> void:
 		aim_dist = ground_t
 		aim_sim = o + d * ground_t
 	else:
+		var sky := reach if mount.boresight() else SKY
 		aim_car = null
 		aim_kind = "sky"
-		aim_dist = SKY
-		aim_sim = o + d * SKY
+		aim_dist = sky
+		aim_sim = o + d * sky
+	if mount.assist_deg() > 0.0 and (aim_car == null or not aim_car.hostile):
+		_assist(o, d)
 	# The lock holds through a glance off it (a head is never still, a vehicle never slow): it builds while
 	# the same vehicle is under the sight, eases off while none is, and starts again on another.
 	if aim_car != null and aim_car == _lock_car:
@@ -293,6 +350,43 @@ func _find(o: Vector3, d: Vector3, delta: float) -> void:
 		lock = maxf(0.0, lock - delta * LOCK_EASE)
 		if lock == 0.0:
 			_lock_car = null
+
+
+## Fixed guns' assist (the search along the bore found no raider): the nearest raider (traffic.hostiles()) whose lead
+## lies within the mount's assist_deg of the bore (o, d: sims' frame, d a unit vector), within `reach`, the line to
+## its lead clear of the ground (the ground search's march, for the nearest ASSIST_LOOKS so placed). On it, the aim is
+## its middle and the bolts are laid on its lead (step). With none, the aim stays where the search left it.
+func _assist(o: Vector3, d: Vector3) -> void:
+	var traffic = view.traffic_net
+	if traffic == null or not traffic.has_method("hostiles"):
+		return
+	var cone := deg_to_rad(mount.assist_deg())
+	var placed := []          # [distance to its lead, the raider, its lead]
+	for c in traffic.hostiles():
+		var dx: float = c.x - o.x
+		var dy: float = c.y - o.y
+		if dx * dx + dy * dy > (reach + 60.0) * (reach + 60.0):
+			continue
+		var lead := _lead_at(c, traffic.body_height(c))
+		var line := lead - o
+		var dist := line.length()
+		if dist > 1.0 and dist <= reach and d.angle_to(line) <= cone:
+			placed.append([dist, c, lead])
+	if placed.is_empty():
+		return
+	placed.sort_custom(func(a: Array, b: Array) -> bool: return a[0] < b[0])
+	for k in mini(placed.size(), ASSIST_LOOKS):
+		var dist: float = placed[k][0]
+		var t0 := Time.get_ticks_usec()
+		var blocked := march(o, ((placed[k][2] as Vector3) - o) / dist, dist) >= 0.0
+		march_ms += (Time.get_ticks_usec() - t0) / 1000.0
+		if not blocked:
+			var c = placed[k][1]
+			aim_car = c
+			aim_kind = "vehicle"
+			aim_sim = Vector3(c.x, c.y, traffic.body_height(c))
+			aim_dist = o.distance_to(aim_sim)
+			return
 
 
 ## The ground's height at (x, y), sims' frame: the craft's own road where it runs, and the land.
@@ -351,25 +445,29 @@ func march(o: Vector3, d: Vector3, reach: float) -> float:
 	return -1.0
 
 
-## Where a vehicle will be when a bolt fired now reaches it (sims' frame).
+## Where a vehicle will be when a bolt fired now reaches it (sims' frame), at the aim's height.
 func _lead(c) -> Vector3:
+	return _lead_at(c, aim_sim.z)     # (keep the gaze's height on it: the sight sits on its body, not its road)
+
+
+## ... `h` high.
+func _lead_at(c, h: float) -> Vector3:
 	var from := to_sim(mount.origin())
-	var at := Vector3(c.x, c.y, aim_sim.z)
+	var at := Vector3(c.x, c.y, h)
 	var v := Vector3(c.hx * c.v, c.hy * c.v, 0.0)
 	var speed := _bolt_speed((at - from).normalized())
 	for k in 2:
 		var tof := from.distance_to(at) / speed
-		at = Vector3(c.x, c.y, aim_sim.z) + v * tof
-	# (keep the gaze's height on it: the sight sits on its body, not its road)
+		at = Vector3(c.x, c.y, h) + v * tof
 	return at
 
 
-## A bolt's speed over the ground along `dir` (sims' frame): BOLT_V, more by the craft's own way that way
-## (fired ahead it still leaves the craft at BOLT_V).
+## A bolt's speed over the ground along `dir` (sims' frame): the weapon's (bolt_v), more by the craft's own way that
+## way (fired ahead it still leaves the craft at bolt_v).
 func _bolt_speed(dir: Vector3) -> float:
 	var sim = view.sim
 	var ahead: float = sim.pod.vx * dir.x + sim.pod.vy * dir.y
-	return BOLT_V + maxf(0.0, ahead)
+	return bolt_v + maxf(0.0, ahead)
 
 
 func _fire(target: Vector3) -> void:
@@ -427,7 +525,7 @@ func _land(bolt: Dictionary) -> void:
 				print("GUN: commuter struck")
 			struck_commuter.emit(c)
 			return
-		_damage[id] = int(_damage.get(id, 0)) + 1
+		_damage[id] = int(_damage.get(id, 0)) + bolt_hits
 		if _damage[id] >= HOSTILE_HP:
 			_damage.erase(id)
 			kills += 1
@@ -472,46 +570,10 @@ func _sounds_step(asked_out: bool) -> void:
 
 func _draw(cam: Camera3D) -> void:
 	var eye := cam.global_position
-	# (the gaze sight's stops, coils and pipper are the turret's own: a mount without them shows none of them)
-	var gun := mount as TurretMountScript
-	# The sight: at the aim, the size of SIGHT_DEG there.
-	var showing := mount.deploy_t() > 0.0 and want_out
-	sight.visible = showing
-	if showing:
-		var at := to_render(aim_sim)
-		var dist := eye.distance_to(at)
-		var size := 2.0 * dist * tan(deg_to_rad(SIGHT_DEG) * 0.5)
-		var sight_at := at
-		if aim_kind == "vehicle" and aim_car != null:
-			# Brackets round the vehicle itself (its middle, on its road), not a ring over where the gaze struck it.
-			sight_at = to_render(Vector3(aim_car.x, aim_car.y, aim_sim.z))
-			size = maxf(size, float(BRACKET.get(aim_car.kind, 30.0)))
-		sight.global_transform = Transform3D(Basis().scaled(Vector3.ONE * size), sight_at)
-		var state := 0
-		if not mount.is_out():
-			state = 3
-		elif (gun != null and gun.limited()) or fouled:
-			state = 2
-		elif aim_kind == "vehicle":
-			state = 1
-		sight_mat.set_shader_parameter("state", state)
-		sight_mat.set_shader_parameter("power", power)
-		sight_mat.set_shader_parameter("lock", lock)
-		sight_mat.set_shader_parameter("heat", gun.heat() if gun != null else 0.0)
-		sight_mat.set_shader_parameter("spin", Time.get_ticks_msec() * 0.004 if state == 3 else 0.0)
-		# The pipper: where the bore meets the sight's distance, as seen from the eye.
-		if gun != null:
-			var bore_pt := mount.origin() + gun.bore() * dist
-			var to_bore := (bore_pt - eye).normalized()
-			var basis := cam.global_transform.basis
-			var fwd := (sight_at - eye).normalized()
-			var off := Vector2(to_bore.dot(basis.x) - fwd.dot(basis.x), to_bore.dot(basis.y) - fwd.dot(basis.y))
-			var half := size * 0.5 / maxf(eye.distance_to(sight_at), 0.01)
-			var pip := off / half
-			sight_mat.set_shader_parameter("pipper", Vector2(pip.x, pip.y))
-			sight_mat.set_shader_parameter("pipper_on", 1.0 if mount.is_out() and pip.length() < 3.0 else 0.0)
-		else:
-			sight_mat.set_shader_parameter("pipper_on", 0.0)
+	if mount.boresight():
+		_draw_boresight(eye)
+	else:
+		_draw_gaze_sight(eye, cam)
 	# Bolts: streaks along their flight, thick enough to see from where the eye is.
 	var n := 0
 	for bolt: Dictionary in _bolts:
@@ -543,13 +605,16 @@ func _draw(cam: Camera3D) -> void:
 	# Flashes, sparks and fire (added), dust and smoke (blended).
 	var nf := 0
 	var ns := 0
+	var mouths := []      # (the muzzles, asked once a frame where a flash needs them)
 	for f: Dictionary in _fx:
 		var u: float = f.t / f.dur
 		var p := to_render(f.p)
 		var size: float = f.size
 		match String(f.kind):
 			"muzzle":
-				p = mount.muzzles()[(_barrel + 1) % 2]
+				if mouths.is_empty():
+					mouths = mount.muzzles()
+				p = mouths[posmod(_barrel - 1, mouths.size())]      # (the barrel that fired last)
 				_flash_mm.set_instance_transform(nf, Transform3D(Basis().scaled(Vector3.ONE * 0.35 * (1.0 - u)), p))
 				_flash_mm.set_instance_color(nf, Color(1.0, 0.7, 0.35) * (1.0 - u))
 				nf += 1
@@ -572,6 +637,80 @@ func _draw(cam: Camera3D) -> void:
 				ns += 1
 	_flash_mm.visible_instance_count = nf
 	_smoke_mm.visible_instance_count = ns
+
+
+## The gaze sight (a turret's): at the aim, the size of SIGHT_DEG there; brackets round a vehicle; the mount's
+## pipper where its bore meets the sight's distance (a mount without stops, glow or bore shows none of them).
+func _draw_gaze_sight(eye: Vector3, cam: Camera3D) -> void:
+	var showing := mount.deploy_t() > 0.0 and want_out
+	sight.visible = showing
+	if not showing:
+		return
+	var at := to_render(aim_sim)
+	var dist := eye.distance_to(at)
+	var size := 2.0 * dist * tan(deg_to_rad(SIGHT_DEG) * 0.5)
+	var sight_at := at
+	if aim_kind == "vehicle" and aim_car != null:
+		# Brackets round the vehicle itself (its middle, on its road), not a ring over where the gaze struck it.
+		sight_at = to_render(Vector3(aim_car.x, aim_car.y, aim_sim.z))
+		size = maxf(size, float(BRACKET.get(aim_car.kind, 30.0)))
+	sight.global_transform = Transform3D(Basis().scaled(Vector3.ONE * size), sight_at)
+	var state := 0
+	if not mount.is_out():
+		state = 3
+	elif mount.limited() or fouled:
+		state = 2
+	elif aim_kind == "vehicle":
+		state = 1
+	sight_mat.set_shader_parameter("state", state)
+	sight_mat.set_shader_parameter("power", power)
+	sight_mat.set_shader_parameter("lock", lock)
+	sight_mat.set_shader_parameter("heat", mount.heat())
+	sight_mat.set_shader_parameter("spin", Time.get_ticks_msec() * 0.004 if state == 3 else 0.0)
+	# The pipper: where the bore meets the sight's distance, as seen from the eye.
+	var bore := mount.bore()
+	if bore != Vector3.ZERO:
+		var bore_pt := mount.origin() + bore * dist
+		var to_bore := (bore_pt - eye).normalized()
+		var basis := cam.global_transform.basis
+		var fwd := (sight_at - eye).normalized()
+		var off := Vector2(to_bore.dot(basis.x) - fwd.dot(basis.x), to_bore.dot(basis.y) - fwd.dot(basis.y))
+		var half := size * 0.5 / maxf(eye.distance_to(sight_at), 0.01)
+		var pip := off / half
+		sight_mat.set_shader_parameter("pipper", Vector2(pip.x, pip.y))
+		sight_mat.set_shader_parameter("pipper_on", 1.0 if mount.is_out() and pip.length() < 3.0 else 0.0)
+	else:
+		sight_mat.set_shader_parameter("pipper_on", 0.0)
+
+
+## Fixed guns' sight: a small boresight ring BORESIGHT m out along the bore (BORE_DEG wide; dim with its ticks
+## turning while the guns come out, grey and crossed while they are hot), and the lead pip (the sight's quad, PIP_DEG
+## wide) where the bolts are laid on a raider: red, closing as the lock builds; grey while hot.
+func _draw_boresight(eye: Vector3) -> void:
+	var showing := mount.deploy_t() > 0.0 and want_out
+	bore_ring.visible = showing
+	sight.visible = showing and aim_car != null and aim_car.hostile
+	if not showing:
+		return
+	var ring_at := mount.origin() + mount.bore() * BORESIGHT
+	var ring_size := 2.0 * eye.distance_to(ring_at) * tan(deg_to_rad(BORE_DEG) * 0.5)
+	bore_ring.global_transform = Transform3D(Basis().scaled(Vector3.ONE * ring_size), ring_at)
+	var state := 0
+	if not mount.is_out():
+		state = 3
+	elif hot > 0.0:
+		state = 2
+	bore_mat.set_shader_parameter("state", state)
+	bore_mat.set_shader_parameter("power", power)
+	bore_mat.set_shader_parameter("heat", mount.heat())
+	bore_mat.set_shader_parameter("spin", Time.get_ticks_msec() * 0.004 if state == 3 else 0.0)
+	if sight.visible:
+		var pip_at := to_render(aim_lead)
+		var size := 2.0 * eye.distance_to(pip_at) * tan(deg_to_rad(PIP_DEG) * 0.5)
+		sight.global_transform = Transform3D(Basis().scaled(Vector3.ONE * size), pip_at)
+		sight_mat.set_shader_parameter("state", 2 if hot > 0.0 else 1)
+		sight_mat.set_shader_parameter("power", power)
+		sight_mat.set_shader_parameter("lock", lock)
 
 
 func _batch(n: String, mesh: Mesh, mat: Material, count: int) -> MultiMesh:

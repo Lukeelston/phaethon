@@ -3,6 +3,8 @@
 ## weapon's own: how it comes out, where it looks from and along, whether it is on the aim and clear of the craft,
 ## where its bolts leave it, and its heat. Each craft's mount is built with its model (view/craft_model.gd `weapon`):
 ##   the Basilisk   view/weapons/turret_mount.gd: its gaze-slaved turret (view/turret.gd)
+##   the Phaethon, the Talon   view/weapons/fixed_guns_mount.gd: their arms (view/arms/<craft>_arms.gd), fixed
+##                  forward and aimed by pointing the craft, with an assist cone
 ## The bodies here are the defaults: a mount that never comes out and never fires.
 ##   g.mount = craft.weapon; g.mount.power = power; g.mount.step(delta, want_out, aim_render, gaze_dir_render)
 class_name WeaponMount
@@ -68,6 +70,35 @@ func assist_deg() -> float:
 	return 0.0
 
 
-## Where its sounds hang (the servo, the shots).
+## Where its sounds hang (the servo, the shots). Null: the fire control's own node.
 func node() -> Node3D:
 	return null
+
+
+## Must it be stepped while stowed, from the start of a flight? Then its fire control is made at once; otherwise
+## the first time the GUN is armed (view/gunnery.gd frame), so a flight that never arms it builds none of it.
+func steps_stowed() -> bool:
+	return false
+
+
+# --- for the sights (view/gunnery.gd _draw): what a mount without them answers ------------------------------
+
+## Is it aimed by pointing the craft (fixed guns: a boresight ring and a lead pip), not by the gaze (a turret: the
+## gaze sight, its stops and its pipper)?
+func boresight() -> bool:
+	return false
+
+
+## Its aim lies outside its stops (it holds at its stop): the gaze sight greys.
+func limited() -> bool:
+	return false
+
+
+## Its glow, 0..1: the sight brightens with it.
+func heat() -> float:
+	return 0.0
+
+
+## The line its bolts leave along (global, a unit vector), or a zero vector for none (then no pipper is drawn).
+func bore() -> Vector3:
+	return Vector3.ZERO

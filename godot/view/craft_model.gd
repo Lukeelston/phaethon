@@ -88,13 +88,15 @@ const FLAP_RATE := 9.0                # flap travel, full range per second (~0.1
 const Fleet := preload("res://view/fleet_airframe.gd")
 var fleet: Fleet
 var turret = null    # the Basilisk's gun (view/turret.gd), on the pod; view/gunnery.gd lays and fires it
-var weapon = null    # what view/gunnery.gd fires through (view/weapons/weapon_mount.gd): the Basilisk's, its turret's mount
+var weapon = null    # what view/gunnery.gd fires through (view/weapons/weapon_mount.gd): the Basilisk's, its turret's mount;
+                     # the Phaethon's and the Talon's, their arms' fixed guns (view/weapons/fixed_guns_mount.gd)
 var arms = null      # the craft's weapon hardware, hidden in its hull until armed (view/arms/<craft>_arms.gd; sim/pilot_craft.gd
                      # WEAPONS): the Phaethon's cannons on its engines, the Talon's wing guns on its pod; null for the rest
                      # (the Basilisk's gun is its turret)
 const ARMS := {"cannons": preload("res://view/arms/phaethon_arms.gd"), "wing_guns": preload("res://view/arms/talon_arms.gd")}
 const TurretScript := preload("res://view/turret.gd")
 const TurretMountScript := preload("res://view/weapons/turret_mount.gd")
+const FixedGunsMountScript := preload("res://view/weapons/fixed_guns_mount.gd")
 const Shrike := preload("res://view/shrike_airframe.gd")
 const Talon := preload("res://view/talon_airframe.gd")
 const PilotCraft := preload("res://sim/pilot_craft.gd")
@@ -621,6 +623,7 @@ func build(v, checkpoint := Callable(), reuse_engine_body := Callable()) -> void
 	if ARMS.has(PilotCraft.weapon_of(sim.P.vehicle)):      # (stowed: nothing of them is drawn till the GUN switch brings them out)
 		arms = ARMS[PilotCraft.weapon_of(sim.P.vehicle)].new()
 		arms.build(self)
+		weapon = FixedGunsMountScript.new(arms, self)      # (aimed by pointing the craft; its fire control is made at the first arming)
 	var flap_mat := null if shrike or fleet else Kit.polished(0.85, 0.2)
 	for s in [-1.0, 1.0]:
 		var hinge := Node3D.new()

@@ -4,9 +4,13 @@
 //         middle left clear so the vehicle shows through; the quad is then sized to the vehicle),
 //         2 out of the gun's reach or its line fouled by the craft (grey, crossed), 3 coming up (dim, ticks turning)
 //   pipper: where the gun's bore is now, as an offset on the quad (-1..1), and how near it is to the aim
+// Fixed guns (view/weapons/fixed_guns_mount.gd) draw two of these: their boresight ring is this same sight (shape 0)
+// small, out along the bore; their lead pip (shape 1) is a diamond round a dot where the bolts are laid on a raider,
+// closing as the lock builds: state 1 red, 2 grey (the guns hot).
 shader_type spatial;
 render_mode unshaded, blend_add, depth_test_disabled, cull_disabled, shadows_disabled, fog_disabled;
 
+uniform int shape = 0;          // 0 the sight above; 1 a lead pip
 uniform int state = 0;
 uniform float power = 1.0;
 uniform vec2 pipper = vec2(0.0);
@@ -37,7 +41,12 @@ void fragment() {
 	vec3 grey = vec3(0.55, 0.58, 0.62);
 	vec3 col = state == 1 ? red : (state == 2 ? grey : amber);
 	float m = 0.0;
-	if (state == 1) {
+	if (shape == 1) {
+		// A lead pip: a diamond round a dot, closing as the lock builds.
+		float k = mix(0.86, 0.62, lock);
+		m += band(abs(q.x) + abs(q.y), k, 0.05) * 1.2;
+		m += 1.0 - smoothstep(0.09, 0.14, r);
+	} else if (state == 1) {
 		// A vehicle: four corner brackets close in round it as the lock builds, and nothing over it.
 		float k = mix(0.98, 0.78, lock);
 		vec2 aq = abs(q);

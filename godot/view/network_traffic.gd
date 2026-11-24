@@ -1556,10 +1556,16 @@ func ray_car(c: Car, o: Vector3, d: Vector3, pad := 0.0) -> float:
 	var tall := 9.6 if c.kind == TRANSPORT else 6.0
 	var radius := (4.2 if c.kind == TRANSPORT else (3.2 if c.kind == SLOW else 2.6)) * SCALE
 	var half := (4.5 if c.kind == TRANSPORT else (4.0 if c.kind == SLOW else 3.5)) * SCALE
-	var h := _drawing.height(c.road, c.f) + tall * 0.5
+	var h := body_height(c)
 	var nose := Vector3(c.x + c.hx * half, c.y + c.hy * half, h)
 	var tail := Vector3(c.x - c.hx * (half + tail_len), c.y - c.hy * (half + tail_len), h)
 	return ray_capsule(o, d, nose, tail, maxf(radius, tall * 0.5) + pad)
+
+
+## How high a vehicle's middle stands (sims' frame): halfway up the body the sims see of it (_feed: from its road up
+## 6 m, a transport 9.6 m). The fixed guns' assist lays its bolts there (view/gunnery.gd _assist).
+func body_height(c: Car) -> float:
+	return _drawing.height(c.road, c.f) + (9.6 if c.kind == TRANSPORT else 6.0) * 0.5
 
 
 ## Where a ray (o + t d, t >= 0, d a unit vector) first meets the capsule round a..b of radius r: t, or -1.
