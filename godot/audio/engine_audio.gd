@@ -62,7 +62,10 @@ extends Node
 
 const PilotCraft := preload("res://sim/pilot_craft.gd")
 const FleetPitchGlide := preload("res://audio/fleet_pitch_glide.gd")
-const FLEET_GLIDE_LAYERS := ["v8", "turbine"]
+# All voices with a sustained note must move together, including the quiet V12
+# under the main drive and the second bank that takes over at speed.
+const FLEET_GLIDE_LAYERS := ["v8", "v12", "turbine", "second", "rotor"]
+const OVERDRIVE_LAYERS := ["v8", "v12", "second", "turbine"]
 const FLEET_DIR := "res://audio/fleet/%s/"
 const DIR := "res://audio/engines/"
 const RAM_DIR := "res://audio/ramjet/"   # the ramjet's voice has its own bank and manifest (tools/ramjet_bake.py)
@@ -215,6 +218,7 @@ const FLEET_VOICES := {
 	"vesper": {"v8": Vector2(0.69, 1.06), "v12": Vector2(1.06, 1.12), "turbine": Vector2(1.17, 1.21)},
 }
 var fleet_voice := {}
+var _paired_fleet := false
 var short_intakes := false
 var solo := ""   # "v8", "v12", "turbine" or "burner": hear one layer alone (tests, tuning)
 var flat := false   # tests: every gain held at 1 and the low-pass open, so only crossfades move the level
@@ -260,7 +264,8 @@ func setup(craft_sim) -> void:
 		safety.ceiling_db = -0.3
 		AudioServer.add_bus_effect(0, safety)
 	var engines_bus := _bus("Engines", "Master")
-	var use_fleet_glide := PilotCraft.known(sim.P.get("vehicle", PilotCraft.STANDARD)) != PilotCraft.STANDARD
+	_paired_fleet = PilotCraft.known(sim.P.get("vehicle", PilotCraft.STANDARD)) != PilotCraft.STANDARD
+	var tonal_starts := {}
 	if AudioServer.get_bus_effect_count(engines_bus) == 0:
 		var lim := AudioEffectHardLimiter.new()
 		lim.ceiling_db = -1.0
@@ -337,9 +342,16 @@ func setup(craft_sim) -> void:
 			"ram_shots": ram_shots, "ram_db": [-80.0, -80.0], "ram_n": 0, "ram_outs": 0}
 		for layer in LAYERS:
 			var ps: Array[AudioStreamPlayer] = []
-			var start := randf()   # per engine, so the two engines never phase against each other
+			var start := randf()
+			if _paired_fleet and layer in FLEET_GLIDE_LAYERS:
+				# Equal lever settings start on the same part of the same take.
+				# Textured wind, burner and exhaust beds keep independent offsets.
+				if k == 0:
+					tonal_starts[layer] = start
+				else:
+					start = tonal_starts[layer]
 			var layer_bus := "%s_%s" % [name, layer] if layer in FILTERED else name
-			if use_fleet_glide and layer in FLEET_GLIDE_LAYERS and _rate_at[layer] > 0.0:
+			if _paired_fleet and layer in FLEET_GLIDE_LAYERS and _rate_at[layer] > 0.0:
 				var glide := FleetPitchGlide.new()
 				glide.bus = layer_bus
 				add_child(glide)
@@ -643,7 +655,7 @@ func update(inp: Dictionary, delta: float) -> void:
 		var lift: float = 1.0 + TUNE.second_lift * clampf((mph - TUNE.second_on_mph)
 			/ (TUNE.second_lift_mph - TUNE.second_on_mph), 0.0, 1.0)
 		var twin := 1.0
-		if k == 1 and not flat:
+		if k == 1 and not flat and not _paired_fleet:
 			twin += TUNE.twin_detune + TUNE.twin_wander[0] * sin(TAU * _t / TUNE.twin_wander[1])
 		for layer in LAYERS:
 			# the second engine, the rotor and the ramjet's voice carry their own levels
@@ -676,10 +688,13 @@ func update(inp: Dictionary, delta: float) -> void:
 				g *= trim.x
 				at *= trim.y
 			v.at[layer] = at
+			var uncapped: bool = overdrive and layer in OVERDRIVE_LAYERS
 			if v.glides.has(layer):
 				var glide: FleetPitchGlide = v.glides[layer]
 				var pitch := maxf(0.01, at / float(_rate_at[layer]))
-				glide.drive(pitch if overdrive else minf(pitch, 16.0), g, crossfade(_bands[layer], _rho[layer], at))
+				# Two matched takes sum coherently on return to equal drive. Leave
+				# 3 dB of headroom for that sum ahead of the stereo engine buses.
+				glide.drive(pitch if uncapped else minf(pitch, 16.0), g*sqrt(0.5), crossfade(_bands[layer], _rho[layer], at))
 				continue
 			if layer in RAM_LAYERS:
 				# unlit and died away, the ramjet's loops are paused: nothing of them is mixed, and nothing is sent them
@@ -692,7 +707,7 @@ func update(inp: Dictionary, delta: float) -> void:
 					if p.stream_paused != quiet:
 						p.stream_paused = quiet
 				continue
-			_drive(v.players[layer], layer, at, g, overdrive and layer in ["v8", "v12", "second", "turbine"])
+			_drive(v.players[layer], layer, at, g, uncapped)
 
 
 ## One side of the second engine: off, waiting its turn (the right side lights a beat after the
