@@ -36,6 +36,14 @@ func clear_of_windscreen(hull: Node3D, rig: Node3D) -> bool:
 	return true
 
 
+func painted_area(mesh: Mesh) -> float:
+	var faces := mesh.get_faces()
+	var area := 0.0
+	for i in range(0,faces.size(),3):
+		area += (faces[i+1] - faces[i]).cross(faces[i+2] - faces[i]).length() * .5
+	return area
+
+
 func _run() -> void:
 	for paint: String in ["factory","cobalt"]:
 		Livery.current = paint
@@ -66,14 +74,21 @@ func _run() -> void:
 			var first: Array = rig.muzzles()
 			check(first.size() == (4 if id == "shrike" else 1), "Every seat or ring has its own socket")
 			var triangles: int = carrier.mesh.surface_get_array_index_len(0)
+			var area := painted_area(carrier.mesh)
 			for hinge in rig.hinges:
 				var plate: MeshInstance3D = hinge.get_node("Skin")
 				check(plate.get_active_material(0) == paint_mat, "A hatch changed the livery or texture")
 				triangles += plate.mesh.surface_get_array_index_len(0)
-			check(triangles == original.surface_get_array_index_len(0), "Painted triangles were added or lost")
+				area += painted_area(plate.mesh)
+			if id == "shrike":
+				check(triangles == original.surface_get_array_index_len(0), "Shrike painted triangles were added or lost")
+			check(is_equal_approx(area,painted_area(original)), "Painted surface area changed across the hatch cut")
 			for t: Transform3D in first:
 				var p := hull.to_local(t.origin)
-				check(p.y < -.10 and p.z < .1, "Emitter must stay below the seat sightline")
+				if id == "shrike":
+					check(p.y > .36 and absf(p.x) > 1.1 and p.z < -1.55, "Shrike cassettes should rise over the cockpit cheeks")
+				else:
+					check(p.y > .18 and p.x > .77 and p.z < -.6, "Vesper pulse cassette should rise above the starboard sill")
 				check((-t.basis.z).dot(-hull.global_basis.z) > .999, "Global socket should face forward")
 			if id == "shrike":
 				check(rig.missile_mesh().get_surface_count() == 1, "Shared projectile needs exactly one surface")
@@ -81,6 +96,12 @@ func _run() -> void:
 					rig.set_loaded(slot,false)
 					check(not rig._rounds[slot].visible,"Round remains in an empty seat")
 					rig.set_loaded(slot,true)
+				for fraction: float in [.25,.50,.75,1.0]:
+					rig.set_deploy(fraction)
+					for frame: Transform3D in rig.muzzles():
+						var sight := hull.to_local(frame.origin) - (Seat.EYE - Vector3.UP * Craft.POD_FRAME_UP)
+						check(sight.y > -.05 and absf(sight.x) < -sight.z * tan(deg_to_rad(49.0)),
+								"Shrike round outside the forward peripheral view at %s" % fraction)
 			rig.heat = 1.6
 			check(rig.heat == 1.0 and rig._glow.emission_energy_multiplier > 4.0, "Heat should clamp and drive the glass")
 			rig.set_deploy(.5)
