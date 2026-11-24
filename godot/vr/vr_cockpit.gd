@@ -9,6 +9,8 @@
 ##   away from the triggers")
 ##   the MODE switch on the right console: push it up for SPEEDCRAFT, down for STARFIGHTER (live,
 ##   mid-lap; STARFIGHTER takes below 1,250 mph). Y hold 1 s flips it too. Y tap: restart
+##   the Basilisk: its GUN / SAFE switch on the right sill brings the gun out of its sponson (view/turret.gd);
+##   it lays itself where you look (view/gunnery.gd) and X fires it while it is out (X repairs otherwise)
 ##   the SLIDE / GRIP switch on the left console: whether the cockpit steps out in a turn; and behind it
 ##   the drift slider (vr/drift_slider.gd): how far. A controller's tip rested on its knob takes hold of
 ##   it, and it goes fore and aft with the hand (forward is more)
@@ -187,6 +189,8 @@ const BOOST_TICK := 0.12                  # s between the ticks in both hands wh
 var _boost_tick := 0.0
 var _menu_page := ""                      # "" the quick menu's first page, "options" its second
 var slide_switch                          # vr/mode_switch.gd again: SLIDE up, GRIP down
+var gun_switch                            # ... and the Basilisk's: GUN up (the gun out and laid where you look), SAFE down
+var _gun_shots := 0                       # (the shots the hand has felt)
 var drift_slider                          # vr/drift_slider.gd: how far it steps out (slide_amount)
 var _slide_stop := 0.0                    # the slide's overshoot is stopped here (it goes out with the amount past 1)
 var _slide := 0.0
@@ -783,6 +787,8 @@ func _build_cockpit() -> void:
 		for hinge in craft.pod_flaps:
 			hinge.reparent(hull, false)
 		craft.tail_lights.reparent(hull, false)
+		if craft.turret:
+			craft.turret.reparent(hull, false)   # (the Basilisk's gun: on the hull the seat sees)
 	for s in [-1.0, 1.0]:   # where the cables hook (the hull carries the eyes themselves)
 		var mark := Marker3D.new()
 		mark.name = "hardpoint_%s" % ("l" if s < 0.0 else "r")
@@ -873,6 +879,17 @@ func _build_cockpit() -> void:
 	shell.add_child(slide_switch)
 	slide_switch.transform = ModeSwitchScript.mount(-1.0)
 	slide_switch.build()
+	if sim != null and CraftModelScript.PilotCraft.armed(sim.P.vehicle):
+		# The Basilisk's gun (view/turret.gd): its switch stands on the starboard sill by the pilot's right
+		# elbow, under the gun's own sponson, turned in at the seat. Up brings the gun out; down stows it.
+		gun_switch = ModeSwitchScript.new()
+		gun_switch.name = "GunSwitch"
+		gun_switch.legends = ["GUN", "SAFE"]
+		gun_switch.colours = [Color(1.0, 0.22, 0.08), Color(0.35, 0.9, 0.45)]
+		gun_switch.throws = ["gun", "safe"]
+		shell.add_child(gun_switch)
+		gun_switch.transform = gun_switch_mount()
+		gun_switch.build()
 	# ... and how far it steps out: the drift slider, a fader in a rail on the same console's inboard
 	# shoulder, behind the switch and out of the box where a hand throws it (vr/drift_slider.gd).
 	drift_slider = DriftSliderScript.new()
@@ -1062,7 +1079,7 @@ func _read_input(delta: float) -> void:
 		inp = {"thrL": p.thrL, "thrR": p.thrR, "brkL": maxf(p.brkL, q.brkL), "brkR": maxf(p.brkR, q.brkR)}
 	else:
 		inp = {"thrL": maxf(p.thrL, q.thrL), "thrR": maxf(p.thrR, q.thrR), "brkL": maxf(p.brkL, q.brkL), "brkR": maxf(p.brkR, q.brkR)}
-	inp.repair = p.repair or _button(l, "ax_button")
+	inp.repair = p.repair or (_button(l, "ax_button") and not (gun_switch and gun_wanted))   # (with the Basilisk's gun out, X is its trigger)
 	# (with the consumables on a flamed-out engine relights by itself once it has cooled: A is the
 	# Network's target button too, and an engine that waits for it is a surprise, not a consequence)
 	inp.reignite = p.reignite or _button(r, "ax_button") or consumables
@@ -1130,6 +1147,13 @@ func _read_input(delta: float) -> void:
 			var thrown: String = slide_switch.poke(hand, delta)
 			if thrown != "":
 				set_slide(thrown == "slide")
+				_buzz(hand, 0.9, 0.06)
+	# the Basilisk's GUN switch, the same way
+	if gun_switch and hands_live and not _await_neutral_controls:
+		for hand in [l, r]:
+			var armed: String = gun_switch.poke(hand, delta)
+			if armed != "":
+				set_gun(armed == "gun")
 				_buzz(hand, 0.9, 0.06)
 	# ... and the drift slider behind it: a tip rested on its knob has it, and it goes with the hand
 	if drift_slider and hands_live and not _await_neutral_controls:
@@ -1980,6 +2004,35 @@ func set_map_scheme(k: int) -> void:
 
 
 ## Turn the slide on or off (the SLIDE / GRIP switch), and remember it.
+## The Basilisk's gun: out (it comes up out of its sponson and lays itself where you look) or stowed.
+func set_gun(on: bool) -> void:
+	gun_wanted = on
+	print("GUN: switch ", "GUN" if on else "SAFE")
+
+
+## Where the GUN switch stands (cockpit rig): on the starboard sill's inner ledge, by the right elbow and
+## inside the canopy's foot, a hand's reach up from the right lever, its face turned in and up at the seat.
+static func gun_switch_mount() -> Transform3D:
+	var at := Vector3(0.80, 0.755, 0.30)
+	var to_eye := (EYE - at)
+	var yaw := atan2(to_eye.x, to_eye.z)
+	return Transform3D(Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, -0.55), at)
+
+
+## The gun from the cockpit: the GUN switch (set_gun), X held fires it while it is out, F too; it
+## comes out only with the battery on.
+func _gun_controls() -> void:
+	if gunnery == null:
+		return
+	gunnery.want_out = gun_wanted
+	gunnery.power = startup.power
+	var l: XRController3D = hands.left
+	gunnery.trigger = not menu.open and ((gun_wanted and _button(l, "ax_button")) or Input.is_key_pressed(KEY_F))
+	if gunnery.shots != _gun_shots:      # each shot a light tick in the hand that fires
+		_gun_shots = gunnery.shots
+		_buzz(l, 0.22, 0.012)
+
+
 func set_slide(on: bool) -> void:
 	slide_feel = on
 	_save_prefs()
@@ -2180,6 +2233,10 @@ func _process(delta: float) -> void:
 	if slide_switch:
 		slide_switch.power = startup.power
 		slide_switch.show_state(not slide_feel, 0.0 if slide_feel else 1.0, false)
+	if gun_switch:
+		gun_switch.power = startup.power
+		var out: float = clampf(craft.turret.t / CraftModelScript.TurretScript.T_FREE, 0.0, 1.0) if craft and craft.turret else 0.0
+		gun_switch.show_state(not gun_wanted, 1.0 - out, false)
 	if drift_slider:
 		drift_slider.show_state(slide_feel, startup.power)
 	# Crash: fade to black, respawn happens in the dark, fade back up.

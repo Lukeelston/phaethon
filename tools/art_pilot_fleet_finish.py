@@ -28,6 +28,7 @@ FLEET = {
     "orrery": ("ORRERY", "IX", "HELIOCENTRIC  /  SURVEY DIVISION", "#eee2bd", "#166363", "#c69956"),
     "kiln": ("KILN", "06", "FOUNDRY  /  HEAVY RECOVERY", "#bf4636", "#f5af44", "#ad734e"),
     "vesper": ("VESPER", "V3", "NIGHT FLIGHT  /  COMPETITION", "#6b5894", "#d5e2e8", "#d69f97"),
+    "basilisk": ("BASILISK", "B7", "GAZE-SLAVED  /  PURSUIT GUNSHIP", "#474e49", "#e59a2c", "#8c7353"),
 }
 
 

@@ -41,7 +41,7 @@ func _run() -> void:
 	Seat._map_loaded = true
 	Seat._school_loaded = true
 	root.msaa_3d = Viewport.MSAA_4X
-	for id in [Pilot.ORRERY, Pilot.KILN, Pilot.VESPER]:
+	for id in [Pilot.ORRERY, Pilot.KILN, Pilot.VESPER, Pilot.BASILISK]:
 		Seat.vehicle_override = id
 		var game := Seat.new()
 		root.add_child(game)

@@ -173,7 +173,7 @@ func _run() -> void:
 	config.save(Settings.PREFS)
 	check("malformed preference recovers to original", Settings.selected_craft() == "phaethon")
 	check("direct launch accepts the explicit vehicle", Sim.PilotCraft.resolve(["--vehicle=shrike"], "phaethon") == "shrike")
-	for id in ["orrery", "kiln", "vesper"]:
+	for id in ["orrery", "kiln", "vesper", "basilisk"]:
 		var result := trial(id)
 		check(id + " reaches 1,000 mph and turns under differential thrust", result.x < 10.0 and result.y > 0)
 		print(id, " 1000 mph seconds / split-lever yaw degrees ", result)
@@ -188,7 +188,7 @@ func _run() -> void:
 	preload("res://vr/vr_cockpit.gd")._startup_loaded = true      # (... whatever the saved choice says)
 	for vr in [false, true]:
 		var scene := "res://release/vr_menu.tscn" if vr else "res://release/menu.tscn"
-		for id in ["shrike", "orrery", "kiln", "vesper", "phaethon"]:
+		for id in ["shrike", "orrery", "kiln", "vesper", "basilisk", "phaethon"]:
 			change_scene_to_file(scene)
 			await scene_changed
 			var menu = current_scene

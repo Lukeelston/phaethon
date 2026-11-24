@@ -1498,6 +1498,67 @@ func _feed() -> void:
 	sim.obstacles = obs
 
 
+## The Basilisk's gun (view/gunnery.gd): the first vehicle a ray meets. o and d in the sims' frame
+## (x, y, height), d a unit vector, out to `reach` m. {} or {"car": Car, "t": m along the ray}.
+## A vehicle is what the sims see of it (_feed): circles along its heading, from its road up 6 m (a
+## transport 9.6 m) and a train behind its tractor; here one capsule from its nose to its tail.
+## Chase mode's craft and the racer are left alone: their own rules own them.
+func ray_pick(o: Vector3, d: Vector3, reach: float) -> Dictionary:
+	var best := {}
+	var best_t := reach
+	for c in cars:
+		if c.craft or c == racer:
+			continue
+		var tail_len := (TRAIN - 1) * TRAIN_GAP if c.kind == TRANSPORT else 0.0
+		var dx := c.x - o.x
+		var dy := c.y - o.y
+		if dx * dx + dy * dy > (reach + tail_len + 40.0) * (reach + tail_len + 40.0):
+			continue
+		var t := ray_car(c, o, d)
+		if t >= 0.0 and t < best_t:
+			best_t = t
+			best = {"car": c, "t": t}
+	return best
+
+
+## Where the ray meets this one vehicle (as ray_pick sees it), its capsule fattened by `pad` m: t, or -1.
+func ray_car(c: Car, o: Vector3, d: Vector3, pad := 0.0) -> float:
+	var tail_len := (TRAIN - 1) * TRAIN_GAP if c.kind == TRANSPORT else 0.0
+	var tall := 9.6 if c.kind == TRANSPORT else 6.0
+	var radius := (4.2 if c.kind == TRANSPORT else (3.2 if c.kind == SLOW else 2.6)) * SCALE
+	var half := (4.5 if c.kind == TRANSPORT else (4.0 if c.kind == SLOW else 3.5)) * SCALE
+	var h := _drawing.height(c.road, c.f) + tall * 0.5
+	var nose := Vector3(c.x + c.hx * half, c.y + c.hy * half, h)
+	var tail := Vector3(c.x - c.hx * (half + tail_len), c.y - c.hy * (half + tail_len), h)
+	return ray_capsule(o, d, nose, tail, maxf(radius, tall * 0.5) + pad)
+
+
+## Where a ray (o + t d, t >= 0, d a unit vector) first meets the capsule round a..b of radius r: t, or -1.
+static func ray_capsule(o: Vector3, d: Vector3, a: Vector3, b: Vector3, r: float) -> float:
+	var u := b - a
+	var w := o - a
+	var uu := u.dot(u)
+	var ud := u.dot(d)
+	var uw := u.dot(w)
+	var dw := d.dot(w)
+	var s := 0.0
+	var den := uu - ud * ud
+	if uu > 1e-9:
+		s = clampf((uw - dw * ud) / den, 0.0, 1.0) if den > 1e-9 else 0.0
+	var t := maxf(0.0, s * ud - dw)
+	if uu > 1e-9:
+		s = clampf((uw + t * ud) / uu, 0.0, 1.0)
+	var miss := (w + d * t - u * s).length()
+	if miss > r:
+		return -1.0
+	return maxf(0.0, t - sqrt(r * r - miss * miss))
+
+
+## The gun's: a vehicle shot out of the traffic. It goes; the fleet fills itself again far off (update).
+func knock_out(c: Car) -> void:
+	cars.erase(c)
+
+
 ## The vehicles on the map: [[x, y, kind], ...] within r of (x, y).
 func marks(x: float, y: float, r: float) -> Array:
 	var out := []

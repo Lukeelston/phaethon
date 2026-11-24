@@ -6,14 +6,16 @@ const SHRIKE := "shrike"
 const ORRERY := "orrery"
 const KILN := "kiln"
 const VESPER := "vesper"
-const ORDER := [STANDARD, SHRIKE, ORRERY, KILN, VESPER]
-const NAMES := {STANDARD: "Phaethon", SHRIKE: "Shrike RS", ORRERY: "Orrery IX", KILN: "Kiln Six", VESPER: "Vesper"}
+const BASILISK := "basilisk"   # the gunship: a turret slaved to the pilot's gaze (view/turret.gd, view/gunnery.gd)
+const ORDER := [STANDARD, SHRIKE, ORRERY, KILN, VESPER, BASILISK]
+const NAMES := {STANDARD: "Phaethon", SHRIKE: "Shrike RS", ORRERY: "Orrery IX", KILN: "Kiln Six", VESPER: "Vesper", BASILISK: "Basilisk"}
 const DETAILS := {
 	STANDARD: "Original twin-engine chassis  ·  16 m tow",
 	SHRIKE: "Lightweight sprint chassis  ·  12.5 m tow",
 	ORRERY: "Annular induction surveyor  ·  17 m tow",
 	KILN: "Six-bank recovery tractor  ·  15 m tow",
 	VESPER: "Split-inlet racing hydrofoil  ·  13.5 m tow",
+	BASILISK: "Gaze-slaved gunship  ·  14.5 m tow",
 }
 const SHR_TUNING := {"engineMass": 1000.0, "podMass": 410.0, "engineGap": 7.2, "cableLen": 12.5}
 const TUNING := {
@@ -21,11 +23,17 @@ const TUNING := {
 	ORRERY: {"engineMass": 1140.0, "podMass": 475.0, "engineGap": 7.6, "cableLen": 17.0},
 	KILN: {"engineMass": 1300.0, "podMass": 540.0, "engineGap": 6.8, "cableLen": 15.0},
 	VESPER: {"engineMass": 960.0, "podMass": 410.0, "engineGap": 7.8, "cableLen": 13.5},
+	BASILISK: {"engineMass": 1240.0, "podMass": 560.0, "engineGap": 7.2, "cableLen": 14.5},
 }
 
 
 static func known(id: Variant) -> String:
 	return id if id is String and NAMES.has(id) else STANDARD
+
+
+## Does this airframe carry a gun (the Basilisk's turret)?
+static func armed(id: Variant) -> bool:
+	return known(id) == BASILISK
 
 
 static func tuning(id: String) -> Dictionary:

@@ -56,6 +56,7 @@ const NetworkTrafficScript := preload("res://view/network_traffic.gd")
 const DrivingPartnerScript := preload("res://view/driving_partner.gd")
 const RacePilotsScript := preload("res://view/race_pilots.gd")
 const MainMenuScript := preload("res://view/main_menu.gd")
+const GunneryScript := preload("res://view/gunnery.gd")   # the Basilisk's gun: fire control (view/turret.gd is the mount)
 const DT := 1.0 / 480.0
 const BOOST_HOLD := 0.35
 const HAZE := Color(0.78, 0.66, 0.52)
@@ -183,6 +184,8 @@ const StartPadScript := preload("res://view/start_pad.gd")
 var light_bars: Array = []   # the pilot's own, in the patrol craft (one on each model of the pod that is built)
 var siren: AudioStreamPlayer # ... and its siren
 var menu = MainMenuScript.new()   # the main menu (view/main_menu.gd): the flight waits while it's open
+var gunnery = null                # the Basilisk's fire control, once its craft has a gun (view/gunnery.gd)
+var gun_wanted := false           # ... its switch: out and laid, or stowed (the cockpit's GUN switch; K here)
 # Power-ups (view/power_ups.gd): lit gates over the road that give the engines a few seconds' surge.
 # Off for a bare view (a test, a render, a replay: --power-ups asks); the headset's cockpit turns
 # them on from its OPTIONS page, where they are on unless switched off.
@@ -565,6 +568,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		set_autopilot(not autopilot.on)
 	if event is InputEventKey and event.pressed and not event.echo and (event as InputEventKey).keycode == KEY_G:
 		enter_city_gp()
+	if event is InputEventKey and event.pressed and not event.echo and (event as InputEventKey).keycode == KEY_K and craft and craft.turret:
+		gun_wanted = not gun_wanted
 
 
 # --- the Network: the target city, arrivals, bests ---
@@ -1050,6 +1055,8 @@ func _process(delta: float) -> void:
 	craft.sync_cables(sim, delta)   # after the camera: in VR the cables' pod end rides the cockpit
 	var t_world := Time.get_ticks_usec()
 	_sync_world()   # after the camera: distant anchors scale about its current position
+	_gun_controls()
+	gunnery = GunneryScript.frame(self, gunnery, delta)   # (after the camera and the world: it lays the gun on what the view is on)
 	if skill_score:
 		if traffic_net:
 			skill_score.observe_traffic(traffic_net.cars, minf(delta, 0.05))
@@ -1931,6 +1938,14 @@ func _build_craft() -> void:
 		add_child(terminal_lighting)
 		terminal_lighting.build(sim, network_world)
 		terminal_lighting.sync(sim, org_x, org_y)
+
+
+## The Basilisk's gun from the keyboard: K deploys and stows it (_unhandled_key_input), F held fires.
+## Overridable: the cockpit has its GUN switch and X.
+func _gun_controls() -> void:
+	if gunnery:
+		gunnery.want_out = gun_wanted
+		gunnery.trigger = Input.is_key_pressed(KEY_F)
 
 
 ## Overridable: the flat view's chase camera and 2D HUD.
