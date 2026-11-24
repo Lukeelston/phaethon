@@ -1,12 +1,15 @@
 ## The craft's power's controls from the pilot's seat (sim/pilot_craft.gd TRAITS; vr_cockpit.gd: the guarded POWER
-## switch on the left console's inboard face, its button on the shoulder over it). The production seat (XR off) on
-## the range, standing still, through the cockpit's own camera at the eye point with the head turned to them:
-##   power        the head turned down and left to the console: the switch, the button, the slider and the lever
-##   power-close  the same, nearer: the legends, the guards, the ring
-##   power-wide   further aft and wider: the whole port console with them on it
+## switch on the left console's inboard face up front, under the SLIDE switch and beside the left lever, its button
+## forward of it; since flight 34, when they were beside his thigh). The production seat (XR off) on the range,
+## standing still, through the cockpit's own camera at the eye point with the head turned to them:
+##   power          the head turned down and left to the console's front: the switch, the button, the lever, SLIDE
+##   power-close    the same, nearer: the legends, the guards, the ring
+##   power-wide     wider: the console's front with them on it, the lever and the map
+##   lever-map      where the left grip at full throttle passes under the map's screen (give --levers=1)
+##   port-wide      the left lever, the console's front, the map and the dash's left end at once
+##   console-front  the console's front from a little higher: the SLIDE switch, and under it the power's controls
 ## --state=ready|active|charging|safe stands the power there first (the ring steady, pulsing, dark; the switch at SAFE).
-## --vehicle=<id> for a craft's own cockpit. --levers=0.87 stands the throttle levers there (else at idle, where the left
-## one's grip stands nearest the button).
+## --vehicle=<id> for a craft's own cockpit. --levers=0.87 stands the throttle levers there (else at idle).
 ## Run windowed: --xr-mode off --resolution 1600x900 --fixed-fps 120 --audio-driver Dummy
 ## -s res://tests/render_power_controls.gd -- --mute --out=DIR [--views=power,power-close] [--state=ready] [--vehicle=kiln]
 extends SceneTree
@@ -17,9 +20,12 @@ const Canopy := preload("res://view/canopy.gd")
 const STEP := 1.0 / 120.0
 # name, the head's turn (degrees up, degrees to the left), the field of view
 const VIEWS := [
-	["power", -42.0, 80.0, 50.0],
-	["power-close", -45.0, 86.0, 24.0],
-	["power-wide", -37.0, 84.0, 70.0],
+	["power", -38.0, 51.0, 45.0],
+	["power-close", -38.0, 51.0, 22.0],
+	["power-wide", -30.0, 48.0, 70.0],
+	["lever-map", -29.0, 41.0, 40.0],
+	["port-wide", -24.0, 40.0, 80.0],
+	["console-front", -33.0, 52.0, 45.0],
 ]
 
 var seat

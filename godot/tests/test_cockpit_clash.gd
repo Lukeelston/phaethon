@@ -35,9 +35,9 @@ const JOINED := [
 	["seat_cushion", "cockpit_interior/MachinedHardware"],                              # the lap belt and its buckle lie in the cushion
 	["cockpit_interior/ConsoleR", "mode_switch/MeshInstance3D"], ["cockpit_interior/ConsoleL", "SlideSwitch/MeshInstance3D"],   # the switches' panels are let into the consoles
 	["cockpit_interior/ConsoleL", "DriftSlider/rail"],                                  # the drift slider's rail sits over the console's inboard shoulder, its foot let into the top
-	["cockpit_interior/ConsoleL", "PowerSwitch/MeshInstance3D"],                        # the POWER switch's panel is let into the console's inboard face (2026-11-24)
+	["cockpit_interior/ConsoleL", "PowerSwitch/MeshInstance3D"],                        # the POWER switch's panel is let into the console's inboard face (2026-11-24; up front under SLIDE since flight 34)
 	["cockpit_interior/ConsoleL", "PowerSwitch/plinth"],                                # ... standing on its plinth, which is let in too
-	["cockpit_interior/ConsoleL", "PowerButton/bezel"],                                 # ... and its button's bezel sits on the shoulder over it
+	["cockpit_interior/ConsoleL", "PowerButton/bezel"],                                 # ... and its button's bezel is let into the same face, forward of it
 ]
 var failures := 0
 var checks := 0

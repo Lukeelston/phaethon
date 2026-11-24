@@ -26,8 +26,17 @@ const TOP := 0.026                  # the readout's band along the top
 const LINE := 0.0024                # path half-width (m on the panel)
 const DIST := 0.80                  # from the eye (0.85 until it was swung out to 39 degrees: there its pod's back corner met the rim)
 const YAW := deg_to_rad(39.0)       # left of straight ahead, clear of the instruments (their end: 27 deg, now that they are 0.3 m nearer; it was 33 here, for an end at 21.5) ...
-const PITCH := deg_to_rad(-14.0)    # ... and below the horizon, just over the port console's nose
+const PITCH := deg_to_rad(-11.0)    # ... and below the horizon, just over the port console's nose (see TILT)
 const SCALE := 0.83                 # the screen and its pod, so it fills the eye as it did a metre away
+# Luke, flight 34: "the left lever collides with the map at 90-100% throttle". At 14 degrees down the left grip came up
+# through the foot of the screen from 85% on (5 to 6 cm into it at full throttle, in every craft). The pod has no room
+# to go forward or down (the dash, the coaming), sideways (the coaming, the instruments) or simply up: the roof's port
+# pillar stands 4 mm behind the controls strip on top, and leans back as it rises. So it is raised (11 degrees down)
+# and its face tipped TILT toward the pilot about its middle, which swings its foot forward, away from the grip, and
+# its strip aft, away from the pillar: the grip now passes 10 mm under it at the least (the Kiln's crown; the
+# Phaethon's 27), the strip clears the pillar by 14 mm, and the screen is seen 33 degrees off square from the eye
+# (6 before), 16% shorter than square on (tests/test_cockpit_reach.gd, test_cockpit_clash.gd).
+const TILT := deg_to_rad(27.0)
 const HUD := [1.0, deg_to_rad(30.0), deg_to_rad(-10.0), 1.0]   # the same four for the heads-up panel
 const ARM_FOOT := Vector3(-0.6, 0.37, -0.028)   # where the arm stands on the port console (rig frame)
 const SP_COL := Color(0.25, 0.65, 1.0)
@@ -252,7 +261,8 @@ func show_controls(local: bool, power: float, hud := false) -> void:
 static func mount(eye: Vector3) -> Transform3D:
 	var pose: Array = [DIST, YAW, PITCH, SCALE] if housed() else HUD
 	var dir := Vector3(-sin(pose[1]) * cos(pose[2]), sin(pose[2]), -cos(pose[1]) * cos(pose[2]))
-	return Transform3D(Basis.looking_at(dir, Vector3.UP).scaled(Vector3.ONE * float(pose[3])), eye + dir * float(pose[0]))
+	var face := Basis.looking_at(dir, Vector3.UP) * Basis(Vector3.RIGHT, TILT if housed() else 0.0)
+	return Transform3D(face.scaled(Vector3.ONE * float(pose[3])), eye + dir * float(pose[0]))
 
 
 static func housed() -> bool:

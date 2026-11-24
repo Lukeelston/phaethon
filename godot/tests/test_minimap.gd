@@ -200,7 +200,8 @@ func _headset() -> void:
 	var d := c - eye
 	var yaw := rad_to_deg(atan2(-d.x, -d.z))
 	var pitch := rad_to_deg(atan2(d.y, Vector2(d.x, d.z).length()))
-	var facing: float = p.transform.basis.z.normalized().dot(-d.normalized())
+	# (facing it but for the face's tip toward the pilot, MapPanel.TILT: it lets the left grip pass under it at full throttle)
+	var facing: float = (p.transform.basis * Basis(Vector3.RIGHT, -MapPanel.TILT)).z.normalized().dot(-d.normalized())
 	# as seen from the eye: the panel's right edge against the instrument panel's left end
 	var dash: Node3D = v.dashboard
 	var dash_left := INF
@@ -219,8 +220,9 @@ func _headset() -> void:
 		right = maxf(right, rad_to_deg(atan2(q.x, -q.z)))
 		bottom = minf(bottom, rad_to_deg(atan2(q.y, Vector2(q.x, q.z).length())))
 	print("  (panel %.2f m from the eye; the instrument panel's centre %.2f m)" % [d.length(), (shell.global_transform.affine_inverse() * dash.global_position - eye).length()])
-	_check("headset: the panel is %.2f m from the eye, %.0f deg left and %.0f deg down, facing it (%.3f)" % [d.length(), yaw, -pitch, facing],
-		p.visible and absf(d.length() - MapPanel.DIST) < 0.01 and yaw > 18.0 and yaw < 40.0 and pitch < -3.0 and pitch > -25.0 and facing > 0.999)
+	_check("headset: the panel is %.2f m from the eye, %.0f deg left and %.0f deg down, facing it (%.3f) but for its tip toward the pilot (%.0f deg)" % [
+		d.length(), yaw, -pitch, facing, rad_to_deg(MapPanel.TILT)],
+		p.visible and absf(d.length() - MapPanel.DIST) < 0.01 and yaw > 18.0 and yaw < 40.0 and pitch < -3.0 and pitch > -25.0 and facing > 0.999 and MapPanel.TILT <= deg_to_rad(30.0))
 	_check("clear of the instrument panel: its right edge at %.1f deg, the instrument panel's left end at %.1f deg (or above its top: %.1f vs %.1f)" % [right, dash_left, bottom, dash_top],
 		right < dash_left - 1.0 or bottom > dash_top + 1.0)
 	var lines: Mesh = p.lines

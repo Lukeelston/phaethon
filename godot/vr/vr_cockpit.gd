@@ -214,7 +214,8 @@ var _gun_shots := 0                       # (the shots the hand has felt)
 var drift_slider                          # vr/drift_slider.gd: how far it steps out (slide_amount)
 # The craft's power (sim/pilot_craft.gd TRAITS; Luke, 2026-11-24: "build the attributes and powers into the game"): its
 # guarded POWER switch (vr/mode_switch.gd again, 0.7 of its size: ARM up, SAFE down) on the port console's inboard
-# face under the drift slider, and its button (vr/power_button.gd) beside it, forward. The switch
+# face up front beside the left lever (power_switch_mount), and its button (vr/power_button.gd) over it, under the
+# SLIDE switch. The switch
 # is CraftView.power_armed, saved as "power"; the button fires the power (CraftView.fire_power). Its ring: dark while
 # the power charges, steady ready, pulsing while it runs.
 var power_switch
@@ -978,8 +979,8 @@ func _build_cockpit() -> void:
 	drift_slider.transform = DriftSliderScript.mount()
 	drift_slider.build()
 	drift_slider.amount = slide_amount
-	# The craft's power: its guarded switch on the same console's inboard face, aft of the lever and under the slider,
-	# its face turned up at the seat; and its button beside it, forward.
+	# The craft's power: its guarded switch on the same console's inboard face up front, outboard of the lever, its face
+	# turned up at the seat; and its button over it, at the grip's height.
 	power_switch = ModeSwitchScript.new()
 	power_switch.name = "PowerSwitch"
 	power_switch.legends = ["ARM", "SAFE"]
@@ -2227,12 +2228,23 @@ static func gun_switch_mount() -> Transform3D:
 	return Transform3D(Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, -0.55), at)
 
 
-## Where the POWER switch stands (cockpit rig): on the port console's inboard face (0.55 out), under the drift
-## slider's middle, between the lever's idle place ahead of it and the seat's bolster aft (which hides the face from
-## the seat further aft), its panel 0.7 of the MODE switch's size, its face turned 20 degrees up from the console's
-## side at the seat (its top edge at the console's face, its foot standing proud), across it forward: ARM up, SAFE
-## down, the legends read along the console. Its button (vr/power_button.gd) is beside it, forward, on the same face.
-const POWER_AT := Vector3(-0.532, 0.305, 0.47)
+## Where the POWER switch stands (cockpit rig). Luke, flight 34: "I think they should go somewhere more reachable up
+## front. Pressing it beside the leg is awkward". It was on the port console's inboard face under the drift slider,
+## beside his thigh: its bat 0.30 m from the left grip at half throttle and 0.46 at full, 0.44 from the left
+## shoulder. Now it is on the same face up front, just outboard of the left lever and under its button
+## (vr/power_button.gd), which stands level with the grip's foot at full throttle: from the grip at half and at full
+## throttle the button's cap is 0.18 and 0.13 m, the switch's bat 0.27 and 0.19 (tests/test_cockpit_reach.gd); from
+## the shoulder they are further than they were (0.69 and 0.73; the SLIDE switch's bat is 0.58, the map's controls
+## about 0.74). The switch stands low and forward of the lever's shaft at its height: its bat, which stands 6 cm out
+## of the face, passes 26 mm from the shaft at full throttle at the least (anywhere the shaft sweeps at its height, it
+## came within 8 to 12 mm), and the hand on the grip at full throttle is above the box where a hand throws it. At full
+## throttle the shaft crosses its lower half as seen from the seat. The other places measured were the dash's left
+## wing beside the gauges (0.48 m from the grip at half throttle, nearly a metre from the shoulder) and the coaming
+## over the console (0.22 / 0.27 / 0.68 m from the grip at half and at full throttle and from the shoulder, and only
+## the Phaethon's cockpits have one: the fleet's hull side stands 0.79 out). The panel is 0.7 of the MODE switch's
+## size, its face turned 20 degrees up from the console's side at the seat (its top edge at the console's face, its
+## foot standing proud), across it forward: ARM up, SAFE down, the legends read along the console.
+const POWER_AT := Vector3(-0.532, 0.215, 0.065)
 const POWER_TILT := deg_to_rad(20.0)
 const POWER_SCALE := 0.7
 

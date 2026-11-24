@@ -2,13 +2,15 @@
 ## the game"): the guarded POWER switch (ARM / SAFE) on the left console's inboard face and its button beside it
 ## (vr_cockpit.gd, vr/power_button.gd), the keyboard's P in the flat view, and what the power says and shows.
 ##   built      the switch (a ModeSwitch: ARM up, SAFE down) and the button on the port console's inboard face, the
-##              button beside the switch and carrying the power's name; ARM unless saved otherwise
+##              button over the switch and carrying the power's name; ARM unless saved otherwise
 ##   by hand    a tip pushed down through the switch's box throws it to SAFE (saved "power": "safe"), up to ARM; a
 ##              fingertip brought in to the button's cap fires the power: the Orrery's Gyro Lock runs the next step,
 ##              its word is on the status strip, and its ring pulses; at SAFE the button fires nothing
 ##   the ring   dark while the power charges, steady when it is ready, pulsing while it runs; dark at SAFE
-##   not by accident   the hand's way to each of the left console's toggles and back throws nothing of it, and the
-##              drift slider's knob, wherever it stands, is out of the switch's box
+##   not by accident   the hand's way to each of the left console's toggles and back throws nothing of it, nor its way
+##              from the grip at half and at full throttle to the SLIDE switch over them and back (they stand under that
+##              switch, beside the lever, since flight 34), and the drift slider's knob, wherever it stands, is out of
+##              the switch's box
 ##   the flat view     P fires the power (the autopilot is O now)
 ##   the drift reach   the Orrery's cockpit steps out 0.8 as far as the Phaethon's in the same turn (the view's own)
 ## --headless --xr-mode off --audio-driver Dummy -s res://tests/test_power_controls.gd -- --mute
@@ -135,8 +137,8 @@ func _run() -> void:
 	var bt_at: Vector3 = bt.position
 	_check("the POWER switch is a guarded toggle (ARM up, SAFE down) on the port console's inboard face (%.3f, %.3f, %.3f)" % [sw_at.x, sw_at.y, sw_at.z],
 		sw != null and sw.get_script() == Switch and sw.legends == ["ARM", "SAFE"] and sw_at.x < -0.5 and sw_at.x > -0.56 and sw_at.y < 0.38)
-	_check("its button stands beside it, forward, on the same face (%.0f mm apart), with the power's name: \"%s\"" % [sw_at.distance_to(bt_at) * 1000.0, bt.legend.text],
-		bt != null and bt_at.z < sw_at.z and sw_at.distance_to(bt_at) < 0.1 and bt.legend.text.replace("\n", " ") == "GYRO LOCK")
+	_check("its button stands over it on the same face (%.0f mm apart; since flight 34, at the grip's height), with the power's name: \"%s\"" % [sw_at.distance_to(bt_at) * 1000.0, bt.legend.text],
+		bt != null and bt_at.y > sw_at.y + 0.08 and absf(bt_at.x - sw_at.x) < 0.02 and sw_at.distance_to(bt_at) < 0.13 and bt.legend.text.replace("\n", " ") == "GYRO LOCK")
 	_check("ARM unless saved otherwise; the Orrery's power is ready, its ring steady", v.power_armed and v.sim.power == "gyro" and v.sim.power_state == "ready" and v.power_ring() == "steady")
 
 	# ---- the switch by hand: a tip pushed down through its box, then up
@@ -204,6 +206,49 @@ func _run() -> void:
 			v._power_fire = false
 	_check("the hand's way from the left lever to each of the console's toggles and back throws the switch nowhere (%s) and presses the button %d times" % [
 		"ARM" if v.power_armed else "SAFE", presses], v.power_armed == was_armed and presses == 0)
+	# ... and to the SLIDE switch over them, from the grip at half and at full throttle: up to its bat, a throw down and
+	# one up (a second apart), and back
+	presses = 0
+	var slide_bat: Vector3 = v.slide_switch.transform * Vector3(0.0, 0.0, 0.07)
+	var slide_up: Vector3 = v.slide_switch.transform * Vector3(0.0, 0.06, 0.07)
+	var slide_down: Vector3 = v.slide_switch.transform * Vector3(0.0, -0.06, 0.07)
+	var slide_off: Vector3 = v.slide_switch.transform * Vector3(0.0, 0.06, 0.2)
+	for thr in [0.5, 1.0]:
+		v.lever_pivots[0].rotation.x = deg_to_rad(lerpf(30.0, -30.0, thr))
+		var grip: Vector3 = v.lever_pivots[0].transform * Vector3(0.0, 0.39, 0.0)
+		var there := [grip, slide_bat, slide_up]
+		for k in range(1, there.size()):
+			_move(hl, there[k - 1], there[k], 0.5)
+		_move(hl, slide_up, slide_down, 0.5)
+		_rest(hl, slide_down, Switch.COOLDOWN + 0.1)
+		_move(hl, slide_down, slide_up, 0.5)
+		var back := [slide_up, slide_off, grip]
+		for k in range(1, back.size()):
+			_move(hl, back[k - 1], back[k], 0.5)
+		presses += int(v._power_fire)
+		v._power_fire = false
+	v.lever_pivots[0].rotation.x = 0.0
+	_check("nor its way from the grip at half and at full throttle to the SLIDE switch, throwing it, and back (%s, the button pressed %d times)" % [
+		"ARM" if v.power_armed else "SAFE", presses], v.power_armed == was_armed and presses == 0)
+	# ... and the button's own use in flight: from the grip at half and at full throttle down to its cap, a press, and
+	# back to the grip, the switch under it is not thrown
+	presses = 0
+	var cap_out := _on_button(bt.face_at() + Vector3(0.0, 0.0, 0.05))
+	var cap_in := _on_button(bt.face_at())
+	for thr in [0.5, 1.0]:
+		v.lever_pivots[0].rotation.x = deg_to_rad(lerpf(30.0, -30.0, thr))
+		var grip: Vector3 = v.lever_pivots[0].transform * Vector3(0.0, 0.39, 0.0)
+		_move(hl, grip, cap_out, 0.5)
+		_rest(hl, cap_out, Console.CLAIM_S + 0.1)
+		_move(hl, cap_out, cap_in, 0.25)
+		presses += int(v._power_fire)
+		v._power_fire = false
+		_move(hl, cap_in, cap_out, 0.3)
+		_move(hl, cap_out, grip, 0.5)
+		_rest(hl, grip, 0.6)
+	v.lever_pivots[0].rotation.x = 0.0
+	_check("its way from the grip at half and at full throttle to the button, a press, and back fires it each time (%d of 2) and throws the switch nowhere (%s)" % [
+		presses, "ARM" if v.power_armed else "SAFE"], v.power_armed == was_armed and presses == 2)
 	var inside := 0
 	var into_switch: Transform3D = sw.global_transform.affine_inverse() * v.shell.global_transform
 	for a in [0.0, Drift.STANDARD, Drift.AMOUNT_MAX]:

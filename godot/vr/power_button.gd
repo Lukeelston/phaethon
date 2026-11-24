@@ -1,6 +1,6 @@
 ## The craft's power's button (Luke, 2026-11-24: "build the attributes and powers into the game"; sim/pilot_craft.gd
-## TRAITS): a fingertip push-button on the left console's inboard face, beside the POWER switch (ARM / SAFE: a guarded
-## toggle, vr_cockpit.gd power_switch_mount), forward of it and turned up at the seat as it is. Pressed with a
+## TRAITS): a fingertip push-button on the left console's inboard face up front, over the POWER switch (ARM / SAFE: a
+## guarded toggle, vr_cockpit.gd power_switch_mount) and turned up at the seat as it is. Pressed with a
 ## controller's tip as the map's colour button is (a tip coming in to its face, near its axis), it fires the power
 ## (CraftView.fire_power). Its lamp
 ## ring says where the power is: dark while it charges, steady when it is ready, pulsing while it runs; dark at SAFE,
@@ -28,10 +28,12 @@ const REPEAT_S := 0.4                        # s between presses (on the cockpit
 const TRAVEL := 0.0035                       # the cap goes in this far as it is pressed, for ...
 const SHOWN_S := 0.18                        # ... this long
 const COLOUR := Color(1.0, 0.42, 0.12)       # the ring's lamp: the gates' and the burner's hot orange
-# Where it sits (cockpit metres, floor origin, forward -Z): the port console's inboard face beside the POWER switch,
-# just forward of it (the seat's bolster hides the face aft of the switch and under it from the seat; the lever at
-# idle stands 3 cm further forward and higher), its face turned TILT up at the seat as the switch's is.
-const AT := Vector3(-0.5385, 0.305, 0.404)
+# Where it sits (cockpit metres, floor origin, forward -Z): the port console's inboard face up front, over the POWER
+# switch, under the SLIDE switch's nose and outboard of the left lever, level with the grip's foot at full throttle:
+# a short drop of the hand from the grip (Luke, flight 34: "I think they should go somewhere more reachable up front":
+# it was beside his thigh, 0.40 m from the grip at full throttle and 0.26 at half; now 0.13 and 0.18,
+# tests/test_cockpit_reach.gd), its face turned TILT up at the seat.
+const AT := Vector3(-0.5385, 0.325, 0.09)
 const TILT := deg_to_rad(20.0)
 
 var cap: MeshInstance3D
