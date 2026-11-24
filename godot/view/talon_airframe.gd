@@ -232,9 +232,11 @@ static func add_pod(mesh: ArrayMesh, closed_nose: bool, pal: Dictionary) -> void
 	if closed_nose:
 		# Two removable dorsal panels. The ridge is shallow enough to sit below
 		# the seated eye. Their chamfers leave a dark expansion joint over the tub.
+		# (Their front was at -2.16, over the bullring's posts: today's tow links turn on swivels on those posts,
+		# up to 5 cm over the nose, where Codex's ropes were tied to a bar. They begin behind the swivels.)
 		for side: float in [-1.0, 1.0]:
 			var deck := [body, panel.darkened(0.18), body, pal.trim, body, cavity, cavity]
-			_chine(st, [[-2.16, 0.15, 0.010, 0.15, 0.088, 0.02],
+			_chine(st, [[-2.02, 0.15, 0.010, 0.15, 0.088, 0.02],
 				[-1.83, 0.31, -0.006, 0.31, 0.074, 0.018],
 				[-1.49, 0.392, -0.009, 0.392, 0.068, 0.018]], side, deck, cavity)
 			_chine(st, [[-1.475, 0.394, -0.009, 0.394, 0.068, 0.018],
@@ -246,11 +248,17 @@ static func add_pod(mesh: ArrayMesh, closed_nose: bool, pal: Dictionary) -> void
 		var cant := Vector3(side * 0.42, 0.908, 0)
 		_foil(st, TAIL, Vector3(side * 0.84, -0.12, 0), cant, Vector3(side * 0.908, -0.42, 0), pal.trim, pal.tip, pal)
 		# A continuous line from the beak to the cockpit shoulder and the trim jet.
+		# (Codex drew the beak's first three stations for ropes from a bar at -0.05: [-3.27, 0.085, 0.050, 0.085,
+		# 0.044, 0.035], [-2.30, 0.20, 0.075, 0.20, 0.055, 0.045], [-2.065, 0.34, 0.069, 0.22, 0.055, 0.043]. Today's
+		# links are drawbars, 4.8 cm in the barrel, on swivels standing on the posts, and in a hard split-lever turn
+		# the port barrel rises to 10 cm over the nose 0.5 m out: through his beak. So the beak is flat underneath
+		# from the tip's section to the root's (its keel gone: the relief the links pass under), and its first two
+		# sections stand 2 cm higher at the crown, thinner. tests/test_talon_prow.gd: no link touches it.)
 		_chine(st, [
 			[-3.83, 0.012, 0.035, 0.012, 0.012, 0.012],
-			[-3.27, 0.085, 0.050, 0.085, 0.044, 0.035],
-			[-2.30, 0.20, 0.075, 0.20, 0.055, 0.045],
-			[-2.065, 0.34, 0.069, 0.22, 0.055, 0.043],
+			[-3.27, 0.085, 0.095, 0.085, 0.019, 0.0],
+			[-2.30, 0.20, 0.12, 0.20, 0.03, 0.0],
+			[-2.065, 0.34, 0.069, 0.22, 0.055, 0.0],
 			[-1.91, 0.49, -0.11, 0.25, 0.14, 0.17],
 			[-1.38, 0.79, -0.185, 0.26, 0.20, 0.25],
 			[-0.48, 0.975, -0.155, 0.30, 0.235, 0.30],
