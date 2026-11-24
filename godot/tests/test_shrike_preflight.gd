@@ -143,7 +143,7 @@ func _run() -> void:
 	var vr_exists := FileAccess.file_exists(Cockpit.PREFS)      # (the cockpit saves its own choices: put them back too)
 	var vr_old := FileAccess.get_file_as_bytes(Cockpit.PREFS) if vr_exists else PackedByteArray()
 	Settings.set_selected_craft("phaethon")
-	for entry in [["paint", "ember"], ["craft", "racer"], ["network_start", "summit"], ["time", "noon"], ["weather", "fair"]]:
+	for entry in [["paint", "ember"], ["paint_shrike", "factory"], ["craft", "racer"], ["network_start", "summit"], ["time", "noon"], ["weather", "fair"]]:
 		Settings.set_choice(entry[0], entry[1])
 	View.best_dir = OS.get_user_data_dir().path_join("test_shrike_preflight_")
 	Cockpit._startup_loaded = true
@@ -156,11 +156,13 @@ func _run() -> void:
 	var paint: Button = menu.option_buttons.filter(func(b): return b.text.begins_with("Paint:"))[0]
 	menu.focus_row(menu.buttons.find(paint))
 	var choices := []
-	for i in Livery.CHOICES.size():
-		choices.append(Settings.choice("paint", Livery.ids()))
-		if i < Livery.CHOICES.size()-1:
+	var row := Livery.ids_for("shrike")      # (the Shrike's own paint: each craft keeps its own)
+	for i in row.size():
+		choices.append(Livery.saved_for("shrike"))
+		if i < row.size()-1:
 			menu.activate()
-	check("the board selects Shrike, cycles all eight paints and displays Obsidian black", menu.craft_selector.selected == "shrike" and choices == Livery.ids() and paint.text.ends_with("Obsidian black"))
+	check("the board selects Shrike, cycles Factory and all eight paints and displays Obsidian black, the Phaethon's left as it was (%s)" % Livery.saved_for("phaethon"),
+		menu.craft_selector.selected == "shrike" and choices == row and paint.text.ends_with("Obsidian black") and Livery.saved_for("phaethon") == "factory")
 	menu.choose_course("network")
 	menu.focus_row(menu.start_index)
 	menu.activate()

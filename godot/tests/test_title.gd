@@ -393,7 +393,7 @@ func _turntable(menu, stage, eye: Vector3, forward: Vector3) -> void:
 	var now_paint := Stage.flight_livery()
 	var repainted: bool = await _shown(stage, Pilot.STANDARD + "/" + now_paint)
 	check("choosing a paint puts the craft on show in it (%s to %s)" % [was_paint, now_paint], now_paint != was_paint and repainted)
-	for i in Livery.CHOICES.size() - 1:      # (round to the paint it had)
+	for i in Livery.ids_for(Pilot.STANDARD).size() - 1:      # (round to the paint it had: the Phaethon's row)
 		menu.activate()
 	var back: bool = await _shown(stage, Pilot.STANDARD + "/" + was_paint)
 	check("... and back (%s)" % Stage.flight_livery(), Stage.flight_livery() == was_paint and back)

@@ -42,8 +42,13 @@ void fragment() {
 		vec3 made = share.r * from_r.rgb + share.g * from_g.rgb + share.b * from_b.rgb + share.a * from_a.rgb;
 		float rest = max(1.0 - share.r - share.g - share.b - share.a, 0.0);
 		float shade = dot(base, LUMA) / max(dot(made + rest * base, LUMA), 0.0005);
+		shade = clamp(shade, 0.5, 1.6);
 		vec3 turn = share.r * (to_r.rgb - from_r.rgb) + share.g * (to_g.rgb - from_g.rgb) + share.b * (to_b.rgb - from_b.rgb) + share.a * (to_a.rgb - from_a.rgb);
-		base = max(base + turn * clamp(shade, 0.5, 1.6), vec3(0.0));
+		// where a texel is wholly the craft's colours, it is the livery's in the texel's own light and dark
+		// alone: the atlas's grain was drawn into each channel alike, and kept as a difference it is a
+		// colour of its own on a paint much darker or lighter than the one it was drawn on
+		vec3 pure = (share.r * to_r.rgb + share.g * to_g.rgb + share.b * to_b.rgb + share.a * to_a.rgb) * shade + rest * base;
+		base = max(mix(base + turn * shade, pure, smoothstep(0.85, 1.0, 1.0 - rest)), vec3(0.0));
 	}
 	ALBEDO = base;
 	AO = finish.r * COLOR.a;

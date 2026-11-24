@@ -12,6 +12,7 @@ const MASK := "_livery.png"     # <id>_livery.png: where each of its own colours
 # accent (its bands, accent panels and number plates), B its trim lines, A its number. (tests/test_paint.gd
 # reads them back off the atlases.)
 const INK := Color("#25343b")
+const DARK_BAND := 0.12          # linear luminance under which a band is too dark for dark lettering on it
 const OWN := {
 	"orrery": [Color("#eee2bd"), Color("#166363"), Color("#c69956")],
 	"kiln": [Color("#bf4636"), Color("#f5af44"), Color("#ad734e")],
@@ -74,9 +75,6 @@ static func colours(vehicle: String) -> Array:
 static func lettering(ink: Color) -> Color:
 	var band := Livery.coat("pin").srgb_to_linear()
 	return Livery.coat("paint") if 0.2126 * band.r + 0.7152 * band.g + 0.0722 * band.b < DARK_BAND else ink
-
-
-const DARK_BAND := 0.12          # linear luminance under which a band is too dark for dark lettering
 
 
 ## Put a finish (finish_for) into a livery: the mask, and for each of its four channels [the colour the
