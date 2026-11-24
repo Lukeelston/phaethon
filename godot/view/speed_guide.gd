@@ -85,9 +85,12 @@ func brake_model(handling := "") -> Vector4:
 		P = P.duplicate()
 		P.merge(sim.HANDLING[handling], true)
 	var m: float = sim.eL.m + sim.eR.m + sim.pod.m
-	var base: float = 2.0 * (P.engineCd + P.brakeCd) + P.podCd + 0.5 * P.brakeCd
-	var fl: float = 2.0 * P.frontBrakeCd
-	return Vector4(2.5 * P.brakeConst / m, base / m, (base + 0.5 * fl) / m, (base + fl) / m) * P.forceScale
+	# (the craft's attributes and power this step: sim.k_drag on the cruise drag, sim.k_brake on the brakes; 1 for the Phaethon)
+	var kd: float = sim.k_drag
+	var kb: float = sim.k_brake
+	var base: float = 2.0 * (P.engineCd * kd + P.brakeCd * kb) + P.podCd * kd + 0.5 * P.brakeCd * kb
+	var fl: float = 2.0 * P.frontBrakeCd * kb
+	return Vector4(2.5 * P.brakeConst * kb / m, base / m, (base + 0.5 * fl) / m, (base + fl) / m) * P.forceScale
 
 
 ## Maximum acceleration from the two fully deployed front flaps; zero means uncapped.

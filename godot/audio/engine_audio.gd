@@ -240,6 +240,13 @@ var shift := 1.0   # the pistons' note against their revs: 1 until the turbines 
 var anger := 1.0   # the V8's temper: what is left of the stage
 var _wind := 0.0   # the whine's wind-up, 0..1
 var second_on := false   # craft fast enough for the second engine (with hysteresis)
+# The Orrery's Gyro Lock (sim/pilot_craft.gd TRAITS: "the rotor's whine climbs as it locks"): while it runs the bass
+# rotor is wound up GYRO_PITCH higher and GYRO_GAIN louder, eased in over GYRO_TAU and out over twice that. Its own
+# recordings, nothing new: the same rotor layer the bank already has.
+const GYRO_PITCH := 0.42           # x1.42: six semitones up
+const GYRO_GAIN := 0.8             # ... and 80% louder (5 dB)
+const GYRO_TAU := 0.35             # s
+var gyro := 0.0                    # how far it is wound up, 0..1
 # The start-up (vr/startup_sequence.gd), told by the cockpit. An engine that is `off` is silent
 # and winds down as a flamed-out one does; one whose start has been asked for (`crank`) waits out
 # the pre-starter whine, then turns over at cranking speed without firing; taken out of `off` it
@@ -509,6 +516,8 @@ func update(inp: Dictionary, delta: float) -> void:
 	elif second_on and mph < TUNE.second_off_mph:
 		second_on = false
 	turbines_on = turbines_at(mph, turbines_on)
+	var locked: bool = "power" in sim and sim.power == "gyro" and sim.power_state == "active"
+	gyro = _follow(gyro, 1.0 if locked else 0.0, GYRO_TAU if locked else 2.0 * GYRO_TAU, dt)
 	var want := 0.0
 	if turbines_on:
 		want = lerpf(TUNE.turbine_light, 1.0, smoothstep(TUNE.turbine_mph[0], TUNE.turbine_mph[1], mph))
@@ -639,7 +648,7 @@ func update(inp: Dictionary, delta: float) -> void:
 		}
 		var sec_gain := _second(v, k, running_target, dt, duck, rise_rate)
 		gains["second"] = sec_gain * bark * v.alive
-		gains["rotor"] = _rotor(v, lever, mph, dt, duck) * v.alive
+		gains["rotor"] = _rotor(v, lever, mph, dt, duck) * v.alive * (1.0 + GYRO_GAIN * gyro)
 		for layer: String in TUNE.ram_duck:      # under a lit ramjet the layers in its band step back and give it room
 			gains[layer] *= lerpf(1.0, TUNE.ram_duck[layer], v.ram)
 		if short_intakes:
@@ -668,7 +677,7 @@ func update(inp: Dictionary, delta: float) -> void:
 				"second":
 					at = layer_at("second", v.sec.spool) * lift * twin
 				"rotor":
-					at = v.rotor_p * twin
+					at = v.rotor_p * twin * (1.0 + GYRO_PITCH * gyro)
 					if short_intakes:
 						at *= lerpf(1.08, 1.20, lever)
 				"burner":

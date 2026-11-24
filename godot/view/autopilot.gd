@@ -511,23 +511,24 @@ func _move(x: float, to: float, up: float, down: float) -> float:
 
 
 ## The craft's own figures (the sim's P and its bodies, read, not changed): N of thrust a unit of
-## lever, N of drag at v, N of braking a unit of brake at v. As sim/craft_sim.gd step() has them.
+## lever, N of drag at v, N of braking a unit of brake at v. As sim/craft_sim.gd step() has them, with
+## the craft's attributes and its power this step (sim.k_thrust, k_drag, k_brake: 1 for the Phaethon).
 func _figures(sim, v: float) -> Vector3:
 	var P: Dictionary = sim.P
 	var fs: float = P.forceScale
 	var line := 1.0 / pow(float(sim.line_speed()), 2.0)      # (the Aurora Line's air goes along with her)
-	var cd: float = (2.0 * P.engineCd + P.podCd) * line
-	var thrust: float = 2.0 * P.thrustMax / P.gate * (0.45 + 0.55 * (sim.eL.health + sim.eR.health) / 2.0) * _pull * fs
+	var cd: float = (2.0 * P.engineCd + P.podCd) * line * float(sim.k_drag)
+	var thrust: float = 2.0 * P.thrustMax * float(sim.k_thrust) / P.gate * (0.45 + 0.55 * (sim.eL.health + sim.eR.health) / 2.0) * _pull * fs
 	var drag := cd * v * v
 	if overdrive:      # top gear: the drag is shaped toward the full lever's thrust
-		var nominal: float = 2.0 * P.thrustMax * (0.87 / P.gate) * _pull
+		var nominal: float = 2.0 * P.thrustMax * float(sim.k_thrust) * (0.87 / P.gate) * _pull
 		var ref := sqrt(maxf(1.0, nominal / cd))
 		drag = lerpf(drag, nominal * (1.0 - exp(-v / (0.65 * ref))), smoothstep(0.6, 0.8, v / ref))
 	var flap: float = P.frontBrakeCd
 	if P.frontBrakeMaxG > 0.0:
 		flap = minf(flap, sim.eL.m * P.frontBrakeMaxG * G / maxf(v * v, 1.0))
 	flap *= smoothstep(P.frontBrakeV0, P.frontBrakeV1, v) if P.frontBrakeCd > 0.0 else 0.0
-	var brake: float = (2.0 * (P.brakeCd + flap) + 0.5 * P.brakeCd) * v * v + 2.5 * (P.brakeLin * v + P.brakeConst)
+	var brake: float = ((2.0 * (P.brakeCd + flap) + 0.5 * P.brakeCd) * v * v + 2.5 * (P.brakeLin * v + P.brakeConst)) * float(sim.k_brake)
 	return Vector3(thrust, drag * fs, brake * fs)
 
 

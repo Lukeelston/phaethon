@@ -164,7 +164,7 @@ var net_found := {}          # the Network: the cities found (best_dir + network
 var net_best := {}           # the Network: "FROM>TO" -> best time, s
 var net_beaten := {}         # the Network: racer -> times you've beaten them
 var traffic_net: Node3D      # the Network: its traffic and racers (view/network_traffic.gd)
-var autopilot = preload("res://view/autopilot.gd").new()   # the Network's autopilot (Luke: "Add autopilot."): P here, the left stick across in the cockpit
+var autopilot = preload("res://view/autopilot.gd").new()   # the Network's autopilot (Luke: "Add autopilot."): O here (P was, until P fired the craft's power), the left stick across in the cockpit
 var _autopilot_let_go := false   # the hands have let go of what they held when it was taken: now a lever or a brake takes the craft back
 const AUTOPILOT_LET_GO := 0.1    # a lever or a brake under this is let go ...
 const AUTOPILOT_TAKE := 0.25     # ... and over this, after that, is the pilot taking her back
@@ -201,6 +201,16 @@ var avoid_eyes = AvoidanceFieldScript.new()
 var _avoid_push := Vector2.ZERO
 var power_ups: Node3D
 var surge := 0.0                  # s left of a gate's surge (the sims' inp.surge while it lasts)
+# The craft's own power (sim/pilot_craft.gd TRAITS; Luke, 2026-11-24: "build the attributes and powers into the game"):
+# the POWER switch (ARM / SAFE: the cockpit's guarded switch on the left console, saved with its prefs; ARM unless
+# switched) and the button beside it (P here) that fires it. Given to the sims as inp.power (ARM), inp.powerFire (one
+# step), inp.draft (Slipstream: a traffic vehicle ahead in the craft's lane, looked for once a frame) and inp.turretOut
+# (the Basilisk's gun up): none of them for a replay. What it does goes in the log ("POWER: ..."), briefly on the LCD
+# (_power_say) and as a light buzz in the hands as it fires (_power_felt).
+static var power_armed := true
+var _power_fire := false          # the button pressed: the next step fires it
+var _draft := false               # Slipstream: drafting a vehicle this frame
+var draft_gap := INF              # ... how far ahead it is, m (INF none)
 var menu_label: Label             # the flat view's panel
 var _menu_was_muted := false
 
@@ -396,6 +406,16 @@ func _sim_step() -> void:
 	elif inp.has("avoid"):
 		inp.erase("avoid")
 		inp.erase("avoidPush")
+	if replay.is_empty():      # the craft's power (none of it for a replay: they fly as they were recorded)
+		inp["power"] = power_armed
+		inp["draft"] = _draft
+		if craft and craft.turret:
+			inp["turretOut"] = craft.turret.t > 0.0
+		if _power_fire:
+			inp["powerFire"] = true
+			_power_fire = false
+		elif inp.has("powerFire"):
+			inp.erase("powerFire")
 	sim.step(inp, DT)
 	for e in sim.events:
 		_on_event(e)
@@ -409,9 +429,14 @@ func _on_event(e: Dictionary) -> void:
 		skill_score.on_event(e)
 	if e.type == "avoid":   # the avoidance field takes hold (of a wall, of the traffic): it flares, and is in the log below
 		_field_flash(0.8)
+	if e.type == "power":
+		_on_power(e)
+		return
 	if e.type == "bump":   # traffic's forcefield: a shove you feel, not a hit (and see: the field flares)
 		_on_hit(e.who, 0.5)
 		_field_flash(1.0)
+		if e.get("ram", false) and traffic_net and traffic_net.has_method("shove"):   # Ram Plate: the vehicle gives way
+			traffic_net.shove(int(e.id) >> 5, sim.pod.x, sim.pod.y, Vector2(sim.pod.vx, sim.pod.vy).length())
 		return
 	if e.type == "hit" or e.type == "scrape":
 		_field_flash(1.0 if e.type == "hit" else 0.45)
@@ -565,6 +590,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo and (event as InputEventKey).keycode == KEY_T:
 		net_cycle_target()
 	if event is InputEventKey and event.pressed and not event.echo and (event as InputEventKey).keycode == KEY_P:
+		fire_power()      # the craft's power (the autopilot was P: it is O now)
+	if event is InputEventKey and event.pressed and not event.echo and (event as InputEventKey).keycode == KEY_O:
 		set_autopilot(not autopilot.on)
 	if event is InputEventKey and event.pressed and not event.echo and (event as InputEventKey).keycode == KEY_G:
 		enter_city_gp()
@@ -865,6 +892,78 @@ func _flash(msg: String) -> void:
 	flash_until = sim.time + 5.0
 
 
+# --- the craft's power (sim/pilot_craft.gd TRAITS) ---
+
+## The craft's name and its power's, as the log has them: "Orrery IX Gyro Lock".
+func power_title() -> String:
+	var id: String = sim.P.vehicle
+	return "%s %s" % [CraftSimScript.PilotCraft.NAMES.get(id, id.capitalize()), String(sim.traits.power.get("name", "power"))]
+
+
+## The power's button (the cockpit's, P here): fire it, if the switch is at ARM and it is a power the button fires.
+## The others say why not, in the log and on the LCD.
+func fire_power() -> void:
+	var pw: Dictionary = sim.traits.power
+	var lcd := String(pw.get("lcd", "POWER"))
+	if pw.is_empty():
+		return
+	if not power_armed:
+		print("POWER: %s refused (the switch is at SAFE)" % power_title())
+		_power_say("POWER SAFE")
+		return
+	match sim.power:
+		"slipstream", "gyro", "ram":
+			_power_fire = true
+		"turret":
+			print("POWER: %s: the GUN switch and the trigger work it, not the button" % power_title())
+			_power_say("GUN SWITCH")
+		_:
+			print("POWER: %s refused (automatic: it needs no button)" % power_title())
+			_power_say(lcd + " AUTO")
+
+
+## Slipstream's eyes, once a frame: a traffic vehicle within its reach ahead, in the craft's lane and going its way.
+func _look_for_draft() -> void:
+	_draft = false
+	draft_gap = INF
+	if sim.power != "slipstream" or not power_armed or traffic_net == null or not replay.is_empty():
+		return
+	var pw: Dictionary = sim.traits.power
+	draft_gap = traffic_net.draft_gap(sim.pod.x, sim.pod.y, sim.pod.vx, sim.pod.vy, float(pw.reach), float(pw.lane))
+	_draft = draft_gap <= float(pw.reach)
+
+
+## The sims' power events: the log, the LCD's word, and the hands' buzz as it fires.
+func _on_power(e: Dictionary) -> void:
+	var lcd := String(sim.traits.power.get("lcd", "POWER"))
+	var mph := roundi(Vector2(sim.pod.vx, sim.pod.vy).length() * 2.236936)
+	match String(e.state):
+		"ready":
+			print("POWER: %s ready" % power_title())
+			_power_say(lcd + " READY")
+		"fired":
+			print("POWER: %s fired at %d mph" % [power_title(), mph])
+			_power_say(lcd)
+			_power_felt()
+		"active":
+			print("POWER: %s active %d s, %d mph" % [power_title(), roundi(float(e.t)), mph])
+		"ended":
+			print("POWER: %s ended after %.1f s, %d mph" % [power_title(), float(e.t), mph])
+		"refused":
+			print("POWER: %s refused (%s, %d%%)" % [power_title(), "charging" if sim.power != "slipstream" else "not full", roundi(float(e.gauge) * 100.0)])
+			_power_say(lcd + " %d%%" % roundi(float(e.gauge) * 100.0))
+
+
+## Overridable: the power's word on the LCD, briefly (the flat view's line under the speed; the cockpit's status strip).
+func _power_say(msg: String) -> void:
+	_flash(msg)
+
+
+## Overridable: the power firing, felt (the cockpit buzzes both hands lightly).
+func _power_felt() -> void:
+	pass
+
+
 ## Y: a fresh start. The range restarts the sprint at the start line, a circuit puts you back
 ## on the grid; both with whole engines (wall damage otherwise stays until you repair it).
 func _respawn() -> void:
@@ -1028,6 +1127,7 @@ func _process(delta: float) -> void:
 		return   # Freeze traffic, partner, effects and audio too; XR tracking is native.
 	if autopilot.on and replay.is_empty() and cruise < 0.0:
 		_autopilot_frame(delta)
+	_look_for_draft()
 	acc += minf(delta, 0.05)
 	var t_sim := Time.get_ticks_usec()
 	while acc >= DT:

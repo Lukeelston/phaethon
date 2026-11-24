@@ -35,6 +35,9 @@ const JOINED := [
 	["seat_cushion", "cockpit_interior/MachinedHardware"],                              # the lap belt and its buckle lie in the cushion
 	["cockpit_interior/ConsoleR", "mode_switch/MeshInstance3D"], ["cockpit_interior/ConsoleL", "SlideSwitch/MeshInstance3D"],   # the switches' panels are let into the consoles
 	["cockpit_interior/ConsoleL", "DriftSlider/rail"],                                  # the drift slider's rail sits over the console's inboard shoulder, its foot let into the top
+	["cockpit_interior/ConsoleL", "PowerSwitch/MeshInstance3D"],                        # the POWER switch's panel is let into the console's inboard face (2026-11-24)
+	["cockpit_interior/ConsoleL", "PowerSwitch/plinth"],                                # ... standing on its plinth, which is let in too
+	["cockpit_interior/ConsoleL", "PowerButton/bezel"],                                 # ... and its button's bezel sits on the shoulder over it
 ]
 var failures := 0
 var checks := 0
@@ -103,7 +106,7 @@ func _run() -> void:
 		"ramp at OFF": Vector3(Drift.place(0.0), 0.007, 0.004), "ramp at MAX": Vector3(Drift.place(Drift.AMOUNT_MAX), 0.0107, 0.004),
 		"knob at OFF": Vector3(Drift.place(0.0), 0.0, Drift.CAP_Z + Drift.CAP.z * 0.5 + 0.001), "knob in its notch": Vector3(Drift.place(Drift.STANDARD), 0.0, Drift.CAP_Z + Drift.CAP.z * 0.5 + 0.001),
 		"knob at MAX": Vector3(Drift.place(Drift.AMOUNT_MAX), 0.0, Drift.CAP_Z + Drift.CAP.z * 0.5 + 0.001)}
-	var least := [ClashKit.REACH, ClashKit.REACH, ClashKit.REACH]
+	var least := [ClashKit.REACH, ClashKit.REACH, ClashKit.REACH, ClashKit.REACH, ClashKit.REACH]
 	var behind_grip := []
 	for at_amount in [Drift.AMOUNT_MAX, 0.0]:      # (the knob at each end of its slot: the forward end is the one the grips come nearest)
 		slider.amount = at_amount
@@ -112,7 +115,7 @@ func _run() -> void:
 			for pivot: Node3D in cockpit.lever_pivots:
 				pivot.rotation.x = deg_to_rad(lerpf(30.0, -30.0, step / 4.0))      # (idle to full burner: the live cockpit's swing)
 			var near := ClashKit.new()
-			for part in cockpit.lever_pivots + [slide, mode, slider]:
+			for part in cockpit.lever_pivots + [slide, mode, slider, cockpit.power_switch, cockpit.power_button]:
 				near.gather_part(rig, part)
 			near.arm(root)
 			await physics_frame
@@ -120,6 +123,8 @@ func _run() -> void:
 			least[0] = minf(least[0], float(near.gap(root.world_3d.direct_space_state, "PilotGrip", "SlideSwitch")[0]))
 			least[1] = minf(least[1], float(near.gap(root.world_3d.direct_space_state, "PilotGrip", "shell/mode_switch")[0]))
 			least[2] = minf(least[2], float(near.gap(root.world_3d.direct_space_state, "PilotGrip", "DriftSlider")[0]))
+			least[3] = minf(least[3], float(near.gap(root.world_3d.direct_space_state, "PilotGrip", "PowerSwitch")[0]))
+			least[4] = minf(least[4], float(near.gap(root.world_3d.direct_space_state, "PilotGrip", "PowerButton")[0]))
 			for what: String in slider_face:
 				for part in near.sight(root.world_3d.direct_space_state, VR.EYE, to_rig * (slider.global_transform * (slider_face[what] as Vector3))):
 					if not part.contains("DriftSlider"):
@@ -134,6 +139,8 @@ func _run() -> void:
 	_check("the levers' grips pass the SLIDE switch by %s mm at the least through their travel, the handling switch by %s mm and the drift slider by %s mm" % [_mm(least[0]), _mm(least[1]), _mm(least[2])],
 		least[0] >= 0.012 and least[1] >= 0.012 and least[2] >= 0.012)
 	_check("and from the seat no lever, anywhere in its travel, stands before the drift slider's knob, legends or ramp (hidden: %s)" % [behind_grip], behind_grip.is_empty())
+	_check("the levers' grips pass the POWER switch by %s mm and its button by %s mm at the least through their travel" % [_mm(least[3]), _mm(least[4])],
+		least[3] >= 0.012 and least[4] >= 0.012)
 
 	# ---- everything else, as built (the two switches' levers thrown up, toward the map's pod)
 	for sw in [slide, mode]:
