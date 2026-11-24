@@ -181,6 +181,10 @@ var partner: Node3D          # the driving partner (view/driving_partner.gd), nu
 var partner_on := false      # common release preference, overridden by launch flags
 var race: Node3D             # Eridanus: the racing pilots (view/race_pilots.gd), null when there are none
 var raids: Node3D            # raids on the Network (view/network_raids.gd), null when they are off
+var _raid_kills_paid := 0    # of raids.kills, the raiders the score has paid for
+var _raid_lost_paid := 0     # of raids.lost, the commuters the score has charged for (off-screen and run down alike)
+var _raid_results_taken := 0 # of the director's results (its tally's cleared + lost), the ones the score has taken
+var _raid_struck_ids := {}   # commuters the pilot's fire struck this raid (instance id -> true): charged once each
 var thump: AudioStreamPlayer # the jolt's thump (made on the first one; none while muted or raids are off)
 var muted := false           # --mute: no sound of the jolt's either
 var _jolt_t := 0.0           # s of the flat view's shake left
@@ -404,6 +408,7 @@ func _ready() -> void:
 		raids.build(self)
 		traffic_net.raids = raids
 		raids.hit_taken.connect(func(_source): jolt(1.0))
+		raids.hit_taken.connect(_raid_hit)
 
 
 func _sim_step() -> void:
@@ -872,6 +877,70 @@ func _chase_result() -> void:
 				skill_score._award("chase", "PATROL ESCAPED", 2000)
 
 
+## The raid's score, after the director's frame: each raider shot since the last frame pays RAIDER DOWN, and each
+## commuter lost costs COMMUTER LOST (off-screen ticks have no signal, so the count is read: one charge for each one lost,
+## whichever way it was). A new raid (the director's counts back at 0) starts the count again.
+func _raid_sync() -> void:
+	if raids == null or skill_score == null:
+		return
+	var P: Dictionary = RaidsScript.RAID_POINTS
+	if raids.kills < _raid_kills_paid:
+		_raid_kills_paid = 0
+	if raids.lost < _raid_lost_paid:
+		_raid_lost_paid = 0
+	while _raid_kills_paid < raids.kills:
+		_raid_kills_paid += 1
+		skill_score._award("raid", "RAIDER DOWN", int(P.raider))
+	while _raid_lost_paid < raids.lost:
+		_raid_lost_paid += 1
+		skill_score.deduct("raid", "COMMUTER LOST", int(P.commuter_lost))
+	if raids.state != "on":
+		_raid_struck_ids.clear()
+
+
+## A restart: the score's counts of the raid begin again.
+func _raid_reset_score() -> void:
+	_raid_kills_paid = 0
+	_raid_lost_paid = 0
+	_raid_struck_ids.clear()
+
+
+## A raider rammed the craft: a hit taken costs points (the jolt is the view's; it never costs health).
+func _raid_hit(_source: String) -> void:
+	if skill_score:
+		skill_score.deduct("raid", "HIT TAKEN", int(RaidsScript.RAID_POINTS.hit))
+
+
+## The pilot's fire struck a commuter: during a raid, 150 points the first time for each one (a stream of bolts is
+## one strike); with no raid on, nothing.
+func _raid_struck(car) -> void:
+	if raids == null or skill_score == null or raids.state != "on":
+		return
+	var id: int = car.get_instance_id()
+	if _raid_struck_ids.has(id):
+		return
+	_raid_struck_ids[id] = true
+	skill_score.deduct("raid", "COMMUTER STRUCK", int(RaidsScript.RAID_POINTS.struck))
+
+
+## A raid ended (the director's result stays as it left it, so a result is taken when its tally has grown): cleared pays 2000 and 20 for each commuter not lost; lost only says so.
+func _raid_result() -> void:
+	if raids == null or int(raids.tally.cleared) + int(raids.tally.lost) <= _raid_results_taken:
+		return
+	_raid_sync()      # (the frame's last kills and losses first)
+	var how: String = raids.result
+	_raid_results_taken = int(raids.tally.cleared) + int(raids.tally.lost)
+	var times := int(raids.tally[how]) if raids.tally.has(how) else 0
+	match how:
+		"cleared":
+			_flash("RAID CLEARED  (%d)" % times)
+			if skill_score:
+				var P: Dictionary = RaidsScript.RAID_POINTS
+				skill_score._award("raid", "RAID CLEARED", int(P.cleared) + int(P.saved_each) * maxi(0, RaidsScript.SAVED_START - raids.lost))
+		"lost":
+			_flash("RAID LOST  (%d)" % times)
+
+
 ## The dash on the Network: the target city and how far (straight line), where you left and your
 ## clock since; a racer's line while one's about.
 func _net_text() -> String:
@@ -1057,6 +1126,7 @@ func _respawn() -> void:
 	net_air_t0 = -1.0
 	if raids:
 		raids.reset()
+		_raid_reset_score()
 	if minimap:
 		minimap.waypoint = {}
 	brake_point = -1.0
@@ -1228,6 +1298,8 @@ func _process(delta: float) -> void:
 	gunnery = GunneryScript.frame(self, gunnery, delta)   # (after the camera and the world: it lays the gun on what the view is on)
 	if gunnery and raids and not gunnery.killed.is_connected(raids.on_kill):
 		gunnery.killed.connect(raids.on_kill)      # (a raider shot down reaches the raid: whichever of the two came later)
+	if gunnery and raids and not gunnery.struck_commuter.is_connected(_raid_struck):
+		gunnery.struck_commuter.connect(_raid_struck)      # (a commuter struck by the pilot's fire, in a raid, costs points)
 	if skill_score:
 		if traffic_net:
 			skill_score.observe_traffic(traffic_net.cars, minf(delta, 0.05))
@@ -1927,6 +1999,8 @@ func _sync_world() -> void:
 				_chase_result()
 		if raids:
 			raids.update(get_process_delta_time())
+			_raid_sync()
+			_raid_result()
 		_patrol_lights()
 		if minimap:
 			minimap.marks = traffic_net.marks(sim.pod.x, sim.pod.y, 40000.0)

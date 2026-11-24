@@ -12,6 +12,7 @@ func setup() -> void:
 		"near": Synth.make_chime([660.0, 990.0], 0.32),
 		"turn": Synth.make_chime([587.33, 880.0], 0.32),
 		"jump": Synth.make_chime([523.25, 783.99, 1046.5], 0.46),
+		"penalty": Synth.make_chime([130.81, 98.0], 0.38),   # (raids: points lost; low and short of the rewards' bright chimes)
 	}
 	player = AudioStreamPlayer.new()
 	add_child(player)

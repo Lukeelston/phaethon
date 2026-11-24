@@ -49,6 +49,10 @@ const RAIDER_HEADWAY := 0.45              # s: a raider's headway with no prey
 const PREY_REACH := 3000.0               # m: the farthest ahead a commuter is its prey
 const HEADING_BELOW := 30.0              # m/s: slower, the pick looks the way the craft points, not the way it goes
 const GRACE := 1.0                       # s: a raider in contact is one hit taken, then none for this long
+const SAVED_START := 60                  # commuters a raid starts with: the clearing pays for each one not lost
+## The score (view/skill_score.gd): raiders shot and raids cleared are awards; commuters lost, hits taken and
+## commuters struck by the pilot's own fire are deductions (never health).
+const RAID_POINTS := {"raider": 250, "cleared": 2000, "saved_each": 20, "commuter_lost": 40, "hit": 100, "struck": 150}
 const CONTACT_CRAFT := 14.0              # m from the pod or either engine's centre to a raider's centre, in three dimensions: a ram
 
 static var enabled := false      # raids

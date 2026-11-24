@@ -109,6 +109,18 @@ func _award(kind: String, label: String, points: int, skill := true) -> void:
 	if feedback.size() > 8:
 		feedback.pop_front()
 
+## Points taken away (Raids: a commuter lost, a hit taken, a commuter struck by your fire): the total never goes
+## below 0, the chain and its multiplier are lost, and the best is never lowered.
+func deduct(kind: String, label: String, points: int) -> void:
+	total = maxi(0, total - points)
+	chain = 0
+	multiplier = 1.0
+	award_text = "%s  -%d" % [label, points]
+	_notice_until = time + 2.4
+	feedback.append({"kind": "penalty", "points": -points, "multiplier": 1.0})
+	if feedback.size() > 8:
+		feedback.pop_front()
+
 func on_event(event: Dictionary) -> void:
 	var kind: String = event.type
 	if kind in ["hit", "scrape", "bump", "smash", "crash", "ground"]:
