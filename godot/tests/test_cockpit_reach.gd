@@ -20,8 +20,9 @@
 ##                since 2026-11-23. The same checks as the power's controls: the levers' sweep passes through nothing of
 ##                it and keeps POWER_GAP clear (and the lever on its side, again, with its bat thrown up, straight out as
 ##                in mid-throw, and thrown down); in place it crosses nothing but the starboard console it is let into
-##                (the Basilisk's, unmoved, nothing but BASILISK_GUN_KNOWN, told); its bat is within GUN_REACH of the
-##                grip on its side at half and at full throttle and of that shoulder (the Basilisk's, unmoved, within
+##                (the Basilisk's, unmoved, nothing but BASILISK_GUN_KNOWN, told); the lever on its side keeps GUN_GAP
+##                off it; its bat is within GUN_REACH of the grip on its side at half and at full throttle and of that
+##                shoulder (the Basilisk's, unmoved, within
 ##                BASILISK_GUN_REACH); and from the seat nothing hides its GUN lamp at idle or at full, nor its SAFE lamp
 ##                at idle
 ## --headless --xr-mode off --audio-driver Dummy -s res://tests/test_cockpit_reach.gd -- --mute
@@ -44,10 +45,13 @@ const POWER_GAP := 0.012         # ... and this of the POWER switch and its butt
 const BUTTON_REACH := Vector3(0.20, 0.15, 0.71)
 const SWITCH_REACH := Vector3(0.28, 0.20, 0.75)
 # The GUN switch's bat (m, at most): from the grip on its side at half and at full throttle, and from that shoulder.
-# The Phaethon's and the Talon's are held to the POWER button's bars. The Basilisk's stands where it has since
-# 2026-11-23, by the right elbow on the sill (0.452 / 0.561 / 0.662): held to tests/test_turret.gd's 0.6 m from the
-# right grip, and to the button's bar from the shoulder.
-const GUN_REACH := BUTTON_REACH
+# The Phaethon's and the Talon's are held to the POWER switch's: the other guarded throw switch a hand reaches down to
+# from its lever (0.266 / 0.187 / 0.732 above), as ruled after the review of 2026-11-24 (the POWER button's tighter
+# bars left room under the MODE switch only for a half-size switch, its box 4 mm from MODE's). The Basilisk's stands
+# where it has since 2026-11-23, by the right elbow on the sill (0.452 / 0.561 / 0.662): held to tests/test_turret.gd's
+# 0.6 m from the right grip, and to the button's bar from the shoulder.
+const GUN_REACH := Vector3(0.27, 0.19, 0.73)
+const GUN_GAP := 0.014           # m: the lever on its side keeps at least this off the GUN switch, its bat up, out or down
 const BASILISK_GUN_REACH := Vector3(0.60, 0.60, 0.71)
 # What the Basilisk's GUN switch crosses where it has stood since 2026-11-23 (its place is not this stage's to move):
 # the hull's sill it stands on, and the cabin roof's glass, through its panel's top (5 edges). Told, not failed.
@@ -199,8 +203,8 @@ func _run() -> void:
 					await physics_frame
 				_lever(v, k, 0.5)
 			(gun.lever as Node3D).rotation.x = lean_was
-			_check("%s: and of the GUN switch by %s mm, its bat up, out or down (%s; %s wanted), passing through none of it (%s)" % [id, _mm(least.GunSwitch), where.get("GunSwitch", "-"), _mm(POWER_GAP), gun_through],
-				least.GunSwitch >= POWER_GAP and gun_through.is_empty())
+			_check("%s: and of the GUN switch by %s mm, its bat up, out or down (%s; %s wanted), passing through none of it (%s)" % [id, _mm(least.GunSwitch), where.get("GunSwitch", "-"), _mm(GUN_GAP), gun_through],
+				least.GunSwitch >= GUN_GAP and gun_through.is_empty())
 
 		# ---- in place: the whole cabin, the levers at idle
 		for k in 2:

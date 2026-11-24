@@ -2226,22 +2226,21 @@ func set_gun(on: bool) -> void:
 	print("GUN: switch ", "GUN" if on else "SAFE")
 
 
-const GUN_AT := Vector3(0.543, 0.305, 0.085)      # (the Phaethons' GUN switch: gun_switch_mount)
-const GUN_TILT := deg_to_rad(5.0)
-const GUN_SCALE := 0.5
+const GUN_AT := Vector3(0.544, 0.26, 0.06)      # (the Phaethons' GUN switch: gun_switch_mount)
+const GUN_TILT := deg_to_rad(10.0)
+const GUN_SCALE := 0.7
 
 
 ## Where the GUN switch stands (cockpit rig).
 ##   phaethon_family (the Phaethon, the Talon: sim/pilot_craft.gd phaethon_based; Raids, 2026-11-24): on the starboard
-##     console's inboard face up front, outboard of the right lever and under the MODE switch: the POWER button's place
-##     on the port side, mirrored, a short drop of the hand from the grip. GUN_SCALE of the MODE switch's size, its face
-##     GUN_TILT up from the console's side and standing a little proud of it: GUN up, SAFE down, the legends read along
-##     the console. Its bat is 0.197 m from the right grip at half throttle, 0.132 at full and 0.691 from the right
-##     shoulder, inside the POWER button's bars; the right lever keeps over 20 mm off it through its whole travel, the
-##     bat up, straight out (mid-throw) or down (tests/test_cockpit_reach.gd); and the box before it where a hand throws
-##     it is 4 mm clear of the MODE switch's (tests/test_gun_controls.gd). Its size is what the place leaves: any larger and
-##     its box met the MODE switch's (review, 2026-11-24), or its bat came out of the button's bars or under the grip
-##     at full throttle.
+##     console's inboard face up front, outboard of the right lever, low and forward under the MODE switch: the POWER
+##     switch's place on the port side, mirrored, a little higher. The POWER switch's size (GUN_SCALE of the MODE
+##     switch's), its face GUN_TILT up from the console's side, its top edge in the console's face and its foot standing
+##     proud: GUN up, SAFE down, the legends read along the console. Its bat is 0.240 / 0.153 / 0.722 m from the right
+##     grip at half and full throttle and the right shoulder, inside the POWER switch's own (0.27 / 0.19 / 0.73); the
+##     right lever keeps about 20 mm off it through its whole travel, the bat up, straight out (mid-throw) or down
+##     (tests/test_cockpit_reach.gd); and the box before it where a hand throws it is 24 mm clear of the MODE switch's
+##     (tests/test_gun_controls.gd; review, 2026-11-24: where they met, one push up threw both).
 ##   else (the Basilisk, 2026-11-23): on the starboard sill's inner ledge, by the right elbow and inside the canopy's
 ##     foot, a hand's reach up from the right lever, its face turned in and up at the seat.
 static func gun_switch_mount(phaethon_family: bool) -> Transform3D:

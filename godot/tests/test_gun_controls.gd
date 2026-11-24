@@ -13,8 +13,8 @@
 ##                             over the GUN switch, a throw down and one up, and back, throws the GUN switch nowhere,
 ##                             at SAFE or at GUN
 ##   check_zones_apart         (the Phaethon's and the Talon's) the box before the GUN switch where a hand throws it and
-##                             the MODE switch's box, each mapped through its mount, do not meet (two oriented boxes, by
-##                             their separating axes: exact, not sampled)
+##                             the MODE switch's box, each mapped through its mount, stand ZONES_APART apart at the least
+##                             (two oriented boxes, by their separating axes: exact, not sampled)
 ##   check_overshoot_push      a push up through the aft upper part of the GUN switch's box that runs on 1.5 cm past its
 ##                             top, faster than either switch asks, throws the GUN switch and not the MODE switch above
 ##                             it (at STARFIGHTER, so a push up there would throw it to SPEED): a hand that has just
@@ -31,6 +31,7 @@ const Cockpit := preload("res://vr/vr_cockpit.gd")
 const Craft := preload("res://sim/pilot_craft.gd")
 const Switch := preload("res://vr/mode_switch.gd")
 const DT := 1.0 / 90.0
+const ZONES_APART := 0.010    # m: the GUN switch's box and the MODE switch's, at the least
 const SECTIONS := 9           # built; X and the boxes in the Phaethon and in the Talon; the menu; not by accident; the overshoot; the flat view
 var failures := 0
 var checks := 0
@@ -356,7 +357,7 @@ func check_zones_apart(id: String) -> void:
 		check("%s: a GUN switch whose box to measure (none)" % id, false)
 		return
 	var gap := _box_gap(_zone_box(v.gun_switch), _zone_box(v.mode_switch))
-	check("%s: the GUN switch's box and the MODE switch's do not meet: %.1f mm apart at the least, along a separating axis" % [id, gap * 1000.0], gap > 0.0)
+	check("%s: the GUN switch's box and the MODE switch's stand %.1f mm apart at the least, along a separating axis (%.0f wanted)" % [id, gap * 1000.0, ZONES_APART * 1000.0], gap >= ZONES_APART)
 	sections += 1
 
 
@@ -399,8 +400,8 @@ func _push_up(start: Vector3, end: Vector3) -> Array:
 func check_overshoot_push() -> void:
 	var s: float = v.gun_switch.transform.basis.y.length()      # (its scale: 1.5 cm past the box's top, in its own metres)
 	var aft := Switch.ZONE.x * 0.8
-	var start := _on_gun(Vector3(aft, -0.02, 0.04))
-	var past_top := _on_gun(Vector3(aft, Switch.ZONE.y + 0.015 / s, 0.04))
+	var start := _on_gun(Vector3(aft, -0.02, 0.03))
+	var past_top := _on_gun(Vector3(aft, Switch.ZONE.y + 0.015 / s, 0.03))
 	var a := _push_up(start, past_top)
 	check("a push up at 0.8 m/s through the aft upper part of the GUN switch's box, 1.5 cm on past its top (%d of its frames in the MODE switch's box), throws it (%s) and not the MODE switch over it (handling \"%s\", wanted \"starfighter\"; its bat %s)" % [
 		a[3], "GUN" if a[0] else "SAFE", a[1], "down" if a[2] else "up"], a[0] and a[1] == "starfighter" and a[2])
