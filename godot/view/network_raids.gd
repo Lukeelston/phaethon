@@ -356,17 +356,12 @@ func _hunt(c, delta: float) -> void:
 		_run_down(p)
 
 
-## A commuter run down: out of traffic, a flash, lost.
+## A commuter run down: out of traffic, lost, and commuter_lost for the flash.
 func _run_down(p) -> void:
 	traffic.knock_out(p)
 	lost += 1
 	print("RAID: commuter lost")
-	commuter_lost.emit(p.x, p.y)
-	var gun = view.gunnery if view != null else null
-	if gun != null:       # (the Basilisk's effects, where the craft has them)
-		var at := Vector3(p.x, p.y, gun.ground_at(p.x, p.y) + 2.0)
-		gun._add_fx(at, "fireball", 0.9, 34.0)
-		gun._add_fx(at, "flash", 0.12, 90.0)
+	commuter_lost.emit(p.x, p.y)      # (the flash is drawn from this, for every craft)
 
 
 ## A raider shot (the gun's: before traffic.knock_out takes it out of traffic).

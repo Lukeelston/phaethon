@@ -538,11 +538,19 @@ func _run() -> void:
 	var h_prey = _car(T, st[0], st[1] + 600.0 / st[2], 1, 0, 80.0, false)
 	R.pack.append(h_raider)
 	var is_prey: bool = R.prey_of(h_raider) == h_prey
-	var h_took: float = await _hold(v, 15.0, [h_raider, h_prey], func(): return not T.cars.has(h_prey))
+	var sig := []
+	R.commuter_lost.connect(func(x: float, y: float): sig.append(Vector2(x, y)))
+	var seen := [Vector2(h_prey.x, h_prey.y)]
+	var h_took: float = await _hold(v, 15.0, [h_raider, h_prey], func():
+		if T.cars.has(h_prey):
+			seen[0] = Vector2(h_prey.x, h_prey.y)
+		return not T.cars.has(h_prey))
+	await _hold(v, 0.5, [h_raider])      # (a second run-down would show: there is no commuter left)
 	var h_gone: bool = not T.cars.has(h_prey)
-	_check("a raider 600 m behind a commuter in its lane (its prey %s; %d lanes): the commuter knocked out after %.1f s (%s), lost %d (want 1), the raider still hunting (%s, state \"%s\"), no kill counted (%d)" % [
-			is_prey, nl, h_took, h_gone, R.lost, T.cars.has(h_raider) and R.pack.has(h_raider), R.state, R.kills],
-		is_prey and h_gone and h_took <= 15.0 and R.lost == 1 and T.cars.has(h_raider) and R.state == "on" and R.kills == 0)
+	var sig_ok: bool = sig.size() == 1 and sig[0].distance_to(seen[0]) < 3.0
+	_check("a raider 600 m behind a commuter in its lane (its prey %s; %d lanes): the commuter knocked out after %.1f s (%s), lost %d (want 1), the raider still hunting (%s, state \"%s\"), no kill counted (%d); commuter_lost emitted %d time(s), at the commuter (%s)" % [
+			is_prey, nl, h_took, h_gone, R.lost, T.cars.has(h_raider) and R.pack.has(h_raider), R.state, R.kills, sig.size(), sig_ok],
+		is_prey and h_gone and h_took <= 15.0 and R.lost == 1 and T.cars.has(h_raider) and R.state == "on" and R.kills == 0 and sig_ok)
 
 	# lane change: the prey one lane over, the raider takes its lane
 	st = _stage(v, e3, X)
