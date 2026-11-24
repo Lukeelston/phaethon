@@ -51,8 +51,20 @@ func trial(id: String) -> Vector2:
 
 
 func check_airframe(craft) -> void:
-	var material: StandardMaterial3D = craft.engines[0].get_node("ShrikeFairing").get_active_material(0)
-	check("paint, surface finish and relief use the imported maps", material.albedo_texture != null and material.roughness_texture == material.metallic_texture and material.ao_texture == material.roughness_texture and material.normal_texture != null)
+	# (Geometry pass, 2026-11-23: the baked bodywork's finish is view/fleet_finish.gdshader, which adds
+	# the occlusion baked into the vertex colours and specular anti-aliasing to the same three maps.)
+	var material: ShaderMaterial = craft.engines[0].get_node("ShrikeFairing").get_active_material(0)
+	var atlas := load("res://art/shrike/enamel.tres") as StandardMaterial3D
+	check("paint, surface finish and relief use the imported maps", material.shader == preload("res://view/fleet_finish.gdshader")
+		and material.get_shader_parameter("albedo_map") == atlas.albedo_texture
+		and material.get_shader_parameter("orm_map") == atlas.roughness_texture and atlas.roughness_texture == atlas.metallic_texture
+		and material.get_shader_parameter("normal_map") == atlas.normal_texture and atlas.normal_texture != null)
+	var colours = (craft.engines[0].get_node("ShrikeFairing").mesh as ArrayMesh).surface_get_arrays(0)[Mesh.ARRAY_COLOR]
+	var shaded := 0
+	if colours != null:
+		for c: Color in colours:
+			shaded += int(c.a < 0.6)
+	check("the engine carries baked occlusion in its vertex colours (%d vertices in shadow)" % shaded, colours != null and shaded > 50)
 	for k in 2:
 		var body: ArrayMesh = craft.engines[k].get_node("ShrikeFairing").mesh
 		check("engine %d batches its fixed surfaces into one paint material" % k, body.get_surface_count() == 1 and body.surface_get_material(0) == material and not craft.engines[k].has_node("NacelleShell"))

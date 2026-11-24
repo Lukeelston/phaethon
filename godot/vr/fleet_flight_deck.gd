@@ -512,7 +512,7 @@ func _floor() -> ArrayMesh:
 	var screw := Finish.socket_screw(.004, STEEL)
 	for side: float in [-1.0, 1.0]:
 		var cx := side * .201
-		var plate := Finish.beveled_plate(Vector3(.378, .008, 1.035), .003)
+		var plate := Finish.rounded_slab(Vector3(.378, .008, 1.035))
 		panels.append([plate, Kit.at(Vector3(cx, .141, 0)), upholstery])
 		match id:
 			P.SHRIKE:
@@ -521,9 +521,9 @@ func _floor() -> ArrayMesh:
 					var z := -.348 + j * .174
 					for dx in [-.074, .074]:
 						trim.append([bay, Kit.at(Vector3(cx + dx, .145, z)), Color("#596169")])
-					panels.append([Finish.beveled_plate(Vector3(.277, .003, .008)), Kit.at(Vector3(cx, .154, z + .064)), DARK])
+					panels.append([Finish.rounded_slab(Vector3(.277, .003, .008)), Kit.at(Vector3(cx, .154, z + .064)), DARK])
 				trim.append(
-					[Finish.beveled_plate(Vector3(.007, .005, .84), .001), Kit.at(Vector3(cx + .158 * side, .147, 0)), accent]
+					[Finish.rounded_slab(Vector3(.007, .005, .84)), Kit.at(Vector3(cx + .158 * side, .147, 0)), accent]
 				)
 			P.ORRERY:
 				# Oiled slats with a black seam between boards and brass end straps.
@@ -531,26 +531,26 @@ func _floor() -> ArrayMesh:
 					var x := cx + (j - 2) * .067
 					var colour := Color("#805a3d").lerp(Color("#af8154"), float((j * 3) % 5) * .14)
 					facing.append(
-						[Finish.beveled_plate(Vector3(.063, .008, .954)), Kit.at(Vector3(x, .148, 0)), colour]
+						[Finish.rounded_slab(Vector3(.063, .008, .954)), Kit.at(Vector3(x, .148, 0)), colour]
 					)
 				for z in [-.449, .449]:
-					trim.append([Finish.beveled_plate(Vector3(.343, .003, .020)), Kit.at(Vector3(cx, .1535, z)), accent])
+					trim.append([Finish.rounded_slab(Vector3(.343, .003, .020)), Kit.at(Vector3(cx, .1535, z)), accent])
 			P.KILN:
 				# Bar grating over the dark drain pan. The backing remains visible through every slot.
 				for j in 5:
 					trim.append(
-						[Finish.beveled_plate(Vector3(.008, .007, .915), .001), Kit.at(Vector3(cx + (j - 2) * .072, .147, 0)), STEEL]
+						[Finish.rounded_slab(Vector3(.008, .007, .915)), Kit.at(Vector3(cx + (j - 2) * .072, .147, 0)), STEEL]
 					)
 				for j in 15:
 					trim.append(
 						[
-							Finish.beveled_plate(Vector3(.337, .008, .023)),
+							Finish.rounded_slab(Vector3(.337, .008, .023)),
 							Kit.at(Vector3(cx, .152, -.441 + .063 * j)),
 							Color("#69706b")
 						]
 					)
 				for z in [-.477, .477]:
-					panels.append([Finish.beveled_plate(Vector3(.336, .004, .029)), Kit.at(Vector3(cx, .147, z)), accent])
+					panels.append([Finish.rounded_slab(Vector3(.336, .004, .029)), Kit.at(Vector3(cx, .147, z)), accent])
 			P.VESPER:
 				# Three flush longitudinal runners taper toward the toe.
 				for j in 3:
@@ -564,7 +564,7 @@ func _floor() -> ArrayMesh:
 		for edge in [-1, 1]:
 			trim.append(
 				[
-					Finish.beveled_plate(Vector3(.014, .003, .267)),
+					Finish.rounded_slab(Vector3(.014, .003, .267)),
 					Kit.at(Vector3(side * .46 + edge * .034, .1415, .2035)),
 					STEEL
 				]
@@ -751,6 +751,151 @@ func _stitch_mesh() -> ArrayMesh:
 	return st.commit()
 
 
+## A four-point harness laid on this craft's own seat (geometry pass, 2026-11-23). The Phaethon's
+## straps are flat boards placed for its own seat; on these seats they stood off the back and through
+## the cushion. Here each strap is found on the seat by casting onto it: the shoulder straps come
+## through slots in the back at shoulder height, run down its face and over the cushion to a cam-lock
+## buckle, and the lap belts come over the cushion from the hips to the same buckle. Webbing has a
+## rolled edge; the slots, the adjusters and the buckle are radiused castings.
+const STRAP_RED := Color(0.6, 0.08, 0.06)
+
+
+func fit_harness(shell: Node3D, interior: Node3D) -> void:
+	var seats := []
+	for label in ["FleetSeat", "seat_back", "seat_cushion"]:
+		var piece := shell.find_child(label, true, false) as MeshInstance3D
+		if piece and piece.mesh:
+			seats.append([piece.mesh.generate_triangle_mesh(), _relative(piece, interior)])
+	if seats.is_empty():
+		return
+	var webbing := SurfaceTool.new()
+	webbing.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var hardware := []
+	# Where the buckle sits: on the cushion, a hand's width ahead of the back.
+	var lap := _drop(seats, Vector3(0, .75, .80), Vector3.DOWN)
+	if lap.is_empty():
+		return
+	var buckle: Vector3 = lap.position + lap.normal * .006
+	for side: float in [-1.0, 1.0]:
+		# Shoulder strap: down the back's face from its slot, then over the cushion to the buckle.
+		var down := []
+		for i in 15:
+			var t := i / 14.0
+			var y := lerpf(.86, .32, t)
+			var hit := _drop(seats, Vector3(side * lerpf(.10, .125, t), y, .45), Vector3.BACK)
+			if not hit.is_empty() and hit.normal.dot(Vector3.FORWARD) > .35:
+				down.append([hit.position + hit.normal * .0035, hit.normal])
+		if down.size() < 4:
+			continue
+		var run := down.duplicate()
+		var heel: Vector3 = down.back()[0]
+		for i in range(1, 9):
+			var t := i / 8.0
+			var guide := heel.lerp(buckle + Vector3(side * .028, 0, 0), t)
+			var hit := _drop(seats, Vector3(guide.x, .75, guide.z), Vector3.DOWN)
+			if not hit.is_empty() and hit.position.y > heel.y - .2:
+				var lift := .0035 + .02 * sin(PI * t) * (1.0 - t)
+				run.append([hit.position + hit.normal * lift, hit.normal])
+		_strap(webbing, run, .046, .0032)
+		var slot: Vector3 = down[0][0]
+		var slot_n: Vector3 = down[0][1]
+		hardware.append([Finish.rounded_slab(Vector3(.062, .006, .022), .006, .0025), _facing(slot - slot_n * .002, slot_n, Vector3.UP), DARK])
+		# The length adjuster, at the chest.
+		var mid: Array = down[down.size() / 3]
+		hardware.append([Finish.rounded_slab(Vector3(.056, .005, .034), .007, .0022), _facing(mid[0] + mid[1] * .003, mid[1], Vector3.UP), STEEL])
+		# Lap belt: from the hip, where the cushion meets the bolster, across to the buckle.
+		var belt := []
+		for i in 11:
+			var t := i / 10.0
+			var guide := Vector3(side * lerpf(.27, .035, t), .75, lerpf(.95, buckle.z + .012, t))
+			var hit := _drop(seats, guide, Vector3.DOWN)
+			if not hit.is_empty() and hit.position.y > buckle.y - .25:
+				belt.append([hit.position + hit.normal * .004, hit.normal])
+		if belt.size() > 3:
+			_strap(webbing, belt, .05, .0034)
+	var mesh := webbing.commit()
+	mesh.surface_set_material(0, Finish.tinted("webbing", STRAP_RED))
+	hardware.append([Finish.rounded_slab(Vector3(.078, .012, .066), .014, .004), _facing(buckle + lap.normal * .004, lap.normal, Vector3.FORWARD), STEEL])
+	hardware.append([Finish.rounded_slab(Vector3(.052, .006, .028), .008, .0025), _facing(buckle + lap.normal * .0115 + Vector3(0, 0, -.012), lap.normal, Vector3.FORWARD), Color("#c9ccd0")])
+	Kit.compound(hardware, mesh, true)
+	mesh.surface_set_material(1, Finish.satin())
+	var node := MeshInstance3D.new()
+	node.name = "Harness"
+	node.mesh = mesh
+	interior.add_child(node)
+
+
+## The transform taking `node`'s local frame into `frame`'s, without the scene tree (the cockpit
+## can be assembled outside it, as test_cockpit_assembly does).
+static func _relative(node: Node3D, frame: Node3D) -> Transform3D:
+	var up := func(n: Node) -> Transform3D:
+		var xf := Transform3D.IDENTITY
+		while n is Node3D:
+			xf = (n as Node3D).transform * xf
+			n = n.get_parent()
+		return xf
+	return (up.call(frame) as Transform3D).affine_inverse() * (up.call(node) as Transform3D)
+
+
+## The nearest point on any seat along a ray, with its surface normal facing back along the ray.
+static func _drop(seats: Array, from: Vector3, direction: Vector3) -> Dictionary:
+	var best := {}
+	var nearest := INF
+	for seat: Array in seats:
+		var xf: Transform3D = seat[1]
+		var local := xf.affine_inverse()
+		var hit: Dictionary = (seat[0] as TriangleMesh).intersect_ray(local * from, (local.basis * direction).normalized())
+		if hit.is_empty():
+			continue
+		var at: Vector3 = xf * (hit.position as Vector3)
+		var d := from.distance_to(at)
+		if d < nearest:
+			nearest = d
+			var n: Vector3 = (xf.basis * (hit.normal as Vector3)).normalized()
+			best = {position = at, normal = n if n.dot(direction) < 0.0 else -n}
+	return best
+
+
+## A basis whose +Y is `normal`, its +Z as near `along` as the normal allows.
+static func _facing(origin: Vector3, normal: Vector3, along: Vector3) -> Transform3D:
+	var z := along.slide(normal).normalized()
+	return Transform3D(Basis(normal.cross(z), normal, z), origin)
+
+
+## A strap along `run` ([point, surface normal] pairs): woven webbing with a rolled edge.
+func _strap(st: SurfaceTool, run: Array, width: float, thick: float) -> void:
+	var profile: Array[Vector2] = []
+	for k in 7:
+		var a := -PI * .5 + PI * k / 6.0
+		profile.append(Vector2(width * .5 - thick * .5 + cos(a) * thick * .5, sin(a) * thick * .5))
+	for k in 7:
+		var a := PI * .5 + PI * k / 6.0
+		profile.append(Vector2(-width * .5 + thick * .5 + cos(a) * thick * .5, sin(a) * thick * .5))
+	var previous := []
+	for i in run.size():
+		var at: Vector3 = run[i][0]
+		var up: Vector3 = run[i][1]
+		var tangent: Vector3 = ((run[mini(i + 1, run.size() - 1)][0] as Vector3) - (run[maxi(i - 1, 0)][0] as Vector3)).normalized()
+		var across := tangent.cross(up).normalized()
+		up = across.cross(tangent).normalized()
+		var ring := []
+		for k in profile.size():
+			var p: Vector2 = profile[k]
+			var bulge := Vector2(p.x - signf(p.x) * (width * .5 - thick * .5), p.y)
+			var n := (across * bulge.x + up * bulge.y).normalized() if absf(p.x) > width * .5 - thick * .5 - .0001 else up * signf(p.y)
+			ring.append([at + across * p.x + up * p.y, n])
+		if not previous.is_empty():
+			for k in ring.size():
+				var j := (k + 1) % ring.size()
+				_soft_quad(st, previous[k], ring[k], ring[j], previous[j])
+		if i == 0 or i == run.size() - 1:
+			# A cut, heat-sealed end.
+			var out := -tangent if i == 0 else tangent
+			for k in range(1, ring.size() - 1):
+				_soft_triangle(st, [ring[0][0], out], [ring[k][0], out], [ring[k + 1][0], out])
+		previous = ring
+
+
 func fit_cabin(interior: Node3D) -> void:
 	# The hip liners and dashboard retain their original clearances. The outer sill carries
 	# the craft-specific fittings, outboard of the switches and the entire lever sweep.
@@ -794,7 +939,7 @@ func fit_cabin(interior: Node3D) -> void:
 					var z := -.15 + k * .24
 					panels.append(
 						[
-							Finish.beveled_plate(Vector3(.044, .066, .224), .009),
+							Finish.rounded_slab(Vector3(.044, .066, .224), .012, .009),
 							Kit.at(Vector3(s * .736, .449, z + .13), Vector3(-.15, 0, s * .18)),
 							paint
 						]

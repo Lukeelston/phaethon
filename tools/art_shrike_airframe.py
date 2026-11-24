@@ -8,6 +8,7 @@ import math
 import struct
 
 import numpy as np
+from art_bake_ao import bake as bake_ao
 from art_shrike_finish import ART, REGIONS, SIZE, generate
 
 TAU = math.tau
@@ -18,11 +19,34 @@ def vec(x, y, z):
 
 
 def unit(v):
-    return v / max(np.linalg.norm(v), 1e-12)
+    # (Geometry pass: the floor was 1e-12, and a millimetre part's finite-difference normal is smaller
+    # than that before it is normalised: it came out short, not unit.)
+    return v / max(np.linalg.norm(v), 1e-300)
 
 
 def signed(v, p):
     return 0.0 if abs(v) < 1e-9 else math.copysign(abs(v) ** p, v)
+
+
+def sides_for(radius, authored=0):
+    """Enough sides that a turned part's silhouette reads round where it is seen. Never fewer than
+    the part was authored with. (Geometry pass, 2026-11-23: 8-sided rods and lines read as faceted
+    prisms from the seat and at the 13 m the pilot sees the engines.)"""
+    for limit, count in ((0.004, 10), (0.012, 12), (0.03, 14), (0.07, 16), (0.15, 20), (0.3, 24)):
+        if radius < limit:
+            return max(authored, count)
+    return max(authored, 28)
+
+
+def rolled_end(lip, steps=3):
+    # (Two steps are plenty on anything thinner than a forearm: the round is a few pixels across.)
+    """A quarter-round from an end face to the full-size wall: (axial offset, radial inset, angle)
+    from the face (angle 0, inset lip) to the wall (angle pi/2, inset 0)."""
+    out = []
+    for j in range(steps + 1):
+        phi = math.pi * 0.5 * j / steps
+        out.append((lip * (1 - math.cos(phi)), lip * (1 - math.sin(phi)), phi))
+    return out
 
 
 def panel_faces(points, normal):
@@ -107,33 +131,51 @@ class Mesh:
         if uv is None:
             uv = (p[:, axes] - p[:, axes].min(axis=0)) / np.maximum(np.ptp(p[:, axes], axis=0), 1e-6)
         uv = np.asarray(uv)
-        rim, outer, tex = [], [], []
         shortest = min(np.linalg.norm(b - a) for a, b in zip(p, np.roll(p, -1, axis=0)))
-        radius = min(thick * 0.28, shortest * 0.042)
-        # Two tangent points and one crown per plan-view corner remove the pointed ends.
-        for i in range(len(p)):
-            j = (i + 1) % len(p)
-            trim = min(radius * 4, shortest * 0.20)
-            ka = trim / np.linalg.norm(p[i - 1] - p[i])
-            kb = trim / np.linalg.norm(p[j] - p[i])
-            a, b = (p[i - 1] - p[i]) * ka, (p[j] - p[i]) * kb
-            for t in (0, 0.5, 1):
-                rim.append(p[i] + (1 - t) ** 2 * a + t * t * b)
-                outer.append(unit(np.cross(t * b - (1 - t) * a, n)))
-                tex.append(uv[i] + (1 - t) ** 2 * ka * (uv[i - 1] - uv[i]) + t * t * kb * (uv[j] - uv[i]))
-        rim, outer = np.asarray(rim), np.asarray(outer)
-        top = rim - outer * radius + n * thick
-        for outline, normal, material, front in ((top, n, region, True), (rim, -n, edge, False)):
+        # Geometry pass: a pressing's edge radius is a good fraction of its gauge, so the edge catches
+        # a thin highlight from any side (it was 28%, one 45 degree facet, and read as a cut edge), and
+        # five points per plan-view corner make a radiused corner, not a clipped one. A deep concave
+        # corner cannot take the full radius (the face's inset outline folds over itself there), so
+        # the radius steps down until the face is clean, ending at the old pressing.
+        for radius, trim_of, ts in (
+            (min(thick * 0.42, shortest * 0.08), 0.24, (0, 0.25, 0.5, 0.75, 1)),
+            (min(thick * 0.30, shortest * 0.06), 0.22, (0, 0.25, 0.5, 0.75, 1)),
+            (min(thick * 0.28, shortest * 0.042), 0.20, (0, 0.5, 1)),
+        ):
+            rim, outer, tex = [], [], []
+            for i in range(len(p)):
+                j = (i + 1) % len(p)
+                trim = min(radius * 4, shortest * trim_of)
+                ka = trim / np.linalg.norm(p[i - 1] - p[i])
+                kb = trim / np.linalg.norm(p[j] - p[i])
+                a, b = (p[i - 1] - p[i]) * ka, (p[j] - p[i]) * kb
+                for t in ts:
+                    rim.append(p[i] + (1 - t) ** 2 * a + t * t * b)
+                    outer.append(unit(np.cross(t * b - (1 - t) * a, n)))
+                    tex.append(uv[i] + (1 - t) ** 2 * ka * (uv[i - 1] - uv[i]) + t * t * kb * (uv[j] - uv[i]))
+            rim, outer = np.asarray(rim), np.asarray(outer)
+            top = rim - outer * radius + n * thick
+            try:
+                faces = [panel_faces(top, n), panel_faces(rim, n)]
+            except ValueError:
+                continue
+            tris = np.asarray(faces[0])
+            facing = np.cross(top[tris[:, 1]] - top[tris[:, 0]], top[tris[:, 2]] - top[tris[:, 0]]) @ n
+            if np.all(facing > -1e-12):
+                break
+        for outline, normal, material, front, tris in ((top, n, region, True, faces[0]), (rim, -n, edge, False, faces[1])):
             base = len(self.pos)
             for pt, st in zip(outline, tex):
                 self.vertex(pt, normal, st, material)
-            for a, b, c in panel_faces(outline, n):
+            for a, b, c in tris:
                 self.indices.extend((base + a, base + b, base + c) if front else (base + a, base + c, base + b))
         prev = None
         for angle, height in (
             (0, 0),
             (0, thick - radius),
+            (math.pi / 8, thick - radius),
             (math.pi / 4, thick - radius),
+            (math.pi * 3 / 8, thick - radius),
             (math.pi / 2, thick - radius),
         ):
             base = len(self.pos)
@@ -150,62 +192,93 @@ class Mesh:
                     self.indices.extend((prev + i, prev + j, base + j, prev + i, base + j, base + i))
             prev = base
 
-    def sweep(self, points, radius, region, sides):
-        """Bend a continuous tube. Share each section through bends and cap only its ends."""
+    def sweep(self, points, radius, region, sides, ends=True):
+        """Bend a continuous tube. Share each section through bends; roll each cut end into its cap.
+        Geometry pass: a bend is sampled every 12 degrees or so (it was three rings whatever the
+        angle, so a right-angle bend showed two creases), and an end is a quarter-round, not a cut."""
         pts = np.asarray(points, dtype=float)
+        sides = sides_for(radius, sides)
         path = [pts[0]]
         for i in range(1, len(pts) - 1):
             incoming, outgoing = pts[i] - pts[i - 1], pts[i + 1] - pts[i]
-            if np.dot(unit(incoming), unit(outgoing)) > 0.985:
+            turn = math.acos(max(-1.0, min(1.0, float(np.dot(unit(incoming), unit(outgoing))))))
+            if turn < 0.17:
                 path.append(pts[i])
                 continue
-            span = min(radius * 2.6, np.linalg.norm(incoming) * 0.30, np.linalg.norm(outgoing) * 0.30)
+            span = min(radius * 3.0, np.linalg.norm(incoming) * 0.38, np.linalg.norm(outgoing) * 0.38)
             a, b = -unit(incoming) * span, unit(outgoing) * span
-            path.extend(pts[i] + a * (1 - t) ** 2 + b * t * t for t in (0, 0.5, 1))
+            steps = max(2, min(10, math.ceil(math.degrees(turn) / 12)))
+            path.extend(pts[i] + a * (1 - t) ** 2 + b * t * t for t in np.linspace(0, 1, steps + 1))
         path.append(pts[-1])
         directions = [unit(b - a) for a, b in zip(path, path[1:])]
         tangents = [directions[0], *[unit(a + b) for a, b in zip(directions, directions[1:])], directions[-1]]
+        # Each ring: centre, tangent, radius, normal tilt toward the tangent (for the rolled ends).
+        lip = min(radius * 0.32, 0.012, np.linalg.norm(path[1] - path[0]) * 0.3, np.linalg.norm(path[-1] - path[-2]) * 0.3)
+        rings = [(p, t, radius, 0.0) for p, t in zip(path, tangents)]
+        if ends and lip > radius * 0.05:
+            steps = 3 if radius >= 0.06 else 2
+            start = [(path[0] + tangents[0] * ax, tangents[0], radius - inset, -math.cos(phi))
+                     for ax, inset, phi in rolled_end(lip, steps)]
+            end = [(path[-1] - tangents[-1] * ax, tangents[-1], radius - inset, math.cos(phi))
+                   for ax, inset, phi in reversed(rolled_end(lip, steps))]
+            rings = start + rings[1:-1] + end
         right = unit(np.cross(tangents[0], np.eye(3)[np.argmin(np.abs(tangents[0]))]))
-        for i, (point, tangent) in enumerate(zip(path, tangents)):
+        count = len(rings)
+        for i, (point, tangent, r, tilt) in enumerate(rings):
             right = unit(right - tangent * np.dot(right, tangent))
             up = np.cross(tangent, right)
             base = len(self.pos)
             ring = []
             for k in range(sides + 1):
                 angle = TAU * k / sides
-                normal = right * math.cos(angle) + up * math.sin(angle)
-                ring.append(point + normal * radius)
-                self.vertex(ring[-1], normal, (i / (len(path) - 1), k / sides), region)
+                radial = right * math.cos(angle) + up * math.sin(angle)
+                ring.append(point + radial * r)
+                normal = unit(radial * math.sqrt(max(0.0, 1 - tilt * tilt)) + tangent * tilt)
+                self.vertex(ring[-1], normal, (i / (count - 1), k / sides), region)
             if i:
                 for k in range(sides):
                     a, b = prev + k, base + k
                     self.indices.extend((a, a + 1, b + 1, a, b + 1, b))
-            if i in (0, len(path) - 1):
+            if i in (0, count - 1):
                 self.poly(ring[:-1], -tangent if i == 0 else tangent, region)
             prev = base
 
-    def pipe(self, a, b, r, region="metal", sides=12, r2=None, lip=0, crowned=False):
-        a, b = np.asarray(a), np.asarray(b)
+    def pipe(self, a, b, r, region="metal", sides=12, r2=None, lip=None, crowned=False):
+        """A turned part from a to b. Geometry pass, 2026-11-23: every cut end is rolled (a quarter-round
+        of `lip`, by default a fifth of the radius up to 6 mm) so no turned part shows a knife edge, and
+        thin parts get enough sides to read round. Six sides and no longer than it is wide is a nut:
+        flats, with its corners and faces radiused like a pressing."""
+        a, b = np.asarray(a, dtype=float), np.asarray(b, dtype=float)
+        length = np.linalg.norm(b - a)
         axis = unit(b - a)
         right = unit(np.cross(axis, vec(0, 1, 0) if abs(axis[1]) < 0.92 else vec(0, 0, 1)))
         up = np.cross(axis, right)
         end = r if r2 is None else r2
-        if lip:
-            length = np.linalg.norm(b - a)
-            lip = min(lip, length * 0.22, min(r, end) * 0.20)
-            stations = np.array([(0, r - lip), (lip / length, r), (1 - lip / length, end), (1, end - lip)])
-            if crowned:
-                stations = np.array([(0, r - lip), (0.5, (r + end) / 2), (1, end - lip)])
+        if sides == 6 and length <= 1.5 * max(r, end):
+            hexagon = [a + (right * math.cos(TAU * k / 6) + up * math.sin(TAU * k / 6)) * r for k in range(6)]
+            self.panel(hexagon, axis, region, length, region)
+            return
+        sides = sides_for(max(r, end), sides)
+        if lip is None:
+            lip = min(min(r, end) * 0.2, 0.006)
+        lip = min(lip, length * 0.22, min(r, end) * 0.30)
+        if crowned:
+            stations = np.array([(0, r - lip), (0.5, (r + end) / 2), (1, end - lip)])
+        elif lip > 1e-5:
+            steps = 3 if min(r, end) >= 0.1 else 2
+            head = [(ax / length, r - inset) for ax, inset, _ in rolled_end(lip, steps)]
+            tail = [(1 - ax / length, end - inset) for ax, inset, _ in reversed(rolled_end(lip, steps))]
+            stations = np.array(head + tail)
+        else:
+            stations = np.array([(0, r), (1, end)])
 
         def p(u, v):
-            radial = r + (end - r) * u
-            if lip:
-                t = u * (len(stations) - 1)
-                i = min(int(t), len(stations) - 2)
-                u, radial = stations[i] + (stations[i + 1] - stations[i]) * (t - i)
+            t = u * (len(stations) - 1)
+            i = min(int(t), len(stations) - 2)
+            u, radial = stations[i] + (stations[i + 1] - stations[i]) * (t - i)
             return a + (b - a) * u + (right * math.cos(TAU * v) + up * math.sin(TAU * v)) * radial
 
-        self.grid(len(stations) - 1 if lip else 1, sides, p, region, True)
+        self.grid(len(stations) - 1, sides, p, region, True)
         self.poly([p(1, i / sides) for i in range(sides)], axis, region)
         self.poly([p(0, i / sides) for i in range(sides)], -axis, region)
 
@@ -863,7 +936,9 @@ def pod_brake(side):
     inside = [p + vec(-side * 0.027, 0, 0) for p in pts]
     m.panel(inside, (side, 0, 0), "coachwork", 0.027, "metal", uv)
     for y in (-0.077, 0.061):
-        m.pipe((-side * 0.044, y, 0.055), (-side * 0.125, y * 0.4, 0.61), 0.013, "bronze", 8, 0.008)
+        # (Geometry pass: the strut's root starts in the hinge barrel. It met the barrel only with the
+        # rim of its cut end; rolled, that end stood 4 mm clear.)
+        m.pipe((-side * 0.036, y, 0.040), (-side * 0.125, y * 0.4, 0.61), 0.013, "bronze", 8, 0.008)
     m.pipe((-side * 0.01, -0.133, 0.026), (-side * 0.01, 0.13, 0.026), 0.022, "metal", 14)
     return m
 
@@ -1089,7 +1164,7 @@ def seat_back():
     return m
 
 
-def write_glb(parts, destination=ART / "bodywork.glb", generator="Phaethon Shrike tooling"):
+def write_glb(parts, destination=ART / "bodywork.glb", generator="Phaethon Shrike tooling", occlusion=True):
     blob = bytearray()
     views, accessors, meshes, nodes = [], [], [], []
 
@@ -1124,6 +1199,15 @@ def write_glb(parts, destination=ART / "bodywork.glb", generator="Phaethon Shrik
                 ("TEXCOORD_0", m.uv, "VEC2"),
             )
         }
+        if occlusion:
+            # Baked ambient occlusion in the vertex colour's alpha (tools/art_bake_ao.py); the colour
+            # itself stays white. Alpha because Godot's glTF import leaves it linear.
+            seen = bake_ao(m.pos, m.norm, m.indices, getattr(m, "ao_reach", None))
+            rgba = np.full((len(m.pos), 4), 255, dtype=np.uint8)
+            rgba[:, 3] = np.round(seen * 255).astype(np.uint8)
+            attr["COLOR_0"] = accessor(rgba, "VEC4", 5121, "u1", 34962)
+            accessors[attr["COLOR_0"]]["normalized"] = True
+            print(f"{name}: occlusion mean {seen.mean():.3f}, darkest {seen.min():.2f}")
         idx = accessor(m.indices, "SCALAR", 5123, "<u2", 34963)
         meshes.append({"name": name, "primitives": [{"attributes": attr, "indices": idx}]})
         nodes.append({"name": name, "mesh": len(meshes) - 1})

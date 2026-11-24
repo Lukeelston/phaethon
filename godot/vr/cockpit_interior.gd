@@ -219,11 +219,13 @@ func build(fleet_controls := false) -> void:
 				_fastener(q + Vector3(dx, 0.016, z), metal, rubber)
 
 	# harness on the seat: shoulder straps down the seat back, a lap belt across the cushion
+	# (The pilot craft lay their own harness on their own seats: vr/fleet_flight_deck.gd fit_harness.)
 	var strap := Color(0.6, 0.08, 0.06)
-	for s in [-1.0, 1.0]:
+	for s in ([] if fleet_controls else [-1.0, 1.0]):
 		web.append([Kit.box(Vector3(0.05, 0.62, 0.012)), Transform3D(Basis.from_euler(Vector3(-0.12, 0, 0)), Vector3(0.11 * s, 0.6, 1.012)), strap])
 		web.append([Kit.box(Vector3(0.25, 0.05, 0.012)), Transform3D(Basis.from_euler(Vector3(-PI / 2.0, 0.35 * s, 0)), Vector3(0.14 * s, 0.215, 0.76)), strap])
-	metal.append([Kit.rounded_box(Vector3(0.08, 0.06, 0.02), 5.0, 5), Kit.at(Vector3(0, 0.222, 0.72), Vector3(-PI / 2.0, 0, 0)), steel])
+	if not fleet_controls:
+		metal.append([Kit.rounded_box(Vector3(0.08, 0.06, 0.02), 5.0, 5), Kit.at(Vector3(0, 0.222, 0.72), Vector3(-PI / 2.0, 0, 0)), steel])
 
 	_batch(solid, Finish.powder_coat(), "PowderCoatedPanels")
 	_batch(metal, Finish.machined(), "MachinedHardware")

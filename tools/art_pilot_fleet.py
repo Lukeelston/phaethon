@@ -10,7 +10,7 @@ import sys
 
 import numpy as np
 from art_pilot_fleet_finish import ART, FLEET, REGIONS, make_maps
-from art_shrike_airframe import TAU, Mesh, signed, unit, vec, write_glb
+from art_shrike_airframe import TAU, Mesh, signed, sides_for, unit, vec, write_glb
 
 
 class Surface(Mesh):
@@ -27,12 +27,14 @@ def loft(m, rows, mat, exp=0.78, sides=32, closed=True):
     if closed:
         # Press a narrow radius into each cut end. Keep the end plane and the
         # full-size body inside their authored envelope, including grip and brake pivots.
+        # Geometry pass, 2026-11-23: a true quarter-round in four rows (it was two rows: a 45 degree
+        # chamfer, which caught the light as one bright facet), and a little more of it.
         rounded = []
         for end, neighbour in ((rows[0], rows[1]), (rows[-1], rows[-2])):
             run = abs(neighbour[0] - end[0])
-            radius = min(min(end[3:]) * 0.16, run * 0.19, 0.018)
+            radius = min(min(end[3:]) * 0.22, run * 0.24, 0.024)
             lip = []
-            for a in (0, math.pi / 2):
+            for a in (0, math.pi / 6, math.pi / 3, math.pi / 2):
                 sample = end + (neighbour - end) * (radius * (1 - math.cos(a)) / max(run, 1e-8))
                 sample[3:] -= radius * (1 - math.sin(a))
                 lip.append(sample)
@@ -113,20 +115,68 @@ def hoop(m, z, x, y, w, h, t, depth, mat, exp=0.94, bonded=False):
 
 
 def tube(m, pts, r, mat, n=10):
-    m.sweep(pts, r, mat, max(n, 10))
+    m.sweep(pts, r, mat, sides_for(r, max(n, 10)))
 
 
 def badge(m, z, x, y, side, width, height):
-    # A plaque reads nose-to-tail on port, tail-to-nose on starboard.
-    right = vec(0, 0, -side * width / 2)
-    up = vec(0, height / 2, 0)
-    p = vec(side * x, y, z)
-    m.poly(
-        [p - right + up, p + right + up, p + right - up, p - right - up],
-        (side, 0, 0),
-        "badge",
-        [(0, 0), (1, 0), (1, 1), (0, 1)],
-    )
+    """A plaque reads nose-to-tail on port, tail-to-nose on starboard. Geometry pass, 2026-11-23: it
+    is pressed onto the skin it is fixed to, found by casting onto the part as built so far, stands
+    2.5 mm proud of it, and its edge turns down into the skin. It was a flat card a few millimetres
+    off a curved skin, and its long edges stood up to 3 cm clear of it."""
+    pos = np.asarray(m.pos)
+    tri = np.asarray(m.indices).reshape(-1, 3)
+    a, b, c = pos[tri[:, 0]], pos[tri[:, 1]], pos[tri[:, 2]]
+    e1, e2 = b - a, c - a
+    out = vec(side, 0, 0)
+
+    def cast(target):
+        # Nearest skin from 3 cm in front of the plaque's plane to 6 cm behind it.
+        origin, d = target + out * 0.03, -out
+        p = np.cross(d, e2)
+        det = np.sum(e1 * p, axis=1)
+        ok = np.abs(det) > 1e-12
+        inv = np.where(ok, 1 / np.where(ok, det, 1), 0)
+        s = origin - a
+        u = np.sum(s * p, axis=1) * inv
+        q = np.cross(s, e1)
+        v = (q @ d) * inv
+        t = np.sum(e2 * q, axis=1) * inv
+        hit = ok & (u >= 0) & (v >= 0) & (u + v <= 1) & (t > 0) & (t < 0.09)
+        if not hit.any():
+            return target, out
+        k = np.where(hit)[0][np.argmin(t[hit])]
+        n = unit(np.cross(e1[k], e2[k]))
+        return origin + d * t[k], (n if np.dot(n, out) > 0 else -n)
+
+    lip_u, lip_v = 0.0015 / width, 0.0015 / height
+    us = [-lip_u, *np.linspace(0, 1, 19), 1 + lip_u]
+    vs = [-lip_v, *np.linspace(0, 1, 7), 1 + lip_v]
+    points = np.zeros((len(vs), len(us), 3))
+    texture = np.zeros((len(vs), len(us), 2))
+    for j, v in enumerate(vs):
+        for i, u in enumerate(us):
+            edge = not (0 <= u <= 1 and 0 <= v <= 1)
+            at, n = cast(vec(side * x, y + (0.5 - v) * height, z + side * width * (0.5 - u)))
+            points[j, i] = at + n * (-0.004 if edge else 0.0025)
+            texture[j, i] = (min(max(u, 0), 1), min(max(v, 0), 1))
+    quads = [(j, i) for j in range(len(vs) - 1) for i in range(len(us) - 1)]
+    faces = {}
+    for j, i in quads:
+        f = np.cross(points[j + 1, i] - points[j, i], points[j, i + 1] - points[j, i])
+        faces[(j, i)] = f if np.dot(f, out) >= 0 else -f
+    base = len(m.pos)
+    for j in range(len(vs)):
+        for i in range(len(us)):
+            around = [faces[(jj, ii)] for jj in (j - 1, j) for ii in (i - 1, i) if (jj, ii) in faces]
+            m.vertex(points[j, i], unit(np.sum(around, axis=0)), tuple(texture[j, i]), "badge")
+    row = len(us)
+    for j, i in quads:
+        p, q, r, s = base + j * row + i, base + j * row + i + 1, base + (j + 1) * row + i, base + (j + 1) * row + i + 1
+        for t in ((p, q, s), (p, s, r)):
+            # Each triangle faces the way its own vertices' normals do (the turned-down edge stands
+            # nearly edge-on to the plaque, so the plaque's facing does not settle it).
+            f = np.cross(m.pos[t[1]] - m.pos[t[0]], m.pos[t[2]] - m.pos[t[0]])
+            m.indices.extend(t if np.dot(f, sum(m.norm[k] for k in t)) >= 0 else (t[0], t[2], t[1]))
 
 
 def blade(m, pts, thickness, mat, normal=(0, 1, 0)):
@@ -219,8 +269,10 @@ def shared_engine(m, side, craft):
     # Outer actuators, common mounting centres for distinct moving leaves.
     for s in (-1, 1):
         m.pipe((s * 0.52, 0.02, -3.25), (s * 1.24, 0, -3.25), 0.077, "gold", 12)
-        for up in (-1, 1):
-            m.pipe((s * 0.44, up * 0.43, 1.40), (s * 0.71, up * 0.50, 1.40), 0.065, "alloy", 12)
+        # (Geometry pass: the lower one's root now starts inside the body. It ended a few centimetres
+        # under the Orrery's and the Vesper's bodies, a stub in the air.)
+        m.pipe((s * 0.44, 0.43, 1.40), (s * 0.71, 0.50, 1.40), 0.065, "alloy", 12)
+        m.pipe((s * 0.30, -0.18, 1.40), (s * 0.71, -0.50, 1.40), 0.065, "alloy", 12)
 
 
 def orrery_engine(m, side):
@@ -575,6 +627,11 @@ SILLS = {
 }
 
 
+# The brake lamps across the aft bulkhead: the first's offset and the pitch. (Geometry pass: the
+# Orrery's bulkhead tapers to 0.28 m each side, and its outer lamps' sockets hung past its end.)
+LAMPS = {"orrery": (0.10, 0.075), "kiln": (0.14, 0.105), "vesper": (0.14, 0.105)}
+
+
 def aft_bulkhead(m, craft):
     ends = {"orrery": (2.38, 0.80, 0.43), "kiln": (1.86, 0.97, 0.34), "vesper": (1.89, 0.67, 0.20)}
     z, w, h = ends[craft]
@@ -589,10 +646,27 @@ def aft_bulkhead(m, craft):
         "access",
         0.36 if craft == "kiln" else 0.80,
     )
+    first, pitch = LAMPS[craft]
     for s in (-1, 1):
         for i in range(3):
-            x = s * (0.14 + i * 0.105)
+            x = s * (first + i * pitch)
             m.pipe((x, -0.11, z - 0.008), (x, -0.11, z + 0.024), 0.041, "dark", 14)
+
+
+SILL_SPLIT = 2  # rows set between each pair of authored sill stations
+
+
+def smooth_rows(rows, split=SILL_SPLIT):
+    """Rows through every authored station, `split` more between each pair, on a shape-preserving
+    cubic (no overshoot). Geometry pass, 2026-11-23: a loft is straight between its stations, so
+    where the sill steps 25 to 32 cm outboard to clear the consoles it creased at the station and its
+    smooth normals smeared across the crease (shading turned up to 89 degrees from the faces)."""
+    from scipy.interpolate import PchipInterpolator
+
+    table = np.asarray(rows, dtype=float)
+    index = np.arange(len(table))
+    dense = np.linspace(0, len(table) - 1, (len(table) - 1) * (split + 1) + 1)
+    return [tuple(r) for r in PchipInterpolator(index, table, axis=0)(dense)]
 
 
 def cab(craft):
@@ -604,14 +678,17 @@ def cab(craft):
             # and pilot's hands clear of the inside of the sill.
             x = max(x, 0.79 + w)
         rows.append((z, x, y, w, h))
+    authored = len(rows)
+    rows = smooth_rows(rows)
+    k = SILL_SPLIT + 1  # an authored station's index among the smoothed rows
     exp = {"orrery": 0.87, "kiln": 0.32, "vesper": 0.69}[craft]
     for s in (-1, 1):
         body = [(z, x * s, y, w, h) for z, x, y, w, h in rows]
         loft(m, body, "enamel", exp)
         angles = (40, 110) if s > 0 else (70, 140)
-        for j in range(1, len(body) - 2):
-            skin_patch(m, body, j + 0.07, j + 0.92, angles, exp, "access", 0.009)
-        skin_patch(m, body, 2.28, 2.81, angles, exp, "number", 0.022)
+        for j in range(1, authored - 2):
+            skin_patch(m, body, (j + 0.07) * k, (j + 0.92) * k, angles, exp, "access", 0.009)
+        skin_patch(m, body, 2.28 * k, 2.81 * k, angles, exp, "number", 0.022)
         trim = [(z, s * (x + w * 0.75), y + h * 0.31, w * 0.29, h * 0.29) for z, x, y, w, h in rows]
         loft(m, trim, "accent", exp, 20)
         # Shorter fairlead with paired fork cheeks either side of each drawbar.
@@ -957,18 +1034,28 @@ def canopy(craft):
 def seat(craft):
     m = Surface()
     mat = {"orrery": "cloth", "kiln": "rubber", "vesper": "dark"}[craft]
-    loft(
-        m,
-        [
-            (0.42, 0, -0.43, 0.17, 0.04),
-            (0.52, 0, -0.42, 0.25, 0.075),
-            (0.80, 0, -0.43, 0.28, 0.075),
-            (1.02, 0, -0.43, 0.26, 0.081),
-            (1.12, 0, -0.40, 0.21, 0.044),
-        ],
-        mat,
-        0.57,
-    )
+    # Geometry pass, 2026-11-23: the cushion is filled, not extruded. It swells into a front pillow
+    # under the thighs and a second at the hips, with the dip between where the seam would pull, and
+    # a stitched piping cord runs along both upper edges and rolls off at the front and back.
+    cushion = [
+        (0.42, 0, -0.43, 0.17, 0.04),
+        (0.47, 0, -0.425, 0.225, 0.064),
+        (0.53, 0, -0.42, 0.255, 0.078),
+        (0.665, 0, -0.424, 0.274, 0.083),
+        (0.80, 0, -0.43, 0.28, 0.076),
+        (0.915, 0, -0.43, 0.273, 0.086),
+        (1.02, 0, -0.43, 0.26, 0.081),
+        (1.12, 0, -0.40, 0.21, 0.044),
+    ]
+    loft(m, cushion, mat, 0.57, 36)
+    table = np.asarray(cushion)
+    for s in (-1, 1):
+        cord = []
+        for z in np.linspace(0.445, 1.095, 44):
+            _, x, y, w, h = [np.interp(z, table[:, 0], table[:, k]) for k in range(5)]
+            a = math.radians(52)
+            cord.append(vec(s * (w * math.cos(a) ** 0.57 + 0.0012), y + h * math.sin(a) ** 0.57 + 0.0012, z))
+        tube(m, cord, 0.0042, "accent", 10)
     # Shape the back in its upright frame, then tilt it back at the shoulders.
     back = Surface()
     levels = {
@@ -981,30 +1068,36 @@ def seat(craft):
     for i in range(pads):
         a = -0.32 + i * 0.54 / pads
         w = 0.22 if i < pads - 1 else 0.19
+        # Each tuft is pillowed: full at its middle, pulled down to the seams at either edge.
+        span = 0.54 / pads
         loft(
             back,
             [
                 (a, 0, 0.082, w * 0.91, 0.025),
                 (a + 0.017, 0, 0.082, w, 0.034),
-                (a + 0.54 / pads - 0.018, 0, 0.082, w, 0.034),
-                (a + 0.54 / pads - 0.007, 0, 0.082, w * 0.93, 0.016),
+                (a + span * 0.5, 0, 0.082, w * 1.01, 0.043),
+                (a + span - 0.018, 0, 0.082, w, 0.034),
+                (a + span - 0.007, 0, 0.082, w * 0.93, 0.016),
             ],
             mat,
             0.50,
-            20,
+            28,
         )
     for s in (-1, 1):
         loft(
             back,
             [
                 (-0.35, s * 0.21, 0.065, 0.034, 0.045),
+                (-0.27, s * 0.235, 0.08, 0.045, 0.064),
                 (-0.18, s * 0.25, 0.09, 0.051, 0.074),
+                (-0.05, s * 0.262, 0.094, 0.056, 0.080),
                 (0.07, s * 0.27, 0.09, 0.057, 0.074),
+                (0.13, s * 0.245, 0.077, 0.046, 0.060),
                 (0.18, s * 0.21, 0.06, 0.031, 0.04),
             ],
             "accent",
             0.74,
-            18,
+            24,
         )
     # -90 degrees about X brings local Z up and local Y toward the driver.
     for i, (x, y, z) in enumerate(back.pos):
@@ -1162,9 +1255,10 @@ def grip(craft):
 def lens(craft):
     m = Surface()
     z = {"orrery": 2.38, "kiln": 1.86, "vesper": 1.89}[craft]
+    first, pitch = LAMPS[craft]
     for s in (-1, 1):
         for i in range(3):
-            x = s * (0.14 + i * 0.105)
+            x = s * (first + i * pitch)
             m.pipe((x, -0.11, z + 0.023), (x, -0.11, z + 0.037), 0.032, "ceramic", 14)
     return m
 

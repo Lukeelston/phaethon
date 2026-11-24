@@ -7,7 +7,7 @@ const Kit := preload("res://view/mesh_kit.gd")
 const FINISH := preload("res://view/fleet_finish.gdshader")
 const ASSET_DIR := "res://art/pilot_fleet/"
 const STROBES := {"orrery": Vector3(1.315, 0.24, 1.04), "kiln": Vector3(1.02, 0.54, 2.34), "vesper": Vector3(2.22, 0.58, 1.83)}
-const CAB_HINGES := {"orrery": Vector3(1.295, -0.24, 0.77), "kiln": Vector3(1.396, -0.17, 0.70), "vesper": Vector3(1.252, -0.12, 0.69)}
+const CAB_HINGES := {"orrery": Vector3(1.295, -0.24, 0.77), "kiln": Vector3(1.396, -0.17, 0.70), "vesper": Vector3(1.241, -0.12, 0.69)}
 
 var id: String
 var parts := {}
@@ -20,22 +20,29 @@ static func supports(vehicle: String) -> bool:
 func _init(vehicle: String) -> void:
 	id = vehicle
 	var source := (load(ASSET_DIR + id + ".glb") as PackedScene).instantiate()
-	var finish := load(ASSET_DIR + id + ".tres") as StandardMaterial3D
-	var paint: Material = finish
+	var paint := finish_for(load(ASSET_DIR + id + ".tres") as StandardMaterial3D)
 	if Livery.accent() != null:
-		var custom := ShaderMaterial.new()
-		custom.shader = FINISH
-		custom.set_shader_parameter("enamel", Livery.coat("paint"))
-		custom.set_shader_parameter("albedo_map", finish.albedo_texture)
-		custom.set_shader_parameter("normal_map", finish.normal_texture)
-		custom.set_shader_parameter("orm_map", finish.roughness_texture)
-		paint = custom
+		paint.set_shader_parameter("repaint", true)
+		paint.set_shader_parameter("enamel", Livery.coat("paint"))
 	for node: MeshInstance3D in source.find_children("*", "MeshInstance3D", true, false):
 		# The import is shared between flights. Only this flight owns the surface assignment.
 		var own := node.mesh.duplicate() as ArrayMesh
 		own.surface_set_material(0, paint)
 		parts[node.name] = own
 	source.free()
+
+
+## The baked bodywork's finish (view/fleet_finish.gdshader) from the atlas material the tools write:
+## the same maps, with the occlusion the tools bake into the vertex colours, and specular
+## anti-aliasing on the radiused edges. The Shrike's bodywork uses it too (view/shrike_airframe.gd).
+static func finish_for(atlas: StandardMaterial3D) -> ShaderMaterial:
+	var mat := ShaderMaterial.new()
+	mat.shader = FINISH
+	mat.set_shader_parameter("albedo_map", atlas.albedo_texture)
+	mat.set_shader_parameter("normal_map", atlas.normal_texture)
+	mat.set_shader_parameter("orm_map", atlas.roughness_texture)
+	mat.set_shader_parameter("normal_depth", atlas.normal_scale)
+	return mat
 
 
 func part(key: StringName) -> ArrayMesh:

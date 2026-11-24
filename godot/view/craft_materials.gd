@@ -154,6 +154,70 @@ static func beveled_plate(size: Vector3, bevel := 0.002) -> ArrayMesh:
 	return st.commit()
 
 
+## A plate with radiused plan corners and rolled top and bottom edges, every normal smooth: the
+## pilot craft's decks, rails and straps (geometry pass, 2026-11-23). beveled_plate's single
+## 45-degree cuts, flat-shaded, catch the light as a hard line; a rolled edge catches it as a thin
+## highlight. The Phaethon keeps beveled_plate.
+static func rounded_slab(size: Vector3, corner := -1.0, edge := -1.0) -> ArrayMesh:
+	var h := size * 0.5
+	var c := minf(minf(h.x, h.z) * 0.6, 0.012) if corner < 0.0 else corner
+	c = minf(c, minf(h.x, h.z) * 0.98)
+	var e := minf(h.y * 0.9, 0.004) if edge < 0.0 else edge
+	e = minf(e, minf(h.y * 0.98, c * 0.98))
+	const ARC := 5          # points per plan corner
+	const ROLL := 3         # steps per rolled edge
+	var dirs: Array[Vector2] = []
+	var centres: Array[Vector2] = []
+	for q in 4:
+		var centre := Vector2((h.x - c) * (1.0 if q == 0 or q == 3 else -1.0), (h.z - c) * (1.0 if q < 2 else -1.0))
+		for i in ARC:
+			var a := (q + float(i) / (ARC - 1)) * PI * 0.5
+			dirs.append(Vector2(cos(a), sin(a)))
+			centres.append(centre)
+	# Section from the bottom face's edge round to the top face's: radial inset, height, normal (out, up).
+	var section: Array[Vector4] = []
+	for j in ROLL + 1:
+		var phi := PI * 0.5 * j / ROLL
+		section.append(Vector4(e * (1.0 - sin(phi)), -h.y + e - e * cos(phi), sin(phi), -cos(phi)))
+	for j in ROLL + 1:
+		var phi := PI * 0.5 * j / ROLL
+		section.append(Vector4(e * (1.0 - cos(phi)), h.y - e + e * sin(phi), cos(phi), sin(phi)))
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var rings := []
+	var normals := []
+	for row in section:
+		var ring := PackedVector3Array()
+		var ns := PackedVector3Array()
+		for k in dirs.size():
+			var xz: Vector2 = centres[k] + dirs[k] * (c - row.x)
+			ring.append(Vector3(xz.x, row.y, xz.y))
+			ns.append(Vector3(dirs[k].x * row.z, row.w, dirs[k].y * row.z).normalized())
+		rings.append(ring)
+		normals.append(ns)
+	var count := dirs.size()
+	for r in rings.size() - 1:
+		for k in count:
+			var n := (k + 1) % count
+			_smooth_triangle(st, [rings[r][k], rings[r][n], rings[r + 1][n]], [normals[r][k], normals[r][n], normals[r + 1][n]])
+			_smooth_triangle(st, [rings[r][k], rings[r + 1][n], rings[r + 1][k]], [normals[r][k], normals[r + 1][n], normals[r + 1][k]])
+	for k in count:
+		var n := (k + 1) % count
+		_triangle(st, Vector3(0, -h.y, 0), rings[0][k], rings[0][n], Vector3.DOWN)
+		_triangle(st, Vector3(0, h.y, 0), rings[-1][k], rings[-1][n], Vector3.UP)
+	st.index()
+	return st.commit()
+
+
+## One triangle with its own normal at each corner, wound as Godot's front (clockwise from outside).
+static func _smooth_triangle(st: SurfaceTool, points: Array, normals: Array) -> void:
+	var outward: Vector3 = normals[0] + normals[1] + normals[2]
+	var order := [0, 1, 2] if (points[1] - points[0]).cross(points[2] - points[0]).dot(outward) < 0.0 else [0, 2, 1]
+	for i in order:
+		st.set_normal(normals[i])
+		st.add_vertex(points[i])
+
+
 static func _plate_ring(hx: float, hz: float, y: float, cut: float) -> Array[Vector3]:
 	return [Vector3(-hx + cut, y, -hz), Vector3(hx - cut, y, -hz),
 		Vector3(hx, y, -hz + cut), Vector3(hx, y, hz - cut),

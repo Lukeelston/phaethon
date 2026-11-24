@@ -29,9 +29,29 @@ The preview uses the assembled game geometry in studio lighting. Physical headse
 
 The cockpit renderer accepts `--interiors` for a seated view and instrument close-up of all four. `python tools/art_cockpit_meters.py` rebuilds the printed instrument cards.
 
+## Geometry and finish pass (2026-11-23)
+
+A pass over Shrike RS, Orrery IX, Kiln Six and Vesper to take out edges that read as computer-made, keeping each craft's design. The Phaethon and every part it shares with the four (the authored consoles, the mode switch panel, the vectoring nozzle) are untouched.
+
+- **Turned parts and lines** (`Mesh.pipe`, `Mesh.sweep` in `tools/art_shrike_airframe.py`): every cut end is a quarter-round instead of a knife edge. Bends are sampled about every 12 degrees instead of three rings per bend. Thin parts get enough sides to read round (`sides_for`). A six-sided part no longer than it is wide is a nut, with radiused flats.
+- **Pressings and brackets** (`Mesh.panel`): the edge radius rises to 42% of the gauge, in five steps, with radiused plan corners. A deep concave corner steps its radius down until the face is clean.
+- **Loft ends** (`loft` in `tools/art_pilot_fleet.py`): a true quarter-round in four rows, where it was a two-row chamfer.
+- **Cab sills**: the stations run on a shape-preserving cubic (`smooth_rows`). Where a sill stepped up to 32 cm outboard to clear the consoles, it creased, and its shading turned up to 89 degrees from its faces.
+- **Seats**: the cushion is filled into a front pillow and a hip pillow, each tuft of the back is pillowed, the bolsters are crowned, and a piping cord runs along both upper edges of the cushion.
+- **Harness** (`fit_harness` in `vr/fleet_flight_deck.gd`): straps are cast onto each craft's own seat. The shoulder straps come through slots in the back and run down its face, past an adjuster, to a cam-lock buckle on the cushion; the lap belts come from the hips to the same buckle. The Phaethon's flat straps were placed for its own seat, and on these seats they stood off the back.
+- **Deck plates, slats, gratings and sill blocks**: `Finish.rounded_slab` replaces `beveled_plate`, giving radiused corners and rolled edges with smooth normals.
+- **Baked occlusion** (`tools/art_bake_ao.py`): each vertex's view of the sky within a short reach is stored in the vertex colour's alpha. It uses NumPy and SciPy only: a voxel shell and 48 rays per vertex. `view/fleet_finish.gdshader` darkens ambient light by it, and direct light by 30% of it, so a hoop on a body or a pipe in a saddle sits in its own contact shadow. There is no runtime cost.
+- **Specular anti-aliasing** in the same shader: roughness widens where the geometry's normal turns within a pixel, so a radiused edge's highlight holds still in the headset.
+
+- **Floating parts**: each badge plaque is cast onto the skin it is fixed to and turns its edge down into that skin; before, it was a flat card a few millimetres off a curved skin. The lower actuator stubs now start inside the engine body (on the Orrery and the Vesper they ended in the air). The Orrery's outer brake-lamp sockets come in onto its tapered bulkhead (`LAMPS`). The Shrike's pod-brake struts start in their hinge barrel. The Vesper's cab-brake hinge moves 11 mm inboard onto the smoothed sill.
+
+Triangles per craft, before and after: Shrike 42,524 to 71,320; Orrery 55,396 to 109,308; Kiln 51,104 to 111,484; Vesper 40,936 to 73,560. Godot's importer generates LODs for these meshes. GPU time was measured at headset size (offscreen 4128 x 2208, MSAA 4x, seat, chase and engine views, base and new builds run turn about, four rounds each). Shrike and Vesper are within 0.01 ms. Orrery is up to 0.05 ms higher, against a 0.15 ms spread between runs of the same build. Kiln's own runs spread by 0.36 ms. No cost could be separated from noise.
+
+`python tools/inspect_craft_meshes.py [ART_DIR] [--strict]` reports, per part: triangles and vertices, pieces, floating pieces, collapsed triangles, reversed normals, the worst normal turn, and the occlusion range. `tests/render_fleet_detail.gd` renders fourteen close-ups per craft, with `--wire` for wireframes.
+
 ## Reproduce
 
-From the worktree, run `python tools/art_pilot_fleet.py` to rebuild the original meshes and finish maps. NumPy and Pillow are required. Import the project before testing.
+From the worktree, run `python tools/art_pilot_fleet.py` (and `python tools/art_shrike_airframe.py` for the Shrike) to rebuild the original meshes and finish maps. NumPy, SciPy and Pillow are required. Import the project before testing, and confirm the import cache is newer than the rebuilt `.glb` files: once, an `--import` run scanned them without reimporting.
 
 ```powershell
 $godot = (Get-Command Godot*_console.exe).Source
