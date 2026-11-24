@@ -48,7 +48,9 @@ func run() -> void:
 		if child is CanvasLayer:
 			child.hide()
 	var cam: Camera3D = game.cam
-	cam.near = .018
+	var seat_frame := cam.global_transform
+	var seat_fov := cam.fov
+	var seat_near := cam.near
 	var hull: MeshInstance3D = game.shell.get_node("PodHull")
 	var craft_frame := hull.global_transform
 	var arms = Shrike.ensure_arms(hull) if id == "shrike" else game.craft.fleet.ensure_arms()
@@ -56,17 +58,17 @@ func run() -> void:
 	if id == "vesper":
 		views.append("exterior-wide")
 	for view: String in views:
+		cam.near = seat_near if view == "seat" else .018
 		if view == "seat":
-			cam.global_position = game.shell.global_transform * Seat.EYE
-			cam.look_at(cam.global_position + craft_frame.basis * Vector3(0,-.075,-1),craft_frame.basis.y)
-			cam.fov = 82
+			cam.global_transform = seat_frame
+			cam.fov = seat_fov
 		elif view == "exterior-wide":
-			cam.global_position = craft_frame * Vector3(3.8,-2.05,-4.1)
-			cam.look_at(craft_frame * Vector3(0,-.15,-.05), craft_frame.basis.y)
+			cam.global_position = craft_frame * Vector3(4.8,2.5,-4.8)
+			cam.look_at(craft_frame * Vector3.ZERO, craft_frame.basis.y)
 			cam.fov = 50
 		else:
-			var eye: Vector3 = {"shrike":Vector3(3.1,.75,-2.9),"orrery":Vector3(3.2,3.6,-3.5),"kiln":Vector3(2.25,.54,-3.8),"vesper":Vector3(1.45,-2.05,-1.85)}[id]
-			var target: Vector3 = {"shrike":Vector3(.52,-.12,-.32),"orrery":Vector3(0,.02,.03),"kiln":Vector3(.38,-.12,-1.7),"vesper":Vector3(0,-.52,-.12)}[id]
+			var eye: Vector3 = {"shrike":Vector3(3.9,1.8,-3.1),"orrery":Vector3(1.30,1.60,-4.57),"kiln":Vector3(2.7,1.72,-3.7),"vesper":Vector3(2.9,1.7,-2.6)}[id]
+			var target: Vector3 = {"shrike":Vector3(0,.16,-.73),"orrery":Vector3(0,.26,-1.40),"kiln":Vector3(.36,.13,-1.32),"vesper":Vector3(.88,.11,-.87)}[id]
 			cam.global_position = craft_frame * eye
 			cam.look_at(craft_frame * target,craft_frame.basis.y)
 			cam.fov = 40 if id == "orrery" else 42
