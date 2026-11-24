@@ -7,13 +7,19 @@
 ##   off           no node, nothing drawn; the cockpit's one call costs next to nothing
 ##   the rails     stand on the road's own samples, at its edges, on its surface (the views' accessor), out to
 ##                 twelve seconds' flying; their colour is the bend's ask against the sim's own grip at the
-##                 speed she is doing; a banked circuit's bank is in it
+##                 speed she is doing, on the scale set from Luke's flights (calm under 1.8, red from 2.7), which
+##                 `pace` moves live; a banked circuit's bank is in it; at no severity are they a vehicle's colour
+##                 (nor an exit's); `dim` dims it all
 ##   the vehicles  one ahead in her lane that she is closing on has a line; one she is not gaining on, one on
 ##                 a road crossing overhead and one on that deck heading her way have none; a busy road keeps
 ##                 only those in her way
 ##   the exits     an exit's chevrons begin seven seconds before its mouth at any speed to 8,000 mph (never
 ##                 less than 8 km), stand on its lane, point the way it leaves, and none is laid nearer than
-##                 two and a half seconds
+##                 two and a half seconds; a gate stands across the lane at the mouth; the row is laid in
+##                 seconds at the speed it was laid for, big at the whole seconds, a quarter apart over the last
+##                 two and a half before that; seen from the seat a chevron keeps one size far off and grows as
+##                 she nears from two and a half seconds off, as a thing of its own size does
+##   the log       a TAC line a second while it is shown, none while it is off or nothing of it is shown
 ##   where         nothing standing still, in the Aurora tube, from an outside camera; the number alone off
 ##                 the roads
 ## --headless --xr-mode off --audio-driver Dummy -s res://tests/test_tactical_display.gd -- --mute
@@ -212,12 +218,14 @@ func _run() -> void:
 
 	# ---- off ----
 	Tactical.wanted = false
+	Tactical.tac_lines = 0
 	var t0 := Time.get_ticks_usec()
 	var gave = null
 	for k in 20000:
 		gave = Tactical.frame(v, gave, 1.0 / 120.0, v._rush_flow, true)
 	var off_us := float(Time.get_ticks_usec() - t0) / 20000.0
-	_check("off: the cockpit's call gives nothing back, builds nothing, and takes %.2f microseconds" % off_us, gave == null and v.find_child("TacticalDisplay", true, false) == null and off_us < 3.0)
+	_check("off: the cockpit's call gives nothing back, builds nothing, writes nothing to the log (%d lines in 167 s of frames), and takes %.2f microseconds" % [Tactical.tac_lines, off_us],
+		gave == null and v.find_child("TacticalDisplay", true, false) == null and off_us < 3.0 and Tactical.tac_lines == 0)
 
 	# ---- the rails ----
 	var e1 := _road(sim, "E1")
@@ -284,15 +292,69 @@ func _run() -> void:
 	var v_hold := sqrt(grip / maxf(bend, 1e-12))
 	_check("the hardest bend of the highways (%s, sample %d: a radius of %.1f km) is in the rails 6 km short of it (station %d), and is held to %.0f mph" % [sim.roads[bend_road].name, bend_i, 0.001 / maxf(bend, 1e-12), bend_at, v_hold * MPH],
 		bend > 1e-6 and absf(bend - hardest) < hardest * 0.02 and absi(int(t.st_i[bend_at]) - bend_i) <= 8)
-	var calm: Color = Tactical.tint(Tactical.load_of(sim, bend, 0.6 * v_hold))
-	var warm: Color = Tactical.tint(Tactical.load_of(sim, bend, 0.99 * v_hold))
-	var hot: Color = Tactical.tint(Tactical.load_of(sim, bend, 1.1 * v_hold))
-	_check("its colour answers the speed: calm at six tenths of that (%s), amber on it (%s), red a tenth over (%s)" % [calm.to_html(false), warm.to_html(false), hot.to_html(false)],
-		calm.is_equal_approx(Tactical.CALM) and warm.is_equal_approx(Tactical.WARM) and hot.is_equal_approx(Tactical.HOT)
-		and Tactical.tint(0.5 * (Tactical.CALM_AT + Tactical.WARM_AT)).is_equal_approx(Tactical.CALM.lerp(Tactical.WARM, 0.5)))
+	var held: Color = Tactical.tint(Tactical.load_of(sim, bend, v_hold))
+	var calm: Color = Tactical.tint(Tactical.load_of(sim, bend, 1.3 * v_hold))
+	var warm: Color = Tactical.tint(Tactical.load_of(sim, bend, sqrt(Tactical.WARM_AT) * v_hold))
+	var hot: Color = Tactical.tint(Tactical.load_of(sim, bend, 1.75 * v_hold))
+	_check("its colour answers the speed, on the scale set from his flights: calm on that speed (%s; red on the old scale) and three tenths over it (%s), amber at %.2f of it (%s), red at 1.75 (%s)" % [held.to_html(false), calm.to_html(false), sqrt(Tactical.WARM_AT), warm.to_html(false), hot.to_html(false)],
+		held.is_equal_approx(Tactical.RAIL_CALM) and calm.is_equal_approx(Tactical.RAIL_CALM) and warm.is_equal_approx(Tactical.RAIL_WARM) and hot.is_equal_approx(Tactical.RAIL_HOT)
+		and Tactical.tint(0.5 * (Tactical.CALM_AT + Tactical.WARM_AT)).is_equal_approx(Tactical.RAIL_CALM.lerp(Tactical.RAIL_WARM, 0.5)))
 	_check("... by what the mesh carries for the shader: each vertex its place along the route and the bend there (station %d: %.0f m, 1 / %.0f m), and the frame's speed squared" % [bend_at, t._uv2[4 * bend_at].x, 1.0 / t._uv2[4 * bend_at].y],
 		is_equal_approx(t._uv2[4 * bend_at].x, float(t.st_s[bend_at])) and absf(t._uv2[4 * bend_at + 3].y - bend) < bend * 1e-4 and is_equal_approx(float(t.rail_mat.get_shader_parameter("speed2")), speed * speed)
 		and is_equal_approx(float(t.rail_mat.get_shader_parameter("pod_s")), t.pod_s))
+	# ---- the scale, its two knobs, and the rails against the vehicles ----
+	t.sync(1.0 / 120.0, v._rush_flow, true)
+	var sent: Vector4 = t.rail_mat.get_shader_parameter("at_load")
+	_check("at pace 1 the scale is the one from his flights (calm under %.1f, amber by %.1f, red from %.1f, wholly by %.1f), and the rails' shader has it" % [sent.x, sent.y, sent.z, sent.w],
+		Tactical.pace == 1.0 and Tactical.thresholds().is_equal_approx(Vector4(1.8, 2.2, 2.7, 3.0)) and sent.is_equal_approx(Vector4(1.8, 2.2, 2.7, 3.0))
+		and Tactical.tint(1.79).is_equal_approx(Tactical.RAIL_CALM) and Tactical.tint(2.2).is_equal_approx(Tactical.RAIL_WARM) and Tactical.tint(3.0).is_equal_approx(Tactical.RAIL_HOT)
+		and Tactical.heat(1.79) == "calm" and Tactical.heat(1.8) == "warm" and Tactical.heat(2.7) == "hot")
+	Tactical.pace = 0.345
+	t.sync(1.0 / 120.0, v._rush_flow, true)
+	sent = t.rail_mat.get_shader_parameter("at_load")
+	var sooner := Tactical.tint(0.7)
+	Tactical.pace = 1.0
+	t.sync(1.0 / 120.0, v._rush_flow, true)
+	var back_again: Vector4 = t.rail_mat.get_shader_parameter("at_load")
+	_check("pace 0.345 moves it at the next frame (calm now ends at %.3f, the old 0.62) and an ask of 0.7 is no longer calm (%s); pace 1 again, the shader has the first scale back" % [sent.x, sooner.to_html(false)],
+		absf(sent.x - 0.621) < 0.001 and sent.is_equal_approx(Vector4(1.8, 2.2, 2.7, 3.0) * 0.345) and not sooner.is_equal_approx(Tactical.RAIL_CALM) and Tactical.tint(0.7).is_equal_approx(Tactical.RAIL_CALM)
+		and back_again.is_equal_approx(Vector4(1.8, 2.2, 2.7, 3.0)))
+	var full: float = t.rail_mat.get_shader_parameter("gain")
+	Tactical.dim = 0.5
+	t.sync(1.0 / 120.0, v._rush_flow, true)
+	var dimmed: float = t.rail_mat.get_shader_parameter("gain")
+	var dimmed_chev: float = t.chev_mat.get_shader_parameter("gain")
+	var dimmed_words: float = t.number.modulate.a
+	Tactical.dim = 1.0
+	t.sync(1.0 / 120.0, v._rush_flow, true)
+	_check("dim 0.5 halves its strength at the next frame (the rails %.2f of %.2f, the chevrons %.2f, the number %.2f); dim 1, all of it again" % [dimmed, full, dimmed_chev, dimmed_words],
+		full > 0.5 and absf(dimmed - 0.5 * full) < 0.01 and absf(dimmed_chev - 0.5 * full) < 0.01 and absf(dimmed_words - 0.5 * full) < 0.01
+		and absf(float(t.rail_mat.get_shader_parameter("gain")) - full) < 0.01)
+	# every severity of the rails against every one of the vehicles' (and the exits' green): by hue, and by colour
+	var rail_hues := Vector2(INF, -INF)
+	var car_hues := Vector2(INF, -INF)
+	var nearest_colour := INF
+	var nearest_green := INF
+	for a in 81:
+		var rail: Color = Tactical.tint(float(a) * 0.05)
+		rail_hues = Vector2(minf(rail_hues.x, rail.h * 360.0), maxf(rail_hues.y, rail.h * 360.0))
+		nearest_green = minf(nearest_green, Vector3(rail.r - Tactical.EXIT_GREEN.r, rail.g - Tactical.EXIT_GREEN.g, rail.b - Tactical.EXIT_GREEN.b).length())
+		for s in 201:
+			var car: Color = Tactical.soon_tint(float(s) * 0.05)
+			if a == 0:
+				car_hues = Vector2(minf(car_hues.x, car.h * 360.0), maxf(car_hues.y, car.h * 360.0))
+			nearest_colour = minf(nearest_colour, Vector3(rail.r - car.r, rail.g - car.g, rail.b - car.b).length())
+	_check("the rails at every severity (hues %.0f to %.0f degrees) are never a vehicle's colour at any seconds (hues %.0f to %.0f): the nearest pair %.2f apart in RGB, the exits' green %.2f off" % [rail_hues.x, rail_hues.y, car_hues.x, car_hues.y, nearest_colour, nearest_green],
+		rail_hues.x > car_hues.y + 40.0 and rail_hues.y < 360.0 + car_hues.x - 40.0 and nearest_colour > 0.45 and nearest_green > 0.7
+		and Tactical.soon_tint(9.0).is_equal_approx(Tactical.CALM) and not Tactical.tint(0.0).is_equal_approx(Tactical.CALM))
+	# the log
+	Tactical.tac_lines = 0
+	t._tac_t = 0.0
+	for k in 300:      # two and a half seconds
+		t.sync(1.0 / 120.0, v._rush_flow, true)
+	var tac_pattern := RegEx.create_from_string("^TAC: rails \\d+\\.\\d\\d (calm|warm|hot) \\| vehicles \\d+ nearest (-|\\d+\\.\\d) \\| exit (-|\\d+\\.\\d)$")
+	_check("while it is shown, a line a second to the log: %d in two and a half seconds, \"%s\"" % [Tactical.tac_lines, t.last_tac],
+		Tactical.tac_lines == 2 and tac_pattern.search(t.last_tac) != null)
 	_place(v, e1, 4000, 1, 5000.0)
 	_settle(v, t)
 	_check("at 5,000 mph on E1: the speed squared the shader has is that speed's, and the rails run to %.1f km" % [(t.st_s[t.st_s.size() - 1] - t.pod_s) / 1000.0],
@@ -427,10 +489,16 @@ func _run() -> void:
 	var nearest := INF
 	var on_lane := 0
 	var on_exit := 0
+	var gates := 0
+	var gate_at := Vector2.ZERO
+	var gate_k := -1
 	var points_out := true
 	var out_way := Vector3(E.nx[mouth], 0.0, -E.ny[mouth]) * (1.0 if float(lane[3]) >= 0.0 else -1.0)
 	var mine := 0
-	for laid in t.chev_laid:
+	var row: Array = []      # [m to the mouth, tier, its index in the MultiMesh]
+	var laid_v: float = ex.v
+	for idx in t.chev_laid.size():
+		var laid: Array = t.chev_laid[idx]
 		if String(laid[0]) != String(ex.key):
 			continue
 		mine += 1
@@ -438,16 +506,66 @@ func _run() -> void:
 		var to_mouth: float = laid[2]
 		var x: float = xf.origin.x + t._chev_ax
 		var y: float = -xf.origin.z + t._chev_ay
-		points_out = points_out and xf.basis.x.is_equal_approx(out_way)
-		if to_mouth > 0.0:
+		points_out = points_out and xf.basis.x.normalized().is_equal_approx(out_way) and is_equal_approx(xf.basis.x.length(), float(laid[4]))
+		if String(laid[3]) == "gate":
+			gates += 1
+			gate_at = Vector2(x, y)
+			gate_k = idx
+		elif to_mouth > 0.0:
 			var i := mouth - roundi(to_mouth / 24.0)
 			var want := Vector2(E.px[i] + E.nx[i] * float(lane[3]), E.py[i] + E.ny[i] * float(lane[3]))
 			on_lane += int(Vector2(x, y).distance_to(want) < 0.05)
 			nearest = minf(nearest, (float(i) - here_f) * 24.0)
+			row.append([to_mouth, float(laid[4]), idx])
 		else:
 			on_exit += 1
-	_check("%d stand on the lane's own line along E1 (%.0f m left of its middle), the nearest %.1f km ahead of her (2.5 s is %.1f km), %d more on along the exit; every one points the way the lane leaves" % [on_lane, float(lane[3]), nearest / 1000.0, speed * 2.5 / 1000.0, on_exit],
-		on_lane > 15 and on_lane + on_exit == mine and t.chevrons.multimesh.visible_instance_count == t.chevron_count and nearest >= speed * Tactical.EXIT_CLEAR_S - 300.0 and on_exit == Tactical.CHEV_ON and points_out)
+	# the row, in seconds at the speed it was laid for: the whole seconds big, halves between, quarters over the last two
+	row.sort_custom(func(a, b): return float(a[0]) < float(b[0]))
+	var expect := 0
+	var expect_wholes := 0
+	for q in range(1, 200):
+		var back := roundi(q * 0.25 * laid_v / 24.0)
+		if back > int(ex.from):
+			break
+		expect += int(q % 2 == 0 or q * 0.25 <= Tactical.CHEV_TIGHT + 0.001)
+		expect_wholes += int(q % 4 == 0)
+	var wholes_ok := true
+	var gaps_ok := true
+	var wholes := 0
+	var tiers_ok := true
+	for idx in row.size():
+		var seconds: float = float(row[idx][0]) / laid_v
+		var tier: float = row[idx][1]
+		var is_whole := absf(seconds - roundf(seconds)) < 0.02
+		var is_half := not is_whole and absf(seconds * 2.0 - roundf(seconds * 2.0)) < 0.04
+		wholes += int(is_whole)
+		wholes_ok = wholes_ok and (tier == Tactical.CHEV_TIER.x) == is_whole
+		tiers_ok = tiers_ok and (tier == (Tactical.CHEV_TIER.x if is_whole else (Tactical.CHEV_TIER.y if is_half else Tactical.CHEV_TIER.z))) and (is_whole or is_half or seconds <= Tactical.CHEV_TIGHT + 0.02)
+		var gap: float = (float(row[idx][0]) - (float(row[idx - 1][0]) if idx > 0 else 0.0)) / laid_v
+		gaps_ok = gaps_ok and absf(gap - (0.25 if seconds <= Tactical.CHEV_TIGHT + 0.02 else 0.5)) < 0.03
+	_check("%d stand on the lane's own line along E1 (%.0f m left of its middle), the nearest %.1f km ahead of her (2.5 s is %.1f km), %d more on along the exit; every one points the way the lane leaves, scaled by its tier" % [on_lane, float(lane[3]), nearest / 1000.0, speed * 2.5 / 1000.0, on_exit],
+		on_lane == expect and on_lane + on_exit + gates == mine and t.chevrons.multimesh.visible_instance_count == t.chevron_count and nearest >= speed * Tactical.EXIT_CLEAR_S - 300.0 and on_exit == Tactical.CHEV_ON and points_out)
+	_check("... laid in seconds at %.0f mph: %d at whole seconds before the mouth (the big ones), a quarter second apart over the last two and a half before that (%s), each sized by its place (%s)" % [laid_v * MPH, wholes, gaps_ok, tiers_ok],
+		on_lane > 8 and wholes == expect_wholes and wholes_ok and gaps_ok and tiers_ok)
+	var gate_want := Vector2(E.px[mouth] + E.nx[mouth] * float(lane[3]), E.py[mouth] + E.ny[mouth] * float(lane[3]))
+	var gate_data: Color = t.chev_laid[gate_k][6] if gate_k >= 0 else Color()
+	var gate_from_start: float = rad_to_deg(atan(Tactical.chev_half(speed * Tactical.EXIT_LEAD_S, absf(gate_data.a), 1.0, true) * Tactical.GATE_TALL / (speed * Tactical.EXIT_LEAD_S)))
+	_check("one gate stands across the lane at the mouth (%.2f m off the lane's line there), its own half width %.0f m (the lane's rails stand 26 m out), %.1f degrees tall from where it begins" % [gate_at.distance_to(gate_want), -gate_data.a, gate_from_start],
+		gates == 1 and gate_at.distance_to(gate_want) < 0.05 and gate_data.a <= -30.0 and gate_data.r == 0.0 and gate_from_start > 1.0)
+	# as she nears: a whole second's chevron one second before the mouth, its half size as the eye sees it, by the
+	# shaders' own rule (whose numbers are the ones the instance and the material carry)
+	var one_s: Array = []
+	for r in row:
+		if absf(float(r[0]) / laid_v - 1.0) < 0.02:
+			one_s = r
+	var data: Color = t.chev_laid[int(one_s[2])][6] if not one_s.is_empty() else Color()
+	var looks := []
+	for s in [4.0, 3.0, 2.5, 2.0, 1.5, 1.0, 0.5]:
+		var d: float = s * laid_v
+		looks.append(rad_to_deg(atan(Tactical.chev_half(d, data.a, Tactical.CHEV_TIER.x) / d)))
+	_check("seen from the seat, its half size %s degrees at 4, 3, 2.5, 2, 1.5, 1 and half a second from it: one size far off, then growing as she nears (own half size %.0f m, the shader's %.5f the material's)" % [str(looks.map(func(a): return snappedf(a, 0.01))), data.a, float(t.chev_mat.get_shader_parameter("chev_tan"))],
+		not one_s.is_empty() and is_equal_approx(data.a, Tactical.chev_own(laid_v)) and absf(float(looks[0]) - float(looks[1])) < 0.01 and float(looks[3]) > float(looks[2]) * 1.05
+		and float(looks[6]) > 3.5 * float(looks[0]) and float(looks[5]) > float(looks[4]) and is_equal_approx(float(t.chev_mat.get_shader_parameter("chev_tan")), tan(deg_to_rad(Tactical.CHEV_ANGLE))))
 	var born: float = float(ex.born)
 	_place(v, e1, mouth - int(4000.0 / 24.0), 1, 5000.0)
 	_settle(v, t)
@@ -457,7 +575,7 @@ func _run() -> void:
 	for e in t.exits:
 		if int(e.mouth) == mouth and int(e.to) == int(lane[5]) and not bool(e.join):
 			still = e
-	_check("flown on to 4 km short of it, its chevrons are the ones first laid (when, and from where)", not still.is_empty() and float(still.born) == born and int(still.from) == int(ex.from))
+	_check("flown on to 4 km short of it, its chevrons are the ones first laid (when, from where, and for what speed)", not still.is_empty() and float(still.born) == born and int(still.from) == int(ex.from) and float(still.v) == float(ex.v))
 	_place(v, e1, mouth + 30, 1, 5000.0)
 	_settle(v, t)
 	for k in 16:
@@ -471,7 +589,10 @@ func _run() -> void:
 	_place(v, e1, 4000, 1, 0.0)
 	for k in 120:
 		t.sync(1.0 / 120.0, v._rush_flow, true)
-	_check("standing still: nothing of it is shown", not t.rails.visible and not t.lines.visible and not t.chevrons.visible and not t.number.visible and t.amount == 0.0)
+	Tactical.tac_lines = 0
+	for k in 360:
+		t.sync(1.0 / 120.0, v._rush_flow, true)
+	_check("standing still: nothing of it is shown, and nothing written to the log (%d lines in 3 s)" % Tactical.tac_lines, not t.rails.visible and not t.lines.visible and not t.chevrons.visible and not t.number.visible and t.amount == 0.0 and Tactical.tac_lines == 0)
 	_place(v, e1, 4000, 1, 3000.0)
 	for k in 120:
 		t.sync(1.0 / 120.0, v._rush_flow, true)

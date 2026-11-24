@@ -15,9 +15,26 @@
 ##                  render_terminal_art.gd --two-eyes). A turn is 300 frames, the last 240 timed: the GPU's
 ##                  time for the view, the renderer's own CPU time, the cockpit's whole frame on the main
 ##                  thread, and the display's own share of that. cost.json.
+##   --mode=approach  an exit flown up to (Luke, 2026-11-23: "the same size arrows for a few miles then a turn out of
+##                  nowhere"): a still from the seat, 38 degrees high, at each of --at=7,6,5,... seconds before
+##                  its mouth at --mph=3500, the seconds written on the frame. Its marks are laid where a flight
+##                  would have laid them (at their lead) and she is then stood nearer, on the line she came up
+##                  (--left=M left of the road's middle; --left=lane: in the exit's own lane). --exit=N: E1's
+##                  N-th exit going up its samples; --join: the first join past it instead; --tag=WORDS: on the
+##                  frames and in their names. approach.json: what stood where at each. --film: flown up to
+##                  instead, from --from=7.5 seconds before the mouth to just past it at --mph, the seconds written
+##                  on each frame (run with --fixed-fps 30 --write-movie FILE.avi).
+##   --mode=bend    the highways' hardest bend from the seat, --ahead=3 seconds short of it, at each of
+##                  --mph=6500,8000,9300 (a still each, the bend's ask of what she holds written on it; --tag=WORDS).
+##                  Uses only what every version of the display has, so the same run shows an older one.
+##   --mode=rails   the rails' colours, for choosing: one pose by an exit with vehicles ahead whose lines are
+##                  calm, amber and red, by day, at dawn, at dusk, at night and in a city's hall; in each the
+##                  whole of the rails is shown calm, near the limit and past it (the shader's thresholds are
+##                  moved for the picture; nothing else is), for each of --schemes=NAME,... (SCHEMES below;
+##                  "now": the display's own).
 ## Run windowed, as render_terminal_art.gd:
 ## --xr-mode off --resolution 1600x900 --fixed-fps 120 --audio-driver Dummy
-## -s res://tests/render_tactical.gd -- --mute --out=DIR --mode=shots|film|cost [--only=bend,traffic,...]
+## -s res://tests/render_tactical.gd -- --mute --out=DIR --mode=shots|film|cost|approach|rails|bend [--only=bend,traffic,...]
 extends "res://tests/render_terminal_art.gd"
 
 const Tactical := preload("res://view/tactical_display.gd")
@@ -30,6 +47,15 @@ var _bend := [-1, 0, 0.0]      # the highways' hardest bend: [road, sample, 1 / 
 var _cross := -1               # E1's sample where N1 crosses over it
 var _mouth := -1               # ... and its first exit's mouth, going up its samples
 const TRAFFIC := [[1400.0, 22.5, 2400.0], [2600.0, 22.5, 1300.0], [3800.0, 67.5, 2800.0], [5200.0, -22.5, 2600.0], [7500.0, 22.5, 3000.0], [9000.0, -112.5, 2500.0], [12000.0, 112.5, 2900.0]]
+## The rails' colours tried (--mode=rails): [calm, near the limit, past it].
+const SCHEMES := {
+	"old": [Color(0.0, 0.8, 1.0), Color(1.0, 0.7, 0.1), Color(1.0, 0.16, 0.08)],                # as flown on 2026-11-23: the vehicles' own
+	"violet": [Color(0.66, 0.56, 1.0), Color(0.8, 0.36, 1.0), Color(1.0, 0.2, 0.9)],             # lavender, violet, magenta
+	"ice": [Color(0.86, 0.9, 1.0), Color(0.7, 0.5, 1.0), Color(1.0, 0.2, 0.9)],                  # white, violet, magenta
+	"indigo": [Color(0.38, 0.42, 1.0), Color(0.7, 0.36, 1.0), Color(1.0, 0.3, 0.85)],            # a deep blue, violet, pink
+	"white": [Color(0.9, 0.92, 1.0), Color(0.9, 0.92, 1.0), Color(0.9, 0.92, 1.0)],              # one white: the curtain and the line alone say how hard
+}
+var _caption: Label
 
 
 func _named(road_name: String) -> int:
@@ -93,6 +119,39 @@ func _shot(shot_name: String) -> bool:
 
 
 var _wide := 70.0
+
+
+## Words written on the frames that follow (none: nothing).
+func _say(words: String) -> void:
+	if _caption == null:
+		var layer := CanvasLayer.new()
+		layer.layer = 60
+		root.add_child(layer)
+		_caption = Label.new()
+		_caption.position = Vector2(22.0, 12.0)
+		_caption.add_theme_font_size_override("font_size", 30)
+		_caption.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0))
+		_caption.add_theme_color_override("font_outline_color", Color(0.0, 0.0, 0.0))
+		_caption.add_theme_constant_override("outline_size", 9)
+		layer.add_child(_caption)
+	_caption.text = words
+
+
+## One still from the seat, 38 degrees high (about what a headset shows pixel for pixel).
+func _eye_shot(shot_name: String) -> bool:
+	seat.cam.position = Vector3.ZERO
+	seat.cam.fov = 38.0
+	seat.cam.rotation_degrees = Vector3(1.5, 0.0, 0.0)
+	for frame in 3:
+		await process_frame
+	await RenderingServer.frame_post_draw
+	var path := out_dir.path_join(shot_name + ".png")
+	var saved := root.get_texture().get_image().save_png(path) == OK
+	if not saved:
+		push_error("Couldn't save " + path)
+	seat.cam.fov = _wide
+	seat.cam.rotation_degrees = Vector3.ZERO
+	return saved
 
 
 ## A scene with the display off, then on: `pose` stands the craft (and whatever the scene needs).
@@ -213,8 +272,11 @@ func _run() -> void:
 		"shots": ok = await _shots(only)
 		"film": await _film()
 		"cost": await _cost()
+		"approach": ok = await _approach()
+		"rails": ok = await _rails()
+		"bend": ok = await _bend_speeds()
 		_:
-			push_error("--mode= shots, film or cost")
+			push_error("--mode= shots, film, cost, approach, rails or bend")
 			ok = false
 	Tactical.wanted = false
 	seat.queue_free()
@@ -324,6 +386,248 @@ func _shots(only: PackedStringArray) -> bool:
 			continue
 		if not await _pair("night-" + scene, scenes[scene]):
 			return false
+	Hour.time = "afternoon"
+	Hour.apply(seat)
+	return true
+
+
+## E1's exits (or the joins) going up its samples, past sample 3000: exit_lanes' rows, by their mouths.
+func _lanes_up(joins: bool) -> Array:
+	var out: Array = []
+	for row in seat.network_world.exit_lanes.get(e1, []):
+		if int(row[5]) >= 0 and int(row[4]) > 3000 and (int(row[2]) == 1) != joins:
+			out.append(row)
+	out.sort_custom(func(a, b): return int(a[4]) < int(b[4]))
+	return out
+
+
+## What the display has laid for the exits, in words and in numbers (as far as this copy of it says).
+func _laid() -> Dictionary:
+	var t = seat.tactical
+	var out := {"chevrons": 0, "exits": 0}
+	if t == null:
+		return out
+	out.chevrons = int(t.chevron_count)
+	out.exits = t.exits.size()
+	var to_mouth := []
+	for laid in t.chev_laid:
+		to_mouth.append(snappedf(float(laid[2]), 1.0))
+	out["to_mouth"] = to_mouth
+	if "chev_kind" in t:
+		out["kinds"] = Array(t.chev_kind)
+	return out
+
+
+## An exit flown up to (see the header).
+func _approach() -> bool:
+	var mph := 3500.0
+	var times := PackedFloat64Array([7.0, 6.0, 5.0, 4.0, 3.0, 2.5, 2.0, 1.5, 1.0, 0.75, 0.5, 0.25])
+	var left_arg := "22.5"
+	var nth := 0
+	var join := false
+	var tag := ""
+	var film := false
+	var from_s := 7.5
+	for arg in OS.get_cmdline_user_args():
+		if arg == "--film":
+			film = true
+		if arg.begins_with("--from="):
+			from_s = float(arg.trim_prefix("--from="))
+		if arg.begins_with("--mph="):
+			mph = float(arg.trim_prefix("--mph="))
+		if arg.begins_with("--at="):
+			times = PackedFloat64Array()
+			for word in arg.trim_prefix("--at=").split(","):
+				times.append(float(word))
+		if arg.begins_with("--left="):
+			left_arg = arg.trim_prefix("--left=")
+		if arg.begins_with("--exit="):
+			nth = int(arg.trim_prefix("--exit="))
+		if arg == "--join":
+			join = true
+		if arg.begins_with("--tag="):
+			tag = arg.trim_prefix("--tag=")
+	var lanes := _lanes_up(join)
+	if nth >= lanes.size():
+		push_error("E1 has %d such lanes going up its samples" % lanes.size())
+		return false
+	var lane: Array = lanes[nth]
+	var mouth := int(lane[4])
+	var E = sim.roads[e1]
+	var speed := mph / MPH
+	var left := float(lane[3]) if left_arg == "lane" else float(left_arg)
+	var lead := Tactical.exit_lead(speed)
+	print("APPROACH %s of E1 at its sample %d to %s: its lane %.1f m left of the road's middle (the road %.0f m wide there), her line %.1f m left; %.0f mph, its lead %.2f km (%.1f s)" % ["join" if join else "exit", mouth,
+		sim.roads[int(lane[5])].name, float(lane[3]), E.w[mouth], left, mph, lead / 1000.0, lead / speed])
+	Tactical.wanted = true
+	# laid where a flight would have laid them: as the mouth comes inside its lead (a join: inside its own look)
+	var first := (Tactical.JOIN_LOOK if join else lead) - 100.0
+	_stand(e1, mouth - int(first / 24.0), 1, mph, left)
+	await _settle()
+	seat._process(0.0)
+	if seat.tactical != null:
+		for frame in 24:
+			seat.tactical.sync(1.0 / 120.0, seat._rush_flow, true)
+	var record := {"mph": mph, "mouth": mouth, "join": join, "lane_left": float(lane[3]), "her_left": left, "lead_m": lead, "laid": _laid(), "frames": []}
+	print("APPROACH laid %s" % [record.laid])
+	var name_tag := "" if tag.is_empty() else tag.to_lower().replace(" ", "-") + "-"
+	if film:      # flown up to, a frame at a time, at the engine's fixed rate
+		var fps := 30.0      # (run with --fixed-fps 30)
+		seat.cam.position = Vector3.ZERO
+		seat.cam.fov = 38.0
+		seat.cam.rotation_degrees = Vector3(1.5, 0.0, 0.0)
+		var frames := int((from_s + 0.4) * fps)
+		for frame in frames:
+			var left_s := from_s - float(frame) / fps
+			var back_m := left_s * speed
+			var i := mouth - int(floorf(back_m / 24.0))
+			var rest := float(mouth - i) * 24.0 - back_m      # m on past sample i
+			_stand(e1, i, 1, mph, left)
+			for body in sim.bodies:
+				body.x += E.tx[i] * rest
+				body.y += E.ty[i] * rest
+			# a pose a frame, as the stills are (the sim is not stepped: a step of its own would turn her), the world
+			# streamed in round her and the display given the frame's time on its own clock
+			for sweep in 3:
+				seat.network_world.sync(sim.pod.x, sim.pod.y)
+				seat.landscape.sync(sim.pod.x, sim.pod.y)
+			seat._process(0.0)
+			if seat.tactical != null:
+				seat.tactical.sync(1.0 / fps, seat._rush_flow, true)
+			seat.cam.position = Vector3.ZERO
+			seat.cam.fov = 38.0
+			seat.cam.rotation_degrees = Vector3(1.5, 0.0, 0.0)
+			var to_go: float = (float(mouth) - float(sim._road_f(sim.pod))) * 24.0
+			_say("%s%.2f s to the mouth   %.1f km   %s mph" % ["" if tag.is_empty() else tag + "   ", to_go / speed, to_go / 1000.0, seat.tactical.number.text if seat.tactical != null else str(int(mph))])
+			await process_frame
+			if frame % int(fps) == 0:
+				print("APPROACH_FILM %.2f s to the mouth, %d chevrons laid" % [to_go / speed, int(seat.tactical.chevron_count) if seat.tactical != null else 0])
+		_say("")
+		return true
+	for k in times.size():
+		var back := roundi(float(times[k]) * speed / 24.0)
+		_stand(e1, mouth - back, 1, mph, left)
+		await _settle()
+		await _show(1.0)
+		var to_go: float = (float(mouth) - float(sim._road_f(sim.pod))) * 24.0
+		var words := "%s%.2f s to the mouth   %.1f km   %s mph" % ["" if tag.is_empty() else tag + "   ", to_go / speed, to_go / 1000.0, seat.tactical.number.text if seat.tactical != null else str(int(mph))]
+		_say(words)
+		var shot := "%s%02d-%05dms" % [name_tag, k, roundi(float(times[k]) * 1000.0)]
+		if not await _eye_shot(shot):
+			return false
+		(record.frames as Array).append({"file": shot + ".png", "seconds": snappedf(to_go / speed, 0.001), "metres": snappedf(to_go, 1.0), "chevrons": int(seat.tactical.chevron_count) if seat.tactical != null else 0})
+		print("APPROACH_SHOT %s  %s  (%d chevrons laid)" % [shot, words, int(seat.tactical.chevron_count) if seat.tactical != null else 0])
+	_say("")
+	var output := FileAccess.open(out_dir.path_join(name_tag + "approach.json"), FileAccess.WRITE)
+	if output:
+		output.store_line(JSON.stringify(record, "\t"))
+	return true
+
+
+## The highways' hardest bend at several speeds (see the header).
+func _bend_speeds() -> bool:
+	var speeds := PackedFloat64Array([6500.0, 8000.0, 9300.0])
+	var ahead_s := 3.0
+	var tag := ""
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--mph="):
+			speeds = PackedFloat64Array()
+			for word in arg.trim_prefix("--mph=").split(","):
+				speeds.append(float(word))
+		if arg.begins_with("--ahead="):
+			ahead_s = float(arg.trim_prefix("--ahead="))
+		if arg.begins_with("--tag="):
+			tag = arg.trim_prefix("--tag=")
+	var bend := _hardest_bend()
+	var grip: float = Tactical.grip(sim)
+	var held := sqrt(grip / float(bend[2])) * MPH
+	print("BEND %s sample %d: a radius of %.1f km, held to %.0f mph (%.2f g)" % [sim.roads[int(bend[0])].name, int(bend[1]), 0.001 / float(bend[2]), held, grip / 9.81])
+	Tactical.wanted = true
+	var name_tag := "" if tag.is_empty() else tag.to_lower().replace(" ", "-") + "-"
+	for k in speeds.size():
+		var mph: float = speeds[k]
+		var speed := mph / MPH
+		_stand(int(bend[0]), int(bend[1]) - roundi(ahead_s * speed / 24.0), 1, mph)
+		await _settle()
+		await _show()
+		var ask: float = Tactical.load_of(sim, float(bend[2]), speed)
+		var t = seat.tactical
+		var hue: String = t.number.modulate.to_html(false) if t != null else "-"
+		var banked: float = t.number_load if t != null else 0.0      # (with the bend's own bank, as the rails have it)
+		_say("%s%.0f mph   the bend %.0f s ahead asks %.2f of what she holds with its bank (%.2f flat)   number #%s" % ["" if tag.is_empty() else tag + "   ", mph, ahead_s, banked, ask, hue])
+		var shot := "%sbend-%05dmph" % [name_tag, int(mph)]
+		if not await _eye_shot(shot):
+			return false
+		print("BEND_SHOT %s  %.0f mph, ask %.2f, the hardest within six seconds %.2f, the number %s #%s" % [shot, mph, ask, t.number_load if t != null else 0.0, t.number.text if t != null else "-", hue])
+	_say("")
+	return true
+
+
+## The rails' colours, for choosing (see the header).
+func _rails() -> bool:
+	var names := PackedStringArray(["old", "violet"])
+	var lights := PackedStringArray(["afternoon", "dawn", "dusk", "night", "hall"])
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--schemes="):
+			names = arg.trim_prefix("--schemes=").split(",")
+		if arg.begins_with("--lights="):
+			lights = arg.trim_prefix("--lights=").split(",")
+	var lanes := _lanes_up(false)
+	var mouth := int(lanes[0][4])
+	var mph := 3500.0
+	var speed := mph / MPH
+	# vehicles in her way whose lines are calm, amber and red: [m ahead, m left of the road's middle, mph]
+	var slow := 1500.0
+	var closing := (mph - slow) / MPH
+	var cars := [[closing * 1.0, 22.5, slow], [closing * 2.4, -22.5, slow], [closing * 6.0, 67.5, slow]]
+	Tactical.wanted = true
+	for light in lights:
+		var hall: bool = light == "hall"
+		Hour.time = "afternoon" if hall else light
+		Hour.apply(seat)
+		if hall:      # the departure city's hall, a kilometre inside it
+			var lit = seat.terminal_lighting
+			_stand(int(lit.road_id), int(lit.first_sample) + 40, 1, mph, 22.5)
+			await _settle()
+			_traffic_ahead(int(lit.road_id), 1, cars)
+		else:         # 4.5 s short of an exit's mouth, its chevrons laid where a flight would have laid them
+			_stand(e1, mouth - int((Tactical.exit_lead(speed) - 100.0) / 24.0), 1, mph, 22.5)
+			await _settle()
+			seat._process(0.0)
+			for frame in 24:
+				seat.tactical.sync(1.0 / 120.0, seat._rush_flow, true)
+			_stand(e1, mouth - int(4.5 * speed / 24.0), 1, mph, 22.5)
+			await _settle()
+			_traffic_ahead(e1, 1, cars)
+		await _show()
+		var t = seat.tactical
+		print("RAILS %s: %s sample %d, enclosure %.2f, darkness %.2f; %d lines, %d chevrons" % [light, sim.roads[sim.pod.path].name, sim.pod.hint,
+			float(seat.terminal_lighting.enclosure) if seat.terminal_lighting != null else 0.0, Hour.darkness(), t.line_count, t.chevron_count])
+		for scheme in names:
+			var colours: Array = SCHEMES.get(scheme, [])
+			if scheme == "now":
+				colours = [t.rail_mat.get_shader_parameter("calm"), t.rail_mat.get_shader_parameter("warm"), t.rail_mat.get_shader_parameter("hot")]
+			if colours.is_empty():
+				push_error("no scheme named " + scheme)
+				return false
+			var was := [t.rail_mat.get_shader_parameter("calm"), t.rail_mat.get_shader_parameter("warm"), t.rail_mat.get_shader_parameter("hot"), t.rail_mat.get_shader_parameter("at_load")]
+			t.rail_mat.set_shader_parameter("calm", colours[0])
+			t.rail_mat.set_shader_parameter("warm", colours[1])
+			t.rail_mat.set_shader_parameter("hot", colours[2])
+			for level in 3:      # the whole of the rails calm, near the limit, past it: the thresholds moved under a straight road's nothing
+				t.rail_mat.set_shader_parameter("at_load", [Vector4(5.0, 6.0, 7.0, 8.0), Vector4(-2.0, -1.0, 7.0, 8.0), Vector4(-4.0, -3.0, -2.0, -1.0)][level])
+				var tint: Color = colours[level]
+				tint.a = t.number.modulate.a
+				t.number.modulate = tint
+				_say("%s   %s   the road %s" % [scheme, light, ["calm", "near the limit", "past it"][level]])
+				if not await _eye_shot("rails-%s-%s-%d" % [light, scheme, level]):
+					return false
+			t.rail_mat.set_shader_parameter("calm", was[0])
+			t.rail_mat.set_shader_parameter("warm", was[1])
+			t.rail_mat.set_shader_parameter("hot", was[2])
+			t.rail_mat.set_shader_parameter("at_load", was[3])
+			t._number_tint = Color(0, 0, 0, 0)      # (the number takes its own colour again at its next frame)
+	_say("")
 	Hour.time = "afternoon"
 	Hour.apply(seat)
 	return true
