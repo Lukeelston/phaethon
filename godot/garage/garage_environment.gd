@@ -3,6 +3,9 @@
 extends Node3D
 
 const Pilot := preload("res://sim/pilot_craft.gd")
+const Livery := preload("res://view/livery.gd")
+const Settings := preload("res://release/game_settings.gd")
+const Route := preload("res://release/garage_route.gd")
 const Parked := preload("res://garage/parked_airframe.gd")
 const Seat := preload("res://garage/garage_seat.gd")
 const FloorFinish := preload("res://garage/garage_floor.gdshader")
@@ -47,8 +50,15 @@ func build() -> void:
 	_material("Green", "#88e1c6", .12, .45, .85)
 	_lighting()
 	_hall()
+	var selected := Settings.selected_craft()
+	var paint := Settings.choice("paint", Livery.ids())
+	if Route.arrival_craft in Pilot.ORDER:
+		selected = Route.arrival_craft
+		if Livery.TABLE.has(Route.arrival_paint):
+			paint = Route.arrival_paint
 	for i in Pilot.ORDER.size():
-		_berth(Pilot.ORDER[i], i)
+		var id: String = Pilot.ORDER[i]
+		_berth(id, i, Route.bay_paint(id, paint if id == selected else Livery.FACTORY))
 	_batch_structure()
 
 
@@ -151,8 +161,6 @@ func _hall() -> void:
 		_box("Plinth", Vector3(0,.67,side*(HALF_Z-.07)), Vector3(2*HALF_X,1.34,.14))
 		_box("Enamel", Vector3(0,2.24,side*(HALF_Z-.11)),Vector3(2*HALF_X,.30,.055))
 		_box("Rail", Vector3(side*(HALF_X-.22),3.80,0),Vector3(.09,.09,HALF_Z*2))
-		# A painted continuous pedestrian edge, interrupted by the six transfer gates.
-		_box("Safety", Vector3(side*2.26,.004,0),Vector3(.085,.008,2*HALF_Z-.4))
 		for row in [-ROW_SPACING,0.0,ROW_SPACING]:
 			_shutter(side,row)
 	for ix in range(-4,5):
@@ -235,7 +243,7 @@ func _tool_cart(at: Vector3) -> void:
 	_block(at+Vector3.UP*.45,Vector3(1.18,.9,.62))
 
 
-func _berth(id: String, index: int) -> void:
+func _berth(id: String, index: int, paint: String) -> void:
 	var side := -1.0 if index % 2 == 0 else 1.0
 	var row := ROW_SPACING * (1.0 - floori(index/2.0))
 	var bay := Parked.new()
@@ -243,7 +251,7 @@ func _berth(id: String, index: int) -> void:
 	bay.position = Vector3(side*BAY_X, Parked.SHELL_HEIGHT, row)
 	bay.rotation.y = -side*PI/2
 	add_child(bay)
-	bay.build(id)
+	bay.build(id, paint)
 	_bays[id] = bay
 	var approach := bay.transform * Vector3(side*2.45,-Parked.SHELL_HEIGHT,.54)
 	var seat := bay.transform * Vector3(0,-Parked.SHELL_HEIGHT,.54)
@@ -263,16 +271,47 @@ func _berth(id: String, index: int) -> void:
 	for i in 4:
 		var p := approach + Vector3((i-1.5)*.26, .008, .23)
 		_box("Safety",p,Vector3(.095,.012,.40),Basis(Vector3.UP,-.42))
-	var sign := Vector3(side*3.35,1.46,row-2.18)
-	var face := Basis.looking_at(Vector3(-side*.86,0,.52), Vector3.UP, true)
-	_box("Steel",sign-Vector3.UP*.73,Vector3(.092,1.46,.095),face)
-	_box("Plinth",sign-Vector3.UP*1.40,Vector3(.44,.12,.35),face)
-	_box("Enamel",sign,Vector3(1.72,.62,.085),face)
-	_box("Safety",sign+face*Vector3(-.795,0,.047),Vector3(.038,.48,.012),face)
-	_label(Pilot.NAMES[id].to_upper(),sign+face*Vector3(.025,.066,.051),face,.0033,45)
-	_label("BAY  %02d" % (index+1),sign+face*Vector3(0,-.153,.052),face,.0024,36)
-	_block(sign-Vector3.UP*.73, Vector3(.15,1.46,.15))
-	_block(sign,Vector3(1.72,.62,.085),face)
+	_aisle_gate(side, row, approach.z)
+	_bay_sign(id, index, side, row)
+
+
+func _aisle_gate(side: float, row: float, gate_z: float) -> void:
+	# Turn the aisle paint out toward the boarding marks. The clear opening
+	# lands on the physical approach point, whichever side the pod occupies.
+	var edge := side * 2.26
+	var row_start := -HALF_Z + .2 if row < 0 else row - ROW_SPACING * .5
+	var row_end := HALF_Z - .2 if row > 0 else row + ROW_SPACING * .5
+	var near_end := gate_z - .83
+	var far_end := gate_z + .83
+	for segment: Vector2 in [Vector2(row_start, near_end), Vector2(far_end, row_end)]:
+		var middle := (segment.x + segment.y) * .5
+		_box("Safety", Vector3(edge,.004,middle), Vector3(.085,.008,segment.y-segment.x))
+	for end in [near_end, far_end]:
+		_box("Safety", Vector3(edge+side*(.32+.0425),.004,end), Vector3(.64,.008,.085))
+
+
+func _bay_sign(id: String, index: int, side: float, row: float) -> void:
+	# A folded enamel sign can be read on either walk along the aisle. Each
+	# face carries both identifiers in a single label, including the far side.
+	# Give the entrance pair enough setback to fit in the forward walking view.
+	var sign_z := minf(row + 4.90, HALF_Z - 5.80)
+	var nose := Vector3(side*2.33,1.46,sign_z)
+	var post := nose + Vector3(side*.50,0,0)
+	var width := 1.68
+	var words := "%02d   %s" % [index+1, Pilot.NAMES[id].to_upper()]
+	_box("Steel",post-Vector3.UP*.73,Vector3(.095,1.46,.095))
+	_box("Plinth",post-Vector3.UP*1.40,Vector3(.40,.12,.33))
+	_block(post-Vector3.UP*.73,Vector3(.15,1.46,.15))
+	# The rail joins the backs of the two wings to the post.
+	_box("Steel",post-Vector3.UP*.13,Vector3(.08,.10,1.33))
+	for toward: float in [-1.0,1.0]:
+		var face := Basis.looking_at(Vector3(-side*.80,0,toward*.60), Vector3.UP, true)
+		var along := Vector3(side*.60,0,toward*.80)
+		var panel := nose + along * (width*.5)
+		_box("Enamel",panel,Vector3(width,.43,.056),face)
+		_box("Safety",panel+face*Vector3(-.775,0,.031),Vector3(.035,.33,.006),face)
+		_label(words,panel+face*Vector3(.022,.006,.035),face,.0039,48)
+		_block(panel,Vector3(width,.43,.056),face)
 
 
 func _stand(floor_point: Vector3, height: float, width: float) -> void:

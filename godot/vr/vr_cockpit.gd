@@ -303,12 +303,19 @@ var _turbine_lamp := false           # the run-up's turbine test has the TURBINE
 var _run_shake := 0.0                # the cockpit's tremble while an engine starts or strains against the brake
 
 
+func parked_systems() -> Dictionary:
+	return {"startup": startup, "handling": handling_ask, "slide": slide_feel}
+
+
 func _ready() -> void:
+	var workshop := garage_on_entry
 	_await_neutral_controls = require_neutral_on_entry
 	require_neutral_on_entry = false
 	quest = QuestControlsScript.new()
 	quest.set_gear(0)   # gears on the right stick (triggers), first gear from the start
 	super()
+	if vehicle_override != sim.P.vehicle:
+		workshop = {}
 	var prefs := _load_prefs()
 	if QuestControlsScript.SCHEMES.has(prefs.get("scheme", "")):
 		quest.scheme = prefs.scheme
@@ -320,6 +327,8 @@ func _ready() -> void:
 	_nose_loaded = true
 	if not _slide_loaded and prefs.has("slide"):
 		slide_feel = prefs.slide != "off"
+	if workshop.has("slide"):
+		slide_feel = workshop.slide
 	if not _slide_loaded and typeof(prefs.get("slide_amount")) in [TYPE_FLOAT, TYPE_INT]:
 		slide_amount = clampf(float(prefs.slide_amount), 0.0, DriftSliderScript.AMOUNT_MAX)
 	_slide_loaded = true
@@ -367,21 +376,26 @@ func _ready() -> void:
 	if bool(sim.P.limits) != consumables:
 		sim.set_limits(consumables)
 	set_power_ups(power_ups_on)
-	if cold and overhead != null and replay.is_empty() and cruise < 0.0:
+	var workshop_startup := workshop.get("startup") as StartupSequence
+	if workshop_startup != null and overhead != null and replay.is_empty() and cruise < 0.0:
+		startup = workshop_startup
+		_coach_armed = startup.school and not startup.cleared
+	elif cold and overhead != null and replay.is_empty() and cruise < 0.0:
 		startup.school = school and quest.scheme == "triggers"      # (the lessons are the trigger throttles')
 		_coach_armed = startup.school
 		startup.cold()
+		print("STARTUP: parked, cold and dark")
+	if startup.park:
 		for k in 2:                       # parked: her air brakes were left out, all of them
 			craft.flap_open[k] = 1.0
 			craft.front_open[k] = 1.0
 		craft.pod_flap_open = 1.0
-		print("STARTUP: parked, cold and dark")
 	_apply_startup(0.0)
 	var forced := false
 	for a in OS.get_cmdline_user_args():
 		forced = forced or a.begins_with("--handling=")
 	# the saved handling applies to the range; the grand prix is a STARFIGHTER course
-	if not forced and not sim.course and prefs.get("handling", "speed") != sim.P.handling:
+	if not forced and not workshop.has("handling") and not sim.course and prefs.get("handling", "speed") != sim.P.handling:
 		set_handling(prefs.handling)
 	handling_ask = sim.P.handling
 	quest.sync_handling(sim.hblend)
@@ -1828,49 +1842,15 @@ func _sound(sound: String, side := 0) -> void:
 
 
 func _startup_event(e: String) -> void:
+	if startup_audio:
+		startup_audio.event(e, startup.school)
 	match e:
-		"batt_on":                   # the switch, then the contactor and the fans winding up
-			_sound("toggle_on")
-			_sound("power")
-		"batt_off":
-			_sound("toggle_off")
-			_sound("down")
-		"guard_open":
-			_sound("guard_up")
-		"guard_close":
-			_sound("guard_down")
-		"master_on":                 # the fuel pumps prime as the binder strikes
-			_sound("toggle_on")
-			_sound("pump")
-			_sound("arc")
-		"master_off":
-			_sound("toggle_off")
-		"shutdown":
-			if startup_audio:
-				startup_audio.stop("starter")
-				startup_audio.stop("catch")
-		"start", "dead":
-			_sound("button")
-		"refused":
-			_sound("refuse")
-		"park_set":
-			_sound("paddle_on")
-			_sound("clamp")
 		"park_release":
-			_sound("paddle_off")
-			_sound("release")
 			for side in ["left", "right"]:
 				_buzz(hands[side], 0.7, 0.1)
-		"selftest_done", "turbines_ok":
-			_sound("chime")
-		"crank0", "crank1":
-			_sound("starter", int(e.right(1)))
-		"light0", "light1":          # it catches: its first bark, and a kick in the hand that works it
-			_sound("catch", int(e.right(1)))
+		"light0", "light1":
 			_buzz(_engine_hand(int(e.right(1))), 1.0, 0.18)
 		"check":
-			if startup.school:           # a lesson passed: it is told, not only felt
-				_sound("chime")
 			for side in ["left", "right"]:
 				_buzz(hands[side], 0.3, 0.03)
 		"cleared":

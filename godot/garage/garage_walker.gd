@@ -5,9 +5,11 @@ extends CharacterBody3D
 signal interact_requested
 signal launch_requested
 signal back_requested
+signal cockpit_control_requested(control: String)
 
 const Pilot := preload("res://garage/pilot_model.gd")
 const Levers := preload("res://input/lever_input.gd")
+const CockpitControls := preload("res://garage/garage_controls.gd")
 const STANDING_EYE_HEIGHT := Pilot.STANDING_EYE.y
 const WALK_SPEED := 2.35
 const TURN_SPEED := PI / 2.0  # radians per second at full right-stick travel
@@ -37,9 +39,12 @@ var _align_tracking := true
 var _tracking_area := XRInterface.XR_PLAY_AREA_UNKNOWN
 var _height_offset := 0.0
 var _xr_down := Vector3i.ZERO
+var _xr_cockpit_down := Vector2i.ZERO
+var _controls := CockpitControls.new()
 var _left_live := false
 var _right_live := false
 var _joy := -1
+var _pad_axes := false
 var _pitch := 0.0
 var _focused := true
 var _previous_mouse := Input.MOUSE_MODE_VISIBLE
@@ -143,6 +148,10 @@ func set_pilot(pilot: Pilot) -> void:
 
 func set_seated(value: bool, pose: Transform3D) -> void:
 	seated = value
+	_controls.reset()
+	_pad_axes = false
+	if not seated:
+		_controls.handles.clear()
 	velocity = Vector3.ZERO
 	_pitch = 0.0
 	if third_person:
@@ -172,8 +181,27 @@ func eye_transform() -> Transform3D:
 	return camera.get_camera_transform()
 
 
+func cockpit_input() -> Dictionary:
+	return _controls.axes.duplicate()
+
+
+func set_cockpit_grips(handles: Array[Node3D]) -> void:
+	_controls.handles = handles.duplicate()
+
+
+func cockpit_hands() -> Array[XRController3D]:
+	var active: Array[XRController3D] = []
+	if seated and xr_live and _xr_focused and not _align_tracking:
+		for hand: XRController3D in hands.values():
+			if hand.get_has_tracking_data():
+				active.append(hand)
+	return active
+
+
 func _on_recenter() -> void:
 	_align_tracking = true
+	if seated:
+		_controls.reset()
 
 
 func _align_head() -> void:
@@ -253,6 +281,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			JOY_BUTTON_A: key = KEY_E
 			JOY_BUTTON_Y: key = KEY_F
 			JOY_BUTTON_B: key = KEY_ESCAPE
+			JOY_BUTTON_X: key = KEY_I
+			JOY_BUTTON_LEFT_STICK: key = KEY_P
 			JOY_BUTTON_RIGHT_STICK: key = KEY_V
 	elif not xr_live and event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		if event.relative.length_squared() > .01:
@@ -270,6 +300,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		KEY_F: launch_requested.emit()
 		KEY_ESCAPE: back_requested.emit()
 		KEY_V: _inspect(not third_person)
+		KEY_I, KEY_P:
+			if not seated or xr_live: return
+			cockpit_control_requested.emit("power" if key == KEY_I else "park")
 		_: return
 	if is_inside_tree():
 		get_viewport().set_input_as_handled()
@@ -279,6 +312,7 @@ func _notification(what: int) -> void:
 	if what == NOTIFICATION_APPLICATION_FOCUS_OUT:
 		_focused = false
 		velocity = Vector3.ZERO
+		if seated: _controls.reset()
 	elif what == NOTIFICATION_APPLICATION_FOCUS_IN:
 		_focused = true
 
@@ -303,11 +337,18 @@ func _desktop_input(delta: float) -> Vector2:
 		using_gamepad = false
 	var pads := Input.get_connected_joypads()
 	if not pads.has(_joy):
+		if _joy >= 0 and seated and _pad_axes:
+			_controls.reset()
+			_pad_axes = false
+			using_gamepad = false
 		_joy = -1
 		for device in pads:
 			if _is_gamepad(device):
 				_joy = device
 				break
+	if seated:
+		_seated_desktop_input(delta)
+		return Vector2.ZERO
 	var move := Vector2.ZERO
 	if _joy >= 0:
 		move = _stick(Vector2(Input.get_joy_axis(_joy,JOY_AXIS_LEFT_X),Input.get_joy_axis(_joy,JOY_AXIS_LEFT_Y)))
@@ -318,7 +359,35 @@ func _desktop_input(delta: float) -> Vector2:
 	return (arrows+move).limit_length()
 
 
-func _xr_input() -> Vector2:
+func _seated_desktop_input(delta: float) -> void:
+	var keys := Vector2(float(Input.is_physical_key_pressed(KEY_W)) - float(Input.is_physical_key_pressed(KEY_S)),
+			float(Input.is_physical_key_pressed(KEY_UP)) - float(Input.is_physical_key_pressed(KEY_DOWN)))
+	var brakes := Vector2(float(Input.is_physical_key_pressed(KEY_A)), float(Input.is_physical_key_pressed(KEY_RIGHT)))
+	var idle := Input.is_physical_key_pressed(KEY_X)
+	var sticks := Vector2.ZERO
+	var triggers := Vector2.ZERO
+	if _joy >= 0:
+		sticks = Vector2(-Input.get_joy_axis(_joy, JOY_AXIS_LEFT_Y), -Input.get_joy_axis(_joy, JOY_AXIS_RIGHT_Y))
+		triggers = Vector2(Input.get_joy_axis(_joy, JOY_AXIS_TRIGGER_LEFT), Input.get_joy_axis(_joy, JOY_AXIS_TRIGGER_RIGHT))
+		for side in 2:
+			sticks[side] = clampf(sticks[side], 0, 1) if sticks[side] > .08 else 0.0
+			triggers[side] = clampf(triggers[side], 0, 1) if triggers[side] > .04 else 0.0
+		var look := Vector2(float(Input.is_joy_button_pressed(_joy, JOY_BUTTON_DPAD_RIGHT))
+				- float(Input.is_joy_button_pressed(_joy, JOY_BUTTON_DPAD_LEFT)),
+				float(Input.is_joy_button_pressed(_joy, JOY_BUTTON_DPAD_DOWN))
+				- float(Input.is_joy_button_pressed(_joy, JOY_BUTTON_DPAD_UP)))
+		if sticks != Vector2.ZERO or triggers != Vector2.ZERO or look != Vector2.ZERO:
+			using_gamepad = true
+			_look(-look.x * 2.4 * delta, -look.y * 1.7 * delta)
+		if sticks != Vector2.ZERO or triggers != Vector2.ZERO:
+			_pad_axes = true
+	if keys != Vector2.ZERO or brakes != Vector2.ZERO or idle:
+		using_gamepad = false
+		_pad_axes = false
+	_controls.desktop(keys, brakes, idle, sticks, triggers, _pad_axes, delta)
+
+
+func _xr_input(delta := 1.0 / 60.0) -> Vector2:
 	var focus := _xr_has_focus()
 	var left: XRController3D = hands.left
 	var right: XRController3D = hands.right
@@ -336,15 +405,23 @@ func _xr_input() -> Vector2:
 		if _xr_focused:
 			_align_tracking = true
 			velocity = Vector3.ZERO
+			_controls.reset()
 		_xr_focused = false
 		_left_live = false
 		_right_live = false
 		return Vector2.ZERO
+	var was_aligned := not _align_tracking
 	_align_head()
+	if seated and _align_tracking and was_aligned:
+		_controls.reset()
 	var down := Vector3i(int(have_right and right.is_button_pressed("ax_button")),
 			int(have_left and left.is_button_pressed("by_button")),
 			int(have_right and right.is_button_pressed("by_button")))
 	var actions := down - _xr_down if _xr_focused else Vector3i.ZERO
+	var switches := Vector2i(int(have_left and left.is_button_pressed("ax_button")),
+			int(have_left and left.is_button_pressed("primary_click")))
+	var pressed := switches - _xr_cockpit_down if seated and not _align_tracking and _xr_focused and _left_live else Vector2i.ZERO
+	_xr_cockpit_down = switches
 	if not _left_live:
 		actions.y = 0
 	if not _right_live:
@@ -354,9 +431,16 @@ func _xr_input() -> Vector2:
 	_left_live = have_left
 	_right_live = have_right
 	_xr_focused = true
+	if seated and not _align_tracking:
+		var palms: Array[Node3D] = [left if have_left else null, right if have_right else null]
+		var triggers := Vector2(left.get_float("trigger") if have_left else 0.0, right.get_float("trigger") if have_right else 0.0)
+		var grips := Vector2(left.get_float("grip") if have_left else 0.0, right.get_float("grip") if have_right else 0.0)
+		_controls.tracked(palms, triggers, grips, delta)
 	if actions.x > 0: interact_requested.emit()
 	elif actions.y > 0: launch_requested.emit()
 	elif actions.z > 0: back_requested.emit()
+	elif pressed.x > 0: cockpit_control_requested.emit("power")
+	elif pressed.y > 0: cockpit_control_requested.emit("park")
 	var stick := left.get_vector2("primary") if have_left else Vector2.ZERO
 	return _stick(Vector2(stick.x,-stick.y))
 
@@ -385,7 +469,7 @@ func _turn_xr(axis: float, delta: float) -> void:
 func _physics_process(delta: float) -> void:
 	var intent := Vector2.ZERO
 	if xr_live:
-		intent = _xr_input()
+		intent = _xr_input(delta)
 	elif _focused:
 		intent = _desktop_input(delta)
 	if is_inside_tree():

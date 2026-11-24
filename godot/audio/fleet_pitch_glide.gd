@@ -37,6 +37,37 @@ const ALIGN_FRAMES := 1408  # 32 ms between the independent and synchronized rea
 ## The other engine side may share the decoded arrays. All supplied WAVs must
 ## carry the same mono PCM16 performance, with identical length and sample rate.
 func configure(streams: Array, start_fraction: float, shared_with = null) -> bool:
+	if not _accept_bank(streams, shared_with):
+		return false
+	if shared_with == null:
+		for wav: AudioStreamWAV in streams:
+			var raw := wav.data
+			var samples := _sample_buffer()
+			_decode_range(raw, samples, 0, _length)
+			samples[_length] = samples[0]
+			_pcm.append(samples)
+	_begin_playback(streams, start_fraction)
+	return true
+
+
+## Like configure(), with frame-budget checkpoints while decoding a bank under a live headset.
+func configure_sliced(streams: Array, start_fraction: float, shared_with, checkpoint: Callable) -> bool:
+	if not _accept_bank(streams, shared_with):
+		return false
+	if shared_with == null:
+		for wav: AudioStreamWAV in streams:
+			var raw := wav.data
+			var samples := _sample_buffer()
+			for first in range(0, _length, 8192):
+				await checkpoint.call()
+				_decode_range(raw, samples, first, mini(first + 8192, _length))
+			samples[_length] = samples[0]
+			_pcm.append(samples)
+	_begin_playback(streams, start_fraction)
+	return true
+
+
+func _accept_bank(streams: Array, shared_with) -> bool:
 	if streams.is_empty() or not sources.is_empty():
 		return false
 	if shared_with != null:
@@ -46,23 +77,29 @@ func configure(streams: Array, start_fraction: float, shared_with = null) -> boo
 		_length = shared_with._length
 		_paired_left = shared_with
 		_was_split = true
-		if _pcm.size() != streams.size() or _length == 0:
+		return _pcm.size() == streams.size() and _length > 0
+	for wav: AudioStreamWAV in streams:
+		if not wav or wav.stereo or wav.format != AudioStreamWAV.FORMAT_16_BITS or wav.mix_rate != RATE:
 			return false
-	else:
-		for wav: AudioStreamWAV in streams:
-			if not wav or wav.stereo or wav.format != AudioStreamWAV.FORMAT_16_BITS or wav.mix_rate != RATE:
-				return false
-			var bytes := wav.data
-			var count := bytes.size() / 2
-			if count < 2 or (_length != 0 and count != _length):
-				return false
-			_length = count
-			var samples := PackedFloat32Array()
-			samples.resize(count + 1)
-			for i in count:
-				samples[i] = bytes.decode_s16(2*i) / 32768.0
-			samples[count] = samples[0]    # interpolate through the seam
-			_pcm.append(samples)
+		var count := wav.data.size() / 2
+		if count < 2 or (_length != 0 and count != _length):
+			return false
+		_length = count
+	return true
+
+
+func _sample_buffer() -> PackedFloat32Array:
+	var samples := PackedFloat32Array()
+	samples.resize(_length + 1)
+	return samples
+
+
+static func _decode_range(raw: PackedByteArray, samples: PackedFloat32Array, first: int, end: int) -> void:
+	for i in range(first, end):
+		samples[i] = raw.decode_s16(2 * i) / 32768.0
+
+
+func _begin_playback(streams: Array, start_fraction: float) -> void:
 	sources.assign(streams)
 	_phase = fposmod(start_fraction, 1.0) * _length
 	var generator := AudioStreamGenerator.new()
@@ -73,7 +110,6 @@ func configure(streams: Array, start_fraction: float, shared_with = null) -> boo
 	# default is sample playback. Start after receiving the first target.
 	playback_type = AudioServer.PLAYBACK_TYPE_STREAM
 	set_process(false)
-	return true
 
 
 func drive(pitch_ratio: float, gain: float, weights: PackedFloat64Array) -> void:

@@ -250,11 +250,11 @@ var crank: Array[bool] = [false, false]
 var test_stage := 0.0
 
 
-func setup(craft_sim) -> void:
+func setup(craft_sim, checkpoint := Callable()) -> void:
 	sim = craft_sim
 	short_intakes = sim.P.get("vehicle", "") == "shrike"
 	fleet_voice = FLEET_VOICES.get(sim.P.get("vehicle", ""), {})
-	_load_streams()
+	await _load_streams(checkpoint)
 	# Engines and Wind each limit their own bus to -1 dB, but their sum lands on Master unlimited:
 	# with both peaking together it could clip (engines + wind measured -0.05 dBFS on Master).
 	# A last-resort limiter there touches only true overs.
@@ -343,6 +343,8 @@ func setup(craft_sim) -> void:
 			"ram": 0.0, "ram_lit": false, "ram_kick": 0.0, "ram_boost": 0.0, "ram_thr": 0.0, "ram_since": 9.0,
 			"ram_shots": ram_shots, "ram_db": [-80.0, -80.0], "ram_n": 0, "ram_outs": 0}
 		for layer in LAYERS:
+			if checkpoint.is_valid():
+				await checkpoint.call()
 			var ps: Array[AudioStreamPlayer] = []
 			var start := randf()
 			if _paired_fleet and layer in FLEET_GLIDE_LAYERS:
@@ -358,7 +360,12 @@ func setup(craft_sim) -> void:
 				glide.bus = layer_bus
 				add_child(glide)
 				var left: FleetPitchGlide = voices[0].glides.get(layer) if k == 1 else null
-				if glide.configure(_streams[layer], start, left):
+				var loaded: bool
+				if checkpoint.is_valid():
+					loaded = await glide.configure_sliced(_streams[layer], start, left, checkpoint)
+				else:
+					loaded = glide.configure(_streams[layer], start, left)
+				if loaded:
 					v.glides[layer] = glide
 					continue
 				glide.free()
@@ -384,7 +391,7 @@ func setup(craft_sim) -> void:
 		AudioServer.get_driver_name(), AudioServer.get_mix_rate()])
 
 
-func _load_streams() -> void:
+func _load_streams(checkpoint: Callable) -> void:
 	var manifest: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(DIR + "manifest.json"))
 	var ram_manifest: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(RAM_DIR + "manifest.json"))
 	# Load only the selected craft's performances. All banks share the same
@@ -409,6 +416,8 @@ func _load_streams() -> void:
 			dir = fleet_dir
 			spec = fleet_layers[layer]
 		for b: Dictionary in spec.bands:
+			if checkpoint.is_valid():
+				await checkpoint.call()
 			var w := (ResourceLoader.load(dir + b.file) as AudioStreamWAV).duplicate() as AudioStreamWAV
 			w.loop_mode = AudioStreamWAV.LOOP_FORWARD
 			w.loop_begin = 0
@@ -427,11 +436,15 @@ func _load_streams() -> void:
 	_pops.random_pitch = 1.15            # each pop up to 15% up or down
 	_pops.random_volume_offset_db = 8.0  # and up to 8 dB quieter
 	for f: String in shots.pops:
+		if checkpoint.is_valid():
+			await checkpoint.call()
 		var w := (ResourceLoader.load(shots_dir + f) as AudioStreamWAV).duplicate() as AudioStreamWAV
 		w.loop_mode = AudioStreamWAV.LOOP_DISABLED
 		_pops.add_stream(-1, w)
 	for pair: Array in [[ram_manifest.oneshots.light, _ram_light], [ram_manifest.oneshots.out, _ram_out]]:
 		for f: String in pair[0]:
+			if checkpoint.is_valid():
+				await checkpoint.call()
 			var w := (ResourceLoader.load(RAM_DIR + f) as AudioStreamWAV).duplicate() as AudioStreamWAV
 			w.loop_mode = AudioStreamWAV.LOOP_DISABLED
 			(pair[1] as Array[AudioStreamWAV]).append(w)

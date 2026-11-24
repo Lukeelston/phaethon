@@ -41,6 +41,7 @@ const BY_ENGINE := ["starter", "catch"]     # one player an engine, panned with 
 const LOOP := "avionics"
 const VARY := 1.03                          # a switch's every throw up to 3% higher or lower than the last
 const HUM_TAU := 1.2                        # s: the fans' loop coming in under the power-up, and going
+static var _manifest := {}
 static var _bank := {}      # name -> Array[AudioStreamWAV]: its takes
 static var _levels := {}    # name -> dB
 
@@ -50,7 +51,7 @@ var hum_gain := 0.0         # the fans' loop, 0..1 (the tests read it)
 var _hum: AudioStreamPlayer
 
 
-func setup(pods := {}, vehicle := Craft.STANDARD) -> void:
+func setup(pods := {}, vehicle := Craft.STANDARD, engine_mounts: Array[Node3D] = []) -> void:
 	var sounds := bank()
 	if Craft.sound_bank(vehicle) in FLEET:
 		# Override this cockpit's three roles; station and Phaethon callers read
@@ -80,15 +81,22 @@ func setup(pods := {}, vehicle := Craft.STANDARD) -> void:
 		var list := []
 		if sound in BY_ENGINE:
 			for k in 2:
-				var p := AudioStreamPlayer.new()
+				var p
+				if engine_mounts.size() == 2:
+					p = AudioStreamPlayer3D.new()
+					p.attenuation_model = AudioStreamPlayer3D.ATTENUATION_DISABLED
+					p.attenuation_filter_cutoff_hz = 20500.0
+					engine_mounts[k].add_child(p)
+				else:
+					p = AudioStreamPlayer.new()
+					add_child(p)
 				p.stream = takes[mini(k, takes.size() - 1)]
 				# (one take for both: the right engine's a little lower, as its starter is)
 				p.pitch_scale = 0.96 if k == 1 and takes.size() == 1 else 1.0
 				# the pops' bus carries the engine's pan and no low-pass
 				var side := "EngineL_pops" if k == 0 else "EngineR_pops"
-				p.bus = side if AudioServer.get_bus_index(side) >= 0 else bus
+				p.bus = side if engine_mounts.is_empty() and AudioServer.get_bus_index(side) >= 0 else bus
 				list.append(p)
-				add_child(p)
 		elif AT_POD.has(sound) and pods.has(AT_POD[sound]):
 			var p := AudioStreamPlayer3D.new()
 			p.stream = _varied(takes)
@@ -129,6 +137,49 @@ func play(sound: String, side := 0) -> void:
 		p.call("play")
 
 
+## Translate the mechanical sequence's events identically in flight and in a service bay.
+func event(e: String, school := false) -> void:
+	match e:
+		"batt_on":
+			play("toggle_on")
+			play("power")
+		"batt_off":
+			play("toggle_off")
+			play("down")
+		"guard_open":
+			play("guard_up")
+		"guard_close":
+			play("guard_down")
+		"master_on":
+			play("toggle_on")
+			play("pump")
+			play("arc")
+		"master_off":
+			play("toggle_off")
+		"shutdown":
+			stop("starter")
+			stop("catch")
+		"start", "dead":
+			play("button")
+		"refused":
+			play("refuse")
+		"park_set":
+			play("paddle_on")
+			play("clamp")
+		"park_release":
+			play("paddle_off")
+			play("release")
+		"selftest_done", "turbines_ok":
+			play("chime")
+		"crank0", "crank1":
+			play("starter", int(e.right(1)))
+		"light0", "light1":
+			play("catch", int(e.right(1)))
+		"check":
+			if school:
+				play("chime")
+
+
 ## Stop a sound that is still running (a starter, when the engines are cut mid-start).
 func stop(sound: String) -> void:
 	for p: Node in players.get(sound, []):
@@ -154,21 +205,29 @@ func hum(power: float, running: float, delta: float) -> void:
 
 ## Every sound's takes, loaded on first asking.
 static func bank() -> Dictionary:
-	if _bank.is_empty():
-		var manifest: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(DIR + "manifest.json"))
+	if _bank.size() < NAMES.size():
 		for sound: String in NAMES:
-			var spec: Dictionary = manifest.sounds[sound]
-			var takes := []
-			for f: String in spec.files:
-				var w := (ResourceLoader.load(DIR + f) as AudioStreamWAV).duplicate() as AudioStreamWAV
-				w.loop_mode = AudioStreamWAV.LOOP_FORWARD if spec.get("loop", false) else AudioStreamWAV.LOOP_DISABLED
-				if spec.get("loop", false):
-					w.loop_begin = 0
-					w.loop_end = w.data.size() >> 1   # 16-bit mono frames
-				takes.append(w)
-			_bank[sound] = takes
-			_levels[sound] = float(spec.level_db)
+			load_sound(sound)
 	return _bank
+
+
+## Load one switch or starter between frames while the pilot is walking the hall.
+static func load_sound(sound: String) -> void:
+	if _bank.has(sound):
+		return
+	if _manifest.is_empty():
+		_manifest = JSON.parse_string(FileAccess.get_file_as_string(DIR + "manifest.json"))
+	var spec: Dictionary = _manifest.sounds[sound]
+	var takes := []
+	for f: String in spec.files:
+		var w := (ResourceLoader.load(DIR + f) as AudioStreamWAV).duplicate() as AudioStreamWAV
+		w.loop_mode = AudioStreamWAV.LOOP_FORWARD if spec.get("loop", false) else AudioStreamWAV.LOOP_DISABLED
+		if spec.get("loop", false):
+			w.loop_begin = 0
+			w.loop_end = w.data.size() >> 1   # 16-bit mono frames
+		takes.append(w)
+	_bank[sound] = takes
+	_levels[sound] = float(spec.level_db)
 
 
 static func level_db(sound: String) -> float:

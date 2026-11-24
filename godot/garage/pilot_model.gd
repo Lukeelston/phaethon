@@ -11,6 +11,8 @@ const SEATED_CUSHION := Vector3(0, .421, .010)
 const THIGH := .432
 const SHIN := .414
 const STRIDE := 1.24
+# Center of the authored index finger's pad relative to the OpenXR grip, mirrored at the wrist.
+const RIGHT_INDEX_PAD := Vector3(.00377, -.06591, -.03734)
 
 var _pelvis: Node3D
 var _torso: Node3D
@@ -19,6 +21,7 @@ var _thighs: Array[Node3D] = []
 var _shins: Array[Node3D] = []
 var _boots: Array[Node3D] = []
 var _arms: Array[Node3D] = []
+var _shoulders: Array[Vector3] = []
 var _forearms: Array[Node3D] = []
 var _gloves: Array[MeshInstance3D] = []
 var _seated := false
@@ -27,6 +30,7 @@ var _first_person := false
 var _tracked := false
 var _moving := false
 var _distance := 0.0
+var _grip_targets := PackedVector3Array()
 
 
 func _init() -> void:
@@ -44,6 +48,7 @@ func _init() -> void:
 		_shins.append(shin)
 		_boots.append(shin.get_node("Boot"+side))
 		_arms.append(arm)
+		_shoulders.append(arm.position)
 		_forearms.append(forearm)
 		_gloves.append(forearm.get_node("Glove"+side))
 	# Godot imports the first GLTF material with vertex-colour albedo disabled.
@@ -56,6 +61,7 @@ func _init() -> void:
 func set_seated(value: bool) -> void:
 	if _seated != value:
 		_seated = value
+		_grip_targets.clear()
 		_pose()
 
 
@@ -89,7 +95,12 @@ func set_first_person(value: bool) -> void:
 
 
 func set_tracked_hands(active: bool) -> void:
+	if _tracked == active:
+		return
 	_tracked = active
+	_grip_targets.clear()
+	if _seated:
+		_seat_pose()
 	_update_arms()
 
 
@@ -98,8 +109,28 @@ func _update_arms() -> void:
 		arm.visible = not (_first_person and _tracked)
 
 
+## Desktop gloves follow the moving grips. XR gloves remain on the two tracked controllers.
+func set_grip_targets(left_world: Vector3, right_world: Vector3) -> void:
+	if not _seated or _tracked:
+		return
+	var left := to_local(left_world)
+	var right := to_local(right_world)
+	if _grip_targets.size() == 2 and _grip_targets[0].is_equal_approx(left) and _grip_targets[1].is_equal_approx(right):
+		return
+	_grip_targets = PackedVector3Array([left, right])
+	_seat_spine()
+	_reach_grip(0, left)
+	_reach_grip(1, right)
+
+
 ## Both glove meshes are authored in OpenXR grip space: little finger to index is -Z,
 ## wrist to fingertips is -Y, and the left and right palms face +X and -X respectively.
+static func index_tip(controller: Node3D) -> Vector3:
+	var hand := String(controller.tracker) if controller is XRController3D else String(controller.name)
+	var left := hand.to_lower().contains("left")
+	return Vector3(-RIGHT_INDEX_PAD.x if left else RIGHT_INDEX_PAD.x, RIGHT_INDEX_PAD.y, RIGHT_INDEX_PAD.z)
+
+
 func make_glove(side: String) -> Node3D:
 	var left := side.to_lower() in ["left","l","left_hand"]
 	var mount := Node3D.new()
@@ -114,14 +145,7 @@ func make_glove(side: String) -> Node3D:
 ## Fit a tucked racing posture to the measured pan and throttle heads. The helmet,
 ## arms and legs keep their standing dimensions as the waist folds into the bucket.
 func _seat_pose() -> void:
-	_pelvis.position = Vector3.UP*(SEATED_HIP+_pan_rise)
-	_torso.position = Vector3(0,-.052,-.003)
-	var head_basis := Basis(Vector3.RIGHT,-.12)
-	var neck := SEATED_EYE - head_basis*HELMET_EYE
-	var spine := neck-_pelvis.position-_torso.position
-	var lean := atan2(spine.z,spine.y)
-	_torso.basis = Basis(Vector3.RIGHT,lean)*Basis.from_scale(Vector3(1,spine.length()/.57,1))
-	_head.basis = _torso.basis.inverse()*head_basis
+	_seat_spine()
 	for i in 2:
 		var side := -1.0 if i == 0 else 1.0
 		# The heels rest ahead of the pan, leaving room for the floor beneath the shins.
@@ -130,20 +154,45 @@ func _seat_pose() -> void:
 		_thighs[i].rotation = Vector3(pitch,-side*.115,0)
 		_shins[i].rotation.x = shin_angle-pitch
 		_boots[i].rotation.x = .065-shin_angle
-		var shoulder := _pelvis.position+_torso.position+_torso.basis*_arms[i].position
-		var grip := SEATED_EYE+Vector3(side*.46,-.397,-.195)
-		var reach := grip-shoulder
-		var axis := reach.normalized()
-		var pole := Vector3(side*.80,-1.0,.35)
-		var bend := (pole-axis*axis.dot(pole)).normalized()
-		var upper_length := .286
-		var lower_length := .247+.081
-		var along := (reach.length_squared()+upper_length**2-lower_length**2)/(2.0*reach.length())
-		var elbow := shoulder+axis*along+bend*sqrt(maxf(0,upper_length**2-along**2))
-		var upper := Basis(Quaternion(Vector3.DOWN,(elbow-shoulder).normalized()))
-		var lower := Basis(Quaternion(Vector3.DOWN,(grip-elbow).normalized()))
-		_arms[i].basis = _torso.basis.inverse()*upper
-		_forearms[i].basis = upper.inverse()*lower
+		var grip := _grip_targets[i] if _grip_targets.size() == 2 else SEATED_EYE + Vector3(side * .46, -.397, -.195)
+		_reach_grip(i, grip)
+
+
+func _seat_spine() -> void:
+	_pelvis.position = Vector3.UP*(SEATED_HIP+_pan_rise)
+	_torso.position = Vector3(0,-.052,-.003)
+	var head_basis := Basis(Vector3.RIGHT,-.12)
+	var neck := SEATED_EYE - head_basis*HELMET_EYE
+	var spine := neck-_pelvis.position-_torso.position
+	var lean := atan2(spine.z,spine.y)
+	if _grip_targets.size() == 2:
+		# Fold from the hip as either lever advances. Keep the pan and boots planted.
+		var ahead := (SEATED_EYE.z - .195) - minf(_grip_targets[0].z, _grip_targets[1].z)
+		lean -= deg_to_rad(14.0) * smoothstep(.055, .33, ahead)
+	_torso.basis = Basis(Vector3.RIGHT,lean)*Basis.from_scale(Vector3(1,spine.length()/.57,1))
+	_head.basis = _torso.basis.inverse()*head_basis
+
+
+func _reach_grip(i: int, grip: Vector3) -> void:
+	var shoulder := _pelvis.position + _torso.position + _torso.basis * _shoulders[i]
+	var offset := grip - shoulder
+	var axis := offset.normalized()
+	var pole := Vector3(-.80 if i == 0 else .80, -1.0, .35)
+	var bend := (pole - axis * axis.dot(pole)).normalized()
+	var upper_length := .286
+	var lower_length := .247 + .081
+	# The shoulder rolls forward for the last few centimetres while both arm bones keep their length.
+	var protraction := clampf(offset.length() - upper_length - lower_length + .006, 0.0, .075)
+	_arms[i].position = _shoulders[i] + _torso.basis.inverse() * (axis * protraction)
+	shoulder += axis * protraction
+	offset = grip - shoulder
+	var distance := clampf(offset.length(), absf(lower_length - upper_length) + .001, lower_length + upper_length - .001)
+	var along := (distance * distance + upper_length ** 2 - lower_length ** 2) / (2.0 * distance)
+	var elbow := shoulder + axis * along + bend * sqrt(maxf(0.0, upper_length ** 2 - along ** 2))
+	var upper := Basis(Quaternion(Vector3.DOWN, (elbow - shoulder).normalized()))
+	var lower := Basis(Quaternion(Vector3.DOWN, (shoulder + axis * distance - elbow).normalized()))
+	_arms[i].basis = _torso.basis.inverse() * upper
+	_forearms[i].basis = upper.inverse() * lower
 
 
 func _pose() -> void:
@@ -155,6 +204,8 @@ func _pose() -> void:
 	_pelvis.position = Vector3.UP*HIP_HEIGHT
 	_torso.transform = Transform3D(Basis.IDENTITY,Vector3.UP*.036)
 	_head.basis = Basis.IDENTITY
+	for i in 2:
+		_arms[i].position = _shoulders[i]
 	if _moving:
 		_pelvis.position.y = .897-.029*cos(TAU*2.0*cycle)
 		_pelvis.position.x = -.013*swing

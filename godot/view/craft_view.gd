@@ -108,6 +108,7 @@ var flat_camera := "far"
 var handling_ask := ""             # the live handling switch: "speed" / "starfighter" (VR: the console
                                    # toggle or Y-hold; keyboard: M), sent with every step
 static var vehicle_override := ""
+static var garage_on_entry: Dictionary = {}
 static var track_override := ""    # an in-game track switch (VR: hold the menu button) wins over --track;
                                    # static, so it survives the scene reload that does the switch
 static var job_override := ""      # the job to fly ("emergency": the emergency run; "none": no job), wins over --job; static too
@@ -220,17 +221,29 @@ func can_visit_garage() -> bool:
 	return true
 
 
+func parked_systems() -> Dictionary:
+	# A desktop flight has no battery or starter controls; its engines run from spawn.
+	return {"startup": StartupSequence.new(), "handling": sim.hwant}
+
+
 func _ready() -> void:
 	var opts := {"obstacleCollisions": GameSettings.obstacle_collisions_enabled()}
 	var on_pad := pad_start      # (a menu's word for this flight alone, whatever course it is)
 	pad_start = false
+	opts["vehicle"] = CraftSimScript.PilotCraft.resolve(OS.get_cmdline_user_args(), vehicle_override)
+	var workshop := garage_on_entry if vehicle_override == opts.vehicle else {}
+	garage_on_entry = {}
+	if workshop.has("handling"):
+		opts.handling = workshop.handling
 	if not Livery.pinned:    # the menus' paint (a test or a render that has chosen one keeps it)
-		Livery.current = GameSettings.choice("paint", Livery.ids())
+		if Livery.TABLE.has(workshop.get("paint", "")):
+			Livery.current = workshop.paint
+		else:
+			Livery.current = GameSettings.choice("paint", Livery.ids())
 	Outlook.load_saved()     # ... and their time of day and weather
 	ChaseScript.load_saved() # ... and the craft, and whether chase mode is on
 	if ChaseScript.craft == "patrol":
 		Livery.current = "police"       # the patrol craft comes in its own black and white
-	opts["vehicle"] = CraftSimScript.PilotCraft.resolve(OS.get_cmdline_user_args(), vehicle_override)
 	var seek := 0.0
 	var mute := false
 	for a in OS.get_cmdline_user_args():

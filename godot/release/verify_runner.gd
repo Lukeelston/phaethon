@@ -72,6 +72,20 @@ func _garage_visit() -> bool:
 	if not check("packed garage opens", garage != null and garage.scene_file_path == "res://garage/garage.tscn"):
 		return false
 	var craft := Settings.selected_craft()
+	var alternate := "kiln" if craft == "vesper" else "vesper"
+	garage.walker.global_transform = garage.environment.boarding_transform(alternate)
+	garage.walker.interact_requested.emit()
+	var bay: Node3D = garage.environment.bay_node(alternate)
+	var runup = bay.get_node_or_null("Runup")
+	if not check("alternate service bay boards with its own cold engines", runup != null and not runup.startup.batt and runup.startup.stage == ["off", "off"]):
+		return false
+	var parked_at := bay.global_transform
+	garage.walker.cockpit_control_requested.emit("power")
+	await frames(3)
+	check("occupied bay accepts battery power on the stands", runup.startup.batt and runup.startup.power > 0.0 and bay.global_transform.is_equal_approx(parked_at))
+	garage.walker.cockpit_control_requested.emit("power")
+	check("alternate bay powers back down", not runup.startup.batt and runup.startup.stage == ["off", "off"])
+	garage.walker.interact_requested.emit()
 	garage.walker.global_transform = garage.environment.boarding_transform(craft)
 	garage.interact()
 	if not check("pilot boards the selected craft", garage.seated_craft == craft and garage.walker.seated):

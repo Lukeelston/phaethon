@@ -3,6 +3,7 @@
 extends SceneTree
 
 const Pilot := preload("res://garage/pilot_model.gd")
+const Cab := preload("res://garage/garage_cockpit.gd")
 const CONFIDENT := XRPose.XR_TRACKING_CONFIDENCE_HIGH
 
 # An offline tracking driver. Like OpenXR, the camera center includes XRServer's
@@ -203,6 +204,125 @@ func _turns() -> void:
 	check(absf(angle_difference(yaw[0],yaw[2])) < .001, "Turn amount is independent of render frequency")
 
 
+func _place_palm(side: String, point: Vector3) -> void:
+	var hand: XRController3D = walker.hands[side]
+	var pose: Transform3D = pads[side].get_pose(&"grip").transform
+	var tracking := hand.get_parent_node_3d().global_basis * XRServer.get_reference_frame().basis
+	pose.origin += (tracking.inverse() * (point - hand.global_position)) / XRServer.world_scale
+	pads[side].set_pose(&"grip", pose, Vector3.ZERO, Vector3.ZERO, CONFIDENT)
+	await _tick_input()
+
+
+func _parked_controls() -> void:
+	var cab := Cab.new()
+	root.add_child(cab)
+	# Only fit the production pair of Phaethon levers; include parked shell pitch and bay yaw.
+	cab.shell = Node3D.new()
+	cab.add_child(cab.shell)
+	cab.global_transform = walker.global_transform
+	cab.shell.transform = Cab.pod_pose()
+	cab._fit_throttle(-1, null, null)
+	cab._fit_throttle(1, null, null)
+	var handles := cab.throttle_grips()
+	walker.set_cockpit_grips(handles)
+	var controls: Array[String] = []
+	var record := func(action: String) -> void: controls.append(action)
+	walker.cockpit_control_requested.connect(record)
+	var nav: Array[String] = []
+	var board := func() -> void: nav.append("board")
+	var fly := func() -> void: nav.append("fly")
+	walker.interact_requested.connect(board)
+	walker.launch_requested.connect(fly)
+	pads.left.set_input(&"ax_button", true)
+	await _tick_input()
+	await _tick_input()
+	pads.left.set_input(&"ax_button", false)
+	pads.left.set_input(&"primary_click", true)
+	await _tick_input()
+	pads.left.set_input(&"primary_click", false)
+	check(controls == ["power", "park"] and nav.is_empty(), "X and left stick click change cockpit state on separate edges")
+	pads.right.set_input(&"ax_button", true)
+	await _tick_input()
+	pads.right.set_input(&"ax_button", false)
+	pads.left.set_input(&"by_button", true)
+	await _tick_input()
+	pads.left.set_input(&"by_button", false)
+	check(nav == ["board","fly"] and controls.size() == 2, "A and Y keep their dedicated board and fly actions")
+	pads.right.set_input(&"trigger", 1.0)
+	pads.left.set_input(&"grip", 1.0)
+	await _tick_input()
+	for frame in 120:
+		walker._xr_input()
+	var demand := walker.cockpit_input()
+	check(demand.thrL > .8 and demand.thrR < .005 and demand.brkL > .95 and demand.brkR < .005,
+			"Right trigger revs the left engine; a left grip away from the handle brakes that side")
+	walker.focused = false
+	await _tick_input()
+	check(walker.cockpit_input() == walker.CockpitControls.IDLE and walker.cockpit_hands().is_empty(),
+			"Focus loss zeros the controls and removes hands from overhead switches")
+	walker.focused = true
+	pads.left.set_input(&"ax_button", true)
+	await _tick_input()
+	check(walker.cockpit_input() == walker.CockpitControls.IDLE and controls.size() == 2,
+			"Returning with X and analog controls held cannot restart or rev the craft")
+	pads.left.set_input(&"ax_button", false)
+	pads.right.set_input(&"trigger", 0.0)
+	pads.left.set_input(&"grip", 0.0)
+	await _tick_input()
+	for side in 2:
+		var name_side := "left" if side == 0 else "right"
+		var throttle := "thrL" if side == 0 else "thrR"
+		var brake := "brkL" if side == 0 else "brkR"
+		var pivot := handles[side].get_parent_node_3d()
+		await _place_palm(name_side, handles[side].global_position)
+		check(handles[side].global_position.distance_to(walker.hands[name_side].global_position) < .005,
+				name_side + " test grip contacts the real handle")
+		pads[name_side].set_input(&"grip", 1.0)
+		await _tick_input()
+		var half_point := cab.shell.to_global(pivot.position + Vector3.UP * handles[side].position.y)
+		await _place_palm(name_side, half_point)
+		demand = walker.cockpit_input()
+		check(absf(demand[throttle] - .5) < .015 and demand[brake] == 0.0,
+				name_side + " hand moves its own shaft halfway around the actual pivot without braking")
+		pads[name_side].set_input(&"grip", 0.0)
+		await _tick_input()
+		await _place_palm(name_side, half_point + cab.shell.global_basis.z * .22)
+		check(absf(walker.cockpit_input()[throttle] - .5) < .015, name_side + " released lever stays at the chosen angle")
+	pads.left.set_input(&"trigger", 1.0)
+	await _tick_input()
+	for frame in 120:
+		walker._xr_input()
+	check(walker.cockpit_input().thrR > .8 and absf(walker.cockpit_input().thrL - .5) < .015,
+			"A fresh trigger takes over its engine without disturbing the opposite manual lever")
+	var previous: Transform3D = pads.left.get_pose(&"grip").transform
+	pads.left.invalidate_pose(&"grip")
+	await _tick_input()
+	check(walker.cockpit_input() == walker.CockpitControls.IDLE and walker.cockpit_hands() == [walker.hands.right],
+			"Losing one tracker clears its parked lever and crossed trigger, leaving the other hand live")
+	pads.left.set_pose(&"grip", previous, Vector3.ZERO, Vector3.ZERO, CONFIDENT)
+	await _tick_input()
+	check(walker.cockpit_input().thrR == 0.0, "Reacquiring a held trigger requires a fresh squeeze")
+	pads.left.set_input(&"trigger", 0.0)
+	await _tick_input()
+	pads.right.set_input(&"trigger", 1.0)
+	await _tick_input()
+	var original_head := driver.head.get_pose(&"default").transform
+	driver.head.invalidate_pose(&"default")
+	await _tick_input()
+	check(walker.cockpit_input() == walker.CockpitControls.IDLE and walker.cockpit_hands().is_empty(),
+			"Losing the head pose releases controls even when both hands remain tracked")
+	_poses(original_head)
+	await _tick_input()
+	check(walker.cockpit_input() == walker.CockpitControls.IDLE, "Head tracking returns without a held trigger jumping")
+	pads.right.set_input(&"trigger", 0.0)
+	await _tick_input()
+	walker.cockpit_control_requested.disconnect(record)
+	walker.interact_requested.disconnect(board)
+	walker.launch_requested.disconnect(fly)
+	walker.set_cockpit_grips([])
+	cab.free()
+
+
 func _run() -> void:
 	if DisplayServer.get_name() != "headless" or XRServer.primary_interface != null:
 		push_error("Run in an isolated headless process with XR off")
@@ -269,6 +389,7 @@ func _run() -> void:
 		check(_eye().distance_to(seat.origin) < .007 and _eye().distance_to(_visor()) < .012,
 			"Boarding puts the projected eye at the cockpit and seated visor")
 		await _vertical_motion("Seated")
+		await _parked_controls()
 		pads.right.set_input(&"primary", Vector2.RIGHT)
 		var at := walker.transform
 		walker._process(.02)
@@ -283,6 +404,8 @@ func _run() -> void:
 		_gloves()
 		walker.set_seated(false,start)
 		await _tick_input()
+		check(walker.cockpit_input() == walker.CockpitControls.IDLE and walker.cockpit_hands().is_empty(),
+				"Dismount removes all cockpit input")
 		check(_eye().distance_to(_visor()) < .012 and absf(_eye().y-Pilot.STANDING_EYE.y) < .006,
 			"Dismount in local reference space restores one standing eye height")
 		check(driver.mode_changes == 0, "The garage leaves the runtime's incoming reference space in place")

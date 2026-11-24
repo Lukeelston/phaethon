@@ -4,9 +4,14 @@ const UI := preload("res://release/release_config.gd")
 
 var _title: Label
 var _hint: Label
+var _status: Label
 var _placard: Node3D
 var _vr_title: Label3D
 var _vr_hint: Label3D
+var _vr_status: Label3D
+var _face: QuadMesh
+var _seated := false
+var _state := ""
 
 
 func setup(xr: bool) -> void:
@@ -35,7 +40,10 @@ func setup(xr: bool) -> void:
 	panel.add_child(rows)
 	_title = UI.label("", 22, UI.INK)
 	_hint = UI.label("", 16, Color("#c0cacf"))
+	_status = UI.label("", 17, UI.AMBER)
+	_status.hide()
 	rows.add_child(_title)
+	rows.add_child(_status)
 	rows.add_child(_hint)
 
 
@@ -44,17 +52,19 @@ func _make_placard() -> void:
 	_placard = Node3D.new()
 	add_child(_placard)
 	var backing := MeshInstance3D.new()
-	var face := QuadMesh.new()
-	face.size = Vector2(0.99, 0.19)
+	_face = QuadMesh.new()
+	_face.size = Vector2(0.99, 0.19)
 	var enamel := StandardMaterial3D.new()
 	enamel.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	enamel.albedo_color = Color("#14222c")
-	face.material = enamel
-	backing.mesh = face
+	_face.material = enamel
+	backing.mesh = _face
 	backing.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_placard.add_child(backing)
 	_vr_title = _sign_line(42, 0.037, UI.AMBER)
 	_vr_hint = _sign_line(28, -0.038, UI.INK)
+	_vr_status = _sign_line(26, 0.063, UI.AMBER)
+	_vr_status.hide()
 
 
 func _sign_line(size: int, height: float, color: Color) -> Label3D:
@@ -74,7 +84,24 @@ func boarding(craft: String) -> void:
 	_vr_hint.text = ""
 
 
+func set_runup_status(value: String) -> void:
+	if _state == value: return
+	_state = value
+	_show_status()
+
+
+func _show_status() -> void:
+	if _vr_status:
+		_vr_status.text = _state
+		_vr_status.visible = _seated and not _state.is_empty()
+	if _status:
+		_status.text = _state
+		_status.visible = _seated and not _state.is_empty()
+
+
 func show_controls(craft: String, seated: bool, destination: String, pad: bool, anchor: Transform3D) -> void:
+	_seated = seated
+	_show_status()
 	var board := "A" if pad or _placard else "E"
 	var fly := "Y" if pad or _placard else "F"
 	var back := "B" if pad or _placard else "Esc"
@@ -86,15 +113,28 @@ func show_controls(craft: String, seated: bool, destination: String, pad: bool, 
 		hint = "Left stick  Walk     Right stick  Look     R3  Pilot view     B  Menu"
 	if seated:
 		action = craft + "  /  " + destination
-		hint = "%s  Launch flight     %s  Step out     %s  Menu" % [fly, board, back]
+		if _placard:
+			hint = "X  Start or stop     Left stick click  Park\nTriggers  Throttle     Grips  Airbrakes\nGrip and move levers · Reach up for switches"
+		elif pad:
+			hint = "X  Start or stop     L3  Parking brake     D-pad  Look\nLeft / right stick forward  Throttles     LT / RT  Airbrakes"
+		else:
+			hint = "I  Start or stop     P  Parking brake\nW/S  Left throttle     ↑/↓  Right throttle     X  Idle\nA  Left airbrake     →  Right airbrake"
+		hint += "\n%s  Launch flight     %s  Step out     %s  Menu" % [fly, board, back]
 	elif not craft.is_empty():
 		action = "%s  Board %s" % [board, craft]
 	if _placard:
 		# Walking anchors are floor poses. A seated anchor is already at the pilot's eyes.
 		var offset := Vector3(-0.24, 1.55, -1.65)
-		if seated:
-			offset = Vector3(-0.40, 0.23, -1.12)
 		_placard.global_transform = anchor.orthonormalized().translated_local(offset)
+		_face.size = Vector2(.74, .32) if seated else Vector2(.99, .19)
+		for row: Label3D in [_vr_title, _vr_status, _vr_hint]:
+			row.position.x = -.34 if seated else -.46
+		_vr_title.position.y = .112 if seated else .037
+		_vr_hint.position.y = -.050 if seated else -.038
+		if seated:
+			# Fixed along the port canopy rail, away from the windshield and lever arc.
+			var rail := anchor.orthonormalized().translated_local(Vector3(-.46, -.02, -.13))
+			_placard.global_transform = rail.rotated_local(Vector3.UP, deg_to_rad(75)).scaled_local(Vector3.ONE * .68)
 		_vr_title.text = action
 		_vr_hint.text = hint
 	else:

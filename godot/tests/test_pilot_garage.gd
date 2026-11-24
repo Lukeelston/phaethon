@@ -28,12 +28,16 @@ func check(ok: bool, label: String) -> bool:
 
 func _key(code: Key) -> void:
 	for down in [true, false]:
-		var event := InputEventKey.new()
-		event.keycode = code
-		event.physical_keycode = code
-		event.pressed = down
-		Input.parse_input_event(event)
-		Input.flush_buffered_events()
+		_key_state(code, down)
+
+
+func _key_state(code: Key, down: bool) -> void:
+	var event := InputEventKey.new()
+	event.keycode = code
+	event.physical_keycode = code
+	event.pressed = down
+	Input.parse_input_event(event)
+	Input.flush_buffered_events()
 
 
 func _scene(path: String) -> bool:
@@ -168,11 +172,53 @@ func _floor_and_bays(garage) -> void:
 
 func _fly_and_return(garage, xr: bool) -> void:
 	var id := "orrery" if xr else "vesper"
+	garage.walker.set_physics_process(true)
+	var finishes := {}
+	for craft: String in Fleet.ORDER:
+		finishes[craft] = garage.environment.bay_node(craft).paint
+	check(finishes.vesper == "violet" and finishes.orrery == UI.Livery.FACTORY,
+		"Only the selected Vesper wears the pilot's violet paint")
 	var at: Transform3D = garage.environment.boarding_transform(id)
 	garage.walker.set_seated(false, at)
 	_key(KEY_E)
 	if not check(garage.seated_craft == id, "Board selected launch craft " + id):
 		return
+	var bay = garage.environment.bay_node(id)
+	var runup = bay.get_node("Runup")
+	var systems: StartupSequence = runup.startup
+	var stands: Transform3D = bay.model.pod.global_transform
+	var secondaries: Array = []
+	for engine: Node3D in bay.model.engines:
+		secondaries.append(engine.global_transform)
+	check(not systems.batt and not systems.all_running(), "Fresh workshop airframe is cold")
+	_key(KEY_I)
+	var deadline := Time.get_ticks_msec() + 16000
+	var staggered := false
+	while not systems.all_running() and Time.get_ticks_msec() < deadline:
+		staggered = staggered or systems.stage[0] != systems.stage[1]
+		await process_frame
+	check(systems.all_running() and staggered and garage.walker.seated and current_scene == garage,
+		"Left and right engines start in sequence while the seated pilot stays in the workshop")
+	var grips: Array = bay.get_node("OccupiedCockpit").throttle_grips()
+	var idle: Transform3D = grips[0].global_transform
+	var other: Transform3D = grips[1].global_transform
+	_key_state(KEY_W, true)
+	await create_timer(0.4).timeout
+	check(not idle.is_equal_approx(grips[0].global_transform) and other.is_equal_approx(grips[1].global_transform),
+		"The left throttle moves its own handle when operated through player input")
+	_key_state(KEY_W, false)
+	_key(KEY_P)
+	check(not systems.park and stands.is_equal_approx(bay.model.pod.global_transform)
+		and secondaries[0].is_equal_approx(bay.model.engines[0].global_transform)
+		and secondaries[1].is_equal_approx(bay.model.engines[1].global_transform),
+		"Releasing the park brake leaves the pod and both engines fixed to their service stands")
+	_key(KEY_P)
+	runup.work("handling", 1)
+	runup.work("slide", -1)
+	_key(KEY_E)
+	_key(KEY_E)
+	check(garage.walker.seated and bay.get_node("Runup").startup == systems and systems.all_running(),
+		"Stepping out and returning keeps this airframe running")
 	var old: WeakRef = weakref(garage)
 	_key(KEY_F)
 	if not await _scene("res://vr.tscn" if xr else UI.GAME_SCENE):
@@ -181,8 +227,12 @@ func _fly_and_return(garage, xr: bool) -> void:
 	check((flight is Cockpit if xr else flight is Flat) and flight.sim.P.vehicle == id and Settings.selected_craft() == id,
 		"Launch the actual selected craft in its flight mode")
 	check(flight.sim.kind == ("range" if xr else "network"), "Launch preserves the selected destination")
+	check(UI.Livery.current == finishes[id], "Launch uses the finish the pilot saw from the aisle")
+	check(flight.sim.P.handling == "starfighter", "The physical handling switch carries its selected mode onto the pad")
 	check(old.get_ref() == null, "Flight releases the garage")
 	if xr:
+		check(flight.startup == systems and flight.startup.all_running() and flight.startup.park and not Cockpit.slide_feel,
+			"The runway receives the exact startup, park brake and slide switch state the pilot left in the bay")
 		flight.menu_open(true)
 		for choice in ["options", "garage"]:
 			for index in flight.menu.items.size():
@@ -195,8 +245,12 @@ func _fly_and_return(garage, xr: bool) -> void:
 		if not await _scene(GARAGE):
 			return
 		garage = current_scene
+		_check_returned_finishes(garage, finishes)
 		check(not garage.walker.seated and garage.environment.nearest_bay(garage.walker.global_position) == id,
 			"Headset dismount arrives alongside the craft it flew")
+		var returned = garage.environment.bay_node(id).get_node("Runup")
+		check(returned.startup == systems and returned.startup.all_running() and not returned.telemetry.slide
+			and returned.telemetry.handling == "starfighter", "Headset return restores that flight's engines and switches")
 		_key(KEY_ESCAPE)
 		if await _scene(UI.VR_MENU_SCENE):
 			check(current_scene.selected_course == "range", "Headset garage returns to its selected course on the title")
@@ -223,6 +277,7 @@ func _fly_and_return(garage, xr: bool) -> void:
 	if not await _scene(GARAGE):
 		return
 	garage = current_scene
+	_check_returned_finishes(garage, finishes)
 	check(not paused and not garage.walker.seated and garage.environment.nearest_bay(garage.walker.global_position) == id,
 		"Leave the parked flight on foot alongside the same craft")
 	_key(KEY_ESCAPE)
@@ -230,11 +285,19 @@ func _fly_and_return(garage, xr: bool) -> void:
 		check(current_scene is Control, "Walking back returns to the desktop title")
 
 
+func _check_returned_finishes(garage, expected: Dictionary) -> void:
+	for craft: String in Fleet.ORDER:
+		check(garage.environment.bay_node(craft).paint == expected[craft],
+			"Returning to the workshop preserves the finish on " + craft)
+
+
 func _run() -> void:
 	var settings_before := Settings.prefs_path
 	var had_vr_prefs := FileAccess.file_exists(Cockpit.PREFS)
 	var vr_prefs := FileAccess.get_file_as_bytes(Cockpit.PREFS) if had_vr_prefs else PackedByteArray()
 	Settings.prefs_path = "user://test-garage-%d.cfg" % OS.get_process_id()
+	Settings.set_selected_craft("vesper")
+	Settings.set_choice("paint", "violet")
 	if await _enter_menu(false):
 		await _floor_and_bays(current_scene)
 		await _fly_and_return(current_scene, false)

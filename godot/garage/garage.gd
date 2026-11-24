@@ -6,6 +6,7 @@ const Workshop := preload("res://garage/garage_environment.gd")
 const Walker := preload("res://garage/garage_walker.gd")
 const PilotModel := preload("res://garage/pilot_model.gd")
 const ParkedCockpit := preload("res://garage/garage_cockpit.gd")
+const Runup := preload("res://garage/garage_runup.gd")
 const Prompts := preload("res://garage/garage_prompts.gd")
 
 var environment: Workshop
@@ -13,6 +14,8 @@ var walker: Walker
 var pilot: PilotModel
 var seated_craft := ""
 var _cockpit: ParkedCockpit
+var _runups: Dictionary[String, Runup] = {}
+var _touching_hands: Array[XRController3D] = []
 var _prompts: Prompts
 var _nearby := ""
 var _using_pad := false
@@ -24,6 +27,11 @@ func _ready() -> void:
 	environment = Workshop.new()
 	environment.name = "Workshop"
 	add_child(environment)
+	var returning := Route.take_parked_bays()
+	for id: String in returning:
+		var bay: Dictionary = returning[id]
+		if Fleet.ORDER.has(id) and (bay.has("startup") or bay.has("handling") or bay.has("slide")):
+			_runup_for(id, bay.get("startup")).apply_switches(bay)
 	walker = Walker.new()
 	walker.name = "Walker"
 	walker.allow_xr = Route.is_xr
@@ -38,18 +46,53 @@ func _ready() -> void:
 	walker.interact_requested.connect(interact)
 	walker.launch_requested.connect(launch_flight)
 	walker.back_requested.connect(return_to_menu)
+	walker.cockpit_control_requested.connect(_work_control)
 	_prompts = Prompts.new()
 	add_child(_prompts)
 	_prompts.setup(walker.xr_live)
 	_update_prompt()
+	Runup.prewarm_switches(self)
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if _departing:
 		return
+	if not seated_craft.is_empty():
+		_operate_cockpit(delta)
 	var nearby := environment.nearest_bay(walker.global_position) if seated_craft.is_empty() else ""
 	if nearby != _nearby or _using_pad != walker.using_gamepad:
 		_update_prompt()
+
+
+func _runup_for(id: String, power: StartupSequence = null) -> Runup:
+	if not _runups.has(id):
+		var bay := environment.bay_node(id) as Workshop.Parked
+		var runup := Runup.new()
+		runup.name = "Runup"
+		bay.add_child(runup)
+		runup.setup(bay, power)
+		_runups[id] = runup
+	return _runups[id]
+
+
+func _work_control(control: String) -> void:
+	if not _departing and not seated_craft.is_empty():
+		_runups[seated_craft].work(control)
+
+
+func _operate_cockpit(delta: float) -> void:
+	var runup := _runups[seated_craft]
+	var hands := walker.cockpit_hands()
+	for hand in _touching_hands:
+		if not hands.has(hand):
+			_cockpit.forget_overhead_hand(hand)
+	_touching_hands = hands
+	for hand in hands:
+		for hit: Array in _cockpit.poll_overhead(hand, delta):
+			runup.work(hit[0], hit[1])
+	runup.set_controls(walker.cockpit_input())
+	_cockpit.sync_runup(runup.startup, runup.controls, runup.telemetry, delta, pilot)
+	_prompts.set_runup_status(runup.status_text())
 
 
 func interact() -> void:
@@ -61,7 +104,7 @@ func interact() -> void:
 	var craft := environment.nearest_bay(walker.global_position)
 	if not Fleet.ORDER.has(craft):
 		return
-	var bay := environment.bay_node(craft)
+	var bay := environment.bay_node(craft) as Workshop.Parked
 	if _cockpit == null or _cockpit.get_parent() != bay:
 		if _cockpit != null:
 			_cockpit.queue_free()
@@ -72,7 +115,7 @@ func interact() -> void:
 		if walker.xr_live:
 			_boarding = true
 			_prompts.boarding(str(Fleet.NAMES[craft]))
-			await _cockpit.build(craft, _next_frame)
+			await _cockpit.build(craft, _next_frame, bay.paint)
 			_boarding = false
 			if _departing or not is_inside_tree():
 				return
@@ -80,12 +123,16 @@ func interact() -> void:
 				_update_prompt()
 				return
 		else:
-			_cockpit.build(craft)
+			_cockpit.build(craft, Callable(), bay.paint)
 	_cockpit.show()
 	environment.set_cockpit_visible(craft, false)
 	seated_craft = craft
 	pilot.set_seat_vehicle(craft)
 	walker.set_seated(true, environment.seat_transform(craft))
+	var runup := _runup_for(craft)
+	runup.set_seated(true, _cockpit.overhead.pods if _cockpit.overhead else {})
+	walker.set_cockpit_grips(_cockpit.throttle_grips())
+	_operate_cockpit(0.0)
 	_update_prompt()
 
 
@@ -93,6 +140,9 @@ func leave_seat() -> void:
 	if _departing or seated_craft.is_empty():
 		return
 	var craft := seated_craft
+	_runups[craft].set_seated(false)
+	_cockpit.reset_overhead_hands()
+	_touching_hands.clear()
 	seated_craft = ""
 	walker.set_seated(false, environment.boarding_transform(craft))
 	environment.set_cockpit_visible(craft, true)
@@ -105,7 +155,17 @@ func launch_flight() -> void:
 	if _departing or seated_craft.is_empty():
 		return
 	_departing = true
-	Route.launch_flight(get_tree(), seated_craft)
+	var bays := {}
+	for id: String in Fleet.ORDER:
+		var bay := environment.bay_node(id) as Workshop.Parked
+		var data := {"paint": bay.paint}
+		if _runups.has(id):
+			var runup := _runups[id]
+			data.merge(runup.switch_settings)
+			if runup.operated:
+				data.startup = runup.startup
+		bays[id] = data
+	Route.launch_flight(get_tree(), seated_craft, bays)
 
 
 func return_to_menu() -> void:

@@ -4,6 +4,7 @@ extends Node
 const View := preload("res://view/craft_view.gd")
 const Cockpit := preload("res://vr/vr_cockpit.gd")
 const Boot := preload("res://release/vr_boot.gd")
+const Paint := preload("res://view/livery.gd")
 const Settings := preload("res://release/game_settings.gd")
 const Stops := ["range", "gp", "eridanus", "emergency", "network", "carving", "network", "aurora", "range"]
 
@@ -72,6 +73,25 @@ func shot(name: String) -> void:
 	var image := get_viewport().get_texture().get_image()
 	check(name + " VR scene screenshot saved", image.save_png(evidence.path_join("pcvr-" + name + ".png")) == OK)
 
+## The fleet's atlas is baked into both meshes. Check the material the pilot sees in each.
+func _garage_atlas_matches(bay: Node3D, repaint: bool, enamel := Color.WHITE) -> bool:
+	var shell := bay.get_node_or_null("OccupiedCockpit/ParkedShell/PodHull") as MeshInstance3D
+	if not shell:
+		return false
+	var body: Mesh = bay.model.fleet.part(&"Cab")
+	for mesh: Mesh in [body, shell.mesh]:
+		if not mesh or mesh.get_surface_count() == 0:
+			return false
+		var material := mesh.surface_get_material(0) as ShaderMaterial
+		if not material or (material.get_shader_parameter("repaint") == true) != repaint:
+			return false
+		if repaint:
+			var actual: Color = material.get_shader_parameter("enamel")
+			if not actual.is_equal_approx(enamel):
+				return false
+	return true
+
+
 ## Exercise the shipped garage from its menu row before continuing the flight tour.
 func _visit_garage() -> bool:
 	var menu = get_tree().current_scene
@@ -79,6 +99,13 @@ func _visit_garage() -> bool:
 	var row := menu.find_child("Garage", true, false) as Button
 	if not check("VR menu offers Pilot garage", row != null and menu.buttons.has(row) and not row.disabled):
 		return false
+	var saved_craft := Settings.selected_craft()
+	var saved_paint := Settings.choice("paint", Paint.ids())
+	var previous_live := Paint.current
+	Settings.set_selected_craft("vesper")
+	Settings.set_choice("paint", "cobalt")
+	# Make inadvertent use of the global flight paint visible in both parked cabs.
+	Paint.current = "crimson"
 	menu.set_process(false)
 	menu.focus_row(menu.buttons.find(row))
 	menu.consume_controller(0.0, false, true)
@@ -91,8 +118,20 @@ func _visit_garage() -> bool:
 	garage.walker.interact_requested.emit()
 	if not check("the packaged Vesper cockpit can be boarded", garage.walker.seated and garage.seated_craft == "vesper"):
 		return false
+	var vesper: Node3D = garage.environment.bay_node("vesper")
+	check("selected Vesper carries saved cobalt paint inside and outside",
+		_garage_atlas_matches(vesper, true, Paint.coat("paint", "cobalt")))
 	garage.walker.interact_requested.emit()
 	check("dismount returns to Vesper's boarding point", not garage.walker.seated and garage.environment.nearest_bay(garage.walker.global_position) == "vesper")
+	garage.walker.set_seated(false, garage.environment.boarding_transform("kiln"))
+	garage.walker.interact_requested.emit()
+	var kiln: Node3D = garage.environment.bay_node("kiln")
+	check("adjacent Kiln keeps its own factory atlas inside and outside", _garage_atlas_matches(kiln, false))
+	garage.walker.interact_requested.emit()
+	check("boarding both bays restores incoming global paint", Paint.current == "crimson")
+	Paint.current = previous_live
+	Settings.set_choice("paint", saved_paint)
+	Settings.set_selected_craft(saved_craft)
 	garage.walker.back_requested.emit()
 	await get_tree().scene_changed
 	var returned = get_tree().current_scene

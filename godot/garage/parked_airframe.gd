@@ -3,6 +3,7 @@
 extends Node3D
 
 const Model := preload("res://view/craft_model.gd")
+const Livery := preload("res://view/livery.gd")
 const Pilot := preload("res://sim/pilot_craft.gd")
 const Flight := preload("res://sim/craft_sim.gd")
 const Seat := preload("res://garage/garage_seat.gd")
@@ -14,10 +15,12 @@ const ENGINE_HEIGHT := 1.56
 
 var sim: Dictionary
 var model: Model
+var paint := Livery.FACTORY
 var engine_centers: Array[Vector3] = []
 
 
-func build(id: String) -> void:
+func build(id: String, finish := Livery.FACTORY) -> void:
+	paint = finish
 	var spec := Flight.DEFAULTS.merged(Pilot.tuning(id), true)
 	spec["vehicle"] = id
 	sim = {"P": spec}
@@ -25,7 +28,7 @@ func build(id: String) -> void:
 	model.name = "ParkedModel"
 	model.process_mode = Node.PROCESS_MODE_DISABLED
 	add_child(model)
-	model.build(self)
+	Livery.build_in(paint, model.build.bind(self))
 	model.pod.name = "DisplayCockpit"
 	model.pod.transform = Seat.pod_pose() * Transform3D(Basis.IDENTITY, Vector3.UP * Model.POD_FRAME_UP)
 	model.canopy.get_node("field").hide()

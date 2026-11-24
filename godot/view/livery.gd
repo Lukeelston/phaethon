@@ -15,6 +15,7 @@
 ##   Livery.coat("paint")                 the colour of a part in the current livery
 extends RefCounted
 
+const FACTORY := "ember"
 const TABLE := {
 	"ember": {"name": "Ember orange", "paint": Color(0.95, 0.42, 0.08), "stripe": Color(0.11, 0.12, 0.14), "pin": Color(0.96, 0.95, 0.9),
 		"engine": Color(0.86, 0.27, 0.09), "skin": Color(0.80, 0.82, 0.86)},
@@ -42,12 +43,22 @@ const TABLE := {
 const CHOICES := [["ember", "Ember orange"], ["cobalt", "Cobalt blue"], ["viridian", "Racing green"], ["crimson", "Crimson"],
 	["sunflower", "Sunflower yellow"], ["violet", "Violet"], ["bone", "Bone white"], ["obsidian", "Obsidian black"]]   # the menus' paint row: [id, name]
 
-static var current := "ember"     # the livery crafts are built in
+static var current := FACTORY     # the livery crafts are built in
 static var pinned := false        # a test or a render chose it: the saved choice does not replace it
 
 
 static func ids() -> Array:
 	return CHOICES.map(func(entry): return entry[0])
+
+
+## Build one synchronous piece in its owner's paint. Restore the previous colour
+## before returning so multiple displayed craft and frame-sliced cabins can coexist.
+static func build_in(which: String, build_piece: Callable) -> Variant:
+	var previous := current
+	current = which
+	var piece: Variant = build_piece.call()
+	current = previous
+	return piece
 
 
 ## The colour of a part ("paint", "stripe", "pin", "engine", "skin") in a livery (the current one by default).
