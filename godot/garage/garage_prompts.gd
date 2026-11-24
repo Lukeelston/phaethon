@@ -81,7 +81,7 @@ func show_controls(craft: String, seated: bool, destination: String, pad: bool, 
 	var action := "Walk to a cockpit"
 	var hint := "WASD  Walk     Mouse  Look     V  Pilot view     Esc  Menu"
 	if _placard:
-		hint = "Left stick  Walk     Right stick  Snap turn     B  Menu"
+		hint = "Left stick  Walk     Right stick  Turn     B  Menu"
 	elif pad:
 		hint = "Left stick  Walk     Right stick  Look     R3  Pilot view     B  Menu"
 	if seated:

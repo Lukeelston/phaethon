@@ -98,16 +98,15 @@ func _update_arms() -> void:
 		arm.visible = not (_first_person and _tracked)
 
 
-## A separately tracked glove shares the suit mesh. Its knuckles point up, fingers forward.
+## Both glove meshes are authored in OpenXR grip space: little finger to index is -Z,
+## wrist to fingertips is -Y, and the left and right palms face +X and -X respectively.
 func make_glove(side: String) -> Node3D:
 	var left := side.to_lower() in ["left","l","left_hand"]
-	var sign_side := -1.0 if left else 1.0
 	var mount := Node3D.new()
 	mount.name = &"LeftGlove" if left else &"RightGlove"
 	var glove := MeshInstance3D.new()
 	glove.mesh = _gloves[0 if left else 1].mesh
-	var orientation := Basis(Vector3.UP*sign_side, Vector3.BACK, Vector3.RIGHT*sign_side)
-	glove.transform = Transform3D(orientation, -(orientation*Vector3(0,-.081,-.006)))
+	glove.position = -Vector3(0,-.081,-.006)
 	mount.add_child(glove)
 	return mount
 

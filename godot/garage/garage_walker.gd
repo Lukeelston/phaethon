@@ -10,7 +10,7 @@ const Pilot := preload("res://garage/pilot_model.gd")
 const Levers := preload("res://input/lever_input.gd")
 const STANDING_EYE_HEIGHT := Pilot.STANDING_EYE.y
 const WALK_SPEED := 2.35
-const SNAP_ANGLE := PI / 6.0
+const TURN_SPEED := PI / 2.0  # radians per second at full right-stick travel
 const DEADZONE := .19
 const LOOK_LIMIT := deg_to_rad(82.0)
 
@@ -31,16 +31,14 @@ var _boom: SpringArm3D
 var _outside: Camera3D
 var _gloves := {}
 var _tracking_hands := false
-var _xr: OpenXRInterface
-var _original_area := XRInterface.XR_PLAY_AREA_UNKNOWN
-var _changed_area := false
+var _xr: XRInterface
 var _xr_focused := false
 var _align_tracking := true
+var _tracking_area := XRInterface.XR_PLAY_AREA_UNKNOWN
+var _height_offset := 0.0
 var _xr_down := Vector3i.ZERO
 var _left_live := false
 var _right_live := false
-var _snap_ready := false
-var _snap := 0.0
 var _joy := -1
 var _pitch := 0.0
 var _focused := true
@@ -63,7 +61,7 @@ func _ready() -> void:
 	_shape.position.y = capsule.height * .5
 	add_child(_shape)
 
-	_xr = XRServer.find_interface("OpenXR") as OpenXRInterface
+	_xr = _garage_interface()
 	xr_live = allow_xr and _xr != null and _xr.is_initialized()
 	_previous_mouse = Input.mouse_mode
 	_previous_xr = get_viewport().use_xr
@@ -71,12 +69,6 @@ func _ready() -> void:
 	if xr_live:
 		get_viewport().msaa_3d = Viewport.MSAA_4X
 		DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
-		_original_area = _xr.get_play_area_mode()
-		if _original_area not in [XRInterface.XR_PLAY_AREA_STAGE,XRInterface.XR_PLAY_AREA_ROOMSCALE]:
-			for area in [XRInterface.XR_PLAY_AREA_STAGE,XRInterface.XR_PLAY_AREA_ROOMSCALE]:
-				if _xr.supports_play_area_mode(area) and _xr.set_play_area_mode(area):
-					_changed_area = true
-					break
 		_origin = XROrigin3D.new()
 		_eye = XRCamera3D.new()
 		add_child(_origin)
@@ -87,7 +79,10 @@ func _ready() -> void:
 			hand.pose = &"grip"
 			_origin.add_child(hand)
 			hands[side] = hand
-		_xr.pose_recentered.connect(_on_recenter)
+		if _xr.has_signal(&"pose_recentered"):
+			_xr.connect(&"pose_recentered",_on_recenter)
+		_xr.play_area_changed.connect(_on_recenter.unbind(1))
+		XRServer.reference_frame_changed.connect(_on_recenter)
 	else:
 		_origin = Node3D.new()
 		_origin.position = Pilot.STANDING_EYE
@@ -120,8 +115,15 @@ func _exit_tree() -> void:
 	get_viewport().use_xr = _previous_xr
 	if _owns_mouse:
 		Input.mouse_mode = _previous_mouse
-	if _changed_area and _xr and _xr.is_initialized() and _xr.supports_play_area_mode(_original_area):
-		_xr.set_play_area_mode(_original_area)
+
+
+func _garage_interface() -> XRInterface:
+	return XRServer.find_interface("OpenXR")
+
+
+func _xr_has_focus() -> bool:
+	var openxr := _xr as OpenXRInterface
+	return openxr != null and openxr.get_session_state() == OpenXRInterface.SESSION_STATE_FOCUSED
 
 
 func set_pilot(pilot: Pilot) -> void:
@@ -158,7 +160,8 @@ func set_seated(value: bool, pose: Transform3D) -> void:
 		_avatar.set_stride(_distance,false)
 	if xr_live:
 		_align_tracking = true
-		_align_head()
+		if _xr_has_focus():
+			_align_head()
 	else:
 		_origin.rotation = Vector3.ZERO
 		_origin.position = Pilot.SEATED_EYE if seated else Pilot.STANDING_EYE
@@ -166,7 +169,7 @@ func set_seated(value: bool, pose: Transform3D) -> void:
 
 
 func eye_transform() -> Transform3D:
-	return camera.global_transform
+	return camera.get_camera_transform()
 
 
 func _on_recenter() -> void:
@@ -175,25 +178,34 @@ func _on_recenter() -> void:
 
 func _align_head() -> void:
 	var tracker := XRServer.get_tracker(&"head") as XRPositionalTracker
-	if tracker == null:
+	var head := tracker.get_pose(&"default") if tracker else null
+	if head == null or not head.has_tracking_data or head.tracking_confidence == XRPose.XR_TRACKING_CONFIDENCE_NONE:
+		_align_tracking = true
 		return
-	var head := tracker.get_pose(&"default")
-	if head == null or not head.has_tracking_data:
-		return
-	# The cockpit can leave a seated calibration on XRServer. Place the rig from
-	# the raw floor-space pose without changing the session's shared calibration.
-	var height := STANDING_EYE_HEIGHT
+	# Raw OpenXR metres give us floor height and subsequent physical movement.
+	# The camera supplies the eye actually projected after an inherited recenter.
+	# Both hands ride this same origin. Keep the runtime's reference space intact.
+	var raw_y := head.transform.origin.y * XRServer.world_scale
+	var view := _origin.global_transform.affine_inverse() * eye_transform()
 	var mode := _xr.get_play_area_mode()
-	if mode in [XRInterface.XR_PLAY_AREA_ROOMSCALE,XRInterface.XR_PLAY_AREA_STAGE] and head.transform.origin.y > .20:
-		height = head.transform.origin.y * XRServer.world_scale
-	if not seated and _avatar:
-		_avatar.scale = Vector3.ONE * clampf(height/STANDING_EYE_HEIGHT,.65,1.22)
-		_avatar.position.z = -Pilot.STANDING_EYE.z * _avatar.scale.z
-	var target := Pilot.SEATED_EYE if seated else Vector3(0,height,0)
-	var adjusted := head.get_adjusted_transform()
-	_origin.rotation.y = -atan2(adjusted.basis.z.x,adjusted.basis.z.z)
-	_origin.position = target - _origin.basis * adjusted.origin
-	_align_tracking = false
+	if _align_tracking or mode != _tracking_area:
+		var floor_tracked := mode in [XRInterface.XR_PLAY_AREA_ROOMSCALE,XRInterface.XR_PLAY_AREA_STAGE]
+		if not seated and floor_tracked and raw_y <= .20:
+			return  # the runtime has not delivered a floor-space position yet
+		var height := raw_y if floor_tracked else STANDING_EYE_HEIGHT
+		var target := Pilot.SEATED_EYE if seated else Vector3(0,height,0)
+		_height_offset = target.y - raw_y
+		_origin.rotation.y = -atan2(view.basis.z.x,view.basis.z.z)
+		_origin.position = target - _origin.basis * view.origin
+		if not seated and _avatar:
+			_avatar.scale = Vector3.ONE * (height/STANDING_EYE_HEIGHT)
+			_avatar.position.z = -Pilot.STANDING_EYE.z * _avatar.scale.z
+		_tracking_area = mode
+		_align_tracking = false
+	else:
+		# An interface may publish its updated camera sample after the tracker.
+		# Retain physical head-height deltas when that projected sample arrives.
+		_origin.position.y = _height_offset + raw_y - (_origin.basis * view.origin).y
 
 
 func _inspect(on: bool) -> void:
@@ -307,7 +319,7 @@ func _desktop_input(delta: float) -> Vector2:
 
 
 func _xr_input() -> Vector2:
-	var focus := _xr.get_session_state() == OpenXRInterface.SESSION_STATE_FOCUSED
+	var focus := _xr_has_focus()
 	var left: XRController3D = hands.left
 	var right: XRController3D = hands.right
 	var have_left := focus and left.get_has_tracking_data()
@@ -327,10 +339,8 @@ func _xr_input() -> Vector2:
 		_xr_focused = false
 		_left_live = false
 		_right_live = false
-		_snap_ready = false
 		return Vector2.ZERO
-	if _align_tracking:
-		_align_head()
+	_align_head()
 	var down := Vector3i(int(have_right and right.is_button_pressed("ax_button")),
 			int(have_left and left.is_button_pressed("by_button")),
 			int(have_right and right.is_button_pressed("by_button")))
@@ -347,16 +357,29 @@ func _xr_input() -> Vector2:
 	if actions.x > 0: interact_requested.emit()
 	elif actions.y > 0: launch_requested.emit()
 	elif actions.z > 0: back_requested.emit()
-	var turn := right.get_vector2("primary").x if have_right else 0.0
-	if not have_right:
-		_snap_ready = false
-	elif absf(turn) < .35:
-		_snap_ready = true
-	elif _snap_ready and absf(turn) > .72 and not seated:
-		_snap = -signf(turn)*SNAP_ANGLE
-		_snap_ready = false
 	var stick := left.get_vector2("primary") if have_left else Vector2.ZERO
 	return _stick(Vector2(stick.x,-stick.y))
+
+
+func _process(delta: float) -> void:
+	if not xr_live or not _xr_focused or _align_tracking or seated:
+		return
+	var right: XRController3D = hands.right
+	if right.get_has_tracking_data():
+		_turn_xr(right.get_vector2("primary").x, delta)
+
+
+func _turn_xr(axis: float, delta: float) -> void:
+	if seated or absf(axis) <= DEADZONE:
+		return
+	var travel := clampf((absf(axis) - DEADZONE) / (1.0 - DEADZONE), 0.0, 1.0)
+	# Render-rate yaw keeps slow turns smooth in the headset. Discard elapsed
+	# loading time so a held stick cannot spin the pilot across a scene hitch.
+	var angle := -signf(axis) * travel * TURN_SPEED * minf(delta, 0.05)
+	var eye_offset := eye_transform().origin - global_position
+	rotate_y(angle)
+	# A pilot leaning out from the capsule turns in place around their head.
+	_origin.global_position += eye_offset - eye_offset.rotated(Vector3.UP, angle)
 
 
 func _physics_process(delta: float) -> void:
@@ -377,17 +400,12 @@ func step_locomotion(intent: Vector2, delta: float) -> void:
 		return
 	var start := global_position
 	if xr_live and _xr_focused and not _align_tracking:
-		var room_step := _eye.global_position-global_position
+		var room_step := eye_transform().origin-global_position
 		room_step.y = 0
 		if room_step.length_squared() > .000001:
 			move_and_collide(room_step)
 			_origin.global_position -= room_step
-		if _snap != 0.0:
-			# The capsule is now directly below the headset. Its pivot preserves
-			# the physical head position on a comfort turn, even against a wall.
-			rotate_y(_snap)
-			_snap = 0.0
-	var forward := -camera.global_basis.z
+	var forward := -eye_transform().basis.z
 	forward.y = 0
 	forward = forward.normalized()
 	var right := forward.cross(Vector3.UP)

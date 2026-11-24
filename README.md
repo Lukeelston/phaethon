@@ -19,7 +19,7 @@ uses the course selected on the flight menu.
 
 | Garage control | Keyboard and mouse | Gamepad | VR |
 |---|---|---|---|
-| Walk and look | WASD and mouse | Left and right sticks | Left stick to walk, right stick to snap turn |
+| Walk and look | WASD and mouse | Left and right sticks | Left stick to walk, right stick to turn smoothly |
 | Board or step out | E | A | Right A |
 | Launch from the seat | F | Y | Left Y |
 | View the pilot on foot | V | Right stick click | Look down to see your suit |
