@@ -151,6 +151,16 @@ func _flat_view() -> void:
 	var own := CM.pod_hull()
 	check("the Phaethon's own hull is its own: eight surfaces, no plating, not the Talon's", own != hull and own.get_surface_count() == 8 and own.surface_find_by_name(Talon.SURFACE) < 0
 		and not own.has_meta(&"talon_hull"))
+	# (what it costs to draw, beside the Phaethon: triangles in the hull and in one engine's fixed mesh)
+	var tris := func(mesh: Mesh) -> int:
+		var n := 0
+		for s in mesh.get_surface_count():
+			var idx = mesh.surface_get_arrays(s)[Mesh.ARRAY_INDEX]
+			n += (idx.size() if idx != null and not (idx as PackedInt32Array).is_empty() else (mesh.surface_get_arrays(s)[Mesh.ARRAY_VERTEX] as PackedVector3Array).size()) / 3
+		return n
+	print("  triangles: hull %d (the Phaethon's %d; plating %d), an engine's fixed mesh %d (the Phaethon's %d)" % [tris.call(hull), tris.call(own),
+		(hull.surface_get_arrays(plating)[Mesh.ARRAY_INDEX] as PackedInt32Array).size() / 3, tris.call((craft.engines[1].get_node("TalonFairing") as MeshInstance3D).mesh),
+		tris.call(CM._engine_body(1.0, false))])
 	var brakes: bool = craft.pod_flaps.size() == 2 and craft.tail_lights == null
 	for i in craft.pod_flaps.size():
 		var s := -1.0 if i == 0 else 1.0
