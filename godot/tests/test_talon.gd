@@ -80,8 +80,8 @@ func _on_paper() -> void:
 	check("no craft is called Starfighter (it is a handling mode)", not called_starfighter)
 	check("it is known, chosen by --vehicle=talon, and has the Phaethon's (empty) tuning", Pilot.known("talon") == Pilot.TALON
 		and Pilot.resolve(PackedStringArray(["--vehicle=talon"]), "") == Pilot.TALON and Pilot.tuning(Pilot.TALON) == {} and Pilot.tuning(Pilot.STANDARD) == {})
-	check("it plays the Phaethon's own sounds and sits at the Phaethon's own instruments", Pilot.sound_bank(Pilot.TALON) == Pilot.STANDARD
-		and Pilot.deck_of(Pilot.TALON) == Pilot.STANDARD and not FleetDeck.has_deck(Pilot.TALON) and not Fleet.supports(Pilot.TALON) and not Pilot.armed(Pilot.TALON))
+	check("it plays the Phaethon's own sounds and sits at the Phaethon's own instruments, and is armed (its wing guns)", Pilot.sound_bank(Pilot.TALON) == Pilot.STANDARD
+		and Pilot.deck_of(Pilot.TALON) == Pilot.STANDARD and not FleetDeck.has_deck(Pilot.TALON) and not Fleet.supports(Pilot.TALON) and Pilot.armed(Pilot.TALON))
 	var based := []
 	for id in Pilot.ORDER:
 		if Pilot.phaethon_based(id):

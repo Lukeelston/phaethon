@@ -186,8 +186,8 @@ const StartPadScript := preload("res://view/start_pad.gd")
 var light_bars: Array = []   # the pilot's own, in the patrol craft (one on each model of the pod that is built)
 var siren: AudioStreamPlayer # ... and its siren
 var menu = MainMenuScript.new()   # the main menu (view/main_menu.gd): the flight waits while it's open
-var gunnery = null                # the Basilisk's fire control, once its craft has a gun (view/gunnery.gd)
-var gun_wanted := false           # ... its switch: out and laid, or stowed (the cockpit's GUN switch; K here)
+var gunnery = null                # an armed craft's fire control (view/gunnery.gd): a turret's at once, fixed guns' when first armed
+var gun_wanted := false           # ... its switch: armed and out, or safe and stowed (the cockpit's GUN switch; K here)
 # Power-ups (view/power_ups.gd): lit gates over the road that give the engines a few seconds' surge.
 # Off for a bare view (a test, a render, a replay: --power-ups asks); the headset's cockpit turns
 # them on from its OPTIONS page, where they are on unless switched off.
@@ -606,7 +606,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		set_autopilot(not autopilot.on)
 	if event is InputEventKey and event.pressed and not event.echo and (event as InputEventKey).keycode == KEY_G:
 		enter_city_gp()
-	if event is InputEventKey and event.pressed and not event.echo and (event as InputEventKey).keycode == KEY_K and craft and craft.turret:
+	if event is InputEventKey and event.pressed and not event.echo and (event as InputEventKey).keycode == KEY_K and craft and craft.weapon:
 		gun_wanted = not gun_wanted
 
 
@@ -2057,8 +2057,8 @@ func _build_craft() -> void:
 		terminal_lighting.sync(sim, org_x, org_y)
 
 
-## The Basilisk's gun from the keyboard: K deploys and stows it (_unhandled_key_input), F held fires.
-## Overridable: the cockpit has its GUN switch and X.
+## An armed craft's gun from the keyboard (sim/pilot_craft.gd armed): K arms it and makes it safe
+## (_unhandled_key_input), F held fires. Overridable: the cockpit has its GUN switch and X.
 func _gun_controls() -> void:
 	if gunnery:
 		gunnery.want_out = gun_wanted

@@ -117,9 +117,10 @@ static func power_of(id: Variant) -> Dictionary:
 	return traits(id).power
 
 
-## Does this airframe carry a gun (the Basilisk's turret)?
+## Does this airframe carry a weapon (WEAPONS)? Its cockpit then has a GUN switch (vr/vr_cockpit.gd), and X, and the
+## flat view's K and F, work its gun. Stage 1 of the Raids: the Phaethon, the Talon and the Basilisk.
 static func armed(id: Variant) -> bool:
-	return known(id) == BASILISK
+	return WEAPONS.has(known(id))
 
 
 ## Each craft's weapon, hidden in its hull until its GUN switch is armed (Raids; Luke: "Modelled and hidden - have codex

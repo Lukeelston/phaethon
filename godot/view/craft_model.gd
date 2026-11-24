@@ -615,7 +615,7 @@ func build(v, checkpoint := Callable(), reuse_engine_body := Callable()) -> void
 		await checkpoint.call("canopy")
 	canopy = CanopyScript.build(fleet)   # windscreen and forcefield (view/canopy.gd)
 	pod.add_child(canopy)
-	if fleet and PilotCraft.armed(sim.P.vehicle):
+	if fleet and PilotCraft.weapon_of(sim.P.vehicle) == "turret":      # (the Basilisk's: not every armed craft's, since the Phaethons were armed)
 		turret = TurretScript.new()
 		pod.add_child(turret)
 		turret.build(fleet)

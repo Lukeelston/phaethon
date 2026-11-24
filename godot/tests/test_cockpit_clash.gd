@@ -38,6 +38,7 @@ const JOINED := [
 	["cockpit_interior/ConsoleL", "PowerSwitch/MeshInstance3D"],                        # the POWER switch's panel is let into the console's inboard face (2026-11-24; up front under SLIDE since flight 34)
 	["cockpit_interior/ConsoleL", "PowerSwitch/plinth"],                                # ... standing on its plinth, which is let in too
 	["cockpit_interior/ConsoleL", "PowerButton/bezel"],                                 # ... and its button's bezel is let into the same face, forward of it
+	["cockpit_interior/ConsoleR", "GunSwitch/MeshInstance3D"],                          # the GUN switch's panel is let into the starboard console's inboard face (Raids, 2026-11-24)
 ]
 var failures := 0
 var checks := 0

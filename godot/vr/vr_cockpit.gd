@@ -9,8 +9,11 @@
 ##   away from the triggers")
 ##   the MODE switch on the right console: push it up for SPEEDCRAFT, down for STARFIGHTER (live,
 ##   mid-lap; STARFIGHTER takes below 1,250 mph). Y hold 1 s flips it too. Y tap: restart
-##   the Basilisk: its GUN / SAFE switch on the right sill brings the gun out of its sponson (view/turret.gd);
-##   it lays itself where you look (view/gunnery.gd) and X fires it while it is out (X repairs otherwise)
+##   the GUN / SAFE switch, in every cockpit whose craft has a weapon (sim/pilot_craft.gd armed; Raids): up arms it
+##   and brings it out, and X fires it while it is out (X repairs otherwise; F too, K arms it, in the flat view).
+##   The Phaethon's and the Talon's fixed guns (on the starboard console's inboard face up front, by the right lever)
+##   are aimed by pointing the craft; the Basilisk's turret (on its right sill) comes out of its sponson
+##   (view/turret.gd) and lays itself where you look (view/gunnery.gd)
 ##   the SLIDE / GRIP switch on the left console: whether the cockpit steps out in a turn; and behind it
 ##   the drift slider (vr/drift_slider.gd): how far. A controller's tip rested on its knob takes hold of
 ##   it, and it goes fore and aft with the hand (forward is more)
@@ -209,7 +212,7 @@ const BOOST_TICK := 0.12                  # s between the ticks in both hands wh
 var _boost_tick := 0.0
 var _menu_page := ""                      # "" the quick menu's first page, "options" its second
 var slide_switch                          # vr/mode_switch.gd again: SLIDE up, GRIP down
-var gun_switch                            # ... and the Basilisk's: GUN up (the gun out and laid where you look), SAFE down
+var gun_switch                            # ... and an armed craft's: GUN up (its weapon armed and out), SAFE down (gun_switch_mount)
 var _gun_shots := 0                       # (the shots the hand has felt)
 var drift_slider                          # vr/drift_slider.gd: how far it steps out (slide_amount)
 # The craft's power (sim/pilot_craft.gd TRAITS; Luke, 2026-11-24: "build the attributes and powers into the game"): its
@@ -964,15 +967,16 @@ func _build_cockpit() -> void:
 	slide_switch.transform = ModeSwitchScript.mount(-1.0)
 	slide_switch.build(bespoke_controls)
 	if sim != null and CraftModelScript.PilotCraft.armed(sim.P.vehicle):
-		# The Basilisk's gun (view/turret.gd): its switch stands on the starboard sill by the pilot's right
-		# elbow, under the gun's own sponson, turned in at the seat. Up brings the gun out; down stows it.
+		# The craft's weapon (view/gunnery.gd): up arms it and brings it out; down makes it safe and stows it. The
+		# Phaethon's and the Talon's stands on the starboard console's inboard face up front, by the right lever; the
+		# Basilisk's on its starboard sill by the pilot's right elbow, under the gun's own sponson (gun_switch_mount).
 		gun_switch = ModeSwitchScript.new()
 		gun_switch.name = "GunSwitch"
 		gun_switch.legends = ["GUN", "SAFE"]
 		gun_switch.colours = [Color(1.0, 0.22, 0.08), Color(0.35, 0.9, 0.45)]
 		gun_switch.throws = ["gun", "safe"]
 		shell.add_child(gun_switch)
-		gun_switch.transform = gun_switch_mount()
+		gun_switch.transform = gun_switch_mount(CraftModelScript.PilotCraft.phaethon_based(sim.P.vehicle))
 		gun_switch.build(bespoke_controls)
 	# ... and how far it steps out: the drift slider, a fader in a rail on the same console's inboard
 	# shoulder, behind the switch and out of the box where a hand throws it (vr/drift_slider.gd).
@@ -1190,7 +1194,7 @@ func _read_input(delta: float) -> void:
 		inp = {"thrL": p.thrL, "thrR": p.thrR, "brkL": maxf(p.brkL, q.brkL), "brkR": maxf(p.brkR, q.brkR)}
 	else:
 		inp = {"thrL": maxf(p.thrL, q.thrL), "thrR": maxf(p.thrR, q.thrR), "brkL": maxf(p.brkL, q.brkL), "brkR": maxf(p.brkR, q.brkR)}
-	inp.repair = p.repair or (_button(l, "ax_button") and not (gun_switch and gun_wanted))   # (with the Basilisk's gun out, X is its trigger)
+	inp.repair = p.repair or (_button(l, "ax_button") and not (gun_switch and gun_wanted))   # (with the gun armed, X is its trigger)
 	# (with the consumables on a flamed-out engine relights by itself once it has cooled: A is the
 	# Network's target button too, and an engine that waits for it is a surprise, not a consequence)
 	inp.reignite = p.reignite or _button(r, "ax_button") or consumables
@@ -1290,7 +1294,7 @@ func _work_controls(l: XRController3D, r: XRController3D, delta: float) -> void:
 				_hand_busy[hand] = ConsoleSwitchesScript.CLAIM_S
 				set_slide(thrown == "slide")
 				_buzz(hand, 0.9, 0.06)
-	# the Basilisk's GUN switch, the same way
+	# the GUN switch, the same way
 	if gun_switch and hands_live and not _await_neutral_controls:
 		for hand in [l, r]:
 			var armed: String = gun_switch.poke(hand, delta, at_console.get(hand, false))
@@ -2214,16 +2218,34 @@ func set_map_scheme(k: int) -> void:
 	print("MAP: colours ", MinimapPanelScript.SCHEMES[map_scheme].name)
 
 
-## Turn the slide on or off (the SLIDE / GRIP switch), and remember it.
-## The Basilisk's gun: out (it comes up out of its sponson and lays itself where you look) or stowed.
+## The GUN switch thrown: the craft's weapon armed and out (the Basilisk's comes up out of its sponson and lays itself
+## where you look; the Phaethon's and the Talon's run out of their ports, aimed by pointing the craft) or safe and stowed.
 func set_gun(on: bool) -> void:
 	gun_wanted = on
 	print("GUN: switch ", "GUN" if on else "SAFE")
 
 
-## Where the GUN switch stands (cockpit rig): on the starboard sill's inner ledge, by the right elbow and
-## inside the canopy's foot, a hand's reach up from the right lever, its face turned in and up at the seat.
-static func gun_switch_mount() -> Transform3D:
+## Where the GUN switch stands (cockpit rig).
+##   phaethon_family (the Phaethon, the Talon: sim/pilot_craft.gd phaethon_based; Raids, 2026-11-24): on the starboard
+##     console's inboard face up front, outboard of the right lever and under the MODE switch: the POWER button's place
+##     on the port side, mirrored, a short drop of the hand from the grip. GUN_SCALE of the MODE switch's size (the
+##     POWER switch's 0.7 there meets the MODE switch's underside, or the grip at 90% throttle), its face GUN_TILT up
+##     from the console's side, its top edge 3 mm into the console's face and its foot 13 mm proud: GUN up, SAFE down, the
+##     legends read along the console. Its bat is 0.192 m from the right grip at half throttle, 0.142 at full and 0.680
+##     from the right shoulder, inside the POWER button's bars, and the right lever keeps 14 mm off it through its whole
+##     travel, the bat up, straight out (mid-throw) or down (tests/test_cockpit_reach.gd)
+##   else (the Basilisk, 2026-11-23): on the starboard sill's inner ledge, by the right elbow and inside the canopy's
+##     foot, a hand's reach up from the right lever, its face turned in and up at the seat.
+const GUN_AT := Vector3(0.545, 0.295, 0.10)
+const GUN_TILT := deg_to_rad(10.0)
+const GUN_SCALE := 0.6
+
+
+static func gun_switch_mount(phaethon_family: bool) -> Transform3D:
+	if phaethon_family:
+		var x := Vector3(0.0, 0.0, 1.0)      # (across the panel: aft, so its legends read from the seat)
+		var z := Vector3(-cos(GUN_TILT), sin(GUN_TILT), 0.0)      # (its face: inboard, turned up)
+		return Transform3D(Basis(x, z.cross(x), z).scaled(Vector3.ONE * GUN_SCALE), GUN_AT)
 	var at := Vector3(0.80, 0.755, 0.30)
 	var to_eye := (EYE - at)
 	var yaw := atan2(to_eye.x, to_eye.z)
@@ -2302,6 +2324,7 @@ func _gun_controls() -> void:
 		_buzz(l, 0.22, 0.012)
 
 
+## Turn the slide on or off (the SLIDE / GRIP switch), and remember it.
 func set_slide(on: bool) -> void:
 	slide_feel = on
 	_save_prefs()
@@ -2516,7 +2539,7 @@ func _process(delta: float) -> void:
 		slide_switch.show_state(not slide_feel, 0.0 if slide_feel else 1.0, false)
 	if gun_switch:
 		gun_switch.power = startup.power
-		var out: float = clampf(craft.turret.t / CraftModelScript.TurretScript.T_FREE, 0.0, 1.0) if craft and craft.turret else 0.0
+		var out: float = craft.weapon.deploy_t() if craft and craft.weapon else 0.0
 		gun_switch.show_state(not gun_wanted, 1.0 - out, false)
 	if drift_slider:
 		drift_slider.show_state(slide_feel, startup.power)
