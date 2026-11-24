@@ -16,6 +16,8 @@ const UI := preload("res://release/release_config.gd")
 const Outlook := preload("res://view/outlook.gd")
 const Shrike := preload("res://view/shrike_airframe.gd")
 const CraftModel := preload("res://view/craft_model.gd")
+const Pilot := preload("res://sim/pilot_craft.gd")
+const Livery := preload("res://view/livery.gd")
 
 var checks := 0
 var failures := 0
@@ -217,6 +219,7 @@ func _headset() -> void:
 	check("a third of a second on, the camera and the scene are where they were", menu.camera.global_transform == cam_was and stage.global_transform == stage_was)
 	check("... and the scene is alive: the arcs restrike, the fans turn, the clouds drift", stage.craft[0].model.binder_arc.revision > strikes
 		and (stage.craft[0].model.rotors[0][0] as Node3D).rotation.z != fan and (stage.clouds.material_override as ShaderMaterial).get_shader_parameter("world_offset") != cloud_was)
+	await _turntable(menu, stage, eye, forward)
 	# recentred, it all turns together
 	menu.camera.rotation.y = deg_to_rad(40.0)
 	menu.recenter_panel()
@@ -274,6 +277,134 @@ func _headset() -> void:
 	check("a cancelled title leaves the selected flight paint intact", CraftModel.Livery.current != "boxcover")
 
 
+## How far the craft on show reaches from the turntable's middle, level (the same however the deck has
+## turned it): its engines' noses and tails with their fins, and the pod's corners.
+func _reach(stage) -> float:
+	var middle: Vector3 = stage.turntable.global_position
+	var far := 0.0
+	var model = stage.showcase.model
+	var points := []
+	for k in 2:
+		for x in [-2.3, 2.3]:
+			for z in [-3.85, 4.2]:
+				points.append((model.engines[k] as Node3D).global_transform * Vector3(x, 0.0, z))
+	for x in [-1.4, 1.4]:
+		for z in [-2.3, 2.3]:
+			points.append((model.pod as Node3D).global_transform * Vector3(x, 0.0, z))
+	for p: Vector3 in points:
+		far = maxf(far, Vector2(p.x - middle.x, p.z - middle.z).length())
+	return far
+
+
+## Wait for the turntable to show `key` (vehicle/livery); true once it does.
+func _shown(stage, key: String) -> bool:
+	var deadline := Time.get_ticks_msec() + 5000
+	while stage.showcase.get("key", "") != key and Time.get_ticks_msec() < deadline:
+		await process_frame
+	return stage.showcase.get("key", "") == key
+
+
+## The turntable (Luke, 2026-11-23: "when you choose a vehicle, it rotates in front of the player"): the
+## chosen craft on it in its flight's paint, turning, straight ahead behind the board; the board swinging
+## aside, clear of its sweep, while a row that changes it has the highlight, and back after; each of the
+## five craft coming onto it as it is chosen; a new paint coming onto it.
+func _turntable(menu, stage, eye: Vector3, forward: Vector3) -> void:
+	var on_show: Dictionary = stage.showcase
+	if not check("a turntable is built in the title with the chosen pilot craft on it, in the next flight's paint (%s)" % [on_show.get("key", "none")],
+			stage.turntable != null and not on_show.is_empty() and on_show.sim.P.vehicle == Settings.selected_craft() and String(on_show.key).ends_with("/" + Stage.flight_livery())
+			and on_show.model is CraftModel and on_show.model.pod.has_node("pilot")):
+		return
+	check("... put away under the road until a craft is being chosen: the title is as it was", not stage.turntable_base.visible and stage.turntable_base.position.y <= -Stage.SHOW_SINK + 0.001
+		and stage.turntable_base.global_position.y + Stage.SHOW_H + 0.06 < stage.world.global_position.y)
+	var middle: Vector3 = stage.turntable.global_position
+	var ahead := _sight(eye, forward, middle)
+	var away: float = Vector2(middle.x - eye.x, middle.z - eye.z).length()
+	check("... straight ahead of the pilot (%.1f degrees off), %.0f m out, behind the board" % [ahead.x, away], absf(ahead.x) < 1.0 and away > 20.0)
+	# the board: in front until a row that changes the craft has had the highlight a moment, then aside
+	var board: MeshInstance3D = menu.board
+	var half: Vector2 = (board.mesh as QuadMesh).size / 2.0
+	var home: Transform3D = board.global_transform
+	var row: int = menu.buttons.find(menu.craft_selector.button)
+	menu.focus_row(row)
+	menu.update_swing(0.1)
+	check("the highlight passing over the pilot craft row leaves the board where it is, the turntable away", board.global_transform.is_equal_approx(home) and not stage.attend_wanted)
+	for i in 12:
+		menu.update_swing(0.1)
+	check("held there, the board swings aside", menu.swing == 1.0 and not board.global_transform.is_equal_approx(home))
+	await create_timer(Stage.SHOW_UP_S + 0.9).timeout
+	check("... and the turntable comes up out of the road with the craft on it (deck at %.2f m)" % stage.turntable_base.position.y,
+		stage.reveal == 1.0 and stage.turntable_base.visible and absf(stage.turntable_base.position.y) < 0.001 and (on_show.holder as Node3D).is_visible_in_tree())
+	var engines_up: float = (on_show.model.engines[0] as Node3D).global_position.y - stage.turntable.global_position.y
+	check("... its engines hovering over the deck as over a road (%.2f m over the deck's foot)" % engines_up, engines_up > Stage.SHOW_H + 1.3 and engines_up < Stage.SHOW_H + 1.9)
+	var spun: float = stage.turntable.rotation.y
+	await create_timer(0.3).timeout
+	check("... and it turns", absf(wrapf(stage.turntable.rotation.y - spun, -PI, PI)) > deg_to_rad(Stage.SHOW_SPIN * 0.15))
+	# each of the five, chosen in turn on that row (A or the trigger), comes onto the deck; the board stays clear of its sweep
+	var seen := []
+	var reaches := []
+	var clear := INF
+	var arrived := true
+	for i in Pilot.ORDER.size():
+		menu.activate()
+		var want: String = Pilot.ORDER[(Pilot.ORDER.find(Pilot.STANDARD) + i + 1) % Pilot.ORDER.size()]
+		if not await _shown(stage, want + "/" + Stage.flight_livery()):
+			seen.append(want + " NOT SHOWN")
+			continue
+		arrived = arrived and stage._drop > 0.5 and stage._whip > 0.5
+		var visible := 0
+		for child in stage.turntable.get_children():
+			if child is Node3D and String(child.name).begins_with("showcase_") and (child as Node3D).visible:
+				visible += 1
+		var reach := _reach(stage)
+		reaches.append("%s %.1f m" % [want, reach])
+		var sweep := rad_to_deg(asin(minf(1.0, reach / away)))
+		var edge: float = _sight(eye, forward, board.global_transform * Vector3(half.x, 0.0, 0.0)).x
+		clear = minf(clear, -edge - sweep)
+		seen.append("%s%s" % [want, "" if visible == 1 and (stage.plate.get_node("board/name") as Label3D).text == String(Pilot.NAMES[want]).to_upper() and reach < Stage.SHOW_R - 0.5 else " (WRONG)"])
+		await frames(3)
+	check("each pilot craft chosen comes onto the turntable, alone, named on its board, on the deck (%s; reach %s)" % [seen, reaches], seen.size() == Pilot.ORDER.size() and not str(seen).contains("NOT") and not str(seen).contains("WRONG"))
+	check("... coming down onto it and swung round as it arrives", arrived)
+	check("... and the swung board is clear of each one's sweep (by %.1f degrees at the least)" % clear, clear > 1.0)
+	# ... and so are the two craft standing either side (their engines and pods)
+	var widest := 0.0
+	for r: String in reaches:
+		widest = maxf(widest, float(r.get_slice(" ", 1)))
+	var gap := INF
+	for c: Dictionary in stage.craft:
+		var points := []
+		for k in 2:
+			for x in [-2.3, 2.3]:
+				for z in [-3.85, 4.2]:
+					points.append((c.model.engines[k] as Node3D).global_transform * Vector3(x, 0.0, z))
+		for x in [-1.4, 1.4]:
+			for z in [-2.3, 2.3]:
+				points.append((c.model.pod as Node3D).global_transform * Vector3(x, 0.0, z))
+		for p: Vector3 in points:
+			gap = minf(gap, Vector2(p.x - middle.x, p.z - middle.z).length() - widest)
+	check("the longest craft's sweep (%.1f m) passes the two craft either side with room (%.1f m at the closest)" % [widest, gap], gap > 0.5)
+	# a new paint comes onto the turntable (the paint row also swings the board aside)
+	var paint_row := -1
+	for i in menu.buttons.size():
+		if menu.buttons[i] is Button and String(menu.buttons[i].text).begins_with("Paint:"):
+			paint_row = i
+	var was_paint := Stage.flight_livery()
+	menu.focus_row(paint_row)
+	menu.activate()
+	var now_paint := Stage.flight_livery()
+	var repainted: bool = await _shown(stage, Pilot.STANDARD + "/" + now_paint)
+	check("choosing a paint puts the craft on show in it (%s to %s)" % [was_paint, now_paint], now_paint != was_paint and repainted)
+	for i in Livery.CHOICES.size() - 1:      # (round to the paint it had)
+		menu.activate()
+	var back: bool = await _shown(stage, Pilot.STANDARD + "/" + was_paint)
+	check("... and back (%s)" % Stage.flight_livery(), Stage.flight_livery() == was_paint and back)
+	menu.focus_row(menu.start_index)
+	for i in 12:
+		menu.update_swing(0.1)
+	await create_timer(Stage.SHOW_DOWN_S + 0.3).timeout
+	check("with the highlight off those rows the board swings back to where it was, and the turntable is put away", menu.swing == 0.0 and board.global_transform.is_equal_approx(home)
+		and stage.reveal == 0.0 and not stage.turntable_base.visible)
+
+
 func _desktop() -> void:
 	var overlay = root.get_node_or_null("ReleasePause")
 	change_scene_to_file(UI.MENU_SCENE)
@@ -319,6 +450,38 @@ func _desktop() -> void:
 				first = false
 	check("all four engines' noses are in the picture, under the horizon (%s; the horizon at %.0f, %.0f%% down the picture)" % [craft_box, horizon, 100.0 * (horizon - art.position.y) / art.size.y],
 		art.encloses(craft_box) and craft_box.position.y > horizon and horizon > art.position.y + 0.3 * art.size.y and horizon < art.position.y + 0.55 * art.size.y)
+	# the turntable stands beside the cover's picture, out of it, until a button that changes its craft has the keyboard (or the pointer)
+	var home: Transform3D = stage.camera.transform
+	var middle: Vector3 = stage.turntable.global_position
+	var in_view := 0
+	for i in 32:
+		var a := TAU * float(i) / 32.0
+		for p: Vector3 in [middle + Vector3(sin(a), 0.0, cos(a)) * (Stage.SHOW_R + 1.0) + Vector3.UP * Stage.SHOW_H, middle + Vector3(sin(a), 0.0, cos(a)) * 15.0 + Vector3.UP * 2.5]:
+			if not stage.camera.is_position_behind(p) and art.has_point(stage.camera.unproject_position(p)):
+				in_view += 1
+	check("the turntable is out of the cover's picture (%d of its points in it)" % in_view, in_view == 0 and not stage.showcase.is_empty())
+	(menu.craft_selector.button as Button).grab_focus()
+	await create_timer(Stage.SHOW_TURN_S + 0.6).timeout
+	var on_screen: Vector2 = stage.camera.unproject_position(middle + Vector3.UP * 1.4)
+	var show_box := Rect2(on_screen, Vector2.ZERO)
+	var turned_was: float = stage.turntable.rotation.y
+	for step in 12:      # (all the way round: broadside is its widest)
+		stage.turntable.rotation.y = TAU * float(step) / 12.0
+		for k in 2:
+			for x in [-2.3, 2.3]:
+				for z in [-3.85, 4.2]:
+					show_box = show_box.expand(stage.camera.unproject_position((stage.showcase.model.engines[k] as Node3D).global_transform * Vector3(x, 0.0, z)))
+		for x in [-1.4, 1.4]:
+			for z in [-2.3, 2.3]:
+				show_box = show_box.expand(stage.camera.unproject_position((stage.showcase.model.pod as Node3D).global_transform * Vector3(x, 0.0, z)))
+	stage.turntable.rotation.y = turned_was
+	check("with the pilot craft button focused the turntable comes up and the camera turns to it: its middle in the middle of the picture, the craft inside it all the way round (%s, craft %s, picture %s)" % [on_screen, show_box, art],
+		stage.attention == 1.0 and stage.reveal == 1.0 and (stage.showcase.holder as Node3D).is_visible_in_tree() and on_screen.distance_to(art.get_center()) < 0.12 * art.size.x
+		and art.encloses(show_box) and show_box.size.x > 0.4 * art.size.x)
+	(menu.find_child("Course_range", true, false) as Button).grab_focus()
+	await create_timer(Stage.SHOW_TURN_S + 0.3).timeout
+	check("... and back to the cover's view, exactly, the turntable put away, when the focus moves on", stage.attention == 0.0 and stage.camera.transform.is_equal_approx(home)
+		and stage.reveal == 0.0 and not stage.turntable_base.visible)
 	# a flight starts as it did, without the title; and the title is back after
 	var old_stage: WeakRef = weakref(stage)
 	stage = null

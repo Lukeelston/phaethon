@@ -13,7 +13,7 @@
 extends SceneTree
 
 const Stage := preload("res://release/title_stage.gd")
-const LOOKS := {"ahead": 0.0, "left craft": 57.0, "right craft": -57.0}
+const LOOKS := {"ahead": 0.0, "left craft": 57.0, "right craft": -57.0, "turntable": 0.0}      # (the last: ahead with the turntable up and the board swung aside, as while a craft is chosen)
 
 var frames := 400
 var rounds := 3
@@ -129,6 +129,14 @@ func _measure(on: bool) -> void:
 	(menu.camera as Camera3D).make_current()
 	for look in LOOKS:
 		(menu.camera as Camera3D).rotation_degrees = Vector3(0.0, float(LOOKS[look]), 0.0)
+		if on:
+			var showing: bool = look == "turntable"
+			menu.set_process(not showing)      # (its own frame would put the turntable away: no headset, no highlight held)
+			menu.swing = 1.0 if showing else 0.0
+			menu._place_board()
+			menu.stage.attend(showing)
+			menu.stage.reveal = 1.0 if showing else 0.0
+			menu.stage._pose_turntable()
 		for i in 90:      # (settle: shaders compiled, the arcs struck, the fans up to speed)
 			await process_frame
 		var key := "%s / %s" % ["title" if on else "as it was", look]

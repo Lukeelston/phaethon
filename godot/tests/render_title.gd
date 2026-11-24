@@ -10,16 +10,24 @@
 ##   vr-left-near, vr-right-near                       ... 50 degrees either way through a 50 degree field: a craft as it is looked at
 ##   vr-word          ... 18 degrees up through a 60 degree field: the word as it is read
 ##   stage-vr-*       the same views of the stage alone, no menu board in front of it
+##   vr-show          the board swung aside (a row that changes the craft has the highlight): straight ahead at the turntable
+##   vr-show-near     ... through a 70 degree field, as the craft on it is looked at
+##   flat-show        the desktop menu with its camera turned to the turntable (the pilot craft button has the keyboard)
+## --craft=ID puts that pilot craft on the turntable, --paint=ID in that paint; --spin=DEG turns the deck to that angle.
 ## Nothing here is a headset's picture: no stereo, no lens.
 extends SceneTree
 
 const Stage := preload("res://release/title_stage.gd")
 const TURNS := {"ahead": [0.0, 0.0, 96.0], "left": [50.0, 0.0, 96.0], "right": [-50.0, 0.0, 96.0], "up": [0.0, 25.0, 96.0], "down": [0.0, -30.0, 96.0],
-	"behind": [180.0, 0.0, 96.0], "left-near": [54.0, -9.0, 50.0], "right-near": [-54.0, -9.0, 50.0], "word": [0.0, 18.0, 60.0]}
-const ALL := ["flat", "flat-art", "vr-ahead", "vr-left", "vr-right", "vr-up", "vr-down", "vr-behind", "vr-left-near", "vr-right-near", "vr-word"]
+	"behind": [180.0, 0.0, 96.0], "left-near": [54.0, -9.0, 50.0], "right-near": [-54.0, -9.0, 50.0], "word": [0.0, 18.0, 60.0],
+	"show": [0.0, -8.0, 96.0], "show-near": [0.0, -11.0, 70.0]}
+const ALL := ["flat", "flat-art", "flat-show", "vr-ahead", "vr-show", "vr-show-near", "vr-left", "vr-right", "vr-up", "vr-down", "vr-behind", "vr-left-near", "vr-right-near", "vr-word"]
 
 var out_dir := ""
 var settle := 1.2
+var craft := ""
+var paint := ""
+var spin := NAN
 
 
 func _initialize() -> void:
@@ -35,6 +43,12 @@ func _run() -> void:
 			views = arg.trim_prefix("--views=").split(",")
 		if arg.begins_with("--settle="):
 			settle = float(arg.trim_prefix("--settle="))
+		if arg.begins_with("--craft="):
+			craft = arg.trim_prefix("--craft=")
+		if arg.begins_with("--paint="):
+			paint = arg.trim_prefix("--paint=")
+		if arg.begins_with("--spin="):
+			spin = float(arg.trim_prefix("--spin="))
 	if out_dir.is_empty() or DirAccess.make_dir_recursive_absolute(out_dir) != OK:
 		push_error("Pass --out= and a writable directory.")
 		quit(1)
@@ -77,20 +91,40 @@ func _run() -> void:
 				quit(1)
 				return
 			print("TITLE STAGE built in %d ms" % stage.build_ms)
+			if not craft.is_empty() or not paint.is_empty():      # (straight to the stage: the menus' saved choices are not touched)
+				stage.show_craft(craft if not craft.is_empty() else stage.show_vehicle, paint)
+				var until := Time.get_ticks_msec() + 15000
+				while stage.showcase.get("key", "") != stage._show_key() and Time.get_ticks_msec() < until:
+					await process_frame
+				print("TITLE TURNTABLE ", stage.showcase.get("key", "none"))
 			await _wait(settle)
 		var cam: Camera3D = null
+		var stage_now = current_scene.stage if want != "stage" else current_scene.get_child(0)
 		if want == "stage":
 			cam = current_scene.get_node("eye")
 		elif want == "vr":
 			cam = current_scene.camera
+			current_scene.swing = 1.0 if view.begins_with("vr-show") else 0.0
+			current_scene._place_board()
+			stage_now.attend(view.begins_with("vr-show"))
+			stage_now.reveal = 1.0 if view.begins_with("vr-show") else 0.0
+			stage_now._pose_turntable()
 		if want == "flat":
 			for child in current_scene.get_children():
 				if child is Control:
 					(child as Control).visible = view != "flat-art"
+			current_scene.set_process(view != "flat-show")      # (its own frame would turn the camera back)
+			stage_now.attend(view == "flat-show")
+			stage_now.attention = 1.0 if view == "flat-show" else 0.0
+			stage_now.reveal = stage_now.attention
+			stage_now._aim_camera()
+			stage_now._pose_turntable()
 		else:
 			var turn: Array = TURNS[view.trim_prefix("stage-").trim_prefix("vr-")]
 			cam.rotation_degrees = Vector3(float(turn[1]), float(turn[0]), 0.0)
 			cam.fov = float(turn[2])
+		if not is_nan(spin) and stage_now.turntable != null:
+			stage_now.turntable.rotation.y = deg_to_rad(spin)
 		await _wait(0.25)
 		await RenderingServer.frame_post_draw
 		var path := out_dir.path_join("title-%s.png" % view)
