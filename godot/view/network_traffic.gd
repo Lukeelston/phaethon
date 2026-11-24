@@ -506,9 +506,13 @@ class Car:
 					var take: bool = sp[5] or (plan != null and plan == sp)
 					if kind == RACER and chase != "fugitive":
 						take = traffic._racer_takes(self, sp)
-					if take and int(traffic.oneway.get(int(sp[2]), int(sp[4]))) != int(sp[4]) and self != traffic.racer and not hostile:
+					if take and int(traffic.oneway.get(int(sp[2]), int(sp[4]))) != int(sp[4]) and self != traffic.racer:
 						if sp[5]:
-							v = -1.0   # its road ends here and the only way on is against the pilot: gone
+							if hostile:      # a raider is not lost: held where it is, on its own road
+								f = f0
+								v = 0.0
+							else:
+								v = -1.0   # its road ends here and the only way on is against the pilot: gone
 						take = false
 					if take:
 						traffic._switch_to(self, sp)

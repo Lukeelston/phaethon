@@ -176,16 +176,27 @@ func _run() -> void:
 	_check("a hostile driven off a road's end is kept, stopped on the road (kept %s, f %.1f of %d, v %.1f); the plain car there is gone (%s)" % [T.cars.has(end_h), end_h.f, Re.N, end_h.v, not T.cars.has(end_p)],
 		T.cars.has(end_h) and end_h.f <= Re.N - 1.5 and end_h.v == 0.0 and not T.cars.has(end_p))
 
-	# one-way dead end: a road that ends where the only way on is against the pilot
+	# one-way dead end: a road that ends mid-way where the only way on is against the pilot. The Network has no
+	# such place (each forced junction has a way on either side), so one is made: the other way on is taken off.
 	T.cars.clear()
 	var dead = []
 	for r in sim.roads.size():
+		if not T._public_road(sim.roads[r]) or r == road:
+			continue
 		for sp in T._switch[r]:
-			if sp[5] and T.oneway.has(int(sp[2])) and int(T.oneway[int(sp[2])]) != int(sp[4]) and T._public_road(sim.roads[r]):
+			if sp[5] and float(sp[0]) > 12.0 and float(sp[0]) < sim.roads[r].N - 13.0:
 				dead = [r, sp]
 				break
 		if not dead.is_empty():
 			break
+	T.update(STEP)      # (the one-way map is made again here; the setting below is for the run that follows)
+	if not dead.is_empty():
+		var keep := []
+		for q in T._switch[dead[0]]:
+			if not (int(q[0]) == int(dead[1][0]) and int(q[1]) == int(dead[1][1])) or q == dead[1]:
+				keep.append(q)
+		T._switch[dead[0]] = keep
+		T.oneway[int(dead[1][2])] = -int(dead[1][4])
 	if dead.is_empty():
 		print("NOTE no one-way dead end found from this spot: that case is covered by the road-end check only")
 	else:
@@ -198,10 +209,36 @@ func _run() -> void:
 		T.cars.append(dp)
 		dh.nsp_road = -1
 		dp.nsp_road = -1
-		for k in 360:
+		for k in 40:      # (a short run: the pilot is at 1,000 m/s and the one-way roads change with where it is)
 			T.update(STEP)
-		_check("a hostile at a one-way dead end (road %d) is kept (%s); the plain car is gone (%s)" % [dr, T.cars.has(dh), not T.cars.has(dp)],
-			T.cars.has(dh) and not T.cars.has(dp))
+		var held: bool = T.cars.has(dh) and dh.road == dr and dh.v < 5.0 and (float(dsp[0]) - dh.f) * dd >= 0.0
+		_check("a hostile at a one-way dead end (road %d) is held on it, held back (it is stopped each time it reaches the switch: v is near 0; kept %s, road %d, v %.1f, f %.1f before %d); the plain car is gone (%s)" % [dr, T.cars.has(dh), dh.road, dh.v, dh.f, int(dsp[0]), not T.cars.has(dp)],
+			held and not T.cars.has(dp))
+
+	# an ordinary junction whose branch runs against the pilot's one-way: a hostile declines it
+	T.cars.clear()
+	var junc = []
+	for r in sim.roads.size():
+		for sp in T._switch[r]:
+			if not sp[5] and T.oneway.has(int(sp[2])) and int(T.oneway[int(sp[2])]) != int(sp[4]) and T._public_road(sim.roads[r]) and r != road:
+				junc = [r, sp]
+				break
+		if not junc.is_empty():
+			break
+	if junc.is_empty():
+		print("NOTE no wrong-way ordinary junction found from this spot")
+	else:
+		var jr: int = junc[0]
+		var jsp: Array = junc[1]
+		var jd := int(jsp[1])
+		var jh = _car(T, 900014, jr, float(jsp[0]) - jd * 6.0, jd, 0, true)
+		jh.plan = jsp          # it means to take it
+		jh.decided = int(jsp[0])
+		T.cars.append(jh)
+		for k in 40:
+			T.update(STEP)
+		_check("a hostile meaning to take a branch that runs against the pilot's one-way declines it (road %d, still on it %s; kept %s)" % [jr, jh.road == jr, T.cars.has(jh)],
+			T.cars.has(jh) and jh.road == jr)
 	v.queue_free()
 	print("RAID TRAFFIC %s (%d failures)" % ["PASS" if failures == 0 else "FAIL", failures])
 	quit(0 if failures == 0 else 1)
