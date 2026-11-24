@@ -245,6 +245,7 @@ var g_across := 0.0                       # across it, g: + a left turn
 var g_turn := 0.0                         # ... with a shaft's carrying taken out (it presses you into the seat, not across it): the slip bar
 var g_seat := 1.0                         # the 1 g the seat holds you up with: less as she leaves the ground, none in the air
 var _g_from := [0.0, 0.0, -1.0, 0.0]      # the pod's velocity, the sim's clock and its count of the shafts' turning at the last reading
+var _jolt_quad: MeshInstance3D   # the jolt's red vignette before the camera (made on the first jolt)
 var _buzz_hold := {}   # controller -> seconds an event buzz still owns it (the shudder waits)
 const SHAKE_M := 0.004   # cockpit shake per unit of air-brake shudder, metres
 const GRAB_SHAKE_M := 0.007   # the gear's grab: the cockpit's jolt, metres (fore and aft, a little up)
@@ -485,6 +486,33 @@ func _field_flash(amount: float) -> void:
 	super(amount)
 	if canopy:
 		CanopyScript.flash(canopy, amount)
+
+
+## A raider's ram (Raids): both hands buzz, the edge of the view flashes red, and a thump. Nothing moves: not the
+## camera, the headset's origin, nor the rig. The flash is a vignette quad held before the camera, which goes with the head.
+func jolt(strength := 1.0) -> void:
+	_jolt_amp = clampf(strength, 0.0, 1.0)
+	_jolt_glow = _jolt_amp
+	_buzz(hands.left, 0.9, 0.12)
+	_buzz(hands.right, 0.9, 0.12)
+	_jolt_thump()
+
+
+func _jolt_tick(delta: float) -> void:
+	if _jolt_glow > 0.0 and _jolt_quad == null and cam != null:
+		_jolt_quad = MeshInstance3D.new()
+		var q := QuadMesh.new()
+		q.size = Vector2(1.6, 1.6)
+		_jolt_quad.mesh = q
+		_jolt_quad.material_override = JoltFx.spatial_material()
+		_jolt_quad.position = Vector3(0.0, 0.0, -0.25)
+		_jolt_quad.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		cam.add_child(_jolt_quad)
+	if _jolt_glow > 0.0:
+		_jolt_glow = maxf(_jolt_glow - delta / JoltFx.FLASH_S, 0.0)
+	if _jolt_quad != null:
+		_jolt_quad.visible = _jolt_glow > 0.0
+		(_jolt_quad.material_override as ShaderMaterial).set_shader_parameter("amount", _jolt_glow)
 
 
 func _buzz(c: XRController3D, amp: float, dur: float, delay := 0.0) -> void:

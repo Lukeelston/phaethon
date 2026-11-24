@@ -23,11 +23,16 @@
 ## Hunting: each frame a raider takes its prey's lane and the speed of it plus HUNT_DV (headway 0.05), and on contact
 ## (CONTACT_ALONG, CONTACT_LAT) the commuter is knocked out and lost; with no prey it cruises at the town limit. A raider
 ## gone from traffic without on_kill is fled: no award, kills unchanged.
-## Log lines (the flight log): RAID: alarm <CITY> <km> | arrived | kill | commuter lost | raider fled | cleared | lost (<why>)
+## Contact: a raider within CONTACT_CRAFT of the pod or either engine is one hit taken a GRACE s (signal hit_taken: the
+## view jolts, and the score takes its points; never health).
+## Log lines (the flight log): RAID: alarm <CITY> <km> | arrived | kill | commuter lost | hit taken | raider fled | cleared | lost (<why>)
 extends Node3D
 
 ## A commuter run down, at (x, y) in the sims' frame (for the view's effects).
 signal commuter_lost(x: float, y: float)
+
+## A raider rammed the craft: one hit taken (at most one a GRACE). `source` names what hit it.
+signal hit_taken(source: String)
 
 const Settings := preload("res://release/game_settings.gd")
 const Traffic := preload("res://view/network_traffic.gd")
@@ -43,6 +48,8 @@ const CONTACT_LAT := 12.0                # ... across it: contact with its prey,
 const RAIDER_HEADWAY := 0.45              # s: a raider's headway with no prey
 const PREY_REACH := 3000.0               # m: the farthest ahead a commuter is its prey
 const HEADING_BELOW := 30.0              # m/s: slower, the pick looks the way the craft points, not the way it goes
+const GRACE := 1.0                       # s: a raider in contact is one hit taken, then none for this long
+const CONTACT_CRAFT := 14.0              # m from the pod or either engine's centre to a raider's centre: a ram
 
 static var enabled := false      # raids
 static var pinned := false       # a test or a render chose it: the saved choice does not replace it
@@ -69,6 +76,7 @@ var tick_every := 5.0            # s between commuters lost while it is off-scre
 var tick_cap := 40               # ... and the most lost that way
 var pack_size := Vector2i(4, 6)  # the first raid brings x, each later one 1 more, up to y
 
+var _grace := 0.0                # s before another hit may be taken
 var _clock := 0.0                # s it may start (it falls back while it may not)
 var _lull_len := -1.0            # s of this lull (-1: none drawn yet)
 var _count := 0                  # raids called this flight
@@ -151,10 +159,15 @@ func update(delta: float) -> void:
 						print("RAID: raider fled")
 					pack.remove_at(k)
 			if pack.is_empty():
-				_end("cleared" if kills > 0 else "lost", "fled")
+				_end("cleared" if kills > 0 else "lost", "fled" if fled > 0 else "")
 				return
 			for c in pack:
 				_hunt(c, delta)
+			_grace = maxf(_grace - delta, 0.0)
+			if _grace <= 0.0 and sim.crash_t <= 0.0 and _in_contact():
+				_grace = GRACE
+				print("RAID: hit taken")
+				hit_taken.emit("raider")
 			_away = _away + delta if _gap(city) > Traffic.R_KEEP else 0.0
 			if _away >= away_t:
 				_end("lost", "away")
@@ -180,6 +193,7 @@ func _alarm() -> bool:
 	_tick_t = 0.0
 	_t = 0.0
 	_away = 0.0
+	_grace = 0.0
 	_count += 1
 	print("RAID: alarm %s %d" % [sim.cities[k].name, roundi(called_m / 1000.0)])
 	return true
@@ -318,6 +332,7 @@ func _arrive() -> void:
 	state = "on"
 	_t = 0.0
 	_away = 0.0
+	_grace = 0.0
 	print("RAID: arrived")
 
 
@@ -354,6 +369,16 @@ func _hunt(c, delta: float) -> void:
 	var along: float = (p.f - c.f) * c.dir * float(R.len[clampi(int(c.f), 0, R.N - 1)])
 	if absf(along) <= CONTACT_ALONG and absf(p.lat - c.lat) <= CONTACT_LAT:
 		_run_down(p)
+
+
+## Is a raider on the craft: the centre of one within CONTACT_CRAFT of the pod's or either engine's?
+func _in_contact() -> bool:
+	var r2 := CONTACT_CRAFT * CONTACT_CRAFT
+	for c in pack:
+		for b in sim.bodies:
+			if Vector2(b.x - c.x, b.y - c.y).length_squared() <= r2:
+				return true
+	return false
 
 
 ## A commuter run down: out of traffic, lost, and commuter_lost for the flash.
@@ -412,6 +437,7 @@ func reset(why := "restart") -> void:
 	_tick_t = 0.0
 	_t = 0.0
 	_away = 0.0
+	_grace = 0.0
 	if _count > 0:
 		_lull_len = _rng.randf_range(lull.x, lull.y)
 

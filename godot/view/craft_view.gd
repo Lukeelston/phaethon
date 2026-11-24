@@ -25,6 +25,7 @@ const CraftSimScript := preload("res://sim/craft_sim.gd")
 const GameSettings := preload("res://release/game_settings.gd")
 const Livery := preload("res://view/livery.gd")
 const Outlook := preload("res://view/outlook.gd")      # the Network's time of day and weather
+const JoltFx := preload("res://view/jolt_fx.gd")             # the raiders' ram: its thump and its red vignette
 const RaidsScript := preload("res://view/network_raids.gd")   # raids: hostile raiders attack a city (free flight on the Network)
 const ChaseScript := preload("res://view/network_chase.gd")   # chase mode, and which craft the pilot flies
 const LightBarScript := preload("res://view/light_bar.gd")
@@ -180,6 +181,13 @@ var partner: Node3D          # the driving partner (view/driving_partner.gd), nu
 var partner_on := false      # common release preference, overridden by launch flags
 var race: Node3D             # Eridanus: the racing pilots (view/race_pilots.gd), null when there are none
 var raids: Node3D            # raids on the Network (view/network_raids.gd), null when they are off
+var thump: AudioStreamPlayer # the jolt's thump (made on the first one; none while muted or raids are off)
+var muted := false           # --mute: no sound of the jolt's either
+var _jolt_t := 0.0           # s of the flat view's shake left
+var _jolt_amp := 0.0         # its strength
+var _jolt_glow := 0.0        # the red vignette's strength, falling
+var _jolt_layer: CanvasLayer # the flat view's vignette (made on the first jolt)
+var _jolt_rect: ColorRect
 var chase: Node3D            # chase mode on the Network (view/network_chase.gd), null when it's off
 var pad: Node3D              # the starting pad (view/start_pad.gd), when the flight began on one
 const StartPadScript := preload("res://view/start_pad.gd")
@@ -337,6 +345,7 @@ func _ready() -> void:
 	dust.build(self)
 	if sim.kind == "network":
 		dust.road_spray()
+	muted = mute
 	if not mute and shot_path == "":
 		skill_audio = SkillAudioScript.new()
 		add_child(skill_audio)
@@ -394,6 +403,7 @@ func _ready() -> void:
 		raids.traffic = traffic_net
 		raids.build(self)
 		traffic_net.raids = raids
+		raids.hit_taken.connect(func(_source): jolt(1.0))
 
 
 func _sim_step() -> void:
@@ -529,6 +539,51 @@ func set_handling(name: String) -> void:
 	_load_best()
 	_respawn()
 	_flash("%s HANDLING" % name.to_upper())
+
+
+## A raider's ram on the pilot (Raids): a brief shake of the flat view, a red flash at its edge, a thump. Never
+## health. (The headset's own, vr/vr_cockpit.gd, moves nothing: no camera or cockpit motion in VR.)
+func jolt(strength := 1.0) -> void:
+	_jolt_amp = clampf(strength, 0.0, 1.0)
+	_jolt_t = JoltFx.SHAKE_S
+	_jolt_glow = _jolt_amp
+	_jolt_thump()
+
+
+func _jolt_thump() -> void:
+	if muted or shot_path != "":
+		return
+	if thump == null:
+		thump = AudioStreamPlayer.new()
+		thump.stream = JoltFx.thump()
+		thump.volume_db = -2.0
+		add_child(thump)
+	thump.play()
+
+
+## Every frame: the flat view's shake (the camera's frustum offset: its place is the sim's) and the vignette's fall.
+## (The headset's overrides this to the vignette alone.)
+func _jolt_tick(delta: float) -> void:
+	if _jolt_t > 0.0 and cam != null:
+		_jolt_t = maxf(_jolt_t - delta, 0.0)
+		var k := _jolt_t / JoltFx.SHAKE_S
+		var ph := (JoltFx.SHAKE_S - _jolt_t) * TAU * 38.0
+		cam.h_offset = sin(ph) * 0.05 * _jolt_amp * k if _jolt_t > 0.0 else 0.0
+		cam.v_offset = cos(ph * 1.3) * 0.035 * _jolt_amp * k if _jolt_t > 0.0 else 0.0
+	if _jolt_glow > 0.0 or _jolt_layer != null:
+		_jolt_glow = maxf(_jolt_glow - delta / JoltFx.FLASH_S, 0.0)
+		if _jolt_layer == null and _jolt_glow > 0.0:
+			_jolt_layer = CanvasLayer.new()
+			_jolt_layer.layer = 60
+			_jolt_rect = ColorRect.new()
+			_jolt_rect.set_anchors_preset(Control.PRESET_FULL_RECT)
+			_jolt_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			_jolt_rect.material = JoltFx.canvas_material()
+			_jolt_layer.add_child(_jolt_rect)
+			add_child(_jolt_layer)
+		if _jolt_rect != null:
+			_jolt_rect.visible = _jolt_glow > 0.0
+			(_jolt_rect.material as ShaderMaterial).set_shader_parameter("amount", _jolt_glow)
 
 
 ## Overridable: feedback for wall contact, strength 1 for a damaging hit, less for a scrape
@@ -1129,6 +1184,7 @@ func _read_input(delta: float) -> void:
 
 
 func _process(delta: float) -> void:
+	_jolt_tick(delta)
 	if replay.is_empty() and cruise < 0.0:
 		_read_input(delta)
 	if menu.open:
