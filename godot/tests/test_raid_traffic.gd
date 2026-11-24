@@ -156,6 +156,52 @@ func _run() -> void:
 	await process_frame
 	_check("a hostile car's lamp is HOSTILE_LAMP (%s), a plain one's is not (%s)" % [target.lamp_color, lone.lamp_color],
 		target.lamp_color.is_equal_approx(T.HOSTILE_LAMP) and not lone.lamp_color.is_equal_approx(T.HOSTILE_LAMP))
+
+	# road end: driving at a road's end a hostile is stopped there and kept; a plain car is gone
+	T.cars.clear()
+	var end_road := -1
+	for r in sim.roads.size():
+		if r != road and T._public_road(sim.roads[r]) and not sim.roads[r].shaft and sim.roads[r].N > 40:
+			end_road = r
+			break
+	var Re = sim.roads[end_road]
+	var end_h = _car(T, 900010, end_road, float(Re.N - 8), 1, 0, true)
+	var end_p = _car(T, 900011, end_road, float(Re.N - 8), 1, 1, false)
+	T.cars.append(end_h)
+	T.cars.append(end_p)
+	end_h.nsp_road = -1
+	end_p.nsp_road = -1
+	for k in 360:
+		T.update(STEP)
+	_check("a hostile driven off a road's end is kept, stopped on the road (kept %s, f %.1f of %d, v %.1f); the plain car there is gone (%s)" % [T.cars.has(end_h), end_h.f, Re.N, end_h.v, not T.cars.has(end_p)],
+		T.cars.has(end_h) and end_h.f <= Re.N - 1.5 and end_h.v == 0.0 and not T.cars.has(end_p))
+
+	# one-way dead end: a road that ends where the only way on is against the pilot
+	T.cars.clear()
+	var dead = []
+	for r in sim.roads.size():
+		for sp in T._switch[r]:
+			if sp[5] and T.oneway.has(int(sp[2])) and int(T.oneway[int(sp[2])]) != int(sp[4]) and T._public_road(sim.roads[r]):
+				dead = [r, sp]
+				break
+		if not dead.is_empty():
+			break
+	if dead.is_empty():
+		print("NOTE no one-way dead end found from this spot: that case is covered by the road-end check only")
+	else:
+		var dr: int = dead[0]
+		var dsp: Array = dead[1]
+		var dd := int(dsp[1])
+		var dh = _car(T, 900012, dr, float(dsp[0]) - dd * 6.0, dd, 0, true)
+		var dp = _car(T, 900013, dr, float(dsp[0]) - dd * 6.0, dd, 1, false)
+		T.cars.append(dh)
+		T.cars.append(dp)
+		dh.nsp_road = -1
+		dp.nsp_road = -1
+		for k in 360:
+			T.update(STEP)
+		_check("a hostile at a one-way dead end (road %d) is kept (%s); the plain car is gone (%s)" % [dr, T.cars.has(dh), not T.cars.has(dp)],
+			T.cars.has(dh) and not T.cars.has(dp))
 	v.queue_free()
 	print("RAID TRAFFIC %s (%d failures)" % ["PASS" if failures == 0 else "FAIL", failures])
 	quit(0 if failures == 0 else 1)

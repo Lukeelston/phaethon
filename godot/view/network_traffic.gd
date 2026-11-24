@@ -506,7 +506,7 @@ class Car:
 					var take: bool = sp[5] or (plan != null and plan == sp)
 					if kind == RACER and chase != "fugitive":
 						take = traffic._racer_takes(self, sp)
-					if take and int(traffic.oneway.get(int(sp[2]), int(sp[4]))) != int(sp[4]) and self != traffic.racer:
+					if take and int(traffic.oneway.get(int(sp[2]), int(sp[4]))) != int(sp[4]) and self != traffic.racer and not hostile:
 						if sp[5]:
 							v = -1.0   # its road ends here and the only way on is against the pilot: gone
 						take = false
@@ -515,8 +515,8 @@ class Car:
 						break
 			nsp_road = -1   # passed it: find the next
 		var R2: Simulation.TrackPath = R if road == original_road else traffic.sim.roads[road]
-		if f < 0.5 or f > R2.N - 1.5:   # off an end it couldn't leave: gone (or a racer: kept on the road)
-			if self == traffic.racer:
+		if f < 0.5 or f > R2.N - 1.5:   # off an end it couldn't leave: gone (or a racer or a raider: kept on the road, stopped)
+			if self == traffic.racer or hostile:
 				f = clampf(f, 0.5, R2.N - 1.5)
 				v = 0.0
 				nsp_road = -1
