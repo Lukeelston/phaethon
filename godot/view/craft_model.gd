@@ -1198,7 +1198,10 @@ static func set_nose_closed(closed: bool, under: Node = null) -> void:
 			if part.has_meta(&"service_bonnet"):
 				part.visible = closed
 			elif part.mesh and part.mesh.has_meta(&"shrike_hull"):
+				var open_wings := part.mesh.has_meta(&"talon_stock")
 				part.mesh = pod_hull_in(String(part.mesh.get_meta(&"livery", Livery.current)), part.mesh.get_meta(&"shrike_hull"), part.mesh.get_meta(&"talon_hull", false))
+				if open_wings:
+					part.mesh = Talon.with_gun_bays(part.mesh)
 
 
 

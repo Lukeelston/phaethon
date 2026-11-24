@@ -38,6 +38,8 @@ const TAIL := [
 # Leading-edge erosion strip, upper skin, control-surface joint and bevelled trailing edge.
 const CHORD := [0.0, 0.045, 0.15, 0.44, 0.715, 0.73, 0.965, 1.0, 0.72, 0.20]
 const CAMBER := [0.0, 0.22, 0.50, 0.47, 0.28, 0.26, 0.08, -0.04, -0.46, -0.50]
+const GUN_SPAN := Vector2(1.31, 1.54)    # leading-edge bay, between the chine and the wing's outer crank
+static var _gun_hulls := {}              # the alternate wing skins, per stock hull (paint and open/closed nose)
 # Where the lamps and hinges stand on what Codex drew (craft_model reads them).
 const WINGTIP_LAMP := Vector3(2.91, -0.062, 1.59)    # pod-local, x mirrored: the wing's tip
 const JET_LAMP := Vector3(0.73, -0.05, 2.448)        # pod-local, x mirrored: across each trim jet's mouth
@@ -97,9 +99,11 @@ static func _centre(ring: PackedVector3Array) -> Vector3:
 
 ## Connect two convex sections; auto-orienting against their axis also handles
 ## mirrored port parts without negative scales or inverted specular highlights.
-static func _band(st: SurfaceTool, a: PackedVector3Array, b: PackedVector3Array, colors: Array) -> void:
+static func _band(st: SurfaceTool, a: PackedVector3Array, b: PackedVector3Array, colors: Array, omit := 0) -> void:
 	var centre := (_centre(a) + _centre(b)) * 0.5
 	for i in a.size():
+		if (omit & (1 << i)) != 0:
+			continue
 		var j := (i + 1) % a.size()
 		var outward := (a[i] + a[j] + b[i] + b[j]) * 0.25 - centre
 		_face(st, a[i], a[j], b[j], outward, colors[i])
@@ -112,7 +116,7 @@ static func _cap(st: SurfaceTool, ring: PackedVector3Array, outside: Vector3, co
 		_face(st, ring[i], ring[(i + 1) % ring.size()], centre, outside, color)
 
 
-static func _foil(st: SurfaceTool, stations: Array, origin: Vector3, span: Vector3, up: Vector3, stripe: Color, edge: Color, pal: Dictionary) -> void:
+static func _foil(st: SurfaceTool, stations: Array, origin: Vector3, span: Vector3, up: Vector3, stripe: Color, edge: Color, pal: Dictionary, gun_bays := false) -> void:
 	var base := [pal.metal, stripe, pal.panel, pal.panel, pal.cavity, pal.body, pal.metal, pal.body, (pal.panel as Color).darkened(0.25), pal.body]
 	var last := PackedVector3Array()
 	for row in stations:
@@ -129,7 +133,16 @@ static func _foil(st: SurfaceTool, stations: Array, origin: Vector3, span: Vecto
 			if row == stations.back():
 				colors[2] = stripe
 				colors[3] = edge
-			_band(st, last, ring, colors)
+			if gun_bays and is_equal_approx(float(row[0]), GUN_SPAN.y):
+				# The two top strips and the lower leading skin travel with the shutters.
+				_band(st, last, ring, colors, (1 << 0) | (1 << 1) | (1 << 9))
+				for wall in [last, ring]:
+					var rim := PackedVector3Array([wall[0], wall[1], wall[2], wall[9]])
+					_cap(st, rim, span if wall == last else -span, pal.cavity)
+				_face(st, last[2], ring[2], ring[9], Vector3.FORWARD, pal.cavity)
+				_face(st, last[2], ring[9], last[9], Vector3.FORWARD, pal.cavity)
+			else:
+				_band(st, last, ring, colors)
 		last = ring
 	_cap(st, last, span, edge)
 
@@ -222,13 +235,17 @@ static func _markings(st: SurfaceTool, pal: Dictionary) -> void:
 ## The Talon's plating, appended to the Phaethon's pod hull as its last surface (SURFACE), in `pal`.
 ## The two cheeks converge into a low dorsal beak. Both tow links pass under
 ## its leading section and through the relief at the root.
-static func add_pod(mesh: ArrayMesh, closed_nose: bool, pal: Dictionary) -> void:
+static func add_pod(mesh: ArrayMesh, closed_nose: bool, pal: Dictionary, gun_bays := false) -> void:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var body: Color = pal.body
 	var panel: Color = pal.panel
 	var cavity: Color = pal.cavity
 	var sides := [body, panel, body, panel.lightened(0.14), panel, body, cavity]
+	var wing := WING.duplicate()
+	if gun_bays:
+		wing.insert(2, gun_station(GUN_SPAN.x))
+		wing.insert(3, gun_station(GUN_SPAN.y))
 	if closed_nose:
 		# Two removable dorsal panels. The ridge is shallow enough to sit below
 		# the seated eye. Their chamfers leave a dark expansion joint over the tub.
@@ -244,7 +261,7 @@ static func add_pod(mesh: ArrayMesh, closed_nose: bool, pal: Dictionary) -> void
 				[-0.655, 0.47, -0.032, 0.47, 0.055, 0.018]], side, deck, cavity)
 	for side: float in [-1.0, 1.0]:
 		var span := Vector3.RIGHT * side
-		_foil(st, WING, Vector3.ZERO, span, Vector3.UP, pal.trim, body, pal)
+		_foil(st, wing, Vector3.ZERO, span, Vector3.UP, pal.trim, body, pal, gun_bays)
 		var cant := Vector3(side * 0.42, 0.908, 0)
 		_foil(st, TAIL, Vector3(side * 0.84, -0.12, 0), cant, Vector3(side * 0.908, -0.42, 0), pal.trim, pal.tip, pal)
 		# A continuous line from the beak to the cockpit shoulder and the trim jet.
@@ -299,6 +316,39 @@ static func add_pod(mesh: ArrayMesh, closed_nose: bool, pal: Dictionary) -> void
 	var surface := mesh.get_surface_count() - 1
 	mesh.surface_set_name(surface, SURFACE)
 	mesh.surface_set_material(surface, Finish.painted_metal())
+	mesh.set_meta(&"talon_nose_closed", closed_nose)
+	mesh.set_meta(&"talon_palette", pal)
+
+
+## The two extra sections are inside the straight inner wing panel.
+static func gun_station(x: float) -> Array:
+	var a: Array = WING[1]
+	var b: Array = WING[2]
+	var t := inverse_lerp(a[0], b[0], x)
+	return [x, lerpf(a[1], b[1], t), lerpf(a[2], b[2], t), lerpf(a[3], b[3], t), lerpf(a[4], b[4], t)]
+
+
+## Keep the stock mesh on every other Talon, including an unarmed partner beside the pilot.
+static func with_gun_bays(stock: ArrayMesh) -> ArrayMesh:
+	if stock.has_meta(&"talon_stock"):
+		return stock
+	if _gun_hulls.has(stock):
+		return _gun_hulls[stock]
+	var opened := stock.duplicate() as ArrayMesh
+	opened.surface_remove(opened.surface_find_by_name(SURFACE))
+	add_pod(opened, stock.get_meta(&"talon_nose_closed"), stock.get_meta(&"talon_palette"), true)
+	opened.set_meta(&"talon_stock", stock)
+	_gun_hulls[stock] = opened
+	return opened
+
+
+## The caller supplies the visible hull: craft.pod in flat view, shell/PodHull in the VR cockpit.
+static func wing_arms(hull: MeshInstance3D) -> Node3D:
+	var rig := hull.get_node_or_null("TalonArms") as Node3D
+	if rig == null:
+		rig = load("res://view/arms/talon_arms.gd").new()
+		rig.build(hull)
+	return rig
 
 
 ## What the Talon adds to each engine (`out`: -1 the port engine, 1 the starboard), into the engine's own fixed
