@@ -35,7 +35,9 @@ func _init(vehicle: String) -> void:
 	id = vehicle
 	var source := (load(ASSET_DIR + id + ".glb") as PackedScene).instantiate()
 	var paint := finish_for(load(ASSET_DIR + id + ".tres") as StandardMaterial3D)
-	if not Livery.is_factory():      # (Factory: the atlas as it was painted)
+	if id == Pilot.VESPER and Livery.current == Livery.STAR_COMMAND:      # (its own racing atlas, Codex's: worn as painted)
+		paint.set_shader_parameter("albedo_map", load(ASSET_DIR + "vesper_star_command.webp"))
+	elif not Livery.is_factory():      # (Factory: the atlas as it was painted)
 		repaint(paint, load(ASSET_DIR + id + MASK), colours(id))
 	for node: MeshInstance3D in source.find_children("*", "MeshInstance3D", true, false):
 		# The import is shared between flights. Only this flight owns the surface assignment.

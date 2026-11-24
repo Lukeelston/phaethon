@@ -45,8 +45,12 @@ def font(size, bold=False):
     return ImageFont.load_default(size=size)
 
 
-def make_maps(craft):
+def make_maps(craft, *, star_command=False):
     name, number, division, paint, accent, trim = FLEET[craft]
+    if star_command:
+        assert craft == "vesper"
+        division = "STAR COMMAND  /  FLIGHT DIVISION"
+        paint, accent, trim = "#f4f4eb", "#95e139", "#7238bd"
     colors = [
         paint,
         accent,
@@ -89,7 +93,18 @@ def make_maps(craft):
         if key == "stripe":
             d.polygon([(x, y + 44), (x + 256, y + 100), (x + 256, y + 174), (x, y + 118)], fill=accent)
             d.line((x, y + 135, x + 255, y + 191), fill=trim, width=5)
+            if star_command:
+                # Red bands cross the white top of each swept wing and engine cover.
+                band = Image.new("RGB", (w, t), paint)
+                mark = ImageDraw.Draw(band)
+                for offset in range(-64, 320, 90):
+                    mark.polygon([(offset, 0), (offset + 25, 0),
+                                  (offset - 39, t), (offset - 64, t)], fill="#d33948")
+                mark.rectangle((0, t - 38, w - 1, t - 1), fill=trim)
+                base.paste(band, (x, y))
         if key == "access":
+            if star_command:
+                d.rectangle(box, fill=trim)
             rect = (x + 10, y + 11, x + 245, y + 244)
             d.rounded_rectangle(rect, 14, outline="#575955", width=2)
             h.rounded_rectangle(rect, 14, outline=78, width=3)
@@ -127,7 +142,8 @@ def make_maps(craft):
         + grain[:, :, None]
         + (np.asarray(coarse).astype(float)[:, :, None] - 128) * 0.029
     )
-    Image.fromarray(np.uint8(image.clip(0, 255))).save(ART / (craft + ".webp"), quality=94, method=6)
+    stem = craft + "_star_command" if star_command else craft
+    Image.fromarray(np.uint8(image.clip(0, 255))).save(ART / (stem + ".webp"), quality=94, method=6)
     if craft == "orrery":
         height = np.asarray(bump).astype(float) / 255 + grain * 0.0016
         dy, dx = np.gradient(height * 3)

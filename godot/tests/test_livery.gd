@@ -12,6 +12,8 @@
 ##             binnacle; built in Ember again, nothing is overridden
 ##   saved     the menus' row steps through the Phaethon's paints (Factory, which is Ember, and seven
 ##             more) and saves the choice (every craft's own: tests/test_paint.gd)
+##   vesper    Codex's Star Command: on the Vesper's row only, after Factory, saved as its paint; the Vesper built in
+##             it wears its own atlas (not a repaint); the other craft's rows and choices untouched
 ## Prints LIVERY PASS.
 extends SceneTree
 
@@ -159,6 +161,47 @@ func _run() -> void:
 		row.pressed.emit()
 	_check("the menus' row: \"%s\", a press \"%s\" and saved as %s, round again to \"%s\"" % [first, second, saved, row.text],
 		first.ends_with("Factory") and second.ends_with("Cobalt blue") and saved == "cobalt" and row.text == first)
+	# the Vesper's own livery, Codex's Star Command: on its row only, after Factory, saved as its paint
+	var phaethon_paint := Livery.saved_for("phaethon")
+	Settings.set_choice(Livery.key_for("kiln"), "viridian")
+	Settings.set_choice(Livery.key_for("vesper"), Livery.FACTORY)
+	Settings.set_selected_craft("vesper")
+	UI.refresh_paint(row)
+	var vesper_first := row.text
+	row.pressed.emit()
+	_check("the Vesper's row: \"%s\", a press \"%s\", saved as its paint (%s), built in it (%s)" % [vesper_first, row.text, Livery.saved_for("vesper"), Livery.built("vesper")],
+		vesper_first.ends_with("Factory") and row.text.ends_with("Star Command") and Livery.saved_for("vesper") == Livery.STAR_COMMAND
+			and Settings.choice(Livery.key_for("vesper"), Livery.ids_for("vesper")) == Livery.STAR_COMMAND and Livery.built("vesper") == Livery.STAR_COMMAND
+			and Livery.ids_for("vesper")[1] == Livery.STAR_COMMAND and Livery.ids_for("vesper").size() == Livery.CHOICES.size() + 1)
+	var only_its := []
+	for craft: String in ["phaethon", "talon", "shrike", "orrery", "kiln", "basilisk"]:
+		if Livery.ids_for(craft).has(Livery.STAR_COMMAND):
+			only_its.append(craft)
+	_check("... on no other craft's row (%s), and theirs are kept (the Phaethon's %s, the Kiln's %s)" % [only_its, Livery.saved_for("phaethon"), Livery.saved_for("kiln")],
+		only_its.is_empty() and Livery.saved_for("phaethon") == phaethon_paint and Livery.saved_for("kiln") == "viridian" and not Livery.ids().has(Livery.STAR_COMMAND))
+	Livery.current = Livery.built("vesper")
+	var special := CM.Fleet.new("vesper")
+	Livery.current = Livery.FACTORY
+	var original := CM.Fleet.new("vesper")
+	Livery.current = "ember"
+	var paint := special.part(&"Cab").surface_get_material(0) as ShaderMaterial
+	var stock := original.part(&"Cab").surface_get_material(0) as ShaderMaterial
+	_check("the Vesper wears its own Star Command atlas on cab and engines, not a repaint; its Factory its own atlas",
+		paint.get_shader_parameter("albedo_map").resource_path.ends_with("/vesper_star_command.webp") and not paint.get_shader_parameter("repaint")
+			and special.part(&"Starboard").surface_get_material(0) == paint
+			and stock.get_shader_parameter("albedo_map").resource_path.ends_with("/vesper.webp"))
+	Settings.set_selected_craft("kiln")
+	UI.refresh_paint(row)
+	var kiln_row := row.text
+	Settings.set_selected_craft("vesper")
+	UI.refresh_paint(row)
+	var recalled := row.text
+	row.pressed.emit()
+	_check("changing craft shows its own paint (%s), back on the Vesper it is recalled (%s); the next press is Ember, the Vesper's alone (%s; the Phaethon's %s, the Kiln's %s)" % [
+			kiln_row, recalled, Livery.saved_for("vesper"), Livery.saved_for("phaethon"), Livery.saved_for("kiln")],
+		kiln_row.ends_with("Racing green") and recalled.ends_with("Star Command") and Livery.saved_for("vesper") == "ember"
+			and Livery.saved_for("phaethon") == phaethon_paint and Livery.saved_for("kiln") == "viridian")
+	Settings.set_selected_craft("phaethon")
 	row.queue_free()
 	if before == null:
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(Settings.PREFS))
