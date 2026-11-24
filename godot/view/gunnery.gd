@@ -1,10 +1,12 @@
-## The Basilisk's fire control (view/turret.gd is the mount). Each frame:
-##   1. the gaze: a ray down the middle of the pilot's view (the headset's, or the flat view's camera)
+## The fire control: it fires a craft's weapon through its mount (view/weapons/weapon_mount.gd; the Basilisk's is
+## its gaze-slaved turret, view/weapons/turret_mount.gd on view/turret.gd). Each frame:
+##   1. the aim's ray: the mount's (the turret's is the gaze: down the middle of the pilot's view, the headset's
+##      or the flat view's camera)
 ##   2. what it is on: the first vehicle it meets (view/network_traffic.gd ray_pick), else the ground
 ##      (the Network's land and the craft's own road; elsewhere the course's surface), else the sky
 ##   3. the sight is drawn there, at that distance and a fixed size over everything (view/gun_sight.gdshader)
-##   4. the gun is laid on it, leading a vehicle by the bolt's time of flight, and fires while the
-##      trigger is held, the bore is on, and the line is clear of the craft's own cab and engines
+##   4. the mount is laid on it, leading a vehicle by the bolt's time of flight, and fires while the
+##      trigger is held, the mount is on the aim, and its line is clear of the craft (the turret's: its cab and engines)
 ##   5. bolts fly; where they land, a flash and a puff of dust; a vehicle takes HP hits and is gone
 ## Bolts and bursts are kept in the sims' frame (x, y, height) and drawn about the floating origin.
 ## The switch (deploy) and the trigger are the cockpit's: vr/vr_cockpit.gd, or K and F in the flat view.
@@ -13,7 +15,8 @@ class_name Gunnery
 extends Node3D
 
 const Sim := preload("res://sim/craft_sim.gd")
-const TurretScript := preload("res://view/turret.gd")
+const WeaponMountScript := preload("res://view/weapons/weapon_mount.gd")
+const TurretMountScript := preload("res://view/weapons/turret_mount.gd")
 const SightShader := preload("res://view/gun_sight.gdshader")
 const GlowShader := preload("res://view/gun_glow.gdshader")
 const SmokeShader := preload("res://view/gun_smoke.gdshader")
@@ -33,11 +36,9 @@ const MAX_BOLTS := 48
 const BOLT_WIDTH := 0.0105        # a bolt's least width for its distance from the eye: about six tenths of a degree
 const STREAK := 38.0              # m: a bolt's streak, once it is that far out of the muzzle
 const MAX_FX := 40
-const ENGINE_R := 1.55            # each engine, for the interlock: three balls along it of this radius
-const ENGINE_BALLS := [-3.4, 0.0, 3.2]
 
 var view
-var turret: TurretScript
+var mount: WeaponMountScript       # the craft's weapon (view/craft_model.gd `weapon`): what this fires through
 var want_out := false              # the switch (the cockpit sets it; deploying waits on power)
 var trigger := false               # the fire button held
 var hold_fire := false             # (renders and tests: as if it were)
@@ -48,7 +49,7 @@ var aim_kind := "sky"              # "sky", "ground", "vehicle"
 var aim_car = null                 # the vehicle under the sight
 var lock := 0.0                    # 0..1: how long it has held there
 var fouled := false                # the line of fire would cross the craft
-var on_aim := false                # the bore is on the (led) aim
+var on_aim := false                # the mount is on the (led) aim
 var shots := 0                     # tests and the log read these
 var hits := 0
 var kills := 0
@@ -80,9 +81,9 @@ var _was_out := false
 var _was_moving := false
 
 
-## Once per frame. Creates itself the first time the craft has a turret.
+## Once per frame. Creates itself the first time the craft has a weapon.
 static func frame(v, g, delta: float):
-	if v == null or v.craft == null or v.craft.turret == null:
+	if v == null or v.craft == null or v.craft.weapon == null:
 		return g
 	if g == null:
 		g = load("res://view/gunnery.gd").new()
@@ -95,7 +96,7 @@ static func frame(v, g, delta: float):
 func build(v) -> void:
 	view = v
 	name = "Gunnery"
-	turret = v.craft.turret
+	mount = v.craft.weapon
 	_rng.seed = 7
 	sight_mat = ShaderMaterial.new()
 	sight_mat.shader = SightShader
@@ -117,9 +118,9 @@ func build(v) -> void:
 		var path: String = AUDIO_DIR + n + ".wav"
 		if ResourceLoader.exists(path):
 			_sounds[n] = load(path)
-	_servo = _player(turret, -2.0)
+	_servo = _player(mount.node(), -2.0)
 	for i in 3:
-		_gun_audio.append(_player(turret, 1.0))
+		_gun_audio.append(_player(mount.node(), 1.0))
 	for i in 6:
 		var p := _player(self, 4.0)
 		p.unit_size = 60.0
@@ -170,14 +171,15 @@ func step(delta: float) -> void:
 	delta = minf(delta, 0.05)
 	var cam: Camera3D = view.cam
 	var out_ok := want_out and power > 0.5
-	# The gaze, in the cab's frame for the sight ball, and in the sims' for the search.
-	var gaze_o: Vector3 = cam.global_position
+	# The aim's ray (the turret's is the gaze), in the sims' frame for the search; and the gaze, for the mount
+	# (the turret's sight ball follows it).
+	var ray: Array = mount.aim_ray(cam)
+	var aim_o: Vector3 = ray[0]
+	var aim_d: Vector3 = ray[1]
 	var gaze_d: Vector3 = -cam.global_transform.basis.z.normalized()
-	var cab_xf: Transform3D = turret.global_transform
-	var gaze_cab := cab_xf.basis.inverse() * gaze_d
-	var live := turret.t > 0.0 or out_ok
+	var live := mount.deploy_t() > 0.0 or out_ok
 	if live:
-		_find(to_sim(gaze_o), dir_to_sim(gaze_d), delta)
+		_find(to_sim(aim_o), dir_to_sim(aim_d), delta)
 	else:
 		aim_kind = "sky"
 		aim_car = null
@@ -187,23 +189,20 @@ func step(delta: float) -> void:
 	if aim_car != null:
 		target = _lead(aim_car)
 	var target_r := to_render(target)
-	var aim_cab := cab_xf.affine_inverse() * target_r
-	turret.power = power
-	turret.step(delta, out_ok, aim_cab if live else null, gaze_cab)
-	# Is the bore on, and the line clear?
-	var line_cab := aim_cab - turret.trunnion()
-	var bore_cab := cab_xf.basis.inverse() * turret.bore()
-	on_aim = turret.is_out() and bore_cab.angle_to(line_cab) < TurretScript.ON_TARGET
-	fouled = turret.is_out() and (not turret.clear_of_cab(line_cab) or _crosses_engines(turret.global_transform * turret.trunnion(), target_r))
+	mount.power = power
+	mount.step(delta, out_ok, target_r if live else null, gaze_d)
+	# Is it on, and the line clear?
+	on_aim = mount.on_aim(target_r)
+	fouled = mount.fouled(target_r)
 	_cool = maxf(0.0, _cool - delta)
 	var was_firing := firing
-	firing = (trigger or hold_fire) and turret.ready_to_fire() and on_aim and not fouled and hot <= 0.0
+	firing = (trigger or hold_fire) and mount.ready_to_fire() and on_aim and not fouled and hot <= 0.0
 	if firing:
 		while _cool <= 0.0:
 			_fire(target)
 			_cool += 1.0 / RATE
 	_heat_step(delta, was_firing)
-	_sounds_step()
+	_sounds_step(out_ok)
 	_fly(delta)
 	_draw(cam)
 
@@ -348,7 +347,7 @@ func march(o: Vector3, d: Vector3, reach: float) -> float:
 
 ## Where a vehicle will be when a bolt fired now reaches it (sims' frame).
 func _lead(c) -> Vector3:
-	var from := to_sim(turret.global_transform * turret.trunnion())
+	var from := to_sim(mount.origin())
 	var at := Vector3(c.x, c.y, aim_sim.z)
 	var v := Vector3(c.hx * c.v, c.hy * c.v, 0.0)
 	var speed := _bolt_speed((at - from).normalized())
@@ -367,26 +366,8 @@ func _bolt_speed(dir: Vector3) -> float:
 	return BOLT_V + maxf(0.0, ahead)
 
 
-## Does the line from the gun to `to` (render frame) pass through either of the craft's engines?
-func _crosses_engines(from: Vector3, to: Vector3) -> bool:
-	var d := to - from
-	var length := d.length()
-	if length < 0.01:
-		return false
-	d /= length
-	for eng: Node3D in view.craft.engines:
-		for z: float in ENGINE_BALLS:
-			var c: Vector3 = eng.global_transform * Vector3(0, 0, z)
-			var along := (c - from).dot(d)
-			if along < 0.0 or along > length:
-				continue
-			if (c - from - d * along).length() < ENGINE_R:
-				return true
-	return false
-
-
 func _fire(target: Vector3) -> void:
-	var muzzles := turret.muzzles()
+	var muzzles := mount.muzzles()
 	var m: Vector3 = muzzles[_barrel % muzzles.size()]
 	_barrel += 1
 	var a := to_sim(m)
@@ -403,7 +384,7 @@ func _fire(target: Vector3) -> void:
 	_bolts.append({"a": a, "b": b, "t": 0.0, "dur": maxf(0.02, dur), "car": aim_car if aim_kind == "vehicle" else null,
 		"kind": aim_kind})
 	shots += 1
-	turret.heat = minf(1.0, turret.heat + 0.35)
+	mount.add_heat(0.35)
 	_add_fx(a + dir * 0.4, "muzzle", 0.07, 0.35)
 	_play(_gun_audio, "fire", Vector3.INF, 0.94 + 0.12 * _rng.randf())
 
@@ -458,11 +439,12 @@ func _add_fx(p: Vector3, kind: String, dur: float, size: float) -> void:
 	_fx.append({"p": p, "kind": kind, "t": 0.0, "dur": dur, "size": size})
 
 
-func _sounds_step() -> void:
-	var out := turret.t >= TurretScript.T_FREE
-	var moving := turret.t > 0.0 and turret.t < TurretScript.T_FREE
+## asked_out: what the mount was asked this frame (the switch, with power).
+func _sounds_step(asked_out: bool) -> void:
+	var out := mount.is_out()
+	var moving := mount.deploy_t() > 0.0 and not out
 	if moving and not _was_moving:
-		_servo.stream = _sounds.get("deploy" if turret.deployed else "stow")
+		_servo.stream = _sounds.get("deploy" if asked_out else "stow")
 		if _servo.stream:
 			_servo.play()
 	_was_moving = moving
@@ -475,8 +457,10 @@ func _sounds_step() -> void:
 
 func _draw(cam: Camera3D) -> void:
 	var eye := cam.global_position
+	# (the gaze sight's stops, coils and pipper are the turret's own: a mount without them shows none of them)
+	var gun := mount as TurretMountScript
 	# The sight: at the aim, the size of SIGHT_DEG there.
-	var showing := turret.t > 0.0 and want_out
+	var showing := mount.deploy_t() > 0.0 and want_out
 	sight.visible = showing
 	if showing:
 		var at := to_render(aim_sim)
@@ -489,27 +473,30 @@ func _draw(cam: Camera3D) -> void:
 			size = maxf(size, float(BRACKET.get(aim_car.kind, 30.0)))
 		sight.global_transform = Transform3D(Basis().scaled(Vector3.ONE * size), sight_at)
 		var state := 0
-		if not turret.is_out():
+		if not mount.is_out():
 			state = 3
-		elif turret.limited or fouled:
+		elif (gun != null and gun.limited()) or fouled:
 			state = 2
 		elif aim_kind == "vehicle":
 			state = 1
 		sight_mat.set_shader_parameter("state", state)
 		sight_mat.set_shader_parameter("power", power)
 		sight_mat.set_shader_parameter("lock", lock)
-		sight_mat.set_shader_parameter("heat", turret.heat)
+		sight_mat.set_shader_parameter("heat", gun.heat() if gun != null else 0.0)
 		sight_mat.set_shader_parameter("spin", Time.get_ticks_msec() * 0.004 if state == 3 else 0.0)
 		# The pipper: where the bore meets the sight's distance, as seen from the eye.
-		var bore_pt := turret.global_transform * turret.trunnion() + turret.bore() * dist
-		var to_bore := (bore_pt - eye).normalized()
-		var basis := cam.global_transform.basis
-		var fwd := (sight_at - eye).normalized()
-		var off := Vector2(to_bore.dot(basis.x) - fwd.dot(basis.x), to_bore.dot(basis.y) - fwd.dot(basis.y))
-		var half := size * 0.5 / maxf(eye.distance_to(sight_at), 0.01)
-		var pip := off / half
-		sight_mat.set_shader_parameter("pipper", Vector2(pip.x, pip.y))
-		sight_mat.set_shader_parameter("pipper_on", 1.0 if turret.is_out() and pip.length() < 3.0 else 0.0)
+		if gun != null:
+			var bore_pt := mount.origin() + gun.bore() * dist
+			var to_bore := (bore_pt - eye).normalized()
+			var basis := cam.global_transform.basis
+			var fwd := (sight_at - eye).normalized()
+			var off := Vector2(to_bore.dot(basis.x) - fwd.dot(basis.x), to_bore.dot(basis.y) - fwd.dot(basis.y))
+			var half := size * 0.5 / maxf(eye.distance_to(sight_at), 0.01)
+			var pip := off / half
+			sight_mat.set_shader_parameter("pipper", Vector2(pip.x, pip.y))
+			sight_mat.set_shader_parameter("pipper_on", 1.0 if mount.is_out() and pip.length() < 3.0 else 0.0)
+		else:
+			sight_mat.set_shader_parameter("pipper_on", 0.0)
 	# Bolts: streaks along their flight, thick enough to see from where the eye is.
 	var n := 0
 	for bolt: Dictionary in _bolts:
@@ -547,7 +534,7 @@ func _draw(cam: Camera3D) -> void:
 		var size: float = f.size
 		match String(f.kind):
 			"muzzle":
-				p = turret.muzzles()[(_barrel + 1) % 2]
+				p = mount.muzzles()[(_barrel + 1) % 2]
 				_flash_mm.set_instance_transform(nf, Transform3D(Basis().scaled(Vector3.ONE * 0.35 * (1.0 - u)), p))
 				_flash_mm.set_instance_color(nf, Color(1.0, 0.7, 0.35) * (1.0 - u))
 				nf += 1

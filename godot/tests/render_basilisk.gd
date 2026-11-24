@@ -193,7 +193,7 @@ func _network_shots(game, cam: Camera3D) -> void:
 		var T := preload("res://view/turret.gd")
 		var lay: Vector2 = T.lay_for(game.craft.turret.global_transform.basis.inverse() * to)
 		var gun: Vector3 = game.craft.turret.global_transform * game.craft.turret.trunnion()
-		if d > 120.0 and d < 2400.0 and to.normalized().dot(ahead) > 0.0 and T.reachable(lay) and not g._crosses_engines(gun, at) and d < best:
+		if d > 120.0 and d < 2400.0 and to.normalized().dot(ahead) > 0.0 and T.reachable(lay) and not g.mount._crosses_engines(gun, at) and d < best:
 			best = d
 			target = c
 	if target == null:
