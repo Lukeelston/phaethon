@@ -1,84 +1,72 @@
-"""Take working panels out of the original Shrike hips and Vesper keel.
+"""Take working panels out of the original Shrike hips and Vesper foredeck.
 
 Run after changing either donor GLB. Every original triangle, UV, normal and
-baked occlusion value survives the partition; closed doors share the hull paint.
+baked occlusion value follows the original surface; closed doors share the hull paint.
 """
-import json
-import struct
 from pathlib import Path
 
 import numpy as np
 
+from art_fleet_arm_bays import cab_faces, crop, mesh
+from art_shrike_airframe import write_glb
+
 ART = Path(__file__).resolve().parents[1] / "godot/art"
-DTYPES = {5121: "u1", 5123: "<u2", 5126: "<f4"}
-WIDTHS = {"VEC2": 2, "VEC3": 3, "VEC4": 4, "SCALAR": 1}
 
 
-def partition(craft, source_file, part_name):
-    source = (ART / source_file).read_bytes()
-    header = struct.unpack_from("<I", source, 12)[0]
-    doc = json.loads(source[20:20 + header])
-    binary = source[28 + header:]
-    prim = next(m["primitives"][0] for m in doc["meshes"] if m["name"] == part_name)
+def vesper_foredeck(source_file):
+    # Crop across the tapered sill in its own coordinates. The added column is
+    # discarded after clipping; position, normals, paint UV and AO are interpolated.
+    faces = cab_faces(ART / source_file)
+    across = faces[:, :, 0] - .32 * (faces[:, :, 2] + .9)
+    rest = list(np.concatenate((across[:, :, None], faces[:, :, 1:3], faces), axis=2))
+    parts = {}
+    for name, start, end in [("Port", -1.17, -.92), ("Starboard", -.92, -.67)]:
+        leaf, body = [], []
+        for poly in rest:
+            panel, scraps = crop(poly, (.757, -.024, start), (1.081, .16, end))
+            if len(panel) >= 3:
+                leaf.append(np.asarray(panel)[:, 3:])
+            body.extend(scraps)
+        parts[name] = mesh(leaf)
+        rest = body
+    # The delivered sill has overlapping internal trim shells. Mill a pocket
+    # below the paint, retaining the removed core in the donor for area checks.
+    core, body = [], []
+    for poly in rest:
+        inside, scraps = crop(poly, (.749, -.365, -1.15), (1.031, -.024, -.66))
+        if len(inside) >= 3:
+            core.append(np.asarray(inside)[:, 3:])
+        body.extend(scraps)
+    parts["SillCore"] = mesh(core)
+    parts["Body"] = mesh([np.asarray(poly)[:, 3:] for poly in body])
+    write_glb(parts, ART / "arms" / "vesper_hatches.glb", "Phaethon foredeck pulse cassette")
 
-    def read(i):
-        acc = doc["accessors"][i]
-        view = doc["bufferViews"][acc["bufferView"]]
-        return np.frombuffer(binary, DTYPES[acc["componentType"]], count=acc["count"] * WIDTHS[acc["type"]],
-                             offset=view.get("byteOffset", 0) + acc.get("byteOffset", 0)).reshape(acc["count"], -1)
 
-    triangles = read(prim["indices"]).reshape(-1, 3)
-    attributes = {key: read(i) for key, i in prim["attributes"].items()}
-    xyz = attributes["POSITION"][triangles]
-    normal = attributes["NORMAL"][triangles].mean(axis=1)
-    x, y, z = xyz.mean(axis=1).T
-    if craft == "shrike":
-        # Exactly two loft segments on the outer cheek, ahead of the cab brake.
-        on_hip = np.isclose(xyz[:, :, 2, None], [-.82, -.45, .04], atol=.0001).any(axis=2).all(axis=1)
-        doors = on_hip & (abs(x) > 1.0) & (normal[:, 0] * np.sign(x) > .52)
-    else:
-        # Underside of the continuous keel between its front and middle stations.
-        doors = (xyz[:, :, 2].min(axis=1) > -.841) & (xyz[:, :, 2].max(axis=1) < .601)
-        doors &= (normal[:, 1] < -.70) & (y < -.51) & (abs(x) < .70)
-
-    blob = bytearray()
-    views, accessors, meshes, nodes = [], [], [], []
-
-    def append_array(array, original, target):
-        blob.extend(b"\0" * (-len(blob) % 4))
-        a = dict(original)
-        a.update(bufferView=len(views), count=len(array))
-        if "min" in a:
-            a.update(min=array.min(axis=0).tolist(), max=array.max(axis=0).tolist())
-        a.pop("byteOffset", None)
-        views.append(dict(buffer=0, byteOffset=len(blob), byteLength=array.nbytes, target=target))
-        blob.extend(array.tobytes())
-        accessors.append(a)
-        return len(accessors) - 1
-
-    for name, select in [("Body", ~doors), ("Port", doors & (x < 0)), ("Starboard", doors & (x >= 0))]:
-        faces = triangles[select]
-        assert len(faces) > 3, f"Missing {craft} {name}"
-        vertex, local = np.unique(faces.flatten(), return_inverse=True)
-        attr = {key: append_array(values[vertex], doc["accessors"][prim["attributes"][key]], 34962)
-                for key, values in attributes.items()}
-        idx = append_array(local.astype("<u2"), doc["accessors"][prim["indices"]], 34963)
-        meshes.append(dict(name=name, primitives=[dict(attributes=attr, indices=idx)]))
-        nodes.append(dict(name=name, mesh=len(meshes) - 1))
-        print(craft, name, len(faces))
-    blob.extend(b"\0" * (-len(blob) % 4))
-    result = dict(asset=dict(version="2.0", generator="Phaethon raid hatches"), scene=0, nodes=nodes,
-                  scenes=[dict(nodes=list(range(len(nodes))))], meshes=meshes, accessors=accessors,
-                  bufferViews=views, buffers=[dict(byteLength=len(blob))])
-    js = json.dumps(result, separators=(",", ":")).encode()
-    js += b" " * (-len(js) % 4)
-    dest = ART / "arms" / f"{craft}_hatches.glb"
-    dest.parent.mkdir(exist_ok=True)
-    dest.write_bytes(struct.pack("<4sII", b"glTF", 2, 28 + len(js) + len(blob))
-                     + struct.pack("<I4s", len(js), b"JSON") + js
-                     + struct.pack("<I4s", len(blob), b"BIN\0") + blob)
+def shrike_cheeks(source_file):
+    faces = cab_faces(ART / source_file, "PodStrakes")
+    xyz = faces[:, :, :3]
+    x = xyz[:, :, 0].mean(axis=1)
+    on_hip = np.isclose(xyz[:, :, 2, None], [-.82, -.45, .04], atol=.0001).any(axis=2).all(axis=1)
+    doors = on_hip & (abs(x) > 1.0) & (faces[:, :, 3].mean(axis=1) * np.sign(x) > .52)
+    parts = {"Port": mesh(faces[doors & (x < 0)]), "Starboard": mesh(faces[doors & (x > 0)])}
+    core, body = [], []
+    for face, hip in zip(faces[~doors], on_hip[~doors]):
+        # Inside the fairings the uncut wing passes right through the cassette.
+        # Remove its buried root, and bore the inner cheek for the cross shaft.
+        low, high = ((.857, -.247, -.775), (.895, -.143, -.674)) if hip else (
+            (.910, -.271, -.478), (1.16, -.089, -.044))
+        if face[:, 0].mean() < 0:
+            low, high = (-high[0], *low[1:]), (-low[0], *high[1:])
+        inside, scraps = crop(face, low, high)
+        if len(inside) >= 3:
+            core.append(inside)
+        body.extend(scraps)
+    parts["CheekCore"] = mesh(core)
+    parts["Body"] = mesh(body)
+    write_glb(parts, ART / "arms" / "shrike_hatches.glb", "Phaethon twin swept cassette bays")
 
 
 if __name__ == "__main__":
-    partition("shrike", "shrike/bodywork.glb", "PodStrakes")
-    partition("vesper", "pilot_fleet/vesper.glb", "Cab")
+    (ART / "arms").mkdir(parents=True, exist_ok=True)
+    shrike_cheeks("shrike/bodywork.glb")
+    vesper_foredeck("pilot_fleet/vesper.glb")

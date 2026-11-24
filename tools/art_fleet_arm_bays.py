@@ -29,7 +29,7 @@ DOORS = {
 }
 
 
-def cab_faces(path):
+def cab_faces(path, part_name="Cab"):
     raw = path.read_bytes()
     length = struct.unpack_from("<I", raw, 12)[0]
     doc = json.loads(raw[20:20 + length])
@@ -43,7 +43,7 @@ def cab_faces(path):
         return np.frombuffer(blob, dtype, count=acc["count"] * columns,
                              offset=view.get("byteOffset", 0) + acc.get("byteOffset", 0)).reshape(-1, columns)
 
-    mesh = next(m for m in doc["meshes"] if m["name"] == "Cab")["primitives"][0]
+    mesh = next(m for m in doc["meshes"] if m["name"] == part_name)["primitives"][0]
     a = mesh["attributes"]
     vertices = np.column_stack((array(a["POSITION"]), array(a["NORMAL"]),
                                 array(a["TEXCOORD_0"]), array(a["COLOR_0"])[:, 3] / 255.0))

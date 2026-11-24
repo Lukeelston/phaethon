@@ -4,6 +4,7 @@ extends SceneTree
 const Craft := preload("res://view/craft_model.gd")
 const Fleet := preload("res://view/fleet_airframe.gd")
 const Shrike := preload("res://view/shrike_airframe.gd")
+const ShrikeRig := preload("res://view/arms/shrike_arms.gd")
 const Livery := preload("res://view/livery.gd")
 const VesperRig := preload("res://view/arms/vesper_arms.gd")
 const Seat := preload("res://vr/vr_cockpit.gd")
@@ -73,15 +74,15 @@ func _run() -> void:
 			rig.set_deploy(1.0)
 			var first: Array = rig.muzzles()
 			check(first.size() == (4 if id == "shrike" else 1), "Every seat or ring has its own socket")
-			var triangles: int = carrier.mesh.surface_get_array_index_len(0)
 			var area := painted_area(carrier.mesh)
 			for hinge in rig.hinges:
 				var plate: MeshInstance3D = hinge.get_node("Skin")
 				check(plate.get_active_material(0) == paint_mat, "A hatch changed the livery or texture")
-				triangles += plate.mesh.surface_get_array_index_len(0)
 				area += painted_area(plate.mesh)
-			if id == "shrike":
-				check(triangles == original.surface_get_array_index_len(0), "Shrike painted triangles were added or lost")
+			var hatches: Node3D = load(ShrikeRig.HATCHES if id == "shrike" else VesperRig.HATCHES).instantiate()
+			var core: MeshInstance3D = hatches.get_node("CheekCore" if id == "shrike" else "SillCore")
+			area += painted_area(core.mesh)
+			hatches.free()
 			check(is_equal_approx(area,painted_area(original)), "Painted surface area changed across the hatch cut")
 			for t: Transform3D in first:
 				var p := hull.to_local(t.origin)

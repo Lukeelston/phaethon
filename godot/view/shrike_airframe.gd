@@ -166,6 +166,39 @@ static func fin_lamp(out: float) -> ArrayMesh:
 		Color("#ef413b") if out < 0 else Color("#49dc91")]])
 
 
+## The pod's original sidewall, liner and cage run under the Shrike cheek fairings.
+## End those hidden facets at the cassette recess and the cross-shaft bearing.
+static func recess_pod(source: ArrayMesh) -> ArrayMesh:
+	var pocket := AABB(Vector3(.905,-.326,-.745),Vector3(.245,.208,.705))
+	var bearing := AABB(Vector3(.958,-.274,-.790),Vector3(.177,.107,.101))
+	var fitted := ArrayMesh.new()
+	for surface in source.get_surface_count():
+		var arrays := source.surface_get_arrays(surface)
+		if surface in [0,1,4,5,6]:
+			var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+			var indices: PackedInt32Array = arrays[Mesh.ARRAY_INDEX] if arrays[Mesh.ARRAY_INDEX] != null else PackedInt32Array(range(verts.size()))
+			var keep := PackedInt32Array()
+			for i in range(0,indices.size(),3):
+				var a := verts[indices[i]]
+				var b := verts[indices[i+1]]
+				var c := verts[indices[i+2]]
+				var low := a.min(b).min(c)
+				var high := a.max(b).max(c)
+				if high.x < 0.0:
+					var near_x := -high.x
+					high.x = -low.x
+					low.x = near_x
+				var face := AABB(low,high-low).grow(.0001)
+				if not (face.intersects(pocket) or face.intersects(bearing)):
+					keep.append(indices[i])
+					keep.append(indices[i+1])
+					keep.append(indices[i+2])
+			arrays[Mesh.ARRAY_INDEX] = keep
+		fitted.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES,arrays)
+		fitted.surface_set_material(surface,source.surface_get_material(surface))
+	return fitted
+
+
 static func dress_pod(hull: MeshInstance3D) -> void:
 	if pod_paint == null:
 		pod_paint = Finish.painted_metal().duplicate()
