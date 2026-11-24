@@ -4,6 +4,7 @@ const Settings := preload("res://release/game_settings.gd")
 const Livery := preload("res://view/livery.gd")
 const Outlook := preload("res://view/outlook.gd")
 const Chase := preload("res://view/network_chase.gd")
+const Raids := preload("res://view/network_raids.gd")
 
 const BACKGROUND := Color("10151b")
 const PANEL := Color("192129")
@@ -209,6 +210,10 @@ static func craft_button(font_size: int = 18) -> Button:
 
 static func chase_button(font_size: int = 18) -> Button:
 	return option_button("Chase", "chase", Chase.MODES, font_size)
+
+
+static func raids_button(font_size: int = 18) -> Button:
+	return option_button("Raids", "raids", Raids.MODES, font_size)
 
 
 static func time_button(font_size: int = 18) -> Button:

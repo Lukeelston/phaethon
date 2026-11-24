@@ -93,7 +93,7 @@ func _ready() -> void:
 	craft_selector.button.clip_text = true
 	var paint_row := UI.paint_button(15)
 	craft_selector.button.pressed.connect(UI.refresh_paint.bind(paint_row))      # (each craft has its own paint)
-	for row: Array in [[UI.insertion_button(15), paint_row, UI.time_button(15), UI.weather_button(15)], [craft_selector.button, UI.craft_button(15), UI.chase_button(15)]]:
+	for row: Array in [[UI.insertion_button(15), paint_row, UI.time_button(15), UI.weather_button(15)], [craft_selector.button, UI.craft_button(15), UI.chase_button(15), UI.raids_button(15)]]:
 		var options := HBoxContainer.new()
 		options.add_theme_constant_override("separation", 8)
 		left.add_child(options)
@@ -184,7 +184,7 @@ func _over_title() -> void:
 	for look in look_buttons:
 		look.pressed.connect(_showcase_changed)      # (after the button's own handler: the choice is saved by then)
 	_showcase_changed()
-	for row: Array in [[UI.insertion_button(14), paint], [UI.time_button(14), UI.weather_button(14)], [UI.chase_button(14), role], [craft_selector.button]]:
+	for row: Array in [[UI.insertion_button(14), paint], [UI.time_button(14), UI.weather_button(14)], [UI.chase_button(14), role], [craft_selector.button, UI.raids_button(14)]]:
 		var options := HBoxContainer.new()
 		options.add_theme_constant_override("separation", 8)
 		left.add_child(options)

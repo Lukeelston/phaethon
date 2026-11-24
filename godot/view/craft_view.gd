@@ -25,6 +25,7 @@ const CraftSimScript := preload("res://sim/craft_sim.gd")
 const GameSettings := preload("res://release/game_settings.gd")
 const Livery := preload("res://view/livery.gd")
 const Outlook := preload("res://view/outlook.gd")      # the Network's time of day and weather
+const RaidsScript := preload("res://view/network_raids.gd")   # raids: hostile raiders attack a city (free flight on the Network)
 const ChaseScript := preload("res://view/network_chase.gd")   # chase mode, and which craft the pilot flies
 const LightBarScript := preload("res://view/light_bar.gd")
 const LeverInputScript := preload("res://input/lever_input.gd")
@@ -178,6 +179,7 @@ var dust: Node3D
 var partner: Node3D          # the driving partner (view/driving_partner.gd), null when it's off
 var partner_on := false      # common release preference, overridden by launch flags
 var race: Node3D             # Eridanus: the racing pilots (view/race_pilots.gd), null when there are none
+var raids: Node3D            # raids on the Network (view/network_raids.gd), null when they are off
 var chase: Node3D            # chase mode on the Network (view/network_chase.gd), null when it's off
 var pad: Node3D              # the starting pad (view/start_pad.gd), when the flight began on one
 const StartPadScript := preload("res://view/start_pad.gd")
@@ -221,6 +223,7 @@ func _ready() -> void:
 	pad_start = false
 	Outlook.load_saved()     # the menus' time of day and weather
 	ChaseScript.load_saved() # ... and the craft, and whether chase mode is on
+	RaidsScript.load_saved() # ... and whether raids are on
 	opts["vehicle"] = CraftSimScript.PilotCraft.resolve(OS.get_cmdline_user_args(), vehicle_override)
 	if not Livery.pinned:    # ... and the paint they chose for this pilot craft (a test or a render that has chosen one keeps it)
 		Livery.current = Livery.built(opts["vehicle"])
@@ -385,6 +388,12 @@ func _ready() -> void:
 		chase.traffic = traffic_net
 		chase.build(self)
 		traffic_net.chase = chase
+	if RaidsScript.enabled and traffic_net:
+		raids = RaidsScript.new()
+		add_child(raids)
+		raids.traffic = traffic_net
+		raids.build(self)
+		traffic_net.raids = raids
 
 
 func _sim_step() -> void:
@@ -991,6 +1000,8 @@ func _respawn() -> void:
 	if skill_score:
 		skill_score.reset_run()
 	net_air_t0 = -1.0
+	if raids:
+		raids.reset()
 	if minimap:
 		minimap.waypoint = {}
 	brake_point = -1.0
@@ -1856,6 +1867,8 @@ func _sync_world() -> void:
 			chase.update(get_process_delta_time())
 			if chase.result != "":
 				_chase_result()
+		if raids:
+			raids.update(get_process_delta_time())
 		_patrol_lights()
 		if minimap:
 			minimap.marks = traffic_net.marks(sim.pod.x, sim.pod.y, 40000.0)

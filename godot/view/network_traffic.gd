@@ -556,6 +556,7 @@ var _brake_at_s := PackedFloat64Array()   # BRAKE_AT in samples (m / 24), BRAKE_
 var _brake_by := PackedFloat64Array()
 # the racer
 var racer: Car = null
+var raids = null          # raids, when they are on (view/network_raids.gd)
 var chase = null          # chase mode, when it is on (view/network_chase.gd): its craft has the racer's slot while one runs
 var race_state := ""      # "" | "tail" | "race" | "done"
 var race_t := 0.0         # s in this state

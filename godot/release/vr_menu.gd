@@ -181,7 +181,7 @@ func _build_screen() -> void:
 	look_buttons = [craft_selector.button, paint, role]
 	for look in look_buttons:
 		look.pressed.connect(_showcase_changed)      # (after the row's own handler: the choice is saved by then)
-	var rows: Array = [[UI.insertion_button(22), paint], [UI.time_button(22), UI.weather_button(22), UI.chase_button(22)], [craft_selector.button, role]]     # A or the trigger takes the next choice
+	var rows: Array = [[UI.insertion_button(22), paint], [UI.time_button(22), UI.weather_button(22), UI.chase_button(22)], [craft_selector.button, role, UI.raids_button(22)]]     # A or the trigger takes the next choice
 	for row: Array in rows:
 		var line := HBoxContainer.new()
 		line.add_theme_constant_override("separation", 12)
