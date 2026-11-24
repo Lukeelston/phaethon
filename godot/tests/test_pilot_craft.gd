@@ -233,13 +233,14 @@ func check_flight_deck(game, id: String) -> void:
 				and cluster.gauges == cluster.Layout.GAUGES and not game.interior.has_node("SillFittings")
 				and cluster.get_node("binnacle").mesh == cluster.Interior._hd_mesh(cluster.BODY, "Binnacle"))
 		return
+	var layout := Sim.PilotCraft.deck_of(id)   # (the Basilisk builds the Kiln's deck)
 	check(id + " has its own dial layout, side fittings and auxiliary instrument",
-			cluster.flight_deck.id == id and cluster.gauges != cluster.Layout.GAUGES
-			and game.interior.has_node("SillFittings") and meter.id == id)
-	check_lcd_trays(cluster, id)
-	check_throttle_boots(game, id)
-	check_grip_lenses(game, id)
-	if id != Sim.PilotCraft.ORRERY:
+			cluster.flight_deck.id == layout and cluster.gauges != cluster.Layout.GAUGES
+			and game.interior.has_node("SillFittings") and meter.id == layout)
+	check_lcd_trays(cluster, layout)
+	check_throttle_boots(game, layout)
+	check_grip_lenses(game, layout)
+	if layout != Sim.PilotCraft.ORRERY:
 		var housing: MeshInstance3D = meter.get_node("Case")
 		var surface := housing.mesh.generate_triangle_mesh()
 		var supported := true
@@ -261,8 +262,8 @@ func check_flight_deck(game, id: String) -> void:
 				right += 1
 	check(id + " has raised thread along both padded cheeks", left > 100 and right > 100)
 	# Probe the assembled screw, since a high backing plate can hide a perfectly good socket.
-	var radial := .0022 if id == Sim.PilotCraft.ORRERY else .003
-	var screw_centre := Vector3(0,.073,.003) if id == Sim.PilotCraft.ORRERY else Vector3(.086,.0543,-.0015)
+	var radial := .0022 if layout == Sim.PilotCraft.ORRERY else .003
+	var screw_centre := Vector3(0,.073,.003) if layout == Sim.PilotCraft.ORRERY else Vector3(.086,.0543,-.0015)
 	var hardware: MeshInstance3D = meter.get_node("RimHardware")
 	# TriangleMesh's intersection tolerance can skip sub-millimetre facets at game scale.
 	var millimetres := hardware.mesh.get_faces()
@@ -303,11 +304,11 @@ func check_flight_deck(game, id: String) -> void:
 	game._update_hud()
 	check(id + " lights the printed graduations separately from the card stock",
 			meter.card_material.emission_texture != null and meter.card_material.emission_texture != meter.card_material.albedo_texture)
-	if id == Sim.PilotCraft.KILN:
+	if layout == Sim.PilotCraft.KILN:
 		meter.sync(0,[0,0],[1,1],0,1)
 		check("load pointers can respond independently", meter.cursors[0].position.x > .05
 				and meter.cursors[1].position.x > .05 and is_equal_approx(meter.cursors[1].position.x,before[1].origin.x))
-	if id == Sim.PilotCraft.ORRERY:
+	if layout == Sim.PilotCraft.ORRERY:
 		check("compass reads north with the north-up map", is_zero_approx(meter.cursors[0].rotation.z))
 	check_sight_lines(game)
 	# A long status and a two-line checklist share the strip with the repair hint or step rail.
@@ -387,7 +388,7 @@ func _run() -> void:
 	config.save(Settings.PREFS)
 	check("malformed preference recovers to original", Settings.selected_craft() == "phaethon")
 	check("direct launch accepts the explicit vehicle", Sim.PilotCraft.resolve(["--vehicle=shrike"], "phaethon") == "shrike")
-	for id in ["orrery", "kiln", "vesper"]:
+	for id in ["orrery", "kiln", "vesper", "basilisk"]:
 		var result := trial(id)
 		check(id + " reaches 1,000 mph and turns under differential thrust", result.x < 10.0 and result.y > 0)
 		print(id, " 1000 mph seconds / split-lever yaw degrees ", result)
@@ -402,7 +403,7 @@ func _run() -> void:
 	preload("res://vr/vr_cockpit.gd")._startup_loaded = true      # (... whatever the saved choice says)
 	for vr in [false, true]:
 		var scene := "res://release/vr_menu.tscn" if vr else "res://release/menu.tscn"
-		for id in ["shrike", "orrery", "kiln", "vesper", "phaethon"]:
+		for id in ["shrike", "orrery", "kiln", "vesper", "basilisk", "phaethon"]:
 			change_scene_to_file(scene)
 			await scene_changed
 			var menu = current_scene

@@ -84,6 +84,8 @@ const FLAP_RATE := 9.0                # flap travel, full range per second (~0.1
 # underneath, [x, top (+1) or bottom (-1)], hinged at the front edge on the skin.
 const Fleet := preload("res://view/fleet_airframe.gd")
 var fleet: Fleet
+var turret = null    # the Basilisk's gun (view/turret.gd), on the pod; view/gunnery.gd lays and fires it
+const TurretScript := preload("res://view/turret.gd")
 const Shrike := preload("res://view/shrike_airframe.gd")
 const PilotCraft := preload("res://sim/pilot_craft.gd")
 const ENG_W := 2.4
@@ -595,6 +597,10 @@ func build(v, checkpoint := Callable(), reuse_engine_body := Callable()) -> void
 		await checkpoint.call("canopy")
 	canopy = CanopyScript.build(fleet)   # windscreen and forcefield (view/canopy.gd)
 	pod.add_child(canopy)
+	if fleet and PilotCraft.armed(sim.P.vehicle):
+		turret = TurretScript.new()
+		pod.add_child(turret)
+		turret.build(fleet)
 	var flap_mat := null if shrike or fleet else Kit.polished(0.85, 0.2)
 	for s in [-1.0, 1.0]:
 		var hinge := Node3D.new()

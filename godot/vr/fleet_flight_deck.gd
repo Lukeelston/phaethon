@@ -48,6 +48,8 @@ const FINISHES := {
 	P.ORRERY: [Color("#266665"), Color("#c69d5e"), Color("#664433")],
 	P.KILN: [Color("#ad492d"), Color("#e8b454"), Color("#3f4847")],
 	P.VESPER: [Color("#cecdda"), Color("#9079d1"), Color("#302a48")],
+	# The Basilisk builds the Kiln's deck (sim/pilot_craft.gd deck_of) in its own hull's colours: gunmetal, amber, tan.
+	P.BASILISK: [Color("#474e49"), Color("#e59a2c"), Color("#8c7353")],
 }
 const DARK := Color("#22292c")
 const INK := Color("#10171d")
@@ -65,10 +67,21 @@ var trim := []
 
 
 func _init(vehicle: String) -> void:
-	id = vehicle
-	paint = FINISHES[id][0]
-	accent = FINISHES[id][1]
-	upholstery = FINISHES[id][2]
+	id = P.deck_of(vehicle)      # (the layout: a craft drawn from another builds that one's deck)
+	var finish := finishes_for(vehicle)
+	paint = finish[0]
+	accent = finish[1]
+	upholstery = finish[2]
+
+
+## Is there a fleet deck for this craft (its own, or the one it was drawn from)?
+static func has_deck(vehicle: Variant) -> bool:
+	return STATIONS.has(P.deck_of(vehicle))
+
+
+## Dash panels, exposed structure, upholstery: the craft's own finishes, else those of the deck it builds.
+static func finishes_for(vehicle: Variant) -> Array:
+	return FINISHES.get(P.known(vehicle), FINISHES.get(P.deck_of(vehicle), []))
 
 
 func dial_layout() -> Array:

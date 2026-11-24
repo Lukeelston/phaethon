@@ -43,7 +43,7 @@ func _run() -> void:
 	Seat._school_loaded = true
 	root.msaa_3d = Viewport.MSAA_4X
 	var interiors := "--interiors" in OS.get_cmdline_user_args()
-	var vehicles := [Pilot.SHRIKE, Pilot.ORRERY, Pilot.KILN, Pilot.VESPER] if interiors else [Pilot.ORRERY, Pilot.KILN, Pilot.VESPER]
+	var vehicles := [Pilot.SHRIKE, Pilot.ORRERY, Pilot.KILN, Pilot.VESPER, Pilot.BASILISK] if interiors else [Pilot.ORRERY, Pilot.KILN, Pilot.VESPER, Pilot.BASILISK]
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--vehicle="):
 			var chosen := arg.trim_prefix("--vehicle=")

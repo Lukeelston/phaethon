@@ -1,8 +1,10 @@
-"""Bake three rigged-by-part airframes, in metres (+Y up, +Z aft).
+"""Bake four rigged-by-part airframes, in metres (+Y up, +Z aft).
 
-Usage: python tools/art_pilot_fleet.py [orrery|kiln|vesper ...]. Fixed fittings
+Usage: python tools/art_pilot_fleet.py [orrery|kiln|vesper|basilisk ...]. Fixed fittings
 are welded into their parent mesh. Parts with a flight-system pivot are local
-to that pivot. The three drives mate to the game's standard vectoring nozzle.
+to that pivot. The four drives mate to the game's standard vectoring nozzle.
+The Basilisk also carries its gun's moving parts (GunHatch, GunRing, GunCradle,
+GunCoils, SightBall, SightLens), each local to its own pivot: view/turret.gd.
 """
 
 import math
@@ -523,7 +525,111 @@ def vesper_engine(m, side):
     badge(m, -2.92, 1.482, 0.218, side, 0.86, 0.18)
 
 
-DRIVES = {"orrery": orrery_engine, "kiln": kiln_engine, "vesper": vesper_engine}
+def outboard_patch(m, rows, a, b, side, half, exp, region, lift=0.012):
+    """A plate on the outboard flank, its paint upright and reading forward from either side: on the
+    starboard side the run and the sweep are taken the other way about (skin_patch's own order reads
+    mirrored and upside down there)."""
+    if side > 0:
+        skin_patch(m, rows, b, a, (half, -half), exp, region, lift)
+    else:
+        skin_patch(m, rows, a, b, (180 - half, 180 + half), exp, region, lift)
+
+
+def at_rows(rows, z):
+    """A loft's centre x/y and radii at station z, read between its rows."""
+    table = np.asarray(rows, dtype=float)
+    return [float(np.interp(z, table[:, 0], table[:, k])) for k in range(1, 5)]
+
+
+BASILISK_BODY = [
+    (-4.52, 0, 0.03, 0.88, 0.50),
+    (-4.34, 0, 0.04, 1.03, 0.60),
+    (-3.55, 0, 0.05, 1.10, 0.66),
+    (-2.40, 0, 0.03, 1.04, 0.62),
+    (-0.60, 0, 0.0, 0.94, 0.56),
+    (1.20, 0, -0.02, 0.96, 0.54),
+    (2.10, 0, -0.02, 1.02, 0.52),
+    (2.72, 0, -0.02, 0.90, 0.46),
+]
+
+
+def basilisk_engine(m, side):
+    # An armoured interceptor drive: a hard-chined body, twin inlets either side of a raked
+    # splitter, a heat-sink comb along the spine and a short strake on the outboard cheek.
+    body = BASILISK_BODY
+    exp = 0.42
+    loft(m, body, "enamel", exp, 36, False)
+    for j, (a, b) in enumerate(((1.1, 1.95), (2.05, 2.95), (3.05, 3.95), (4.05, 4.95), (5.05, 6.0))):
+        skin_patch(m, body, a, b, (38, 142), exp, "access" if j % 2 == 0 else "stripe")
+    outboard_patch(m, body, 2.15, 2.85, side, 32, exp, "number", 0.024)
+    outboard_patch(m, body, 4.15, 5.6, side, 32, exp, "stripe", 0.014)
+    hoop(m, -4.44, 0, 0.035, 0.955, 0.555, 0.13, 0.15, "accent", exp)
+    loft(m, [(-4.47, 0, 0.035, 0.86, 0.48), (-3.95, 0, 0.04, 0.84, 0.46)], "dark", exp, 28, False)
+    # The splitter: a vertical wedge, its knife edge raked forward of the lip.
+    loft(
+        m,
+        [
+            (-4.95, 0, 0.03, 0.012, 0.05),
+            (-4.62, 0, 0.035, 0.05, 0.36),
+            (-4.20, 0, 0.04, 0.07, 0.47),
+            (-3.90, 0, 0.04, 0.06, 0.45),
+        ],
+        "brushed",
+        0.6,
+        16,
+    )
+    # Armour belts at three stations, and a chin keel under the whole run.
+    for z in (-3.05, -1.25, 0.95):
+        x, y, w, h = at_rows(body, z)
+        hoop(m, z, x, y, w + 0.012, h + 0.012, 0.05, 0.085, "dark", exp)
+    loft(
+        m,
+        [
+            (-3.60, 0, -0.56, 0.10, 0.06),
+            (-3.20, 0, -0.64, 0.20, 0.11),
+            (1.40, 0, -0.60, 0.22, 0.11),
+            (2.30, 0, -0.50, 0.12, 0.06),
+        ],
+        "dark",
+        0.40,
+    )
+    # The spine and its comb: eight raked plates standing on it.
+    spine = []
+    for z in (-2.85, -2.70, -0.25, -0.05):
+        x, y, w, h = at_rows(body, z)
+        spine.append((z, 0, y + h - 0.01, 0.20 if -2.8 < z < -0.1 else 0.10, 0.05))
+    loft(m, spine, "brushed", 0.5, 18)
+    for i in range(8):
+        z = -2.55 + i * 0.30
+        top = at_rows(body, z)[1] + at_rows(body, z)[3] + 0.02
+        blade(
+            m,
+            [(-0.33, top, z), (0.33, top, z), (0.27, top + 0.15, z + 0.11), (-0.27, top + 0.15, z + 0.11)],
+            0.014,
+            "vent",
+            (0, 0, 1),
+        )
+    # Outboard strake, swept from the intake shoulder; a power conduit along the inboard flank.
+    sx = side
+    loft(
+        m,
+        [
+            (-3.95, sx * 1.06, 0.10, 0.04, 0.03),
+            (-3.25, sx * 1.30, 0.12, 0.11, 0.035),
+            (-2.30, sx * 1.42, 0.12, 0.08, 0.028),
+            (-1.65, sx * 1.27, 0.11, 0.025, 0.018),
+        ],
+        "accent",
+        0.84,
+    )
+    tube(m, [(-sx * 1.02, -0.13, -3.1), (-sx * 1.0, -0.15, -1.2), (-sx * 0.97, -0.16, 1.7)], 0.048, "gold", 10)
+    for z in (-2.6, -1.6, -0.6, 0.4, 1.4):
+        m.pipe((-sx * 0.95, -0.15, z), (-sx * 1.06, -0.13, z + 0.03), 0.062, "dark", 10)
+    x, y, w, h = at_rows(body, -1.85)
+    badge(m, -1.85, w + 0.006, 0.03, side, 0.86, 0.17)
+
+
+DRIVES = {"orrery": orrery_engine, "kiln": kiln_engine, "vesper": vesper_engine, "basilisk": basilisk_engine}
 
 
 def engine(craft, s):
@@ -535,10 +641,10 @@ def engine(craft, s):
 
 def rotor(craft):
     m = Surface()
-    r = {"orrery": 0.88, "kiln": 0.44, "vesper": 0.245}[craft]
+    r = {"orrery": 0.88, "kiln": 0.44, "vesper": 0.245, "basilisk": 0.33}[craft]
     if craft == "orrery":
         hoop(m, 0, 0, 0, r, r, 0.065, 0.065, "gold")
-    count = {"orrery": 6, "kiln": 11, "vesper": 8}[craft]
+    count = {"orrery": 6, "kiln": 11, "vesper": 8, "basilisk": 9}[craft]
     for i in range(count):
         a = i * TAU / count
 
@@ -560,7 +666,7 @@ def rotor(craft):
 
 def brake(craft, front=False, pod=False):
     m = Surface()
-    w, l = {"orrery": (0.22, 0.90), "kiln": (0.32, 0.82), "vesper": (0.335, 1.12)}[craft]
+    w, l = {"orrery": (0.22, 0.90), "kiln": (0.32, 0.82), "vesper": (0.335, 1.12), "basilisk": (0.30, 0.86)}[craft]
     if pod:
         l *= 0.78
     elif front:
@@ -571,7 +677,7 @@ def brake(craft, front=False, pod=False):
         (0, 0, 0, w * 0.72, 0.027),
         (0.06, 0, 0.012, w, 0.037),
         (l * 0.55, 0, 0.04, w * (1 if craft == "kiln" else 0.87), 0.034),
-        (l, 0, 0.085, w * ({"orrery": 0.52, "kiln": 0.88, "vesper": 0.15}[craft]), 0.016),
+        (l, 0, 0.085, w * ({"orrery": 0.52, "kiln": 0.88, "vesper": 0.15, "basilisk": 0.62}[craft]), 0.016),
     ]
     loft(m, rows, "stripe" if not pod else "accent", 0.45, 20)
     for s in (-1, 1):
@@ -624,16 +730,27 @@ SILLS = {
         (2.50, 1.50, 0.13, 0.12, 0.09),
         (2.75, 1.53, 0.17, 0.025, 0.025),
     ],
+    # A long wedge nose; the shoulders carry the sponsons (cab()).
+    "basilisk": [
+        (-2.40, 0.46, -0.20, 0.10, 0.14),
+        (-2.18, 0.60, -0.19, 0.20, 0.24),
+        (-1.30, 0.74, -0.19, 0.25, 0.28),
+        (-0.80, 0.82, -0.18, 0.28, 0.32),
+        (1.15, 0.82, -0.17, 0.28, 0.32),
+        (1.55, 0.80, -0.15, 0.27, 0.32),
+        (1.85, 0.70, -0.16, 0.22, 0.27),
+        (1.95, 0.60, -0.17, 0.14, 0.18),
+    ],
 }
 
 
 # The brake lamps across the aft bulkhead: the first's offset and the pitch. (Geometry pass: the
 # Orrery's bulkhead tapers to 0.28 m each side, and its outer lamps' sockets hung past its end.)
-LAMPS = {"orrery": (0.10, 0.075), "kiln": (0.14, 0.105), "vesper": (0.14, 0.105)}
+LAMPS = {"orrery": (0.10, 0.075), "kiln": (0.14, 0.105), "vesper": (0.14, 0.105), "basilisk": (0.14, 0.105)}
 
 
 def aft_bulkhead(m, craft):
-    ends = {"orrery": (2.38, 0.80, 0.43), "kiln": (1.86, 0.97, 0.34), "vesper": (1.89, 0.67, 0.20)}
+    ends = {"orrery": (2.38, 0.80, 0.43), "kiln": (1.86, 0.97, 0.34), "vesper": (1.89, 0.67, 0.20), "basilisk": (1.95, 0.90, 0.31)}
     z, w, h = ends[craft]
     loft(
         m,
@@ -681,7 +798,7 @@ def cab(craft):
     authored = len(rows)
     rows = smooth_rows(rows)
     k = SILL_SPLIT + 1  # an authored station's index among the smoothed rows
-    exp = {"orrery": 0.87, "kiln": 0.32, "vesper": 0.69}[craft]
+    exp = {"orrery": 0.87, "kiln": 0.32, "vesper": 0.69, "basilisk": 0.40}[craft]
     for s in (-1, 1):
         body = [(z, x * s, y, w, h) for z, x, y, w, h in rows]
         loft(m, body, "enamel", exp)
@@ -807,6 +924,8 @@ def cab(craft):
             0.085,
             "brushed",
         )
+    elif craft == "basilisk":
+        basilisk_sponsons(m)
     else:
         for s in (-1, 1):
             vane = [
@@ -847,7 +966,7 @@ def cab(craft):
 
 def bonnet(craft):
     m = Surface()
-    w = {"orrery": 0.48, "kiln": 0.69, "vesper": 0.38}[craft]
+    w = {"orrery": 0.48, "kiln": 0.69, "vesper": 0.38, "basilisk": 0.62}[craft]
     loft(
         m,
         [
@@ -885,6 +1004,13 @@ def canopy(craft):
             (0.99, 0.89, 0.09, 1.0, 0.59, 0.56),
             (1.70, 0.69, 0.12, 1.42, 0.37, 0.48),
         ],
+        # The Kiln's hoops (the header carries the overhead switchgear where the cockpit expects it).
+        "basilisk": [
+            (-0.88, 0.72, 0.10, 0.11, 0.62, 0.56),
+            (0.48, 0.96, 0.13, 0.50, 0.75, 0.59),
+            (1.03, 0.96, 0.13, 1.13, 0.76, 0.60),
+            (1.51, 0.86, 0.13, 1.51, 0.71, 0.58),
+        ],
     }
     rows = profiles[craft]
 
@@ -898,7 +1024,7 @@ def canopy(craft):
             vec(0, topy, topz - 0.029),
         ]
 
-    rail = 0.041 if craft == "kiln" else 0.026
+    rail = 0.041 if craft in ("kiln", "basilisk") else 0.026
     # Front pane rakes back from the forward sill; leave an uninterrupted frontal view.
     first = rows[0]
     top_left, top_right = section(first, -1)[2], section(first, 1)[2]
@@ -993,6 +1119,8 @@ def canopy(craft):
             (1.15, 0, 0.786, 0.028, 0.018),
         ]
         loft(frame, mtop, "accent", 0.87, 26)
+    elif craft == "basilisk":
+        basilisk_roof(frame)
     else:
         # Dorsal fairing and buttresses continue the twin-keel silhouette over the cabin.
         loft(
@@ -1026,14 +1154,14 @@ def canopy(craft):
     tube(frame, bar, 0.022, "brushed", 10)
     for s in (-1, 1):
         tube(frame, [bar[0 if s < 0 else -1], section(rows[1], s)[2]], 0.024, "dark")
-        if craft == "kiln":
+        if craft in ("kiln", "basilisk"):
             tube(frame, [section(rows[1], s)[0], section(rows[2], s)[2]], 0.039, "accent")
     return frame, pane
 
 
 def seat(craft):
     m = Surface()
-    mat = {"orrery": "cloth", "kiln": "rubber", "vesper": "dark"}[craft]
+    mat = {"orrery": "cloth", "kiln": "rubber", "vesper": "dark", "basilisk": "rubber"}[craft]
     # Geometry pass, 2026-11-23: the cushion is filled, not extruded. It swells into a front pillow
     # under the thighs and a second at the hips, with the dip between where the seam would pull, and
     # a stitched piping cord runs along both upper edges and rolls off at the front and back.
@@ -1062,6 +1190,7 @@ def seat(craft):
         "orrery": [(-0.43, 0.22), (-0.31, 0.28), (0.05, 0.31), (0.23, 0.22), (0.33, 0.15)],
         "kiln": [(-0.43, 0.25), (-0.29, 0.29), (0.12, 0.30), (0.28, 0.29), (0.34, 0.22)],
         "vesper": [(-0.43, 0.19), (-0.30, 0.24), (0.02, 0.33), (0.16, 0.31), (0.23, 0.17), (0.38, 0.14)],
+        "basilisk": [(-0.43, 0.25), (-0.29, 0.29), (0.12, 0.30), (0.28, 0.29), (0.34, 0.22)],
     }[craft]
     loft(back, [(h, 0, 0, w, 0.082) for h, w in levels], "dark", 0.6)
     pads = 5 if craft == "orrery" else 3
@@ -1115,18 +1244,18 @@ def seat(craft):
 def coaming(craft):
     """Custom padded glare shield and inset data plate, in the flight deck's rig frame."""
     m = Surface()
-    sweep = {"orrery": 0.43, "kiln": 0.31, "vesper": 0.54}[craft]
-    width = {"orrery": 0.74, "kiln": 0.79, "vesper": 0.73}[craft]
+    sweep = {"orrery": 0.43, "kiln": 0.31, "vesper": 0.54, "basilisk": 0.31}[craft]
+    width = {"orrery": 0.74, "kiln": 0.79, "vesper": 0.73, "basilisk": 0.79}[craft]
 
     def rim(u, v):
         s = u * 2 - 1
         x = s * width
-        z = -0.525 + sweep * abs(s) ** (1.45 if craft == "kiln" else 2.3)
+        z = -0.525 + sweep * abs(s) ** (1.45 if craft in ("kiln", "basilisk") else 2.3)
         angle = v * TAU
         return vec(x, 0.558 + 0.014 * abs(s) + 0.039 * math.sin(angle), z + 0.048 * math.cos(angle))
 
     m.grid(56, 28, rim, "cloth" if craft == "orrery" else "dark", False)
-    hw = {"orrery": 0.132, "kiln": 0.14, "vesper": 0.124}[craft]
+    hw = {"orrery": 0.132, "kiln": 0.14, "vesper": 0.124, "basilisk": 0.14}[craft]
 
     def surface(x, turn):
         u = 0.5 + x / (2 * width)
@@ -1170,7 +1299,7 @@ def coaming(craft):
 
 def grip(craft):
     m = Surface()
-    w = {"orrery": 0.034, "kiln": 0.050, "vesper": 0.041}[craft]
+    w = {"orrery": 0.034, "kiln": 0.050, "vesper": 0.041, "basilisk": 0.046}[craft]
     # A continuous molded skin. Each row names the finish up to the next row.
     # Rounded rectangles retain long flats across the thumb pad; the six angular
     # samples per corner coincide with the GateIndicator's molded perimeter.
@@ -1254,12 +1383,272 @@ def grip(craft):
 
 def lens(craft):
     m = Surface()
-    z = {"orrery": 2.38, "kiln": 1.86, "vesper": 1.89}[craft]
+    z = {"orrery": 2.38, "kiln": 1.86, "vesper": 1.89, "basilisk": 1.95}[craft]
     first, pitch = LAMPS[craft]
     for s in (-1, 1):
         for i in range(3):
             x = s * (first + i * pitch)
             m.pipe((x, -0.11, z + 0.023), (x, -0.11, z + 0.037), 0.032, "ceramic", 14)
+    return m
+
+
+# --- The Basilisk's gun (view/turret.gd mirrors these numbers) ---------------------------
+# Cab frame: +X starboard, +Y up, +Z aft. The gun rides a sponson on the starboard shoulder; the
+# port shoulder carries a matching one, its top welded shut over the gun's capacitor bank.
+SPONSON_X = 1.13          # the sponsons' centre line
+SPONSON_TOP = 0.19        # the base's top: the gun's bed, and the hatch's sill
+HATCH = (-1.48, -0.14, 0.215, 0.13)    # z from, z to, half-width, height of the hatch's shell
+HATCH_HINGE = (SPONSON_X + HATCH[2], SPONSON_TOP)   # x, y: its outboard edge (the axis runs fore and aft)
+GUN_PIVOT = (SPONSON_X, SPONSON_TOP - 0.035, -0.45)  # the ring's top centre, stowed: sunk in its socket (it rises on its post)
+TRUNNION_UP = 0.07        # the cradle's trunnion over the ring's top
+MUZZLES = ((-0.065, 0.0, -0.93), (0.065, 0.0, -0.93))   # cradle-local
+SIGHT = (SPONSON_X, SPONSON_TOP + 0.065, -1.63)          # the sight ball's centre
+SIGHT_R = 0.08
+
+
+def sponson_rows(s):
+    return [
+        (-1.76, s * 1.05, 0.12, 0.04, 0.035),
+        (-1.62, s * 1.10, 0.11, 0.15, 0.075),
+        (-1.40, s * SPONSON_X, 0.10, 0.215, 0.09),
+        (-0.30, s * SPONSON_X, 0.10, 0.22, 0.09),
+        (-0.10, s * 1.135, 0.09, 0.19, 0.08),
+        (0.10, s * 1.14, 0.07, 0.11, 0.06),
+        (0.22, s * 1.14, 0.05, 0.04, 0.03),
+    ]
+
+
+def hatch_shell(m, s, inset=0.0, region="enamel", inner="dark", height=None):
+    """The upper half of an ellipse run fore and aft over the sponson's bed, its ends drawn in.
+    Outer and inner skins (it is seen from below when open), its edges and end caps."""
+    z0, z1, w, h = HATCH
+    h = h if height is None else height
+    thick = 0.018
+
+    def scale(z):
+        t = min(z - z0, z1 - z) / 0.13
+        return 0.55 + 0.45 * min(1.0, max(0.0, t)) ** 0.6
+
+    def point(u, v, off):
+        z = z0 + (z1 - z0) * u
+        k = scale(z)
+        a = math.pi * v
+        return vec(
+            s * (SPONSON_X + (w - off) * k * signed(math.cos(a), 0.72)),
+            SPONSON_TOP + (h - off) * k * signed(math.sin(a), 0.72) - inset,
+            z,
+        )
+
+    m.grid(28, 18, lambda u, v: point(u, v, 0.0), region, s > 0)
+    m.grid(28, 18, lambda u, v: point(u, v, thick), inner, s < 0)
+    for v in (0.0, 1.0):
+        for i in range(28):
+            u0, u1 = i / 28, (i + 1) / 28
+            m.poly(
+                [point(u0, v, 0.0), point(u1, v, 0.0), point(u1, v, thick), point(u0, v, thick)],
+                (0, -1, 0),
+                "dark",
+            )
+    for u, n in ((0.0, -1), (1.0, 1)):
+        m.poly([point(u, j / 18, 0.0) for j in range(19)], (0, 0, n), "dark")
+    # The armour's access panel and the hazard band at its leading edge.
+    return point
+
+
+def basilisk_sponsons(m):
+    for s in (-1, 1):
+        rows = sponson_rows(s)
+        loft(m, rows, "enamel", 0.45)
+        outboard_patch(m, rows, 2.15, 2.95, s, 42, 0.45, "access", 0.02)
+        outboard_patch(m, rows, 1.05, 1.95, s, 42, 0.45, "stripe", 0.012)
+        # A cheek carries the sponson down to the sill where it overhangs the nose.
+        loft(
+            m,
+            [
+                (-1.70, s * 1.06, -0.03, 0.05, 0.08),
+                (-1.45, s * 1.10, -0.05, 0.15, 0.14),
+                (-0.85, s * 1.10, -0.05, 0.17, 0.14),
+                (-0.60, s * 1.08, -0.04, 0.10, 0.10),
+            ],
+            "dark",
+            0.45,
+        )
+        badge(m, -0.95, SPONSON_X + 0.222, 0.10, s, 0.62, 0.11)
+        # The hinge knuckles along the outboard edge (the starboard hatch turns on them).
+        for z in (-1.36, -0.82, -0.28):
+            m.pipe(
+                (s * HATCH_HINGE[0], HATCH_HINGE[1], z - 0.06),
+                (s * HATCH_HINGE[0], HATCH_HINGE[1], z + 0.06),
+                0.016,
+                "brushed",
+                10,
+            )
+    # Port: the capacitor bank, under a low finned cover (no higher than it must be: it is in the pilot's
+    # view to the left, where the starboard hatch is the gun's price on the right).
+    hatch_shell(m, -1, height=0.06)
+    for i in range(9):
+        z = -1.34 + i * 0.13
+        m.pipe((-SPONSON_X - 0.12, SPONSON_TOP + 0.06, z), (-SPONSON_X + 0.12, SPONSON_TOP + 0.06, z), 0.008, "vent", 8)
+    # Starboard, under the hatch: the gun's bed (two saddles for the barrels, the ring's socket),
+    # and the sight's pedestal at the nose.
+    x, y = SPONSON_X, SPONSON_TOP
+    m.pipe((x, y - 0.02, GUN_PIVOT[2]), (x, y + 0.008, GUN_PIVOT[2]), 0.172, "brushed", 28)
+    m.pipe((x, y - 0.02, GUN_PIVOT[2]), (x, y + 0.004, GUN_PIVOT[2]), 0.188, "dark", 28)
+    for z in (-1.28, -0.98):
+        m.pipe((x - 0.10, y - 0.004, z), (x + 0.10, y - 0.004, z), 0.012, "dark", 8)
+        for dx in (-0.065, 0.065):
+            m.pipe((x + dx, y + 0.0, z - 0.03), (x + dx, y + 0.0, z + 0.03), 0.014, "rubber", 10)
+    m.pipe((x, y - 0.01, SIGHT[2]), (x, SIGHT[1] - SIGHT_R * 0.7, SIGHT[2]), 0.055, "brushed", 16)
+    m.pipe((x, y - 0.01, SIGHT[2]), (x, y + 0.012, SIGHT[2]), 0.075, "dark", 16)
+
+
+def basilisk_roof(frame):
+    # Two armour plates over the hoops, split by a dorsal spine that carries the sensor mast.
+    for s in (-1, 1):
+        loft(
+            frame,
+            [
+                (0.05, s * 0.36, 0.585, 0.06, 0.03),
+                (0.22, s * 0.37, 0.615, 0.27, 0.045),
+                (1.30, s * 0.37, 0.625, 0.28, 0.05),
+                (1.52, s * 0.35, 0.585, 0.20, 0.04),
+            ],
+            "enamel",
+            0.36,
+            22,
+        )
+        tube(
+            frame,
+            [(s * 0.64, 0.60, 0.36), (s * 0.65, 0.69, 0.46), (s * 0.65, 0.70, 1.27), (s * 0.63, 0.62, 1.41)],
+            0.028,
+            "brushed",
+            8,
+        )
+    loft(
+        frame,
+        [(0.14, 0, 0.60, 0.05, 0.03), (0.40, 0, 0.665, 0.085, 0.05), (1.44, 0, 0.66, 0.09, 0.045), (1.62, 0, 0.60, 0.04, 0.02)],
+        "dark",
+        0.5,
+        20,
+    )
+    m = frame
+    m.pipe((0, 0.70, 1.05), (0, 0.84, 1.10), 0.018, "brushed", 10)
+    m.pipe((0, 0.84, 1.10), (0, 0.865, 1.11), 0.036, "accent", 14)
+
+
+def gun_hatch():
+    """The starboard hatch, local to its hinge (the axis runs fore and aft along +Z)."""
+    m = Surface()
+    point = hatch_shell(m, 1)
+    z0, z1 = HATCH[0], HATCH[1]
+    # Hazard band across its leading end, an access panel on its crown, and two grab rails.
+    m.grid(
+        6,
+        10,
+        lambda u, v: point(0.02 + 0.08 * u, 0.12 + 0.76 * v, -0.004),
+        "stripe",
+        True,
+    )
+    m.grid(8, 8, lambda u, v: point(0.30 + 0.45 * u, 0.30 + 0.40 * v, -0.004), "access", True)
+    for z in (-1.05, -0.55):
+        top = point((z - z0) / (z1 - z0), 0.5, -0.03)
+        m.pipe(top + vec(0, 0, -0.07), top + vec(0, 0, 0.07), 0.009, "brushed", 8)
+    hinge = vec(HATCH_HINGE[0], HATCH_HINGE[1], 0)
+    m.pos = [p - hinge for p in m.pos]
+    return m
+
+
+def gun_ring():
+    """The traversing ring, local to its top centre; its post runs down into the sponson."""
+    m = Surface()
+    m.pipe((0, -0.37, 0), (0, -0.045, 0), 0.062, "brushed", 18)
+    for y in (-0.27, -0.17):
+        m.pipe((0, y, 0), (0, y + 0.018, 0), 0.071, "dark", 18)
+    m.pipe((0, -0.05, 0), (0, -0.008, 0), 0.155, "dark", 28)
+    m.pipe((0, -0.012, 0), (0, 0.004, 0), 0.143, "brushed", 28)
+    for k in range(12):
+        a = TAU * k / 12
+        m.pipe((0.149 * math.cos(a), -0.034, 0.149 * math.sin(a)), (0.149 * math.cos(a), -0.02, 0.149 * math.sin(a)), 0.008, "gold", 6)
+    for sx in (-1, 1):
+        x = sx * 0.118
+        blade(
+            m,
+            [(x, 0.0, 0.105), (x, 0.0, -0.105), (x, 0.085, -0.07), (x, TRUNNION_UP + 0.05, 0.0), (x, 0.085, 0.07)],
+            0.024,
+            "enamel",
+            (sx, 0, 0),
+        )
+        m.pipe((sx * 0.105, TRUNNION_UP, 0), (sx * 0.15, TRUNNION_UP, 0), 0.038, "gold", 16)
+    return m
+
+
+def gun_cradle():
+    """The elevating mass, local to its trunnion: receiver, mantlet and the twin emitters (-Z)."""
+    m = Surface()
+    loft(
+        m,
+        [
+            (-0.10, 0, 0, 0.092, 0.05),
+            (-0.07, 0, 0.0, 0.098, 0.058),
+            (0.15, 0, -0.004, 0.098, 0.058),
+            (0.22, 0, -0.006, 0.072, 0.042),
+        ],
+        "enamel",
+        0.45,
+        24,
+    )
+    loft(m, [(-0.20, 0, 0, 0.10, 0.045), (-0.165, 0, 0, 0.112, 0.062), (-0.115, 0, 0, 0.108, 0.058)], "dark", 0.5, 24)
+    skin_patch(
+        m,
+        [(-0.07, 0, 0.0, 0.098, 0.058), (0.15, 0, -0.004, 0.098, 0.058)],
+        0.1,
+        0.9,
+        (50, 130),
+        0.45,
+        "stripe",
+        0.004,
+    )
+    for x, _, z_tip in MUZZLES:
+        m.pipe((x, 0, -0.12), (x, 0, -0.86), 0.021, "brushed", 16)
+        m.pipe((x, 0, -0.84), (x, 0, z_tip), 0.03, "dark", 16)
+        m.pipe((x, 0, z_tip + 0.004), (x, 0, z_tip), 0.017, "rubber", 12)
+        for z in (-0.175, -0.205):
+            m.pipe((x, 0, z), (x, 0, z - 0.012), 0.03, "gold", 14)
+    for z in (-0.40, -0.70):
+        m.pipe((-0.065, 0, z), (0.065, 0, z), 0.014, "dark", 8)
+    m.pipe((0, 0.058, 0.17), (0, 0.05, -0.16), 0.016, "gold", 8)
+    m.pipe((0, -0.056, 0.14), (0, -0.05, -0.12), 0.013, "brushed", 8)
+    return m
+
+
+def gun_coils():
+    """The emitter coils round each barrel, local to the trunnion (the game lights them as it fires)."""
+    m = Surface()
+    for x, _, _ in MUZZLES:
+        for k in range(5):
+            z = -0.25 - k * 0.11
+            m.pipe((x, 0, z), (x, 0, z - 0.038), 0.033, "ceramic", 16)
+    return m
+
+
+def sight_ball():
+    """The sight: a ball turret local to its centre, its window looking down -Z."""
+    m = Surface()
+    r = SIGHT_R
+    rows = []
+    for i in range(13):
+        a = -math.pi / 2 + math.pi * i / 12
+        rows.append((r * math.sin(a), 0, 0, max(0.004, r * math.cos(a)), max(0.004, r * math.cos(a))))
+    loft(m, rows, "dark", 1.0, 24, False)
+    m.pipe((0, 0, -r * 0.72), (0, 0, -r * 0.92), r * 0.72, "brushed", 20)
+    for sx in (-1, 1):
+        m.pipe((sx * r * 0.98, 0, 0), (sx * (r + 0.012), 0, 0), 0.028, "gold", 12)
+    return m
+
+
+def sight_lens():
+    m = Surface()
+    m.pipe((0, 0, -SIGHT_R * 0.90), (0, 0, -SIGHT_R * 0.95), SIGHT_R * 0.56, "ceramic", 20)
     return m
 
 
@@ -1283,6 +1672,17 @@ def make(craft):
         "BrakeLenses": lens(craft),
         "Bonnet": bonnet(craft),
     }
+    if craft == "basilisk":
+        parts.update(
+            {
+                "GunHatch": gun_hatch(),
+                "GunRing": gun_ring(),
+                "GunCradle": gun_cradle(),
+                "GunCoils": gun_coils(),
+                "SightBall": sight_ball(),
+                "SightLens": sight_lens(),
+            }
+        )
     write_glb(parts, ART / (craft + ".glb"), "Phaethon Pilot Fleet")
 
 

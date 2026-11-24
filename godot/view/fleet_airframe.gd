@@ -6,8 +6,8 @@ const Livery := preload("res://view/livery.gd")
 const Kit := preload("res://view/mesh_kit.gd")
 const FINISH := preload("res://view/fleet_finish.gdshader")
 const ASSET_DIR := "res://art/pilot_fleet/"
-const STROBES := {"orrery": Vector3(1.315, 0.24, 1.04), "kiln": Vector3(1.02, 0.54, 2.34), "vesper": Vector3(2.22, 0.58, 1.83)}
-const CAB_HINGES := {"orrery": Vector3(1.295, -0.24, 0.77), "kiln": Vector3(1.396, -0.17, 0.70), "vesper": Vector3(1.241, -0.12, 0.69)}
+const STROBES := {"orrery": Vector3(1.315, 0.24, 1.04), "kiln": Vector3(1.02, 0.54, 2.34), "vesper": Vector3(2.22, 0.58, 1.83), "basilisk": Vector3(1.42, 0.17, -2.30)}
+const CAB_HINGES := {"orrery": Vector3(1.295, -0.24, 0.77), "kiln": Vector3(1.396, -0.17, 0.70), "vesper": Vector3(1.241, -0.12, 0.69), "basilisk": Vector3(1.36, -0.17, 0.70)}
 
 var id: String
 var parts := {}
@@ -81,6 +81,7 @@ func rotor_centres() -> Array:
 	match id:
 		Pilot.ORRERY: return [Vector3(0, 0.19, -3.57)]
 		Pilot.KILN: return [Vector3(-0.47, 0.0, -3.98), Vector3(0.47, 0.0, -3.98)]
+		Pilot.BASILISK: return [Vector3(-0.47, 0.04, -4.12), Vector3(0.47, 0.04, -4.12)]
 		_: return [Vector3(-0.80, 0.04, -4.29), Vector3(0.80, 0.04, -4.29)]
 
 

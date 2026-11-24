@@ -52,11 +52,12 @@ var _hum: AudioStreamPlayer
 
 func setup(pods := {}, vehicle := Craft.STANDARD) -> void:
 	var sounds := bank()
-	if vehicle in FLEET:
+	if Craft.sound_bank(vehicle) in FLEET:
 		# Override this cockpit's three roles; station and Phaethon callers read
 		# the base dictionary. Godot shares immutable samples through its cache.
+		# (The Basilisk has no bank of its own and starts on the Kiln's: sim/pilot_craft.gd SOUND_BANKS.)
 		sounds = sounds.duplicate()
-		var path := "res://audio/fleet/%s/" % vehicle
+		var path := "res://audio/fleet/%s/" % Craft.sound_bank(vehicle)
 		sounds["starter"] = [load(path + "starter_0.wav"), load(path + "starter_1.wav")]
 		sounds["catch"] = [load(path + "catch.wav")]
 		sounds["chime"] = [load(path + "chime.wav")]

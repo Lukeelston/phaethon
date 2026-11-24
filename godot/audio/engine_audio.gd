@@ -216,6 +216,8 @@ const FLEET_VOICES := {
 	"orrery": {"rotor": Vector2(1.16, 0.79), "turbine": Vector2(1.15, 0.86), "v8": Vector2(0.63, 0.98)},
 	"kiln": {"v8": Vector2(1.12, 0.82), "v12": Vector2(0.84, 0.93), "turbine": Vector2(0.72, 0.96)},
 	"vesper": {"v8": Vector2(0.69, 1.06), "v12": Vector2(1.06, 1.12), "turbine": Vector2(1.17, 1.21)},
+	# The gunship: a heavy low bank under a hard turbine, its V12 held back.
+	"basilisk": {"v8": Vector2(1.08, 0.88), "v12": Vector2(0.78, 0.9), "turbine": Vector2(1.05, 0.92)},
 }
 var fleet_voice := {}
 var _paired_fleet := false
@@ -388,7 +390,7 @@ func _load_streams() -> void:
 	# Load only the selected craft's performances. All banks share the same
 	# players, spool control, stereo routing and engine-failure behaviour.
 	var craft_id := PilotCraft.known(sim.P.get("vehicle", PilotCraft.STANDARD))
-	var fleet_dir := FLEET_DIR % craft_id
+	var fleet_dir := FLEET_DIR % PilotCraft.sound_bank(craft_id)   # (the Basilisk plays the Kiln's bank)
 	var fleet_layers := {}
 	var shots_dir := DIR
 	var shots: Dictionary = manifest.oneshots

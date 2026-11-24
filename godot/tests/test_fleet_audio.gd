@@ -247,6 +247,24 @@ func _run() -> void:
 		cabin.free()
 		engine.free()
 		await process_frame
+	# The Basilisk (merged 2026-11-23, after these banks) has none of its own: its engine and its start-up play
+	# the Kiln's (sim/pilot_craft.gd SOUND_BANKS), and load without error.
+	var kiln_dir := "res://audio/fleet/%s/" % Pilot.KILN
+	var kiln_bank: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(kiln_dir + "engine.json"))
+	var gunship := Engines.new()
+	root.add_child(gunship)
+	gunship.setup(Sim.new({"track":"range", "vehicle":Pilot.BASILISK}))
+	_engine_check(gunship, kiln_bank, kiln_dir, Pilot.BASILISK, base.layers)
+	var gun_cabin := Cockpit.new()
+	root.add_child(gun_cabin)
+	gun_cabin.setup({}, Pilot.BASILISK)
+	_check("basilisk starts on the Kiln's starter and catch", _same_take(gun_cabin.players.starter[0].stream, kiln_dir + "starter_0.wav")
+			and _same_take(gun_cabin.players["catch"][0].stream, kiln_dir + "catch.wav"))
+	for player in gunship.find_children("*", "AudioStreamPlayer", true, false):
+		(player as AudioStreamPlayer).stop()
+	gun_cabin.free()
+	gunship.free()
+	await process_frame
 	# Let the audio server retire the last voices before the test closes the tree.
 	await create_timer(1.25).timeout
 	print("FLEET AUDIO ", "PASS" if failures == 0 else "FAIL (%d)" % failures)
