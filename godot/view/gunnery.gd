@@ -58,7 +58,6 @@ var shots := 0                     # tests and the log read these
 var hits := 0
 var kills := 0
 var commuter_strikes := 0          # bolts that struck a commuter (spared: sparks and the impact sound only)
-var last_line := ""                # the last GUN: line printed that says a commuter was struck (tests read it)
 var _struck_id := -1
 var march_ms := 0.0                # the ground search's cost this frame
 # Heat (the Basilisk's power's figures, sim/pilot_craft.gd TRAITS: fireS, coolS; Luke's sheet, 2026-11-24): fire held
@@ -425,8 +424,7 @@ func _land(bolt: Dictionary) -> void:
 			commuter_strikes += 1
 			if _struck_id != id:
 				_struck_id = id
-				last_line = "GUN: commuter struck"
-				print(last_line)
+				print("GUN: commuter struck")
 			struck_commuter.emit(c)
 			return
 		_damage[id] = int(_damage.get(id, 0)) + 1

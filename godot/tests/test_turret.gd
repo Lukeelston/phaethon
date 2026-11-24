@@ -119,10 +119,10 @@ func _look(v, at) -> void:
 		cam.look_at(cam.global_position + rig.basis * (at as Array)[0], rig.basis.y)
 
 
-func check_commuter_spared(traffic, car, g, shots: int, hits: int, kill_log: Array) -> void:
+func check_commuter_spared(traffic, car, g, shots: int, hits: int, kill_log: Array, struck_log: Array) -> void:
 	_check("held on a commuter for 3 s it is spared: %d shots, %d hits, %d struck, %d out, %d killed signals" % [g.shots - shots, g.hits - hits, g.commuter_strikes, g.kills, kill_log.size()],
 		traffic.cars.has(car) and g.kills == 0 and g.commuter_strikes > 0 and kill_log.is_empty() and g.shots > shots)
-	_check("... and a commuter strike says so", g.last_line == "GUN: commuter struck")
+	_check("... and every strike was told by struck_commuter (%d of %d, all this car)" % [struck_log.size(), g.commuter_strikes], struck_log.size() == g.commuter_strikes and struck_log.all(func(c) -> bool: return c == car))
 
 
 func check_hostile_killed(traffic, car, g, shots: int, hits: int, kill_log: Array, frames: int) -> void:
@@ -138,6 +138,8 @@ func check_kill_reaches_raid(v, traffic, car) -> void:
 
 func _in_the_cockpit() -> void:
 	View.vehicle_override = Pilot.BASILISK
+	var was_pinned: bool = Raids.pinned      # (put back at the end)
+	var was_enabled: bool = Raids.enabled
 	Raids.pinned = true      # (raids on, so the cockpit has a director for the gun's kills to reach)
 	Raids.enabled = true
 	var v = Cockpit.new()
@@ -242,6 +244,8 @@ func _in_the_cockpit() -> void:
 		var shots: int = g.shots
 		var hits: int = g.hits
 		var kill_log := []
+		var struck_log := []
+		g.struck_commuter.connect(func(c) -> void: struck_log.append(c))
 		g.killed.connect(func(c) -> void: kill_log.append(c))
 		g.hold_fire = true
 		var frames := 0
@@ -250,7 +254,7 @@ func _in_the_cockpit() -> void:
 			v._process(DT)
 			frames += 1
 		g.hold_fire = false
-		check_commuter_spared(traffic, car, g, shots, hits, kill_log)
+		check_commuter_spared(traffic, car, g, shots, hits, kill_log, struck_log)
 		# The same car, now a raider (Raids): it takes HOSTILE_HP hits and is knocked out.
 		car.hostile = true
 		var raid = v.raids
@@ -271,6 +275,23 @@ func _in_the_cockpit() -> void:
 		check_hostile_killed(traffic, car, g, shots, hits, kill_log, frames)
 		v._process(DT)
 		check_kill_reaches_raid(v, traffic, car)
+		# A director made after the gun (the gun came first): the next view frame joins it, and a kill still reaches it.
+		var late = Raids.new()
+		v.add_child(late)
+		late.traffic = traffic
+		late.build(v)
+		v.raids = late
+		traffic.raids = late
+		v._process(DT)
+		traffic.cars.append(car)
+		late.pack = [car]
+		late.state = "on"
+		late.city = 0
+		g._damage.clear()
+		for k in g.HOSTILE_HP:
+			g._land({"a": Vector3.ZERO, "b": Vector3(car.x, car.y, 0.0), "t": 0.0, "dur": 0.0, "car": car, "id": 0, "kind": "vehicle"})
+		_check("a director made after the gun is joined and a kill reaches it: kills %d (want 1), fled %d, out of traffic %s" % [late.kills, late.fled, not traffic.cars.has(car)],
+			late.kills == 1 and late.fled == 0 and not traffic.cars.has(car) and g.killed.is_connected(late.on_kill))
 		var fx := []
 		for f in g._fx:
 			fx.append(f.kind)
@@ -289,6 +310,8 @@ func _in_the_cockpit() -> void:
 	_check("K brings it out too", v.gun_wanted)
 	v._unhandled_key_input(key)
 	_check("... and puts it away", not v.gun_wanted)
+	Raids.pinned = was_pinned
+	Raids.enabled = was_enabled
 	sections += 1
 	hand.queue_free()
 	v.queue_free()
