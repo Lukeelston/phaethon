@@ -24,6 +24,7 @@ const CAB_HINGES := {"orrery": Vector3(1.295, -0.24, 0.77), "kiln": Vector3(1.39
 
 var id: String
 var parts := {}
+var drawn_hull: MeshInstance3D
 
 
 static func supports(vehicle: String) -> bool:
@@ -101,11 +102,27 @@ func mount(parent: Node3D, key: StringName, node_name: StringName) -> MeshInstan
 
 
 func dress_cab(hull: MeshInstance3D, closed: bool) -> void:
+	drawn_hull = hull
 	hull.mesh = part(&"Cab")
 	mount(hull, &"Seat", &"FleetSeat")
 	var bonnet := mount(hull, &"Bonnet", &"ServiceBonnet")
 	bonnet.set_meta(&"service_bonnet", true)
 	bonnet.visible = closed
+
+
+## First GUN arm only. dress_cab receives the flat pod first and, in VR, the
+## cockpit's visible hull last. An explicit hull is useful in a separate preview.
+func ensure_arms(hull: MeshInstance3D = null):
+	if hull == null:
+		hull = drawn_hull
+	if not is_instance_valid(hull) or id not in [Pilot.ORRERY, Pilot.KILN, Pilot.VESPER]:
+		return null
+	var existing := hull.get_node_or_null(^"Arms")
+	if existing:
+		return existing
+	var rig = load("res://view/arms/" + id + "_arms.gd").new()
+	rig.build(hull)
+	return rig
 
 
 func strobe_at(side: float) -> Vector3:
