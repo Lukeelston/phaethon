@@ -114,6 +114,34 @@
     }
   };
 
+  // The pilot craft (craft_sim.gd's sim/pilot_craft.gd, mirrored): each one's chassis (TUNING) and its attributes
+  // and power (TRAITS: their meaning is written out there). Change one, change both. The Talon's row is keyed by its
+  // id; its chassis is not here yet, so until it is a 'talon' asked for is the Phaethon, as it is in craft_sim.gd.
+  const PILOT_TUNING = {
+    phaethon: {}, shrike: { engineMass: 1000, podMass: 410, engineGap: 7.2, cableLen: 12.5 },
+    orrery: { engineMass: 1140, podMass: 475, engineGap: 7.6, cableLen: 17 },
+    kiln: { engineMass: 1300, podMass: 540, engineGap: 6.8, cableLen: 15 },
+    vesper: { engineMass: 960, podMass: 410, engineGap: 7.8, cableLen: 13.5 },
+    basilisk: { engineMass: 1240, podMass: 560, engineGap: 7.2, cableLen: 14.5 }
+  };
+  const PILOT_TRAITS = {
+    phaethon: { power: { id: 'slipstream', name: 'Slipstream', lcd: 'SLIPSTREAM', thrust: 1.15, last: 4, fill: 6, reach: 120, lane: 22 } },
+    talon: { gripCapG: 0.93, engineCd: 0.98, lift: 0.1, power: { id: 'glide', name: 'Glide', lcd: 'GLIDE', hang: 1.4, airGrip: 0.3 } },
+    shrike: { engineCd: 1.04, gripCapG: 1.07, brakes: 1.15,
+      power: { id: 'kickdown', name: 'Kickdown', lcd: 'KICKDOWN', thrust: 1.35, last: 1.5, recharge: 12, low: 0.3, full: 0.85, within: 0.3 } },
+    orrery: { gripCapG: 1.13, driftReach: 0.8, power: { id: 'gyro', name: 'Gyro Lock', lcd: 'GYRO LOCK', grip: 1.2, last: 4, recharge: 15 } },
+    kiln: { thrustMax: 0.95, brakes: 1.3, wallShove: 0.75, driftReach: 0.7,
+      power: { id: 'ram', name: 'Ram Plate', lcd: 'RAM PLATE', wallShove: 0.5, last: 5, recharge: 20 } },
+    vesper: { engineCd: 0.88, gripCapG: 0.9, driftReach: 1.2,
+      power: { id: 'ground', name: 'Ground Effect', lcd: 'GROUND EFFECT', drag: 0.85, minV: 894.08, climb: 0.03, split: 0.08, hardSplit: 0.12, settle: 0.5 } },
+    basilisk: { engineCd: 1.02, driftReach: 0.85, power: { id: 'turret', name: 'Gaze Turret', lcd: 'GUN', drag: 1.04, fireS: 4, coolS: 3 } }
+  };
+  const TRAIT_DEFAULTS = { thrustMax: 1, engineCd: 1, gripCapG: 1, brakes: 1, wallShove: 1, lift: 0, driftReach: 1 };
+  function pilotTraits(id) {
+    const row = Object.hasOwn(PILOT_TRAITS, id) ? PILOT_TRAITS[id] : PILOT_TRAITS.phaethon;
+    return Object.assign({}, TRAIT_DEFAULTS, row, { power: Object.assign({}, row.power || {}) });
+  }
+
   // The range: 100 miles of open desert. Speed runway along y = 0, a jump lane at
   // y = +400 with a kicker every 4 km from 8 km, and a twisty lane at y = -400 that only
   // the view draws. No walls, no laps. Launch speed is slope x speed, so the kickers are
@@ -995,8 +1023,8 @@
   function pointVel(b, px, py) { return [b.vx - b.w * (py - b.y), b.vy + b.w * (px - b.x)]; }
 
   function makeSim(overrides) {
-    const vehicle = overrides && overrides.vehicle === 'shrike' ? 'shrike' : 'phaethon';
-    const chassis = vehicle === 'shrike' ? { engineMass: 1000, podMass: 410, engineGap: 7.2, cableLen: 12.5 } : {};
+    const vehicle = overrides && Object.hasOwn(PILOT_TUNING, overrides.vehicle) ? overrides.vehicle : 'phaethon';
+    const chassis = PILOT_TUNING[vehicle];
     overrides = Object.assign({}, chassis, overrides, { vehicle });
     // the grand prix is a STARFIGHTER track unless a handling is asked for
     const hname = (overrides && overrides.handling) || (COURSES[(overrides && overrides.track) || ''] && overrides.track !== 'carving' ? 'starfighter' : DEFAULTS.handling);
@@ -1017,6 +1045,12 @@
       P, T, eL: body(P.engineMass, eI), eR: body(P.engineMass, eI), pod: body(P.podMass, pI),
       hwant: hname, hblend: hname === 'starfighter' ? 1 : 0, carryTurn: 0,
       battery: 1, armed: false, mode: 'normal', boost: 0, binderBroken: false, crashT: 0, time: 0, towU: -1, towSwing: 0,
+      // the craft's attributes and power (PILOT_TRAITS; powerStep), as craft_sim.gd's: the power's id, its state
+      // ('charging', 'ready', 'active'; '' none), s left of it or of its recharge, its gauge, s it has run; and this
+      // step's multipliers (thrust, cruise drag, grip limit, brakes, a wall's spring) and lift (g in the air)
+      // (overrides.traitsOf: another row's traits on this chassis; the tests fly the Talon's before it is merged)
+      traits: pilotTraits(overrides.traitsOf ?? vehicle), power: '', powerState: '', powerT: 0, powerGauge: 0, powerLive: 0,
+      kThrust: 1, kDrag: 1, kGrip: 1, kBrake: 1, kWall: 1, lift: 0,
       avoidA: 0, avoidX: 0, avoidY: 0, avoidSrc: '',   // the avoidance field this step: m/s^2, its direction, 'wall' or 'traffic'
       lap: 0, lapStart: null, lastLap: null, bestLap: null, visited: new Set(), checkpoint: 0,
       progressI: 0, cables: [{ f: 0 }, { f: 0 }], events: [], rand: xorshift32(P.seed),
@@ -1030,6 +1064,9 @@
       net: T.kind === 'network' ? { from: P.startCity ?? 0, t0: null, found: new Set([P.startCity ?? 0]), prev: null } : null
     };
     S.bodies = [S.eL, S.eR, S.pod];
+    // the power's own bookkeeping (craft_sim.gd's _ram, _air_grip, _pod_clear, _kick_low, _settled)
+    let ram = false, airGrip = 0, podClear = 1, kickLow = [-Infinity, -Infinity], settled = 0;
+    powerReset();
     // Branches open only on the job that authorizes them (the shade line: the emergency run).
     for (const B of T.branches) B.open = P.job === 'emergency';
     // The job: out to the pad, home to the start town's mouth, ahead of the dawn. t0: when its
@@ -1251,7 +1288,7 @@
           else S.events.push({ type: 'scrape', who });   // contact without (much) damage: feel it, don't pay for it
           b.contact[ci] = true;
         }
-        const fn = P.wallK * pen - (vn < 0 ? P.wallC * vn : 0);
+        const fn = P.wallK * S.kWall * pen - (vn < 0 ? P.wallC * vn : 0);
         const tx = -ny, ty = nx, vt = vx * tx + vy * ty;
         const ft = -Math.sign(vt) * Math.min(P.wallMu * fn, Math.abs(vt) * b.m / dt);
         applyAt(b, fn * nx + ft * tx, fn * ny + ft * ty, cx, cy);
@@ -1280,13 +1317,24 @@
           if (pen <= 0 || d < 1e-6) continue;
           const nx = dx / d, ny = dy / d;
           const [vx, vy] = pointVel(b, cx, cy), vn = (vx - o.vx) * nx + (vy - o.vy) * ny;
+          const rammed = ram && !(o.halfSize > 0);   // Ram Plate: a vehicle (not a pillar) is shoved aside, not smashed into
           if (!b.touch.has(o.id) && !inside.has(o.id)) {
-            if (-vn > P.smashV && S.crashT <= 0) { S.events.push({ type: 'smash', id: o.id, v: -vn }); S.crashT = 1.6; }
+            if (-vn > P.smashV && S.crashT <= 0 && !rammed) { S.events.push({ type: 'smash', id: o.id, v: -vn }); S.crashT = 1.6; }
+            else if (rammed) S.events.push({ type: 'bump', who: b === S.pod ? 'pod' : b === S.eL ? 'L' : 'R', id: o.id, v: Math.max(0, -vn), ram: true });
             else S.events.push({ type: 'bump', who: b === S.pod ? 'pod' : b === S.eL ? 'L' : 'R', id: o.id, v: Math.max(0, -vn) });
           }
           inside.add(o.id);
           const fn = P.fieldK * pen - (vn < 0 ? P.fieldC * vn : 0);
-          applyAt(b, fn * nx, fn * ny, cx, cy);
+          if (rammed) {
+            // ... and its push has no part against the craft's way: it costs the craft no speed
+            let fx = fn * nx, fy = fn * ny;
+            const bv = Math.hypot(b.vx, b.vy);
+            if (bv > 1) {
+              const against = (fx * b.vx + fy * b.vy) / bv;
+              if (against < 0) { fx -= against * b.vx / bv; fy -= against * b.vy / bv; }
+            }
+            applyAt(b, fx, fy, cx, cy);
+          } else applyAt(b, fn * nx, fn * ny, cx, cy);
         }
       }
       b.touch = inside;
@@ -1300,6 +1348,7 @@
       const h = ground(T, b.x, b.y), dhdt = (ground(T, b.x + b.vx * dt, b.y + b.vy * dt) - h) / dt;
       const w = P.hoverOmega;
       const up = Math.max(0, G + w * w * (P.rideH - (b.z - h)) - 2 * P.hoverZeta * w * (b.vz - dhdt));
+      if (S.lift !== 0) b.vz += S.lift * G * clamp((b.z - h - P.rideH - 0.5) / 1.5, 0, 1) * dt;   // (lift in the air only)
       b.vz += (up - G + az) * dt; b.z += b.vz * dt;
       if (b.z - h < 0.3) {
         b.z = h + 0.3;
@@ -1464,7 +1513,7 @@
           if (m.off || al < m.w / 2 - 2 || pen <= 0) return;
           const sgn = m.lat > 0 ? 1 : -1, nx = m.nx * sgn, ny = m.ny * sgn;   // outward
           const [vx, vy] = pointVel(b, cx, cy), vn = vx * nx + vy * ny;
-          const fn = P.wallK * pen - (vn < 0 ? P.wallC * vn : 0);
+          const fn = P.wallK * S.kWall * pen - (vn < 0 ? P.wallC * vn : 0);
           const tx = -ny, ty = nx, vt = vx * tx + vy * ty;
           const ft = -Math.sign(vt) * Math.min(P.wallMu * fn, Math.abs(vt) * b.m / dt);
           applyAt(b, fn * nx + ft * tx, fn * ny + ft * ty, cx, cy);
@@ -1501,6 +1550,99 @@
       const a=brakeProfile(H0,speed,mass), b=brakeProfile(H1,speed,mass);
       return a.map((v,i) => v+(b[i]-v)*S.hblend);
     }
+    // The craft's attributes and its power, mirroring craft_sim.gd (_power_reset, _power_step and their helpers): the
+    // inputs inp.power (the POWER switch at ARM), inp.powerFire (its button, a step), inp.draft and inp.turretOut (the
+    // view's), all off unless given; events {type: 'power', power, state, t, gauge}.
+    function powerReset() {
+      S.power = S.traits.power.id || '';
+      S.powerState = S.power === '' ? '' : S.power === 'slipstream' ? 'charging' : 'ready';
+      S.powerGauge = S.power === 'slipstream' ? 0 : 1;
+      S.powerT = 0; S.powerLive = 0; kickLow = [-Infinity, -Infinity]; settled = 0;
+    }
+    function powerEvent(state) { S.events.push({ type: 'power', power: S.power, state, t: S.powerLive, gauge: S.powerGauge }); }
+    function powerStart(last) {
+      S.powerState = 'active'; S.powerT = last; S.powerLive = 0;
+      if (S.power === 'slipstream') S.powerGauge = 0;
+      powerEvent('fired');
+    }
+    function powerEnd() {
+      const recharge = S.traits.power.recharge || 0;
+      powerEvent('ended');
+      S.powerLive = 0;
+      if (recharge > 0) { S.powerState = 'charging'; S.powerT = recharge; S.powerGauge = 0; }
+      else if (S.power === 'slipstream') { S.powerState = 'charging'; S.powerT = 0; }
+      else { S.powerState = 'ready'; S.powerT = 0; }
+    }
+    function powerRun(dt, timed) {
+      const was = S.powerLive;
+      S.powerLive += dt;
+      if (timed) { S.powerT -= dt; if (S.powerT <= 0) { powerEnd(); return; } }
+      if (Math.floor(S.powerLive) > Math.floor(was)) powerEvent('active');
+    }
+    function recharge(dt) {
+      const r = S.traits.power.recharge || 0;
+      S.powerT -= dt;
+      S.powerGauge = r > 0 ? clamp(1 - S.powerT / r, 0, 1) : 1;
+      if (S.powerT <= 0) { S.powerT = 0; S.powerGauge = 1; S.powerState = 'ready'; powerEvent('ready'); }
+    }
+    function powerStep(inp, dt) {
+      const tr = S.traits, pw = tr.power;
+      S.kThrust = tr.thrustMax; S.kDrag = tr.engineCd; S.kGrip = tr.gripCapG; S.kBrake = tr.brakes; S.kWall = tr.wallShove; S.lift = tr.lift;
+      ram = false; airGrip = 0;
+      if (S.power === '') return;
+      const on = !!inp.power, fire = on && !!inp.powerFire;
+      if (S.power === 'turret') { if (inp.turretOut) S.kDrag *= pw.drag; return; }
+      if (S.powerState === 'active' && !on) powerEnd();   // SAFE ends it
+      switch (S.power) {
+        case 'slipstream':
+          if (S.powerState === 'active') { S.kThrust *= pw.thrust; powerRun(dt, true); }
+          else if (on) {
+            if (inp.draft && S.powerGauge < 1) {
+              S.powerGauge = Math.min(1, S.powerGauge + dt / pw.fill);
+              if (S.powerGauge >= 1) { S.powerState = 'ready'; powerEvent('ready'); }
+            }
+            if (fire) { if (S.powerState === 'ready') powerStart(pw.last); else powerEvent('refused'); }
+          }
+          break;
+        case 'glide':
+          if (on) {
+            S.lift += (1 - S.lift) * (1 - 1 / pw.hang);
+            airGrip = pw.airGrip;
+            if (S.powerState === 'active') { if (podClear >= 1) powerEnd(); else powerRun(dt, false); }
+            else if (podClear <= 0) powerStart(0);
+          }
+          break;
+        case 'kickdown': {
+          const levers = [inp.thrL, inp.thrR];
+          for (let k = 0; k < 2; k++) if (levers[k] < pw.low) kickLow[k] = S.time;
+          if (S.powerState === 'active') { S.kThrust *= pw.thrust; powerRun(dt, true); }
+          else if (S.powerState === 'charging') recharge(dt);
+          else if (on && levers[0] >= pw.full && levers[1] >= pw.full && S.time - kickLow[0] <= pw.within && S.time - kickLow[1] <= pw.within) powerStart(pw.last);
+          break;
+        }
+        case 'gyro': case 'ram':
+          if (S.powerState === 'active') {
+            if (S.power === 'gyro') S.kGrip *= pw.grip;
+            else { ram = true; S.kWall *= pw.wallShove; }
+            powerRun(dt, true);
+          } else if (S.powerState === 'charging') { recharge(dt); if (fire) powerEvent('refused'); }
+          else if (fire) powerStart(pw.last);
+          break;
+        case 'ground': {
+          const Pd = S.pod, v = Math.hypot(Pd.vx, Pd.vy);
+          const split = Math.abs(inp.thrL - inp.thrR) + Math.abs(inp.brkL - inp.brkR);
+          const held = on && v > pw.minV && podClear >= 1 && S.eL.grip >= 1 && S.eR.grip >= 1 && Math.abs(Pd.vz) <= pw.climb * v;
+          if (S.powerState === 'active') {
+            if (held && split < pw.hardSplit) { S.kDrag *= pw.drag; powerRun(dt, false); }
+            else { powerEnd(); settled = 0; }
+          } else {
+            settled = held && split < pw.split ? settled + dt : 0;
+            if (settled >= pw.settle) { powerStart(0); S.kDrag *= pw.drag; }
+          }
+          break;
+        }
+      }
+    }
     function step(inp, dt) {
       const L = S.eL, R = S.eR, Pd = S.pod;
       for (const o of S.obstacles) { o.x += o.vx * dt; o.y += o.vy * dt; }
@@ -1522,6 +1664,7 @@
         P.handling = S.hblend >= 0.5 ? 'starfighter' : 'speed';
         if (S.hblend === htgt) S.events.push({ type: 'handling', mode: P.handling });
       }
+      powerStep(inp, dt);   // the craft's attributes and its power: this step's multipliers (PILOT_TRAITS)
       // Vertical ties: the binder holds both engines at one height and the tow bar lifts the
       // pod toward their mean, so a one-sided ramp hit lifts the whole craft instead of
       // flinging one engine skyward. Exactly zero when heights match (flat ground).
@@ -1533,6 +1676,8 @@
       const ft = P.towKz * ((L.z + R.z) / 2 - Pd.z) + P.towCz * ((L.vz + R.vz) / 2 - Pd.vz);
       az[2] += ft / Pd.m; az[0] -= ft / 2 / L.m; az[1] -= ft / 2 / R.m;
       S.bodies.forEach((b, k) => { b.fx = 0; b.fy = 0; b.t = 0; hover(b, dt, az[k]); });
+      podClear = S.pod.grip;
+      if (airGrip > 0) for (const b of S.bodies) b.grip = Math.max(b.grip, airGrip);   // Glide: the levers steer in the air
       S.time += dt;
       // The burner: an explicit inp.burner (the headset's trigger throttles light it from the left
       // stick, so the levers stay under the gate and still throttle and steer on it), else both
@@ -1566,8 +1711,8 @@
         // speed growth without a terminal speed. Brake drag remains fully effective.
         let driveMult = ramjet ? P.ramjetMult : burner ? P.burnerMult : 1;
         if (S.boost > 0) driveMult *= boostMult;   // (the drag fourth is shaped to follows the boost up: more speed, still no runaway)
-        const nominalThrust = 2 * P.thrustMax * (0.87 / P.gate) * driveMult * gm;
-        const totalCd = (2 * P.engineCd + P.podCd) * line;
+        const nominalThrust = 2 * P.thrustMax * S.kThrust * (0.87 / P.gate) * driveMult * gm;
+        const totalCd = (2 * P.engineCd * S.kDrag + P.podCd * S.kDrag) * line;
         const referenceSpeed = Math.sqrt(Math.max(1, nominalThrust / totalCd));
         const blend = smooth01((speed / referenceSpeed - 0.6) / 0.2);
         const shapedDrag = nominalThrust * (1 - Math.exp(-speed / (0.65 * referenceSpeed)));
@@ -1588,7 +1733,7 @@
         if (inp.repair) lever = Math.min(lever, 0.6);
         let mult = ramjet ? P.ramjetMult : burner ? P.burnerMult : 1;
         if (S.boost > 0) mult *= boostMult;
-        const thrust = e.flameout ? 0 : P.thrustMax * lever * mult * (0.45 + 0.55 * e.health) * e.sputter;
+        const thrust = e.flameout ? 0 : P.thrustMax * S.kThrust * lever * mult * (0.45 + 0.55 * e.health) * e.sputter;
         e.thrust = thrust / P.thrustMax;
         e.fx += thrust * P.forceScale * gm * c; e.fy += thrust * P.forceScale * gm * s;
         // Air brake = quadratic drag plus a linear term, so the flaps still bite at low speed.
@@ -1602,13 +1747,13 @@
           e.front=brk*response[0];
           frontDrag=brk*response[1];
         }
-        const cd = (P.engineCd * cruiseDrag + P.brakeCd * brk + frontDrag) * P.forceScale;
-        const bl = (P.brakeLin * brk + P.brakeConst * brk / Math.max(v, 2)) * P.forceScale;
+        const cd = (P.engineCd * S.kDrag * cruiseDrag + P.brakeCd * S.kBrake * brk + frontDrag * S.kBrake) * P.forceScale;
+        const bl = (P.brakeLin * brk + P.brakeConst * brk / Math.max(v, 2)) * S.kBrake * P.forceScale;
         e.fx -= cd * v * e.vx + bl * e.vx; e.fy -= cd * v * e.vy + bl * e.vy;
         const fxp = e.x - c * P.finOffset, fyp = e.y - s * P.finOffset;
         const [pvx, pvy] = pointVel(e, fxp, fyp), vlat = -s * pvx + c * pvy;
         // Low-speed braking permits drift; deployed high-speed flaps restore cornering grip.
-        const cap = e.m * G * (P.gripCapG * (1 - 0.45 * brk) + brakeGrip);
+        const cap = e.m * G * (P.gripCapG * S.kGrip * (1 - 0.45 * brk) + brakeGrip);
         const flat = clamp(-e.m * P.engineGrip * vlat, -cap, cap) * e.grip;
         applyAt(e, -s * flat, c * flat, fxp, fyp);
         e.t -= P.yawDamp * e.w;
@@ -1659,8 +1804,8 @@
       });
 
       const pb = Math.min(inp.brkL, inp.brkR);
-      const pv = Math.hypot(Pd.vx, Pd.vy), pcd = (P.podCd * cruiseDrag + 0.5 * P.brakeCd * pb) * P.forceScale;
-      const pbl = 0.5 * (P.brakeLin * pb + P.brakeConst * pb / Math.max(pv, 2)) * P.forceScale;
+      const pv = Math.hypot(Pd.vx, Pd.vy), pcd = (P.podCd * S.kDrag * cruiseDrag + 0.5 * P.brakeCd * S.kBrake * pb) * P.forceScale;
+      const pbl = 0.5 * (P.brakeLin * pb + P.brakeConst * pb / Math.max(pv, 2)) * S.kBrake * P.forceScale;
       Pd.fx -= pcd * pv * Pd.vx + pbl * Pd.vx; Pd.fy -= pcd * pv * Pd.vy + pbl * Pd.vy;
       const qx = Pd.x - pc * 1.2, qy = Pd.y - ps * 1.2, [qvx, qvy] = pointVel(Pd, qx, qy);
       const plat = clamp(-Pd.m * P.podGrip * (-ps * qvx + pc * qvy), -Pd.m * P.podCapG * G, Pd.m * P.podCapG * G) * Pd.grip;
@@ -2052,6 +2197,7 @@
       S.crashT = 0; S.finished = false; S.runActive = false; S.runStart = null; S.result = null;
       for (const e of [S.eL, S.eR]) { e.health = 1; e.heat = P.limits ? 0.3 : 0; }
       S.pod.health = 1; S.battery = 1;
+      powerReset();
       if (T.kind === 'range') { S.pod.x = 30; S.pod.y = 0; respawn(); }
       else if (T.kind === 'network') respawn();
       else { S.lap = 0; S.lapStart = null; S.visited = new Set([0]); S.checkpoint = 0; respawn(0); }
@@ -2070,5 +2216,5 @@
       box: { x: BOX_X, half: BOX_HALF, overrun: OVERRUN } };
   }
 
-  window.PhaethonSim = { makeSim, DEFAULTS, HANDLING, TRACKS, COURSES, xorshift32 };
+  window.PhaethonSim = { makeSim, DEFAULTS, HANDLING, TRACKS, COURSES, xorshift32, PILOT_TUNING, PILOT_TRAITS };
 })();
