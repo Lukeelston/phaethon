@@ -171,6 +171,7 @@ func _run() -> void:
 			var lever := "LeverL" if k == 0 else "LeverR"
 			var boot := "ThrottleBootL" if k == 0 else "ThrottleBootR"
 			var lean_was: float = (gun.lever as Node3D).rotation.x
+			var gun_through := {}
 			for lean in [-Switch.THROW_ANGLE, 0.0, Switch.THROW_ANGLE]:
 				(gun.lever as Node3D).rotation.x = lean
 				for step in 21:
@@ -188,7 +189,7 @@ func _run() -> void:
 							continue
 						var n: int = kit.crossing_edges(space, word, "GunSwitch")
 						if n > 0:
-							through["%s at %.0f%% through the GUN switch, its bat at %.0f deg" % [word, thr * 100.0, rad_to_deg(lean)]] = n
+							gun_through["%s at %.0f%% through the GUN switch, its bat at %.0f deg" % [word, thr * 100.0, rad_to_deg(lean)]] = n
 						var g: Array = kit.gap(space, word, "GunSwitch")
 						if float(g[0]) < float(least.GunSwitch):
 							least.GunSwitch = float(g[0])
@@ -198,8 +199,8 @@ func _run() -> void:
 					await physics_frame
 				_lever(v, k, 0.5)
 			(gun.lever as Node3D).rotation.x = lean_was
-			_check("%s: and of the GUN switch by %s mm, its bat up, out or down (%s; %s wanted), passing through none of it (%s)" % [id, _mm(least.GunSwitch), where.get("GunSwitch", "-"), _mm(POWER_GAP), through],
-				least.GunSwitch >= POWER_GAP and through.is_empty())
+			_check("%s: and of the GUN switch by %s mm, its bat up, out or down (%s; %s wanted), passing through none of it (%s)" % [id, _mm(least.GunSwitch), where.get("GunSwitch", "-"), _mm(POWER_GAP), gun_through],
+				least.GunSwitch >= POWER_GAP and gun_through.is_empty())
 
 		# ---- in place: the whole cabin, the levers at idle
 		for k in 2:
@@ -234,7 +235,7 @@ func _run() -> void:
 				continue
 			if (gun_a or gun_b) and Craft.phaethon_based(id) and (a.begins_with("cockpit_interior/ConsoleR") or b.begins_with("cockpit_interior/ConsoleR")):
 				continue      # (the Phaethons' GUN switch's panel is let into the starboard console's inboard face)
-			if (gun_a or gun_b) and not Craft.phaethon_based(id) and BASILISK_GUN_KNOWN.any(func(w: String) -> bool: return (b if gun_a else a).begins_with(w)):
+			if (gun_a or gun_b) and id == Craft.BASILISK and BASILISK_GUN_KNOWN.any(func(w: String) -> bool: return (b if gun_a else a).begins_with(w)):
 				print("NOTE %s: its GUN switch, where it has stood since 2026-11-23, crosses %s >< %s (%d edges)" % [id, a, b, rec.n])
 				continue
 			strangers.append("%s >< %s (%d edges)" % [a, b, rec.n])
@@ -268,7 +269,7 @@ func _run() -> void:
 				gun_grips.append(to_rig * (v.lever_pivots[k].global_transform * Vector3(0.0, 0.36, 0.0)))
 			_lever(v, k, 0.5)
 			to_gun = Vector3(gun_bat.distance_to(gun_grips[0]), gun_bat.distance_to(gun_grips[1]), gun_bat.distance_to(eye + Vector3(0.18 * side, -0.2, 0.05)))
-			var bar: Vector3 = GUN_REACH if Craft.phaethon_based(id) else BASILISK_GUN_REACH
+			var bar: Vector3 = BASILISK_GUN_REACH if id == Craft.BASILISK else GUN_REACH
 			_check("%s: the GUN switch's bat is %.3f m from the %s grip at half throttle, %.3f at full, %.3f from that shoulder (at most %.2f, %.2f, %.2f)" % [
 				id, to_gun.x, "right" if side > 0.0 else "left", to_gun.y, to_gun.z, bar.x, bar.y, bar.z],
 				to_gun.x <= bar.x and to_gun.y <= bar.y and to_gun.z <= bar.z)

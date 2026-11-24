@@ -1276,10 +1276,11 @@ func _work_controls(l: XRController3D, r: XRController3D, delta: float) -> void:
 			var busy: bool = float(_hand_busy[hand]) > 0.0 or (drift_slider != null and drift_slider.held_by == hand)
 			_work_console(console.poke(hand, delta, busy), hand)
 			at_console[hand] = console.claims(hand)
-	# the MODE switch: either hand can throw it
+	# the MODE switch: either hand can throw it (not a hand that has just worked another control: the GUN switch stands
+	# under it, and one push up through both boxes would throw both)
 	if mode_switch and hands_live and not _await_neutral_controls:
 		for hand in [l, r]:
-			var flip: String = mode_switch.poke(hand, delta, at_console.get(hand, false))
+			var flip: String = mode_switch.poke(hand, delta, at_console.get(hand, false) or float(_hand_busy.get(hand, 0.0)) > 0.0)
 			if flip != "":
 				_hand_busy[hand] = ConsoleSwitchesScript.CLAIM_S
 			if flip != "" and ask_handling(flip):   # (refused inside the cooldown: the lever springs back)
@@ -1294,10 +1295,10 @@ func _work_controls(l: XRController3D, r: XRController3D, delta: float) -> void:
 				_hand_busy[hand] = ConsoleSwitchesScript.CLAIM_S
 				set_slide(thrown == "slide")
 				_buzz(hand, 0.9, 0.06)
-	# the GUN switch, the same way
+	# the GUN switch, the same way (and as the MODE switch, not a hand that has just worked another control)
 	if gun_switch and hands_live and not _await_neutral_controls:
 		for hand in [l, r]:
-			var armed: String = gun_switch.poke(hand, delta, at_console.get(hand, false))
+			var armed: String = gun_switch.poke(hand, delta, at_console.get(hand, false) or float(_hand_busy.get(hand, 0.0)) > 0.0)
 			if armed != "":
 				_hand_busy[hand] = ConsoleSwitchesScript.CLAIM_S
 				set_gun(armed == "gun")
@@ -2225,22 +2226,24 @@ func set_gun(on: bool) -> void:
 	print("GUN: switch ", "GUN" if on else "SAFE")
 
 
+const GUN_AT := Vector3(0.543, 0.305, 0.085)      # (the Phaethons' GUN switch: gun_switch_mount)
+const GUN_TILT := deg_to_rad(5.0)
+const GUN_SCALE := 0.5
+
+
 ## Where the GUN switch stands (cockpit rig).
 ##   phaethon_family (the Phaethon, the Talon: sim/pilot_craft.gd phaethon_based; Raids, 2026-11-24): on the starboard
 ##     console's inboard face up front, outboard of the right lever and under the MODE switch: the POWER button's place
-##     on the port side, mirrored, a short drop of the hand from the grip. GUN_SCALE of the MODE switch's size (the
-##     POWER switch's 0.7 there meets the MODE switch's underside, or the grip at 90% throttle), its face GUN_TILT up
-##     from the console's side, its top edge 3 mm into the console's face and its foot 13 mm proud: GUN up, SAFE down, the
-##     legends read along the console. Its bat is 0.192 m from the right grip at half throttle, 0.142 at full and 0.680
-##     from the right shoulder, inside the POWER button's bars, and the right lever keeps 14 mm off it through its whole
-##     travel, the bat up, straight out (mid-throw) or down (tests/test_cockpit_reach.gd)
+##     on the port side, mirrored, a short drop of the hand from the grip. GUN_SCALE of the MODE switch's size, its face
+##     GUN_TILT up from the console's side and standing a little proud of it: GUN up, SAFE down, the legends read along
+##     the console. Its bat is 0.197 m from the right grip at half throttle, 0.132 at full and 0.691 from the right
+##     shoulder, inside the POWER button's bars; the right lever keeps over 20 mm off it through its whole travel, the
+##     bat up, straight out (mid-throw) or down (tests/test_cockpit_reach.gd); and the box before it where a hand throws
+##     it is 4 mm clear of the MODE switch's (tests/test_gun_controls.gd). Its size is what the place leaves: any larger and
+##     its box met the MODE switch's (review, 2026-11-24), or its bat came out of the button's bars or under the grip
+##     at full throttle.
 ##   else (the Basilisk, 2026-11-23): on the starboard sill's inner ledge, by the right elbow and inside the canopy's
 ##     foot, a hand's reach up from the right lever, its face turned in and up at the seat.
-const GUN_AT := Vector3(0.545, 0.295, 0.10)
-const GUN_TILT := deg_to_rad(10.0)
-const GUN_SCALE := 0.6
-
-
 static func gun_switch_mount(phaethon_family: bool) -> Transform3D:
 	if phaethon_family:
 		var x := Vector3(0.0, 0.0, 1.0)      # (across the panel: aft, so its legends read from the seat)

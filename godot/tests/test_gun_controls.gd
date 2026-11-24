@@ -12,6 +12,13 @@
 ##   check_not_by_accident     the right hand's way from its grip at half and at full throttle up to the MODE switch
 ##                             over the GUN switch, a throw down and one up, and back, throws the GUN switch nowhere,
 ##                             at SAFE or at GUN
+##   check_zones_apart         (the Phaethon's and the Talon's) the box before the GUN switch where a hand throws it and
+##                             the MODE switch's box, each mapped through its mount, do not meet (two oriented boxes, by
+##                             their separating axes: exact, not sampled)
+##   check_overshoot_push      a push up through the aft upper part of the GUN switch's box that runs on 1.5 cm past its
+##                             top, faster than either switch asks, throws the GUN switch and not the MODE switch above
+##                             it (at STARFIGHTER, so a push up there would throw it to SPEED): a hand that has just
+##                             thrown one is not given the other (vr_cockpit.gd _work_controls)
 ##   check_flat_keys           in the flat view in the Phaethon, K arms its gun and F held fires it
 ## X is faked with an XRControllerTracker for the left hand (as tests/test_partner_menu.gd); the hands that throw the
 ## switches are the test's own controllers, worked through the cockpit's own _work_controls (as test_power_controls).
@@ -24,7 +31,7 @@ const Cockpit := preload("res://vr/vr_cockpit.gd")
 const Craft := preload("res://sim/pilot_craft.gd")
 const Switch := preload("res://vr/mode_switch.gd")
 const DT := 1.0 / 90.0
-const SECTIONS := 6           # built; X in the Phaethon and in the Talon; the menu; not by accident; the flat view
+const SECTIONS := 9           # built; X and the boxes in the Phaethon and in the Talon; the menu; not by accident; the overshoot; the flat view
 var failures := 0
 var checks := 0
 var sections := 0             # (a section that dies on a script error never counts itself: the verdict then fails)
@@ -77,10 +84,12 @@ func _run() -> void:
 	for id: String in [Craft.STANDARD, Craft.TALON]:
 		print(id)
 		await _cockpit(id)
+		check_zones_apart(id)
 		var armed := check_x_fires_when_armed(id)
 		if armed and id == Craft.STANDARD:
 			check_menu_blocks_fire()
 			check_not_by_accident()
+			check_overshoot_push()
 		v.free()
 		await process_frame
 	await check_flat_keys()
@@ -302,6 +311,116 @@ func check_not_by_accident() -> void:
 	v.set_gun(false)
 	check("the right hand's way from its grip at half and at full throttle to the MODE switch, a throw down and up (%d of 8 thrown), and back throws the GUN switch nowhere, at SAFE or at GUN (thrown: %s)" % [mode_throws, bad],
 		mode_throws == 8 and bad.is_empty())
+	sections += 1
+
+
+## A switch's throw box (ModeSwitch.ZONE before its face, mapped through its mount, the shell's frame): its middle,
+## its three axes (unit) and its half-sizes along them.
+static func _zone_box(sw: Node3D) -> Array:
+	var t: Transform3D = sw.transform
+	var middle := t * Vector3(0.0, 0.0, (Switch.ZONE.z - 0.01) / 2.0)
+	var half := [Switch.ZONE.x, Switch.ZONE.y, (Switch.ZONE.z + 0.01) / 2.0]
+	var axes := []
+	var sizes := []
+	for i in 3:
+		axes.append(t.basis[i].normalized())
+		sizes.append(float(half[i]) * t.basis[i].length())
+	return [middle, axes, sizes]
+
+
+## Two oriented boxes by their separating axes: the widest gap between them along any of the fifteen (m; negative:
+## they meet).
+static func _box_gap(a: Array, b: Array) -> float:
+	var tests := []
+	for i in 3:
+		tests.append(a[1][i])
+		tests.append(b[1][i])
+		for j in 3:
+			var c: Vector3 = (a[1][i] as Vector3).cross(b[1][j])
+			if c.length() > 1e-6:
+				tests.append(c.normalized())
+	var widest := -INF
+	var apart: Vector3 = (b[0] as Vector3) - (a[0] as Vector3)
+	for axis: Vector3 in tests:
+		var ra := 0.0
+		var rb := 0.0
+		for i in 3:
+			ra += float(a[2][i]) * absf((a[1][i] as Vector3).dot(axis))
+			rb += float(b[2][i]) * absf((b[1][i] as Vector3).dot(axis))
+		widest = maxf(widest, absf(apart.dot(axis)) - ra - rb)
+	return widest
+
+
+func check_zones_apart(id: String) -> void:
+	if v.gun_switch == null:
+		check("%s: a GUN switch whose box to measure (none)" % id, false)
+		return
+	var gap := _box_gap(_zone_box(v.gun_switch), _zone_box(v.mode_switch))
+	check("%s: the GUN switch's box and the MODE switch's do not meet: %.1f mm apart at the least, along a separating axis" % [id, gap * 1000.0], gap > 0.0)
+	sections += 1
+
+
+## Is a tip (the shell's frame) in the box before the MODE switch where a hand throws it?
+func _in_mode_box(p: Vector3) -> bool:
+	var q: Vector3 = v.mode_switch.transform.affine_inverse() * p
+	return absf(q.x) < Switch.ZONE.x and absf(q.y) < Switch.ZONE.y and q.z > -0.01 and q.z < Switch.ZONE.z
+
+
+## From the right grip at half throttle, GUN at SAFE and MODE at STARFIGHTER: in to the aft upper part of the GUN
+## switch's box and a push straight up at 0.8 m/s to `end`, and back. -> [GUN thrown, the handling asked, MODE's bat
+## down, how many of the push's frames had the tip in MODE's box].
+func _push_up(start: Vector3, end: Vector3) -> Array:
+	v.set_gun(false)
+	v._flip_at = -100000
+	v.ask_handling("starfighter")
+	var grip := _grip(0.5)
+	_rest(hr, grip, Switch.COOLDOWN + 0.1)      # (the switches shown as they stand: GUN at SAFE, MODE at STARFIGHTER)
+	var out := start + (_on_gun(Vector3(0.0, 0.0, 0.25)) - _on_gun(Vector3(0.0, 0.0, 0.07)))
+	_move(hr, grip, out, 0.5)
+	_move(hr, out, start, 0.4)
+	_rest(hr, start, Switch.COOLDOWN + 0.1)
+	v._flip_at = -100000      # (the handling's wall-clock cooldown would refuse a throw: it must not be what holds it)
+	var in_mode := 0
+	var steps := maxi(1, int(ceil(start.distance_to(end) / (0.8 * DT))))
+	for k in range(1, steps + 1):
+		var p := start.lerp(end, float(k) / steps)
+		in_mode += int(_in_mode_box(p))
+		_put(hr, p)
+		_park(hl)
+		_tick()
+	var got := [v.gun_wanted, v.handling_ask, v.mode_switch.down, in_mode]
+	var back := end + (out - start)
+	_move(hr, end, back, 0.4)
+	_move(hr, back, grip, 0.5)
+	v.lever_pivots[1].rotation.x = 0.0
+	return got
+
+
+func check_overshoot_push() -> void:
+	var s: float = v.gun_switch.transform.basis.y.length()      # (its scale: 1.5 cm past the box's top, in its own metres)
+	var aft := Switch.ZONE.x * 0.8
+	var start := _on_gun(Vector3(aft, -0.02, 0.04))
+	var past_top := _on_gun(Vector3(aft, Switch.ZONE.y + 0.015 / s, 0.04))
+	var a := _push_up(start, past_top)
+	check("a push up at 0.8 m/s through the aft upper part of the GUN switch's box, 1.5 cm on past its top (%d of its frames in the MODE switch's box), throws it (%s) and not the MODE switch over it (handling \"%s\", wanted \"starfighter\"; its bat %s)" % [
+		a[3], "GUN" if a[0] else "SAFE", a[1], "down" if a[2] else "up"], a[0] and a[1] == "starfighter" and a[2])
+	# ... and the same stroke run on straight up until it is a centimetre inside the MODE switch's box: the hand that has
+	# just thrown the GUN switch is not given the MODE switch (whatever the two boxes' places)
+	var into := past_top
+	var reached := false
+	for k in 300:
+		into += Vector3(0.0, 0.0005, 0.0)
+		var q: Vector3 = v.mode_switch.transform.affine_inverse() * into
+		if minf(minf(Switch.ZONE.x - absf(q.x), Switch.ZONE.y - absf(q.y)), minf(q.z + 0.01, Switch.ZONE.z - q.z)) > 0.01:
+			reached = true
+			break
+	var b := _push_up(start, into)
+	check("... and run on straight up %.0f mm into the MODE switch's box (%s, %d frames in it), it throws the GUN switch (%s) and still not the MODE switch (handling \"%s\"; its bat %s)" % [
+		(into.y - past_top.y) * 1000.0, "reached" if reached else "not reached", b[3], "GUN" if b[0] else "SAFE", b[1], "down" if b[2] else "up"],
+		reached and b[3] > 0 and b[0] and b[1] == "starfighter" and b[2])
+	v._flip_at = -100000
+	v.ask_handling("speed")
+	v.set_gun(false)
 	sections += 1
 
 
