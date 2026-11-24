@@ -10,6 +10,7 @@ const Switch := preload("res://vr/mode_switch.gd")
 const T := preload("res://view/turret.gd")
 const Traffic := preload("res://view/network_traffic.gd")
 const Pilot := preload("res://sim/pilot_craft.gd")
+const Raids := preload("res://view/network_raids.gd")
 const DT := 1.0 / 90.0
 var failures := 0
 var sections := 0      # (a section that dies on a script error never counts itself: the verdict then fails)
@@ -129,8 +130,16 @@ func check_hostile_killed(traffic, car, g, shots: int, hits: int, kill_log: Arra
 		not traffic.cars.has(car) and g.kills == 1 and g.hits - hits >= g.HOSTILE_HP and frames * DT < 2.0 and kill_log == [car])
 
 
+func check_kill_reaches_raid(v, traffic, car) -> void:
+	var R = v.raids
+	_check("the gun's kill reaches the raid: raids %s, kills %d (want 1), fled %d (want 0), the raider out of traffic (%s)" % [R != null, R.kills if R else -1, R.fled if R else -1, not traffic.cars.has(car)],
+		R != null and R.kills == 1 and R.fled == 0 and not traffic.cars.has(car))
+
+
 func _in_the_cockpit() -> void:
 	View.vehicle_override = Pilot.BASILISK
+	Raids.pinned = true      # (raids on, so the cockpit has a director for the gun's kills to reach)
+	Raids.enabled = true
 	var v = Cockpit.new()
 	root.add_child(v)
 	await process_frame
@@ -244,6 +253,11 @@ func _in_the_cockpit() -> void:
 		check_commuter_spared(traffic, car, g, shots, hits, kill_log)
 		# The same car, now a raider (Raids): it takes HOSTILE_HP hits and is knocked out.
 		car.hostile = true
+		var raid = v.raids
+		if raid:         # (the car is this raid's raider: on, with it the only one in its pack)
+			raid.pack = [car]
+			raid.state = "on"
+			raid.city = 0
 		g._damage.clear()
 		shots = g.shots
 		hits = g.hits
@@ -255,6 +269,8 @@ func _in_the_cockpit() -> void:
 			frames += 1
 		g.hold_fire = false
 		check_hostile_killed(traffic, car, g, shots, hits, kill_log, frames)
+		v._process(DT)
+		check_kill_reaches_raid(v, traffic, car)
 		var fx := []
 		for f in g._fx:
 			fx.append(f.kind)
