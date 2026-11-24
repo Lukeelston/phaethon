@@ -49,7 +49,6 @@ const RAIDER_HEADWAY := 0.45              # s: a raider's headway with no prey
 const PREY_REACH := 3000.0               # m: the farthest ahead a commuter is its prey
 const HEADING_BELOW := 30.0              # m/s: slower, the pick looks the way the craft points, not the way it goes
 const GRACE := 1.0                       # s: a raider in contact is one hit taken, then none for this long
-const BODY_HALF := 3.0                   # m: half a raider's height (traffic's body_height)
 const CONTACT_CRAFT := 14.0              # m from the pod or either engine's centre to a raider's centre, in three dimensions: a ram
 
 static var enabled := false      # raids
@@ -376,7 +375,7 @@ func _hunt(c, delta: float) -> void:
 func _in_contact() -> bool:
 	var r2 := CONTACT_CRAFT * CONTACT_CRAFT
 	for c in pack:
-		var zc: float = sim.net_deck(c.road, c.f, c.lat) + BODY_HALF      # (the raider's height: its deck and half its body)
+		var zc: float = traffic.body_height(c)      # (the raider's height: its deck and half its body)
 		for b in sim.bodies:
 			var dz: float = b.z - zc
 			if Vector2(b.x - c.x, b.y - c.y).length_squared() + dz * dz <= r2:      # (a raider on another deck is not on the craft)

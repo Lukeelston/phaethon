@@ -502,10 +502,10 @@ func _jolt_tick(delta: float) -> void:
 	if _jolt_glow > 0.0 and _jolt_quad == null and cam != null:
 		_jolt_quad = MeshInstance3D.new()
 		var q := QuadMesh.new()
-		q.size = Vector2(1.6, 1.6)
+		q.size = Vector2(JoltFx.QUAD_SIZE, JoltFx.QUAD_SIZE)
 		_jolt_quad.mesh = q
 		_jolt_quad.material_override = JoltFx.spatial_material()
-		_jolt_quad.position = Vector3(0.0, 0.0, -0.25)
+		_jolt_quad.position = Vector3(0.0, 0.0, -JoltFx.QUAD_Z)
 		_jolt_quad.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		cam.add_child(_jolt_quad)
 	if _jolt_glow > 0.0:

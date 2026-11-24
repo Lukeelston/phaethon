@@ -13,6 +13,7 @@ extends SceneTree
 
 const View := preload("res://view/craft_view.gd")
 const Raids := preload("res://view/network_raids.gd")
+const JoltFx := preload("res://view/jolt_fx.gd")
 const Chase := preload("res://view/network_chase.gd")
 const Livery := preload("res://view/livery.gd")
 const Outlook := preload("res://view/outlook.gd")
@@ -208,6 +209,7 @@ func _run() -> void:
 
 	# the camera and rig stay still through it
 	var still := true
+	var offsets_zero := true
 	c = _stage(v, 200.0)
 	await _hold(v, c, c.f, 0.1)
 	var before := _state(v)
@@ -216,9 +218,12 @@ func _run() -> void:
 	while t < 0.3 - 1.0e-6:
 		await _hold(v, c, c.f, STEP)
 		t += STEP
-		if not _same(before, _state(v)):
+		if not _same(before, _state(v)) or v.cam.h_offset != 0.0 or v.cam.v_offset != 0.0:
 			still = false
-	_check("over 0.3 s of the jolt the VR rig, origin and camera do not move", still)
+	_check("over 0.3 s of the jolt the VR rig, origin and camera do not move, nor its frustum offsets", still)
+	var a40: float = JoltFx.vr_alpha(40.0)
+	var a10: float = JoltFx.vr_alpha(10.0)
+	_check("the headset's red edge: alpha %.2f at 40 degrees off axis (want >= 0.3), %.2f at 10 degrees (want <= 0.05)" % [a40, a10], a40 >= 0.3 and a10 <= 0.05)
 
 	# the thump
 	var played: bool = v.thump != null and v.thump.stream is AudioStreamWAV
@@ -233,6 +238,8 @@ func _run() -> void:
 	v.muted = false
 
 	# a ram with obstacle collisions on: bumps do not make it two
+	var was_collisions: bool = sim.P.obstacleCollisions
+	var was_collide: bool = T.collide
 	sim.P.obstacleCollisions = true
 	T.collide = true
 	c = _stage(v, 0.0)
@@ -241,8 +248,8 @@ func _run() -> void:
 	await _hold(v, c, c.f, 0.9)
 	_check("obstacle collisions on, a ram: %d hit_taken in 0.9 s (want 1) with %d bump events felt (want some)" % [hits, v.bump_hits],
 		hits == 1 and v.bump_hits > 0)
-	sim.P.obstacleCollisions = false
-	T.collide = false
+	sim.P.obstacleCollisions = was_collisions
+	T.collide = was_collide
 
 	# the end: the last raider shot is a clean "cleared"
 	c = _stage(v, 200.0)
@@ -250,6 +257,11 @@ func _run() -> void:
 	T.cars.erase(c)
 	R.update(STEP)
 	_check("the last raider shot: result \"%s\", reason \"%s\"" % [R.result, R._why], R.result == "cleared" and R._why == "")
+	_stage(v, 200.0)          # the case the fix changes: no raider shot or fled, none left
+	R.pack.clear()
+	T.cars.clear()
+	R.update(STEP)
+	_check("an empty pack, none shot, none fled: result \"%s\", reason \"%s\" (want lost, none)" % [R.result, R._why], R.result == "lost" and R._why == "")
 
 	v.queue_free()
 	await process_frame
