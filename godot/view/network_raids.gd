@@ -16,11 +16,18 @@
 ##   var raids := Raids.new(); view.add_child(raids); raids.traffic = view.traffic_net; raids.build(view)
 ##   raids.update(delta)            every frame, after traffic's own update and chase's
 ##   raids.on_kill(car)             a raider shot (the gun's, before traffic.knock_out)
+##   raids.prey_of(car)             a raider's prey: the nearest commuter ahead on its road and way, within 3 km (or null)
 ##   raids.reset()                  on a restart (a crash's respawn it sees for itself: sim.crash_t)
 ##   raids.text()                   the dash's line while a raid is on ("" otherwise)
 ##   raids.result                   "cleared" | "lost", once, for the view to take
-## Log lines (the flight log): RAID: alarm <CITY> <km> | arrived | kill | cleared | lost (<why>)
+## Hunting: each frame a raider takes its prey's lane and the speed of it plus HUNT_DV (headway 0.05), and on contact
+## (CONTACT_ALONG, CONTACT_LAT) the commuter is knocked out and lost; with no prey it cruises at the town limit. A raider
+## gone from traffic without on_kill is fled: no award, kills unchanged.
+## Log lines (the flight log): RAID: alarm <CITY> <km> | arrived | kill | commuter lost | raider fled | cleared | lost (<why>)
 extends Node3D
+
+## A commuter run down, at (x, y) in the sims' frame (for the view's effects).
+signal commuter_lost(x: float, y: float)
 
 const Settings := preload("res://release/game_settings.gd")
 const Traffic := preload("res://view/network_traffic.gd")
@@ -30,6 +37,11 @@ const RAIDER_VISUAL := Traffic.DEMON     # the raiders' model (a demon's, until 
 const READY_V := 900.0 / MPH             # m/s: "at speed", chase's figure
 const ZONE_STEP := 20                    # samples (480 m) between the town zone's points its distance is read from
 const CLEAR_OF_PILOT := 1500.0           # m: no raider is put down nearer the pilot than this (unless the zone has no room)
+const HUNT_DV := 140.0 / MPH             # m/s: a hunting raider's closing speed over its prey
+const CONTACT_ALONG := 30.0              # m along the road, and ...
+const CONTACT_LAT := 12.0                # ... across it: contact with its prey, which is lost
+const RAIDER_HEADWAY := 0.45              # s: a raider's headway with no prey
+const PREY_REACH := 3000.0               # m: the farthest ahead a commuter is its prey
 const HEADING_BELOW := 30.0              # m/s: slower, the pick looks the way the craft points, not the way it goes
 
 static var enabled := false      # raids
@@ -42,9 +54,9 @@ var result := ""
 var tally := {"cleared": 0, "lost": 0}
 var state := ""                  # "" waiting | "called" | "on" | "over" (the lull after one)
 var city := -1                   # the raid's city: an index into sim.cities
-var lost := 0                    # commuters lost: off-screen ticks (and, task 4, the raiders' kills)
+var lost := 0                    # commuters lost: off-screen ticks, and the commuters the raiders ran down
 var kills := 0                   # raiders shot
-var fled := 0                    # raiders gone without being shot (task 4)
+var fled := 0                    # raiders gone without being shot
 var pack: Array = []             # this raid's raiders still in traffic
 var called_m := 0.0              # m to the city (a straight line to its centre) when the alarm went
 # tunables (tests shorten them)
@@ -91,7 +103,7 @@ func build(v) -> void:           # (set `traffic` first: view.traffic_net)
 ## Is the pilot where one can begin: on a public road, not in a shaft, at speed, with traffic's floor free?
 func _ready_for_one() -> bool:
 	var P = sim.pod
-	if P.off_road or traffic.race_state != "":
+	if P.off_road or traffic.race_state != "" or sim.crash_t > 0.0:      # (the craft is down: no alarm until its respawn)
 		return false
 	var R = sim.roads[P.path]
 	return traffic._public_road(R) and not R.shaft and Vector2(P.vx, P.vy).length() > READY_V
@@ -134,10 +146,15 @@ func update(delta: float) -> void:
 			_t += delta
 			for k in range(pack.size() - 1, -1, -1):
 				if not traffic.cars.has(pack[k]):      # shot (on_kill, then knock_out) or gone
+					if not _killed.has(pack[k]):       # gone and not shot: a safety net (traffic never drops one itself)
+						fled += 1
+						print("RAID: raider fled")
 					pack.remove_at(k)
 			if pack.is_empty():
 				_end("cleared" if kills > 0 else "lost", "fled")
 				return
+			for c in pack:
+				_hunt(c, delta)
 			_away = _away + delta if _gap(city) > Traffic.R_KEEP else 0.0
 			if _away >= away_t:
 				_end("lost", "away")
@@ -279,10 +296,10 @@ func _arrive() -> void:
 		c.dir = way
 		c.f = float(room[int((k + 0.5) * room.size() / n)])
 		c.v = Traffic.SF_V
-		c.vdes = Traffic.SF_V          # the town's limit (task 4 sets it toward its prey)
+		c.vdes = Traffic.SF_V          # the town's limit (_hunt sets it toward its prey)
 		c.a_up = 3.0 * Traffic.G
 		c.a_lat = 11.0 * Traffic.G
-		c.headway = 0.45
+		c.headway = RAIDER_HEADWAY
 		c.turn_p = 0.0                 # it keeps to the city's road
 		c.col = Traffic.HOSTILE_COL
 		c.nsp_road = -1
@@ -302,6 +319,54 @@ func _arrive() -> void:
 	_t = 0.0
 	_away = 0.0
 	print("RAID: arrived")
+
+
+## The raider's prey: the nearest commuter (not hostile) ahead of it on its road and way, within PREY_REACH m, or null.
+## One it has just passed within contact range still counts (it may yet be run down).
+func prey_of(c) -> Variant:
+	var R = sim.roads[c.road]
+	var m: float = R.len[clampi(int(c.f), 0, R.N - 1)]
+	var best = null
+	var bd := INF
+	for o in traffic.cars:
+		if o.hostile or o.road != c.road or o.dir != c.dir:
+			continue
+		var along: float = (o.f - c.f) * c.dir * m
+		if along < -CONTACT_ALONG or along > PREY_REACH or along >= bd:
+			continue
+		bd = along
+		best = o
+	return best
+
+
+## One raider's driving: after its prey's lane, at its speed plus HUNT_DV, close behind (headway 0.05); with no prey,
+## the town's limit. Contact runs the commuter down.
+func _hunt(c, delta: float) -> void:
+	var p = prey_of(c)
+	if p == null:
+		c.vdes = Traffic.SF_V
+		c.headway = RAIDER_HEADWAY
+		return
+	c.lane = p.lane
+	c.vdes = p.v + HUNT_DV
+	c.headway = 0.05
+	var R = sim.roads[c.road]
+	var along: float = (p.f - c.f) * c.dir * float(R.len[clampi(int(c.f), 0, R.N - 1)])
+	if absf(along) <= CONTACT_ALONG and absf(p.lat - c.lat) <= CONTACT_LAT:
+		_run_down(p)
+
+
+## A commuter run down: out of traffic, a flash, lost.
+func _run_down(p) -> void:
+	traffic.knock_out(p)
+	lost += 1
+	print("RAID: commuter lost")
+	commuter_lost.emit(p.x, p.y)
+	var gun = view.gunnery if view != null else null
+	if gun != null:       # (the Basilisk's effects, where the craft has them)
+		var at := Vector3(p.x, p.y, gun.ground_at(p.x, p.y) + 2.0)
+		gun._add_fx(at, "fireball", 0.9, 34.0)
+		gun._add_fx(at, "flash", 0.12, 90.0)
 
 
 ## A raider shot (the gun's: before traffic.knock_out takes it out of traffic).

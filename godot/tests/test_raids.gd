@@ -16,6 +16,9 @@
 ##   time       time_limit after arriving: lost, the pack taken out of traffic
 ##   respawn    a restart mid-raid: no hostiles left, the floor free, no result
 ##   crash      a wreck mid-raid (the sim's own: its "wreck", then its respawn when crash_t runs out): the same
+##   hunt       (task 4) a raider 600 m behind a commuter in its lane runs it down (it is lost); it takes its prey's
+##              lane; a raider has no hostile for prey, nor one behind, the other way or 3 km on; one erased from
+##              traffic without a kill is fled (no award); a wreck holds the alarm off until the respawn
 ##   pause      the cockpit's FLIGHT HOLD menu (in the headset) and the desktop pause (the tree paused,
 ##              release/pause_overlay.gd) hold the raid's clocks; resumed, they run on
 ## Run with --fixed-fps 120 (see _fly). Prints RAIDS PASS.
@@ -169,6 +172,79 @@ func _nearest(v, last: int, exclude := true, ahead := true) -> int:
 func _last(R) -> int:
 	var l = R.get("_last_city")
 	return -1 if l == null else int(l)
+
+
+var _ids := 0
+
+
+## A car of the test's on `road` at sample f going dir, in `lane`, at v m/s: a raider (hostile, as the director's own
+## are made) or a commuter. Held in traffic's cars.
+func _car(T, road: int, f: float, dir: int, lane: int, v: float, raider: bool):
+	var c = T.Car.new()
+	_ids += 1
+	c.id = (960500 if raider else 950500) + _ids
+	c.road = road
+	c.dir = dir
+	c.f = f
+	c.v = v
+	c.vdes = v
+	c.turn_p = 0.0
+	c.nsp_road = -1
+	c.lane = lane
+	c.lat = T._lane_lat(c, lane)
+	if raider:
+		c.kind = T.DEMON
+		c.visual = T.DEMON
+		c.hostile = true
+		c.name = "RAIDER"
+		c.a_up = 3.0 * T.G
+		c.a_lat = 11.0 * T.G
+		c.headway = 0.45
+		c.col = T.HOSTILE_COL
+	else:
+		c.kind = T.CAR
+	T._place(c)
+	T.cars.append(c)
+	return c
+
+
+## The hunt's stage: the craft on `e3` (road, sample, way), a raid on with the director's own clocks long, and none
+## of traffic's cars left. -> [road, the sample 250 on, m a sample there].
+func _stage(v, e3: Array, city: int) -> Array:
+	var R = v.raids
+	var T = v.traffic_net
+	R.reset()
+	R.time_limit = 1.0e9
+	R.away_t = 1.0e9
+	_put_pilot(v, e3[0], e3[1], e3[2])
+	T.cars.clear()
+	R.state = "on"
+	R.city = city
+	T.race_state = "raid"
+	var RR = v.sim.roads[e3[0]]
+	var s0: int = e3[1] + 250
+	return [int(e3[0]), s0, float(RR.len[s0])]
+
+
+## Fly frames with the craft held where it is (the cars of `keep` are the only ones in traffic), until `seconds`
+## are gone or `until` says so: the seconds flown.
+func _hold(v, seconds: float, keep: Array, until := Callable()) -> float:
+	var t := 0.0
+	var T = v.traffic_net
+	while t < seconds - 1.0e-6:
+		for body in v.sim.bodies:
+			body.vx = 0.0
+			body.vy = 0.0
+		v.inp = {"thrL": 1.0, "thrR": 1.0, "brkL": 0.0, "brkR": 0.0, "repair": false, "reignite": true, "burner": false}
+		v._process(STEP)
+		await process_frame
+		for c in T.cars.duplicate():
+			if not keep.has(c):
+				T.cars.erase(c)
+		t += STEP
+		if until.is_valid() and until.call():
+			break
+	return t
 
 
 func _run() -> void:
@@ -453,6 +529,100 @@ func _run() -> void:
 	v.set_process(false)
 	_check("the tree paused for 60 frames: the view and the director are not processed (%s), the clocks hold (%s); unpaused, they run on (%.2f s to %.2f)" % [stopped, p_snap == ran_on, p_snap[1], resumed[1]],
 		stopped and p_snap == ran_on and resumed[1] > p_snap[1] + 0.4)
+
+	# raiders hunt (task 4): each on the stage of _stage, the raid held "on"
+	# hunts: a raider 600 m behind a commuter in its lane on a straight runs it down
+	var st := _stage(v, e3, X)
+	var nl: int = T._lanes[st[0]].size()
+	var h_raider = _car(T, st[0], st[1], 1, 0, 80.0, true)
+	var h_prey = _car(T, st[0], st[1] + 600.0 / st[2], 1, 0, 80.0, false)
+	R.pack.append(h_raider)
+	var is_prey: bool = R.prey_of(h_raider) == h_prey
+	var h_took: float = await _hold(v, 15.0, [h_raider, h_prey], func(): return not T.cars.has(h_prey))
+	var h_gone: bool = not T.cars.has(h_prey)
+	_check("a raider 600 m behind a commuter in its lane (its prey %s; %d lanes): the commuter knocked out after %.1f s (%s), lost %d (want 1), the raider still hunting (%s, state \"%s\"), no kill counted (%d)" % [
+			is_prey, nl, h_took, h_gone, R.lost, T.cars.has(h_raider) and R.pack.has(h_raider), R.state, R.kills],
+		is_prey and h_gone and h_took <= 15.0 and R.lost == 1 and T.cars.has(h_raider) and R.state == "on" and R.kills == 0)
+
+	# lane change: the prey one lane over, the raider takes its lane
+	st = _stage(v, e3, X)
+	var l_raider = _car(T, st[0], st[1], 1, 0, 80.0, true)
+	var l_prey = _car(T, st[0], st[1] + 600.0 / st[2], 1, nl - 1, 80.0, false)
+	R.pack.append(l_raider)
+	var l_took: float = await _hold(v, 3.0, [l_raider, l_prey], func(): return l_raider.lane == l_prey.lane)
+	await _hold(v, STEP, [l_raider, l_prey])
+	_check("the prey in lane %d of %d, the raider starting in lane 0: its lane %d after %.2f s (within 3 s), and the prey's %d; vdes %.0f m/s (the prey's %.0f + %.0f)" % [
+			l_prey.lane, nl, l_raider.lane, l_took, l_prey.lane, l_raider.vdes, l_prey.v, R.HUNT_DV],
+		nl >= 2 and l_prey.lane != 0 and l_took <= 3.0 and l_raider.lane == l_prey.lane and absf(l_raider.vdes - (l_prey.v + R.HUNT_DV)) < 0.01)
+
+	# ignores hostiles, and what is not its prey: behind, going the other way, beyond 3 km
+	st = _stage(v, e3, X)
+	var i_a = _car(T, st[0], st[1], 1, 0, 80.0, true)
+	var i_b = _car(T, st[0], st[1] + 400.0 / st[2], 1, 0, 80.0, true)
+	R.pack.append(i_a)
+	R.pack.append(i_b)
+	var two_null: bool = R.prey_of(i_a) == null and R.prey_of(i_b) == null
+	_car(T, st[0], st[1] - 100.0 / st[2], 1, 0, 80.0, false)
+	_car(T, st[0], st[1] + 800.0 / st[2], -1, 0, 80.0, false)
+	_car(T, st[0], st[1] + 3500.0 / st[2], 1, 0, 80.0, false)
+	var none_of_those: bool = R.prey_of(i_a) == null and R.prey_of(i_b) == null
+	_car(T, st[0], st[1] + 2500.0 / st[2], 1, 0, 80.0, false)
+	var i_nearer = _car(T, st[0], st[1] + 1500.0 / st[2], 1, 0, 80.0, false)
+	var picks: bool = R.prey_of(i_a) == i_nearer and R.prey_of(i_b) == i_nearer
+	_check("two raiders and no commuter: neither has a prey (%s); with one behind, one going the other way and one 3.5 km on: still none (%s); with others 1.5 and 2.5 km on: the nearer (%s)" % [two_null, none_of_those, picks],
+		two_null and none_of_those and picks)
+
+	# a raider gone without a kill is fled; no award
+	st = _stage(v, e3, X)
+	var f_a = _car(T, st[0], st[1], 1, 0, 80.0, true)
+	R.pack.append(f_a)
+	var tally_f: Dictionary = R.tally.duplicate()
+	T.cars.erase(f_a)
+	await _hold(v, STEP, [])
+	_check("the one raider erased from traffic: fled %d (want 1), kills %d (want 0), \"%s\" (want \"lost\"; %s), tallied lost %d (was %d), the floor \"%s\", no hostiles (%d)" % [
+			R.fled, R.kills, R.result, R._why, R.tally.lost, tally_f.lost, T.race_state, T.hostiles().size()],
+		R.fled == 1 and R.kills == 0 and R.result == "lost" and int(R.tally.lost) == int(tally_f.lost) + 1 and T.race_state == "" and T.hostiles().is_empty())
+	st = _stage(v, e3, X)
+	var g_a = _car(T, st[0], st[1], 1, 0, 80.0, true)
+	var g_b = _car(T, st[0], st[1] + 100.0 / st[2], 1, 1 % nl, 80.0, true)
+	R.pack.append(g_a)
+	R.pack.append(g_b)
+	T.cars.erase(g_a)
+	await _hold(v, STEP, [g_b])
+	var one_fled: bool = R.fled == 1 and R.kills == 0 and R.state == "on" and R.result == ""
+	var tally_g: Dictionary = R.tally.duplicate()
+	R.on_kill(g_b)
+	T.knock_out(g_b)
+	await _hold(v, STEP, [])
+	_check("two raiders, one erased: fled 1, no kill, the raid on (%s); the other shot: cleared (\"%s\"), kills %d (want 1), fled %d (want 1), tallied cleared %d (was %d)" % [
+			one_fled, R.result, R.kills, R.fled, R.tally.cleared, tally_g.cleared],
+		one_fled and R.result == "cleared" and R.kills == 1 and R.fled == 1 and int(R.tally.cleared) == int(tally_g.cleared) + 1)
+
+	# no alarm while the craft is down: a wreck with the clock just short of first_after
+	R.reset()
+	T.cars.clear()
+	R.first_after = 3.0
+	R._count = 0
+	_put_pilot(v, e3[0], e3[1], e3[2])
+	R._clock = R.first_after - 0.05
+	sim.pod.health = 0.0
+	var alarmed := false
+	var w_t := 0.0
+	var w_down := false
+	while w_t < 3.0:
+		await _fly(v, STEP)
+		w_t += STEP
+		w_down = w_down or sim.crash_t > 0.0
+		if R.state != "":
+			alarmed = true
+			break
+		if w_down and sim.crash_t <= 0.0:
+			break
+	_check("wrecked with the clock 0.05 s short of first_after: the craft down (%s), no alarm from it or before its respawn after %.2f s (state \"%s\", health %.0f)" % [
+			w_down, w_t, R.state, sim.pod.health],
+		w_down and not alarmed and R.state == "" and sim.pod.health > 0.0)
+	R.reset()
+	T.cars.clear()
 
 	chase.free()
 	v.queue_free()
