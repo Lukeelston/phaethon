@@ -5,8 +5,13 @@ extends Node3D
 const Talon := preload("res://view/talon_airframe.gd")
 const Finish := preload("res://view/craft_materials.gd")
 const Kit := preload("res://view/mesh_kit.gd")
-const TRAVEL := 1.22
-const STOWED_TIP_Z := -0.20
+const TRAVEL := 0.83
+const STOWED_TIP_Z := Talon.GUN_FRONT + 0.085
+const LIFT_ARM := 0.53
+const LOW_ANGLE := deg_to_rad(9.0)
+const HIGH_ANGLE := deg_to_rad(69.0)
+const PIVOTS := [-1.48, -0.78]
+const PIVOT_Y := -0.022
 const SIDES := 16
 const CARBON := Color(0.115, 0.14, 0.16)
 const BLUED := Color(0.23, 0.30, 0.34)
@@ -16,8 +21,9 @@ const COOL := Color(0.12, 0.04, 0.012)
 const HOT := Color(1.0, 0.34, 0.055)
 
 var hull: MeshInstance3D
-var upper: MeshInstance3D
-var lower: MeshInstance3D
+var carriage: MeshInstance3D
+var caps: MeshInstance3D
+var links: Array[MeshInstance3D] = []
 var barrels: MeshInstance3D
 var throats: StandardMaterial3D
 var mouths: Array[Marker3D] = []
@@ -38,9 +44,25 @@ func build(visible_hull: MeshInstance3D) -> void:
 	if get_parent() == null:
 		hull.add_child(self)
 	var pal: Dictionary = hull.mesh.get_meta(&"talon_palette")
-	upper = _part("UpperShutters", _shutters(true, pal))
-	lower = _part("LowerShutters", _shutters(false, pal))
+	var skin := SurfaceTool.new()
+	skin.begin(Mesh.PRIMITIVE_TRIANGLES)
+	Talon.add_gun_carriages(skin, pal)
+	skin.index()
+	carriage = _part("GunCarriages", skin.commit())
+	carriage.material_override = Finish.painted_metal()
+	skin = SurfaceTool.new()
+	skin.begin(Mesh.PRIMITIVE_TRIANGLES)
+	Talon.add_gun_caps(skin, pal)
+	skin.index()
+	caps = _part("MuzzleCaps", skin.commit())
+	caps.material_override = carriage.material_override
 	barrels = _part("WingGuns", _barrels())
+	var link_mesh := _lift_links(pal)
+	for z: float in PIVOTS:
+		var link := _part("FrontLinks" if links.is_empty() else "RearLinks", link_mesh)
+		link.position = Vector3(0, PIVOT_Y, z)
+		link.material_override = Finish.painted_metal()
+		links.append(link)
 	for side: float in [-1.0, 1.0]:
 		var mouth := Marker3D.new()
 		mouth.name = "PortMouth" if side < 0.0 else "StarboardMouth"
@@ -73,13 +95,16 @@ func set_deploy(t: float) -> void:
 		hide()
 	else:
 		show()
-	# The shutters run aft into the wing. Their lips clear the tips before the guns advance.
-	var door := smoothstep(0.0, 0.45, deploy)
-	upper.position = Vector3(0, -0.033 * door, 0.60 * door)
-	lower.position = Vector3(0, 0.033 * door, 0.60 * door)
-	upper.visible = door < 1.0
-	lower.visible = upper.visible
-	barrels.position.z = -TRAVEL * smoothstep(0.26, 1.0, deploy)
+	# Parallel lift arms keep the two bores level as their housings rise and advance.
+	# Their painted backs clear the cockpit rails before the inner tubes extend.
+	var lift := lerpf(LOW_ANGLE, HIGH_ANGLE, smoothstep(0.0, 1.0, deploy))
+	for link in links:
+		link.rotation.x = -lift
+	var raised := Vector3(0, sin(lift) - sin(LOW_ANGLE), cos(lift) - cos(LOW_ANGLE)) * LIFT_ARM
+	carriage.position = raised
+	var cap_rotation := Basis(Vector3.RIGHT, deg_to_rad(104.0) * smoothstep(0, 0.50, deploy))
+	caps.transform = Transform3D(cap_rotation, raised + Talon.SHUTTER_PIN - cap_rotation * Talon.SHUTTER_PIN)
+	barrels.position = raised + Vector3.FORWARD * TRAVEL * smoothstep(0.30, 1, deploy)
 
 
 func muzzles() -> Array:
@@ -90,34 +115,24 @@ func muzzles() -> Array:
 
 
 static func _axis(side: float) -> Vector3:
-	var row := Talon.gun_station((Talon.GUN_SPAN.x + Talon.GUN_SPAN.y) * 0.5)
-	return Vector3(float(row[0]) * side, row[1], 0.0)
+	return Vector3(Talon.GUN_X * side, Talon.GUN_Y, 0.0)
 
 
-## The same wing stations, facet colours and painted metal as the non-moving leading edge.
-static func _shutters(top: bool, pal: Dictionary) -> ArrayMesh:
-	var st := SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+## Two cheek links around each breech. They share across port and starboard, and this
+## one mesh fits both pivot stations. Titanium eyes catch the changing light in flight.
+static func _lift_links(pal: Dictionary) -> ArrayMesh:
+	var parts := []
+	var pin := Kit.cyl(.046, .046, .223, 12)
+	var boss := Kit.cyl(.042, .042, .008, 12)
+	var beam := Kit.rounded_box(Vector3(.038, .068, LIFT_ARM), 6.0, 6)
 	for side: float in [-1.0, 1.0]:
-		var rows := []
-		for x: float in [Talon.GUN_SPAN.x, Talon.GUN_SPAN.y]:
-			var row := Talon.gun_station(x)
-			var points := PackedVector3Array()
-			for i in Talon.CHORD.size():
-				points.append(Vector3(side * x, row[1] + row[4] * Talon.CAMBER[i], lerpf(row[2], row[3], Talon.CHORD[i])))
-			rows.append(points)
-		var a: PackedVector3Array = rows[0]
-		var b: PackedVector3Array = rows[1]
-		var normal := Vector3.UP if top else Vector3.DOWN
-		for i: int in ([0, 1] if top else [9]):
-			var j := (i + 1) % Talon.CHORD.size()
-			var color: Color = (pal.metal if i == 0 else pal.trim) if top else pal.body
-			Talon._face(st, a[i], a[j], b[j], normal, color)
-			Talon._face(st, a[i], b[j], b[i], normal, color)
-	st.index()
-	var mesh := st.commit()
-	mesh.surface_set_material(0, Finish.painted_metal())
-	return mesh
+		var x := Talon.GUN_X * side
+		for offset: float in [-.091, .091]:
+			parts.append([beam, Kit.at(Vector3(x + offset, 0, LIFT_ARM * .5)), pal.panel])
+		for z: float in [0.0, LIFT_ARM]:
+			parts.append([pin, Kit.at(Vector3(x, 0, z), Vector3(0, 0, PI / 2)), pal.metal])
+			parts.append([boss, Kit.at(Vector3(x - side * .114, 0, z), Vector3(0, 0, PI / 2)), pal.trim])
+	return Kit.compound(parts, null, true)
 
 
 ## Axially profiled, hollow tips, interrupted heat vents and a faired breech. Both guns share two surfaces.

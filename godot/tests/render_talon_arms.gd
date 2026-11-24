@@ -49,19 +49,24 @@ func _run() -> void:
 	var guns := Talon.wing_arms(hull)
 	var cam := game.cam as Camera3D
 	var cab := hull.global_transform
-	for state in ["stowed", "deployed"]:
-		guns.set_deploy(0.0 if state == "stowed" else 1.0)
-		guns.heat = 0.0 if state == "stowed" else 0.65
+	var eye_pose := cam.global_transform
+	var eye_fov := cam.fov
+	var phases := [["stowed", 0.0], ["quarter", 0.25], ["half", 0.5],
+			["three-quarter", 0.75], ["deployed", 1.0], ["return-half", 0.5]]
+	for phase in phases:
+		var state: String = phase[0]
+		guns.set_deploy(phase[1])
+		# Cold lighting in every phase: arming must read from geometry alone.
+		guns.heat = 0.0
 		for view in ["exterior", "seat"]:
 			if view == "exterior":
 				cam.global_position = cab * Vector3(3.25, 2.75, -6.20)
 				cam.look_at(cab * Vector3(0.0, -0.15, -0.05), cab.basis.y)
 				cam.fov = 36
 			else:
-				var rig: Transform3D = game.rig.global_transform
-				cam.global_position = rig * Seat.EYE
-				cam.look_at(cam.global_position + rig.basis * Vector3(0, -0.12, -1), rig.basis.y)
-				cam.fov = 85
+				# Unmodified production cockpit eye, pitch, and field of view.
+				cam.global_transform = eye_pose
+				cam.fov = eye_fov
 			for i in 4:
 				await process_frame
 			await RenderingServer.frame_post_draw

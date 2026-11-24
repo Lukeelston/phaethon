@@ -38,7 +38,11 @@ const TAIL := [
 # Leading-edge erosion strip, upper skin, control-surface joint and bevelled trailing edge.
 const CHORD := [0.0, 0.045, 0.15, 0.44, 0.715, 0.73, 0.965, 1.0, 0.72, 0.20]
 const CAMBER := [0.0, 0.22, 0.50, 0.47, 0.28, 0.26, 0.08, -0.04, -0.46, -0.50]
-const GUN_SPAN := Vector2(1.31, 1.54)    # leading-edge bay, between the chine and the wing's outer crank
+const GUN_X := 1.36                # the carrier sits at the wing's root, clear of the tow-link path
+const GUN_Y := 0.115
+const GUN_FRONT := -1.78
+const GUN_APERTURE := 0.091
+const SHUTTER_PIN := Vector3(0, GUN_Y + GUN_APERTURE, GUN_FRONT - 0.005)
 static var _gun_hulls := {}              # the alternate wing skins, per stock hull (paint and open/closed nose)
 # Where the lamps and hinges stand on what Codex drew (craft_model reads them).
 const WINGTIP_LAMP := Vector3(2.91, -0.062, 1.59)    # pod-local, x mirrored: the wing's tip
@@ -99,11 +103,9 @@ static func _centre(ring: PackedVector3Array) -> Vector3:
 
 ## Connect two convex sections; auto-orienting against their axis also handles
 ## mirrored port parts without negative scales or inverted specular highlights.
-static func _band(st: SurfaceTool, a: PackedVector3Array, b: PackedVector3Array, colors: Array, omit := 0) -> void:
+static func _band(st: SurfaceTool, a: PackedVector3Array, b: PackedVector3Array, colors: Array) -> void:
 	var centre := (_centre(a) + _centre(b)) * 0.5
 	for i in a.size():
-		if (omit & (1 << i)) != 0:
-			continue
 		var j := (i + 1) % a.size()
 		var outward := (a[i] + a[j] + b[i] + b[j]) * 0.25 - centre
 		_face(st, a[i], a[j], b[j], outward, colors[i])
@@ -116,7 +118,7 @@ static func _cap(st: SurfaceTool, ring: PackedVector3Array, outside: Vector3, co
 		_face(st, ring[i], ring[(i + 1) % ring.size()], centre, outside, color)
 
 
-static func _foil(st: SurfaceTool, stations: Array, origin: Vector3, span: Vector3, up: Vector3, stripe: Color, edge: Color, pal: Dictionary, gun_bays := false) -> void:
+static func _foil(st: SurfaceTool, stations: Array, origin: Vector3, span: Vector3, up: Vector3, stripe: Color, edge: Color, pal: Dictionary) -> void:
 	var base := [pal.metal, stripe, pal.panel, pal.panel, pal.cavity, pal.body, pal.metal, pal.body, (pal.panel as Color).darkened(0.25), pal.body]
 	var last := PackedVector3Array()
 	for row in stations:
@@ -133,16 +135,7 @@ static func _foil(st: SurfaceTool, stations: Array, origin: Vector3, span: Vecto
 			if row == stations.back():
 				colors[2] = stripe
 				colors[3] = edge
-			if gun_bays and is_equal_approx(float(row[0]), GUN_SPAN.y):
-				# The two top strips and the lower leading skin travel with the shutters.
-				_band(st, last, ring, colors, (1 << 0) | (1 << 1) | (1 << 9))
-				for wall in [last, ring]:
-					var rim := PackedVector3Array([wall[0], wall[1], wall[2], wall[9]])
-					_cap(st, rim, span if wall == last else -span, pal.cavity)
-				_face(st, last[2], ring[2], ring[9], Vector3.FORWARD, pal.cavity)
-				_face(st, last[2], ring[9], last[9], Vector3.FORWARD, pal.cavity)
-			else:
-				_band(st, last, ring, colors)
+			_band(st, last, ring, colors)
 		last = ring
 	_cap(st, last, span, edge)
 
@@ -242,10 +235,6 @@ static func add_pod(mesh: ArrayMesh, closed_nose: bool, pal: Dictionary, gun_bay
 	var panel: Color = pal.panel
 	var cavity: Color = pal.cavity
 	var sides := [body, panel, body, panel.lightened(0.14), panel, body, cavity]
-	var wing := WING.duplicate()
-	if gun_bays:
-		wing.insert(2, gun_station(GUN_SPAN.x))
-		wing.insert(3, gun_station(GUN_SPAN.y))
 	if closed_nose:
 		# Two removable dorsal panels. The ridge is shallow enough to sit below
 		# the seated eye. Their chamfers leave a dark expansion joint over the tub.
@@ -261,7 +250,7 @@ static func add_pod(mesh: ArrayMesh, closed_nose: bool, pal: Dictionary, gun_bay
 				[-0.655, 0.47, -0.032, 0.47, 0.055, 0.018]], side, deck, cavity)
 	for side: float in [-1.0, 1.0]:
 		var span := Vector3.RIGHT * side
-		_foil(st, wing, Vector3.ZERO, span, Vector3.UP, pal.trim, body, pal, gun_bays)
+		_foil(st, WING, Vector3.ZERO, span, Vector3.UP, pal.trim, body, pal)
 		var cant := Vector3(side * 0.42, 0.908, 0)
 		_foil(st, TAIL, Vector3(side * 0.84, -0.12, 0), cant, Vector3(side * 0.908, -0.42, 0), pal.trim, pal.tip, pal)
 		# A continuous line from the beak to the cockpit shoulder and the trim jet.
@@ -310,6 +299,12 @@ static func add_pod(mesh: ArrayMesh, closed_nose: bool, pal: Dictionary, gun_bay
 	_chine(st, [[1.28, 0, 0.06, 0.23, 0.125, 0.13], [1.48, 0, 0.055, 0.54, 0.185, 0.22],
 		[1.88, 0, -0.02, 0.54, 0.19, 0.21], [2.27, 0, -0.085, 0.32, 0.12, 0.15],
 		[2.56, 0, -0.13, 0.10, 0.05, 0.07]], 1.0, [panel, body, panel, body, panel, body, body], cavity)
+	# The fixed sills are part of the wing. Closed, their two painted upper
+	# carriages and intake caps are baked into this same draw surface.
+	add_gun_sills(st, pal)
+	if not gun_bays:
+		add_gun_carriages(st, pal)
+		add_gun_caps(st, pal)
 	_markings(st, pal)
 	st.index()
 	st.commit(mesh)
@@ -320,12 +315,84 @@ static func add_pod(mesh: ArrayMesh, closed_nose: bool, pal: Dictionary, gun_bay
 	mesh.set_meta(&"talon_palette", pal)
 
 
-## The two extra sections are inside the straight inner wing panel.
-static func gun_station(x: float) -> Array:
-	var a: Array = WING[1]
-	var b: Array = WING[2]
-	var t := inverse_lerp(a[0], b[0], x)
-	return [x, lerpf(a[1], b[1], t), lerpf(a[2], b[2], t), lerpf(a[3], b[3], t), lerpf(a[4], b[4], t)]
+## Sections of the wing-root cassette, authored from its front face to its rear.
+## The contrasting cheek stripes and beveled tail are visible from the seat.
+static func _gun_section(x: float, y: float, z: float, w: float, h: float) -> PackedVector3Array:
+	var ring := PackedVector3Array()
+	for p: Vector2 in [Vector2(-1, -0.42), Vector2(-0.62, -1), Vector2(0.62, -1),
+			Vector2(1, -0.42), Vector2(1, 0.40), Vector2(0.65, 1), Vector2(-0.65, 1), Vector2(-1, 0.40)]:
+		ring.append(Vector3(x + p.x * w, y + p.y * h, z))
+	return ring
+
+
+static func add_gun_sills(st: SurfaceTool, pal: Dictionary) -> void:
+	for side: float in [-1.0, 1.0]:
+		var x := GUN_X * side
+		# A shallow structural extension of the swept wing, under the nested parallelograms.
+		var last := PackedVector3Array()
+		for section: Vector4 in [Vector4(-1.76, -0.025, .117, .03), Vector4(-1.63, -0.035, .154, .063),
+				Vector4(-1.06, -0.058, .175, .097), Vector4(-.58, -0.07, .185, .107), Vector4(.29, -.086, .151, .08)]:
+			var ring := _gun_section(x, section.y, section.x, section.z, section.w)
+			if last.is_empty():
+				_cap(st, ring, Vector3.FORWARD, pal.metal)
+			else:
+				_band(st, last, ring, [pal.body, pal.body, pal.body, pal.panel, pal.trim, pal.cavity, pal.trim, pal.panel])
+			last = ring
+		_cap(st, last, Vector3.BACK, pal.panel)
+
+
+static func add_gun_carriages(st: SurfaceTool, pal: Dictionary) -> void:
+	for side: float in [-1.0, 1.0]:
+		var x := GUN_X * side
+		var last := PackedVector3Array()
+		for section: Vector3 in [Vector3(GUN_FRONT, .134, .120), Vector3(-1.74, .141, .13),
+				Vector3(-1.56, .15, .138), Vector3(-1.51, .151, .138), Vector3(-.71, .157, .135),
+				Vector3(-.67, .156, .134), Vector3(-.30, .135, .12), Vector3(-.08, .095, .093)]:
+			var ring := _gun_section(x, GUN_Y, section.x, section.y, section.z)
+			if last.is_empty():
+				# An actual open throat. Match pairs of vertices on the 16-sided liner
+				# to each flat on the octagonal housing, without a cap across the muzzle.
+				var inner := PackedVector3Array()
+				for i in 16:
+					var angle := deg_to_rad(-157.5) + TAU * i / 16.0
+					inner.append(Vector3(x + GUN_APERTURE * cos(angle), GUN_Y + GUN_APERTURE * sin(angle), GUN_FRONT))
+				for i in ring.size():
+					var j := (i + 1) % ring.size()
+					var k := i * 2
+					_face(st, ring[i], inner[k], inner[k + 1], Vector3.FORWARD, pal.metal)
+					_face(st, ring[i], inner[k + 1], ring[j], Vector3.FORWARD, pal.metal)
+					_face(st, ring[j], inner[k + 1], inner[j * 2], Vector3.FORWARD, pal.metal)
+				for i in inner.size():
+					var j := (i + 1) % inner.size()
+					var back := Vector3.BACK * 0.35
+					var inward := Vector3(x, GUN_Y, GUN_FRONT) - inner[i]
+					_face(st, inner[i], inner[i] + back, inner[j] + back, inward, pal.cavity)
+					_face(st, inner[i], inner[j] + back, inner[j], inward, pal.cavity)
+			else:
+				var colors := [pal.body, pal.cavity, pal.body, pal.panel, pal.trim, pal.body, pal.trim, pal.panel]
+				if is_equal_approx(section.x, -1.51) or is_equal_approx(section.x, -.67):
+					colors = [pal.cavity, pal.cavity, pal.cavity, pal.metal, pal.metal, pal.metal, pal.metal, pal.metal]
+				_band(st, last, ring, colors)
+			last = ring
+		_cap(st, last, Vector3.BACK, pal.panel)
+
+
+static func add_gun_caps(st: SurfaceTool, pal: Dictionary) -> void:
+	var rim_colors := []
+	rim_colors.resize(16)
+	rim_colors.fill(pal.metal)
+	for side: float in [-1.0, 1.0]:
+		var front := PackedVector3Array()
+		var rear := PackedVector3Array()
+		var centre := Vector3(GUN_X * side, GUN_Y, SHUTTER_PIN.z)
+		for i in 16:
+			var angle := TAU * i / 16.0 + deg_to_rad(22.5)
+			var radial := Vector3(cos(angle), sin(angle), 0)
+			front.append(centre + radial * (GUN_APERTURE - .001) + Vector3.FORWARD * .004)
+			rear.append(centre + radial * (GUN_APERTURE - .001) + Vector3.BACK * .003)
+		_cap(st, front, Vector3.FORWARD, pal.body)
+		_band(st, front, rear, rim_colors)
+		_cap(st, rear, Vector3.BACK, pal.panel)
 
 
 ## Keep the stock mesh on every other Talon, including an unarmed partner beside the pilot.
