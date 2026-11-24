@@ -595,7 +595,10 @@ func _run() -> void:
 			sooner, back_in, ticks, later, _saved().get("tactical_pace", "nothing")],
 		absf(sooner - Console.value_at("pace", deg_to_rad(40.0))) < 0.002 and sooner < 1.0 and back_in == 1.0 and ticks.has("notch") and later > 1.3
 		and absf(float(_saved().get("tactical_pace", -1.0)) - later) < 0.001 and c.knob_held == [null, null])
-	_check("the cockpit hands both on in one place, _apply_tactical_knobs, for the tactical display's own settings at the merge", v.has_method("_apply_tactical_knobs"))
+	# (merged with the tactical display's own settings, push 44: the knobs reach the display as they are turned)
+	_check("the knobs' settings reach the tactical display, which reads them every frame: pace %.3f against TAC WARN's %.3f, dim %.3f against TAC DIM's %.3f" % [
+			Tactical.pace, Cockpit.tactical_pace, Tactical.dim, Cockpit.tactical_dim],
+		v.has_method("_apply_tactical_knobs") and Tactical.pace == Cockpit.tactical_pace and Tactical.dim == Cockpit.tactical_dim and Tactical.pace > 1.3)
 	var dim_saved: float = Cockpit.tactical_dim
 	var pace_saved: float = Cockpit.tactical_pace
 
@@ -652,6 +655,8 @@ func _run() -> void:
 	View.power_ups_on = true
 	Cockpit.speed_rush = true
 	Tactical.wanted = false
+	Tactical.pace = 1.0      # (the knobs reach the display now: put its settings back for whatever runs next in this process)
+	Tactical.dim = 1.0
 	print("CONSOLE SWITCHES %s (%d checks, %d failures)" % ["PASS" if failures == 0 else "FAIL", checks, failures])
 	quit(0 if failures == 0 else 1)
 

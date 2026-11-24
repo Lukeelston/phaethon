@@ -1673,13 +1673,10 @@ func _work_console(did: String, hand: XRController3D = null) -> void:
 		print("CONSOLE: tactical dim %.2f, pace %.2f" % [tactical_dim, tactical_pace])
 
 
-## The two knobs' settings, handed to the tactical display. MERGE: the main session connects this to the display's
-## own settings, which another helper is adding in view/tactical_display.gd (neither is there at d193f50, so this does
-## nothing yet):
-##   TacticalScript.pace = tactical_pace      # the right console's TAC WARN: how soon the rails warn of a bend
-##   TacticalScript.dim = tactical_dim        # the left console's TAC DIM: the display's brightness
+## The two knobs' settings, handed to the tactical display (view/tactical_display.gd reads both every frame).
 func _apply_tactical_knobs() -> void:
-	pass
+	TacticalScript.pace = tactical_pace      # the right console's TAC WARN: how soon the rails warn of a bend (lower sooner)
+	TacticalScript.dim = tactical_dim        # the left console's TAC DIM: the display's brightness
 
 
 ## The consoles' switches, a frame: each bat where its OPTIONS line stands (the menu's change shows at once), lit at
