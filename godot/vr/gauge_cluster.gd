@@ -32,6 +32,7 @@ extends Node3D
 const Kit := preload("res://view/mesh_kit.gd")
 const Finish := preload("res://view/craft_materials.gd")
 const Layout := preload("res://vr/gauge_layout.gd")
+const FleetDeck := preload("res://vr/fleet_flight_deck.gd")
 const Classic := preload("res://vr/dashboard.gd")
 const Interior := preload("res://vr/cockpit_interior.gd")
 const BODY := "res://art/cockpit/gauges_hd.glb"
@@ -87,6 +88,8 @@ var values := {}       # name -> what that needle shows, 0..1 of its scale
 var lamps := {}        # name -> Color: its colour, and how lit it is in alpha
 var _face_mat: ShaderMaterial
 var ivory_thrust_dials := false
+var flight_deck: FleetDeck
+var gauges := Layout.GAUGES
 var _digit_mat: ShaderMaterial
 var _needle_mat: StandardMaterial3D
 var _lamp_index := {}
@@ -136,11 +139,15 @@ static func mount() -> Transform3D:
 
 
 func build() -> void:
-	var body := MeshInstance3D.new()
-	body.name = "binnacle"
-	body.mesh = Interior._hd_mesh(BODY, "Binnacle")
-	Interior.Accent.dress(body)      # its cowl's stitching takes the livery's accent
-	add_child(body)   # it casts shadows: the cowl and the tubes shade the dials
+	if flight_deck:
+		gauges = flight_deck.dial_layout()
+		flight_deck.fit_cluster(self,gauges)
+	else:
+		var body := MeshInstance3D.new()
+		body.name = "binnacle"
+		body.mesh = Interior._hd_mesh(BODY, "Binnacle")
+		Interior.Accent.dress(body)      # its cowl's stitching takes the livery's accent
+		add_child(body)   # it casts shadows: the cowl and the tubes shade the dials
 	for i in Layout.LAMPS.size():
 		_lamp_index[Layout.LAMPS[i]] = i
 		lamps[Layout.LAMPS[i]] = Color(0, 0, 0, 0)
@@ -183,8 +190,8 @@ func _add(mesh: Mesh, mat: Material, name: String) -> MeshInstance3D:
 
 
 ## A quad from four corners given anticlockwise as the pilot sees them (Godot fronts are clockwise).
-func _quad(st: SurfaceTool, xf: Transform3D, p: Array, n: Array, uv: Array, colour: Color) -> void:
-	for k in [0, 2, 1, 0, 3, 2]:
+func _quad(st: SurfaceTool, xf: Transform3D, p: Array, n: Array, uv: Array, colour: Color, centre_fan := false) -> void:
+	for k in ([0, 2, 1] if centre_fan else [0, 2, 1, 0, 3, 2]):
 		var local: Vector3 = p[k]
 		st.set_normal(xf.basis * (n[k] as Vector3))
 		st.set_uv(uv[k])
@@ -206,8 +213,8 @@ func _build_faces() -> void:
 	const SEG := 72
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	for gi in Layout.GAUGES.size():
-		var g: Dictionary = Layout.GAUGES[gi]
+	for gi in gauges.size():
+		var g: Dictionary = gauges[gi]
 		var xf := Kit.on_arc(g.x, g.y, 0.0, R)
 		var rf: float = g.rf
 		# the dial: flat, with the scale on a raised ring round its edge
@@ -226,12 +233,12 @@ func _build_faces() -> void:
 					n.append(Vector3(-cos(a) * Layout.CHAPTER, -sin(a) * Layout.CHAPTER, 0.03 * rf).normalized() if k == 3 else Vector3(0, 0, 1))
 					uv.append(Vector2(g.uv[0] + r * cos(a) * g.uv[2], g.uv[1] - r * sin(a) * g.uv[2]))
 					shade += 0.25 * (0.92 - 0.42 * pow(r, 3.0))   # the tube's wall shades the dial's edge
-				_quad(st, xf, p, n, uv, Color(shade, 0.0, gi / 8.0, 0.0))
+				_quad(st, xf, p, n, uv, Color(shade, 0.0, gi / 8.0, 0.0), flight_deck != null and k == 0)
 	for t in Layout.TELLTALES:
-		var g: Dictionary = Layout.GAUGES[t[1]]
+		var g: Dictionary = gauges[t[1]]
 		_tile(st, Kit.on_arc(g.x, g.y, 0.0, R), Vector2(t[2], t[3]) * g.rf, Vector2(t[4], t[5]) * g.rf * 0.5, g.face + 0.0003, t[6], t[1], _lamp_index[t[0]], 0.0)
 	for arc in Layout.ARCS:
-		var g: Dictionary = Layout.GAUGES[arc[1]]
+		var g: Dictionary = gauges[arc[1]]
 		var xf := Kit.on_arc(g.x, g.y, 0.0, R)
 		var step: float = deg_to_rad(float(arc[5] - arc[4])) / arc[6]
 		var z: float = g.face + Layout.CHAPTER + 0.0003
@@ -251,18 +258,31 @@ func _build_faces() -> void:
 	_face_mat = _unlit("res://vr/gauge_face.gdshader")
 	_face_mat.set_shader_parameter("atlas", load(FACES))
 	_face_mat.set_shader_parameter("ivory_thrust_dials", ivory_thrust_dials)
+	if flight_deck:
+		match flight_deck.id:
+			"orrery":
+				_face_mat.set_shader_parameter("card_stock",Color("#e7d6b1"))
+				_face_mat.set_shader_parameter("card_ink",Color("#173b39"))
+			"kiln":
+				_face_mat.set_shader_parameter("card_stock",Color("#212725"))
+				_face_mat.set_shader_parameter("card_ink",Color("#ffe4a2"))
+			"vesper":
+				_face_mat.set_shader_parameter("card_stock",Color("#292039"))
+				_face_mat.set_shader_parameter("card_ink",Color("#d1eef4"))
 	var shadows := PackedVector4Array()
 	shadows.resize(8)
 	_needle_angles.resize(8)
 	for i in Layout.NEEDLES.size():
 		var nd: Array = Layout.NEEDLES[i]
-		shadows[i] = Vector4(nd[1], 0.0, 0.0, nd[4] * Layout.GAUGES[nd[1]].rf)
+		shadows[i] = Vector4(nd[1], 0.0, 0.0, nd[4] * gauges[nd[1]].rf)
 	_face_mat.set_shader_parameter("needle", shadows)
+	if flight_deck:
+		st.index()
 	_add(st.commit(), _face_mat, "dials")
 
 
 func _build_digits() -> void:
-	var g: Dictionary = Layout.GAUGES[0]
+	var g: Dictionary = gauges[0]
 	var xf := Kit.on_arc(g.x, g.y, 0.0, R)
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
@@ -307,7 +327,7 @@ func _build_needles() -> void:
 	var mesh := _needle_mesh()
 	for i in Layout.NEEDLES.size():
 		var nd: Array = Layout.NEEDLES[i]
-		var g: Dictionary = Layout.GAUGES[nd[1]]
+		var g: Dictionary = gauges[nd[1]]
 		var base := Kit.on_arc(g.x, g.y, 0.0, R) * Transform3D(Basis(), Vector3(0, 0, g.face + Layout.NEEDLE_UP))
 		needles[nd[0]] = _add(mesh, _needle_mat, "needle_" + str(nd[0]))
 		_needle_info[nd[0]] = [base, nd[4] * g.rf, float(nd[2]), float(nd[3]), i, Vector3.ONE]
@@ -333,7 +353,7 @@ func _tell_tale_mesh() -> ArrayMesh:
 ## needle that reads as a second one.)
 func _build_g_meter() -> void:
 	var dial: Array = Layout.G_DIAL
-	var face: Dictionary = Layout.GAUGES[0]
+	var face: Dictionary = gauges[0]
 	var pivot := Kit.on_arc(face.x, face.y, 0.0, R) * Transform3D(Basis(), Vector3(dial[0] * face.rf, dial[1] * face.rf, face.face))
 	var reach: float = dial[5] * face.rf
 	var up: float = dial[6]
@@ -401,25 +421,31 @@ static func g_text(pull: float) -> String:
 
 
 func _build_glass() -> void:
-	const RINGS := 10
+	# Seven radial steps keep the largest fleet lens within 0.1 mm of its spherical profile.
+	var rings := 7 if flight_deck else 10
 	const SEG := 64
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	for g in Layout.GAUGES:
+	for g in gauges:
 		var xf := Kit.on_arc(g.x, g.y, 0.0, R)
 		var a: float = g.rg - 0.0006
 		var rise: float = Layout.DOME * 2.0 * a
 		var rc := (a * a + rise * rise) / (2.0 * rise)   # the dome's radius of curvature
 		var edge := asin(a / rc)
 		var rim: float = g.mouth - Layout.SEAT
-		for i in RINGS:
+		for i in rings:
 			for s in SEG:
-				for corner in [[i, s], [i + 1, s + 1], [i + 1, s], [i, s], [i, s + 1], [i + 1, s + 1]]:
-					var th: float = edge * corner[0] / RINGS
+				var corners := [[i, s], [i + 1, s + 1], [i + 1, s]]
+				if i != 0 or not flight_deck:
+					corners.append_array([[i, s], [i, s + 1], [i + 1, s + 1]])
+				for corner in corners:
+					var th: float = edge * corner[0] / rings
 					var ph: float = TAU * corner[1] / SEG
 					var n := Vector3(sin(th) * cos(ph), sin(th) * sin(ph), cos(th))
 					st.set_normal(xf.basis * n)
 					st.add_vertex(xf * (n * rc + Vector3(0, 0, rim - rc * cos(edge))))
+	if flight_deck:
+		st.index()
 	var mat := _unlit("res://vr/gauge_glass.gdshader")
 	mat.set_shader_parameter("up_local", mount().basis.inverse() * Vector3.UP)
 	_add(st.commit(), mat, "glass")
@@ -440,6 +466,21 @@ func _text(name: String, window: Array, y: float, size: int, colour: Color, vali
 	l.transform = Kit.on_arc(window[1], window[2], 0.0, R) * Transform3D(Basis(), Vector3(0, y, window[5] + 0.0014))
 	add_child(l)
 	labels[name] = l
+
+
+## Keep each message within its half of the glass, including multiline checklist prompts.
+## Measure only on a text change. Label3D uses this same font to shape the displayed line.
+func _strip_text(label: Label3D, value: String) -> void:
+	if label.text == value:
+		return
+	label.text = value
+	if not flight_deck or value.is_empty():
+		return
+	var font := label.font if label.font else ThemeDB.fallback_font
+	var bounds := font.get_multiline_string_size(value, HORIZONTAL_ALIGNMENT_CENTER, -1, label.font_size)
+	label.autowrap_mode = TextServer.AUTOWRAP_OFF
+	var available_height := .031 if label == labels.progress else .025
+	label.pixel_size = minf(PX, minf(label.width * PX / maxf(bounds.x, 1), available_height / maxf(bounds.y, 1)))
 
 
 func _build_text() -> void:
@@ -637,9 +678,9 @@ func show_state(d: Dictionary) -> void:
 		labels.speed.text = Classic._grouped(shown)
 		_digit_mat.set_shader_parameter("speed", shown)
 	labels.units.text = "MPH"
-	labels.mach.text = d.mach_line
-	labels.progress.text = d.progress
-	labels.footer.text = d.footer
+	_strip_text(labels.mach, d.mach_line)
+	_strip_text(labels.progress, d.progress)
+	_strip_text(labels.footer, d.footer)
 	# the points counter, and the feat beside it while it is fresh
 	set_points(int(d.get("points", 0)))
 	(labels.points as Readout).text = str(points)
@@ -656,7 +697,7 @@ func show_state(d: Dictionary) -> void:
 	feat_label.visible = fresh
 	(labels.footer as Label3D).visible = not fresh
 	if fresh:
-		feat_label.text = feat
+		_strip_text(feat_label, feat)
 		feat_label.modulate = Color(GREEN, lerpf(1.0, 0.5, smoothstep(FEAT_BRIGHT, FEAT_BRIGHT + 0.8, age)))
 	var blink: bool = d.blink
 	var backlight: float = float(d.get("backlight", 1.0)) * _power

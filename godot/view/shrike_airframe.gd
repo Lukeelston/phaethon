@@ -4,6 +4,7 @@ extends RefCounted
 
 const Kit := preload("res://view/mesh_kit.gd")
 const Finish := preload("res://view/craft_materials.gd")
+const FleetAirframe := preload("res://view/fleet_airframe.gd")
 const PETROL := Color("#12666a")
 const IVORY := Color("#f1e5c9")
 const COPPER := Color("#e49749")
@@ -19,7 +20,7 @@ static var fittings: ShaderMaterial
 static func part(id: StringName) -> Mesh:
 	if meshes.is_empty():
 		var scene := (load("res://art/shrike/bodywork.glb") as PackedScene).instantiate()
-		var finish := load("res://art/shrike/enamel.tres") as StandardMaterial3D
+		var finish := FleetAirframe.finish_for(load("res://art/shrike/enamel.tres") as StandardMaterial3D)
 		for node in scene.find_children("*", "MeshInstance3D", true, false):
 			var mesh: Mesh = node.mesh
 			mesh.surface_set_material(0, finish)

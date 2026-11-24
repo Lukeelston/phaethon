@@ -28,7 +28,8 @@ func _run() -> void:
 			blocked=blocked or _hit(panels,Vector3(side*0.46,0.17,z),0.07)
 		check("throttle slot is physically open on side %s"%side,not blocked)
 	interior.free()
-	_sweep_levers()
+	for vehicle in ["phaethon", "shrike", "orrery", "kiln", "vesper"]:
+		_sweep_levers(vehicle)
 	print("COCKPIT ASSEMBLY ","PASS" if failures==0 else "FAIL")
 	quit(int(failures>0))
 func _hit(node: MeshInstance3D, origin: Vector3, reach: float) -> bool:
@@ -38,14 +39,18 @@ func _hit(node: MeshInstance3D, origin: Vector3, reach: float) -> bool:
 		if hit!=null and origin.distance_to(hit)<reach: return true
 	return false
 
-func _sweep_levers() -> void:
+func _sweep_levers(vehicle: String) -> void:
 	var cockpit=VR.new()
-	cockpit.sim=Sim.new({"track":"range"})
+	cockpit.sim=Sim.new({"track":"range", "vehicle":vehicle})
 	cockpit.rig=Node3D.new()
 	root.add_child(cockpit.rig)
 	cockpit._build_cockpit()
 	var panels: MeshInstance3D=cockpit.interior.get_node("PowderCoatedPanels")
 	var faces:=panels.mesh.get_faces()
+	for part in ["InstrumentBezel", "GuardAndGatePaint"]:
+		var fitting := cockpit.interior.get_node(part) as MeshInstance3D
+		for vertex in fitting.mesh.get_faces():
+			faces.append(panels.to_local(fitting.to_global(vertex)))
 	var nearby:=[]
 	for i in range(0,faces.size(),3):
 		var center: Vector3=(faces[i]+faces[i+1]+faces[i+2])/3.0
@@ -71,6 +76,6 @@ func _sweep_levers() -> void:
 				for tri in nearby:
 					if Geometry3D.segment_intersects_triangle(a,b,tri[0],tri[1],tri[2])!=null: intersections+=1
 				segments+=1
-	check("actual lever shafts clear quadrant geometry across full travel (%d segments)"%segments,intersections==0)
+	check("%s lever shafts clear the quadrant and gate trim across full travel (%d segments)"%[vehicle,segments],intersections==0)
 	cockpit.rig.free()
 	cockpit.free()

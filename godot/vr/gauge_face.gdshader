@@ -12,6 +12,8 @@ uniform vec4 needle[8];             // gauge, pivot x, pivot y, length (metres);
 uniform float needle_angle[8];      // radians, anticlockwise from three o'clock
 uniform float energy = 1.5;
 uniform bool ivory_thrust_dials = false;
+uniform vec4 card_stock : source_color = vec4(0.0);
+uniform vec4 card_ink : source_color = vec4(1.0);
 
 void fragment() {
 	vec4 print = texture(atlas, UV);
@@ -46,6 +48,13 @@ void fragment() {
 		vec3 card = mix(vec3(0.75, 0.68, 0.52), mix(vec3(0.009,0.035,0.037), vec3(0.53,0.068,0.012), gate), ink);
 		ALBEDO = card * shade;
 		EMISSION = card * 0.19 * light.a;
+	}
+	if (card_stock.a > 0.0 && id == 0) {
+		float ink = smoothstep(0.01, 0.78, max(print.r, print.g));
+		float warning = smoothstep(0.08, 0.40, print.r - print.b);
+		vec3 card = mix(card_stock.rgb, mix(card_ink.rgb, print.rgb, warning), ink);
+		ALBEDO = card * shade;
+		EMISSION = card * (0.12 + 0.48 * print.a) * light.a;
 	}
 	ROUGHNESS = mix(0.84, 0.14, gloss);
 	SPECULAR = mix(0.3, 0.5, gloss);
