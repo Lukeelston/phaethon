@@ -186,6 +186,7 @@ const StartPadScript := preload("res://view/start_pad.gd")
 var light_bars: Array = []   # the pilot's own, in the patrol craft (one on each model of the pod that is built)
 var siren: AudioStreamPlayer # ... and its siren
 var menu = MainMenuScript.new()   # the main menu (view/main_menu.gd): the flight waits while it's open
+var _gun_wired := false           # (gunnery's signals are joined to the raid once, when it first exists)
 var gunnery = null                # the Basilisk's fire control, once its craft has a gun (view/gunnery.gd)
 var gun_wanted := false           # ... its switch: out and laid, or stowed (the cockpit's GUN switch; K here)
 # Power-ups (view/power_ups.gd): lit gates over the road that give the engines a few seconds' surge.
@@ -1170,6 +1171,10 @@ func _process(delta: float) -> void:
 	_sync_world()   # after the camera: distant anchors scale about its current position
 	_gun_controls()
 	gunnery = GunneryScript.frame(self, gunnery, delta)   # (after the camera and the world: it lays the gun on what the view is on)
+	if gunnery and not _gun_wired:
+		_gun_wired = true
+		if raids:
+			gunnery.killed.connect(raids.on_kill)      # (a raider shot down reaches the raid)
 	if skill_score:
 		if traffic_net:
 			skill_score.observe_traffic(traffic_net.cars, minf(delta, 0.05))

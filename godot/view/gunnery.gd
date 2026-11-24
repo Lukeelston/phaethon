@@ -31,7 +31,11 @@ const RATE := 12.0                # shots a second, the two emitters turn about
 const SPREAD := deg_to_rad(0.12)  # each shot's scatter about the aim
 const LOCK_S := 0.35              # s a vehicle holds under the sight to be locked (the brackets close)
 const LOCK_EASE := 3.0            # ... and the lock lost a second with none under it
-const HP := {0: 3, 1: 5, 2: 3, 3: 8, 4: 4}   # hits a vehicle takes, by traffic kind: car, slow, demon, transport, racer
+const HP := {0: 3, 1: 5, 2: 3, 3: 8, 4: 4}   # hits a vehicle takes, by traffic kind: car, slow, demon, transport, racer (a COMMUTER takes none: no weapon knocks one out)
+const HOSTILE_HP := 6                         # hits a hostile raider (Raids) takes, whatever its kind
+
+signal killed(car)                 # a hostile raider shot down (before traffic.knock_out takes it out of traffic): the raid counts it
+signal struck_commuter(car)        # a bolt struck a commuter: sparks only
 const MAX_BOLTS := 48
 const BOLT_WIDTH := 0.0105        # a bolt's least width for its distance from the eye: about six tenths of a degree
 const STREAK := 38.0              # m: a bolt's streak, once it is that far out of the muzzle
@@ -53,6 +57,9 @@ var on_aim := false                # the mount is on the (led) aim
 var shots := 0                     # tests and the log read these
 var hits := 0
 var kills := 0
+var commuter_strikes := 0          # bolts that struck a commuter (spared: sparks and the impact sound only)
+var last_line := ""                # the last GUN: line printed that says a commuter was struck (tests read it)
+var _struck_id := -1
 var march_ms := 0.0                # the ground search's cost this frame
 # Heat (the Basilisk's power's figures, sim/pilot_craft.gd TRAITS: fireS, coolS; Luke's sheet, 2026-11-24): fire held
 # on for fireS s on end overheats the gun, and it will not fire again until it has cooled coolS s. A pause in the
@@ -410,19 +417,29 @@ func _land(bolt: Dictionary) -> void:
 	if c != null and traffic and traffic.cars.has(c):
 		hits += 1
 		var id: int = c.id
-		_damage[id] = int(_damage.get(id, 0)) + 1
 		var body := Vector3(c.x, c.y, at.z)
 		_add_fx(body + Vector3(_rng.randf_range(-3, 3), _rng.randf_range(-3, 3), _rng.randf_range(-1, 2)), "spark", 0.18, 9.0)
 		_play(_world_audio, "impact", to_render(body), 1.25)
-		if _damage[id] >= int(HP.get(c.kind, 3)):
+		if not c.hostile:
+			# No shooting commuters: no weapon knocks one out. The bolt sparks and that is all (no damage entry).
+			commuter_strikes += 1
+			if _struck_id != id:
+				_struck_id = id
+				last_line = "GUN: commuter struck"
+				print(last_line)
+			struck_commuter.emit(c)
+			return
+		_damage[id] = int(_damage.get(id, 0)) + 1
+		if _damage[id] >= HOSTILE_HP:
 			_damage.erase(id)
 			kills += 1
+			killed.emit(c)          # (the raid counts it first: knock_out takes the car out of traffic)
 			traffic.knock_out(c)
 			_add_fx(body, "fireball", 0.9, 34.0)
 			_add_fx(body + Vector3(0, 0, 4), "smoke", 3.2, 46.0)
 			_add_fx(body, "flash", 0.12, 90.0)
 			_play(_world_audio, "burst", to_render(body))
-			print("GUN: vehicle %d knocked out at %d m (%d shots, %d hits, %d out)" % [id, int(aim_dist), shots, hits, kills])
+			print("GUN: raider %d knocked out at %d m (%d shots, %d hits, %d out)" % [id, int(aim_dist), shots, hits, kills])
 		return
 	if bolt.kind == "sky":
 		_add_fx(at, "spark", 0.25, 6.0)      # (spent: it fizzes out at the end of its reach)

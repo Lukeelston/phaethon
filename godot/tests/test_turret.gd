@@ -118,6 +118,17 @@ func _look(v, at) -> void:
 		cam.look_at(cam.global_position + rig.basis * (at as Array)[0], rig.basis.y)
 
 
+func check_commuter_spared(traffic, car, g, shots: int, hits: int, kill_log: Array) -> void:
+	_check("held on a commuter for 3 s it is spared: %d shots, %d hits, %d struck, %d out, %d killed signals" % [g.shots - shots, g.hits - hits, g.commuter_strikes, g.kills, kill_log.size()],
+		traffic.cars.has(car) and g.kills == 0 and g.commuter_strikes > 0 and kill_log.is_empty() and g.shots > shots)
+	_check("... and a commuter strike says so", g.last_line == "GUN: commuter struck")
+
+
+func check_hostile_killed(traffic, car, g, shots: int, hits: int, kill_log: Array, frames: int) -> void:
+	_check("a raider held on is knocked out in %.2f s: %d shots, %d hits, %d out, %d killed signals" % [frames * DT, g.shots - shots, g.hits - hits, g.kills, kill_log.size()],
+		not traffic.cars.has(car) and g.kills == 1 and g.hits - hits >= g.HOSTILE_HP and frames * DT < 2.0 and kill_log == [car])
+
+
 func _in_the_cockpit() -> void:
 	View.vehicle_override = Pilot.BASILISK
 	var v = Cockpit.new()
@@ -221,15 +232,29 @@ func _in_the_cockpit() -> void:
 			g.aim_kind == "vehicle" and g.aim_car == car and g.lock > 0.5 and g.lock < 1.0)
 		var shots: int = g.shots
 		var hits: int = g.hits
+		var kill_log := []
+		g.killed.connect(func(c) -> void: kill_log.append(c))
 		g.hold_fire = true
 		var frames := 0
+		while frames < int(3.0 / DT):
+			_look(v, at.call())
+			v._process(DT)
+			frames += 1
+		g.hold_fire = false
+		check_commuter_spared(traffic, car, g, shots, hits, kill_log)
+		# The same car, now a raider (Raids): it takes HOSTILE_HP hits and is knocked out.
+		car.hostile = true
+		g._damage.clear()
+		shots = g.shots
+		hits = g.hits
+		g.hold_fire = true
+		frames = 0
 		while traffic.cars.has(car) and frames < int(3.0 / DT):
 			_look(v, at.call())
 			v._process(DT)
 			frames += 1
 		g.hold_fire = false
-		_check("held on it, it is knocked out of the traffic in %.2f s: %d shots, %d hits, %d out" % [frames * DT, g.shots - shots, g.hits - hits, g.kills],
-			not traffic.cars.has(car) and g.kills == 1 and g.hits - hits >= int(g.HP[car.kind]) and frames * DT < 2.0)
+		check_hostile_killed(traffic, car, g, shots, hits, kill_log, frames)
 		var fx := []
 		for f in g._fx:
 			fx.append(f.kind)
