@@ -898,10 +898,13 @@ func _raid_sync() -> void:
 		_raid_struck_ids.clear()
 
 
-## A restart: the score's counts of the raid begin again.
+## A restart. The DIRECTOR's raids.reset() is the authoritative reset (it zeroes kills and lost and sets the state back
+## to ""; so does the one a crash's respawn makes inside raids.update). This only re-bases the score's paid counts on
+## whatever the director now reports, so that the next _raid_sync never pays or charges again for what the score
+## has already settled, whether or not the director's counts were zeroed.
 func _raid_reset_score() -> void:
-	_raid_kills_paid = 0
-	_raid_lost_paid = 0
+	_raid_kills_paid = raids.kills if raids else 0
+	_raid_lost_paid = raids.lost if raids else 0
 	_raid_struck_ids.clear()
 
 

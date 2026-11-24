@@ -156,6 +156,77 @@ func _run() -> void:
 	v._raid_struck(RefCounted.new())
 	_check("a commuter struck with no raid on: nothing (%d, %d feedback)" % [S.total, S.feedback.size()], S.total == 700 and S.feedback.is_empty() and S.chain == 0)
 
+	# the director's reset: raids.reset() zeroes kills and lost (the authoritative reset); the score's re-basing keeps
+	# it from paying or charging again. First the pairing alone, with the run's total kept.
+	_fresh(v)
+	R.state = "on"
+	R.kills = 3
+	R.lost = 2
+	v._raid_sync()
+	var settled: int = S.total
+	R.reset()
+	v._raid_reset_score()
+	v._raid_sync()
+	_check("after 3 kills and 2 lost (%d), reset + re-base + sync: nothing paid or charged again (%d), kills %d, lost %d" % [settled, S.total, R.kills, R.lost],
+		settled == 795 and S.total == settled and R.kills == 0 and R.lost == 0)
+	# ... and a wrong pairing cannot double-charge: the director's counts NOT zeroed, the re-basing keeps them settled
+	_fresh(v)
+	R.state = "on"
+	R.kills = 3
+	R.lost = 2
+	v._raid_sync()
+	var kept: int = S.total
+	v._raid_reset_score()      # (no raids.reset(): its counts stand)
+	v._raid_sync()
+	_check("a re-basing without the director's reset does not pay or charge again (%d, was %d)" % [S.total, kept], S.total == kept)
+	# the real restart path, with a raid on
+	_fresh(v)
+	R.state = "on"
+	R.kills = 3
+	R.lost = 2
+	v._raid_sync()
+	v._respawn()
+	v._raid_sync()
+	var after_restart: int = S.total
+	R.state = "on"
+	R.kills = 1
+	v._raid_sync()
+	_check("the restart (v._respawn) clears the run's total with nothing re-paid or re-charged for the old raid (%d), and a new raid's kill pays 250 (%d)" % [after_restart, S.total],
+		after_restart == 0 and S.total == 250 and R.lost == 0)
+	# a crash mid-raid: the director sets the raid aside itself (inside update, when the sim's respawn comes)
+	_fresh(v)
+	R.state = "called"
+	R.city = 0
+	R.arrive_r = 0.0
+	R.tick_every = 1.0e9
+	R.kills = 3
+	R.lost = 2
+	v._raid_sync()
+	var before_crash: int = S.total
+	v.sim.crash_t = 1.0
+	R.update(0.01)
+	v.sim.crash_t = 0.0
+	R.update(0.01)
+	var reset_by_crash: bool = R.state == "" and R.kills == 0 and R.lost == 0
+	v._raid_sync()
+	var after_crash: int = S.total
+	R.kills = 1
+	v._raid_sync()
+	_check("a crash mid-raid: the director sets it aside (%s), the sync pays and charges nothing more (%d, was %d), and the next raid's kill pays 250 (%d)" % [reset_by_crash, after_crash, before_crash, S.total],
+		reset_by_crash and after_crash == before_crash and S.total == before_crash + 250)
+
+	# the display: a deduction reads "-40", never "+-40", on the desktop HUD's label and in the display's own text
+	_fresh(v)
+	R.state = "on"
+	S.total = 1000
+	R.lost = 1
+	v._raid_sync()
+	v._update_hud()
+	var shown: String = v._skill_display.update(S).award
+	var label: String = v._skill_award_label.text
+	_check("a deduction reads \"-40\" and never \"+-40\": display \"%s\", HUD label \"%s\"" % [shown, label],
+		shown == "COMMUTER LOST  -40" and label == shown and not shown.contains("+-") and not label.contains("+-"))
+
 	# the penalty tone
 	var audio = Audio.new()
 	root.add_child(audio)

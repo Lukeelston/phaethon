@@ -247,13 +247,31 @@ func _in_the_cockpit() -> void:
 		var struck_log := []
 		g.struck_commuter.connect(func(c) -> void: struck_log.append(c))
 		g.killed.connect(func(c) -> void: kill_log.append(c))
+		# Raids' score: a raid "on" (its director held still: no traffic of its own to drive), the run's total high.
+		# The strike reaches the score through the view's own connection made in _process, and costs 150, once.
+		var rd = v.raids
+		var rd_traffic = null
+		var drops := 0
+		if rd:
+			rd_traffic = rd.traffic
+			rd.traffic = null
+			rd.state = "on"
+			v.skill_score.total = 5000
 		g.hold_fire = true
 		var frames := 0
 		while frames < int(3.0 / DT):
 			_look(v, at.call())
+			var was: int = v.skill_score.total
 			v._process(DT)
+			drops += int(v.skill_score.total == was - 150)
 			frames += 1
 		g.hold_fire = false
+		if rd:
+			var connected: bool = g.struck_commuter.is_connected(v._raid_struck)
+			_check("a gun strike on a commuter in a raid costs 150, once (%d strikes, %d charge(s) of 150, total %d, charged car %s, connected %s)" % [g.commuter_strikes, drops, v.skill_score.total, v._raid_struck_ids.has(car.get_instance_id()), connected],
+				connected and g.commuter_strikes > 1 and drops == 1 and v._raid_struck_ids.size() == 1 and v._raid_struck_ids.has(car.get_instance_id()))
+			rd.state = ""
+			rd.traffic = rd_traffic
 		check_commuter_spared(traffic, car, g, shots, hits, kill_log, struck_log)
 		# The same car, now a raider (Raids): it takes HOSTILE_HP hits and is knocked out.
 		car.hostile = true
