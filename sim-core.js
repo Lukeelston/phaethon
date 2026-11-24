@@ -1324,17 +1324,9 @@
             else S.events.push({ type: 'bump', who: b === S.pod ? 'pod' : b === S.eL ? 'L' : 'R', id: o.id, v: Math.max(0, -vn) });
           }
           inside.add(o.id);
+          if (rammed) continue;   // ... and it is the vehicle that gives way (the view shoves it aside): the craft goes on through
           const fn = P.fieldK * pen - (vn < 0 ? P.fieldC * vn : 0);
-          if (rammed) {
-            // ... and its push has no part against the craft's way: it costs the craft no speed
-            let fx = fn * nx, fy = fn * ny;
-            const bv = Math.hypot(b.vx, b.vy);
-            if (bv > 1) {
-              const against = (fx * b.vx + fy * b.vy) / bv;
-              if (against < 0) { fx -= against * b.vx / bv; fy -= against * b.vy / bv; }
-            }
-            applyAt(b, fx, fy, cx, cy);
-          } else applyAt(b, fn * nx, fn * ny, cx, cy);
+          applyAt(b, fn * nx, fn * ny, cx, cy);
         }
       }
       b.touch = inside;
@@ -1595,7 +1587,7 @@
       if (S.powerState === 'active' && !on) powerEnd();   // SAFE ends it
       switch (S.power) {
         case 'slipstream':
-          if (S.powerState === 'active') { S.kThrust *= pw.thrust; powerRun(dt, true); }
+          if (S.powerState === 'active') powerRun(dt, true);
           else if (on) {
             if (inp.draft && S.powerGauge < 1) {
               S.powerGauge = Math.min(1, S.powerGauge + dt / pw.fill);
@@ -1615,17 +1607,14 @@
         case 'kickdown': {
           const levers = [inp.thrL, inp.thrR];
           for (let k = 0; k < 2; k++) if (levers[k] < pw.low) kickLow[k] = S.time;
-          if (S.powerState === 'active') { S.kThrust *= pw.thrust; powerRun(dt, true); }
+          if (S.powerState === 'active') powerRun(dt, true);
           else if (S.powerState === 'charging') recharge(dt);
           else if (on && levers[0] >= pw.full && levers[1] >= pw.full && S.time - kickLow[0] <= pw.within && S.time - kickLow[1] <= pw.within) powerStart(pw.last);
           break;
         }
         case 'gyro': case 'ram':
-          if (S.powerState === 'active') {
-            if (S.power === 'gyro') S.kGrip *= pw.grip;
-            else { ram = true; S.kWall *= pw.wallShove; }
-            powerRun(dt, true);
-          } else if (S.powerState === 'charging') { recharge(dt); if (fire) powerEvent('refused'); }
+          if (S.powerState === 'active') powerRun(dt, true);
+          else if (S.powerState === 'charging') { recharge(dt); if (fire) powerEvent('refused'); }
           else if (fire) powerStart(pw.last);
           break;
         case 'ground': {
@@ -1633,14 +1622,21 @@
           const split = Math.abs(inp.thrL - inp.thrR) + Math.abs(inp.brkL - inp.brkR);
           const held = on && v > pw.minV && podClear >= 1 && S.eL.grip >= 1 && S.eR.grip >= 1 && Math.abs(Pd.vz) <= pw.climb * v;
           if (S.powerState === 'active') {
-            if (held && split < pw.hardSplit) { S.kDrag *= pw.drag; powerRun(dt, false); }
+            if (held && split < pw.hardSplit) powerRun(dt, false);
             else { powerEnd(); settled = 0; }
           } else {
             settled = held && split < pw.split ? settled + dt : 0;
-            if (settled >= pw.settle) { powerStart(0); S.kDrag *= pw.drag; }
+            if (settled >= pw.settle) powerStart(0);
           }
           break;
         }
+      }
+      // what it does, every step it is on (the step it starts in too; not the one it ends in)
+      if (S.powerState === 'active') {
+        if (S.power === 'slipstream' || S.power === 'kickdown') S.kThrust *= pw.thrust;
+        else if (S.power === 'gyro') S.kGrip *= pw.grip;
+        else if (S.power === 'ram') { ram = true; S.kWall *= pw.wallShove; }
+        else if (S.power === 'ground') S.kDrag *= pw.drag;
       }
     }
     function step(inp, dt) {

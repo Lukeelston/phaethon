@@ -51,8 +51,9 @@ const TUNING := {
 #   kickdown     both levers from under `low` to `full` (0.85: the trigger throttles' top is 0.87) inside `within`
 #                s: `last` s of thrust x`thrust`, automatic when armed; `recharge` s after it ends
 #   gyro         fired: `last` s of the grip limit x`grip`; `recharge` s after it ends
-#   ram          fired: `last` s in which traffic is shoved aside (its push on the craft has no part against the
-#                craft's way, and a closing speed that would smash is a bump), the walls' shove x`wallShove`
+#   ram          fired: `last` s in which traffic is shoved aside (the vehicle gives way, shoved by the view: its
+#                field does not push the craft, and a closing speed that would smash is a bump; a pillar is still a
+#                pillar), and the walls' shove x`wallShove`
 #   ground       automatic when armed: faster than `minV` m/s (2,000 mph), every body on the ground, the climb under
 #                `climb` of the speed, the levers' split (thrust and brakes, either way) under `split` for `settle`
 #                s: the cruise drag x`drag`, until the split passes `hardSplit` (turning hard) or the rest fails

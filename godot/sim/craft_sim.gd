@@ -998,7 +998,6 @@ func _power_step(inp: Dictionary, dt: float) -> void:
 	match power:
 		"slipstream":
 			if power_state == "active":
-				k_thrust *= pw.thrust
 				_power_run(dt, true)
 			elif on:
 				if bool(inp.get("draft", false)) and power_gauge < 1.0:
@@ -1028,20 +1027,13 @@ func _power_step(inp: Dictionary, dt: float) -> void:
 				if levers[k] < float(pw.low):
 					_kick_low[k] = time
 			if power_state == "active":
-				k_thrust *= pw.thrust
 				_power_run(dt, true)
 			elif power_state == "charging":
 				_recharge(dt)
-			elif on and levers[0] >= float(pw.full) and levers[1] >= float(pw.full) \
-					and time - float(_kick_low[0]) <= float(pw.within) and time - float(_kick_low[1]) <= float(pw.within):
+			elif on and levers[0] >= float(pw.full) and levers[1] >= float(pw.full) 					and time - float(_kick_low[0]) <= float(pw.within) and time - float(_kick_low[1]) <= float(pw.within):
 				_power_start(pw.last)
 		"gyro", "ram":
 			if power_state == "active":
-				if power == "gyro":
-					k_grip *= pw.grip
-				else:
-					_ram = true
-					k_wall *= pw.wallShove
 				_power_run(dt, true)
 			elif power_state == "charging":
 				_recharge(dt)
@@ -1052,11 +1044,9 @@ func _power_step(inp: Dictionary, dt: float) -> void:
 		"ground":
 			var v := sqrt(pod.vx * pod.vx + pod.vy * pod.vy)
 			var split: float = absf(float(inp.thrL) - float(inp.thrR)) + absf(float(inp.brkL) - float(inp.brkR))
-			var held: bool = on and v > float(pw.minV) and _pod_clear >= 1.0 and eL.grip >= 1.0 and eR.grip >= 1.0 \
-					and absf(pod.vz) <= float(pw.climb) * v
+			var held: bool = on and v > float(pw.minV) and _pod_clear >= 1.0 and eL.grip >= 1.0 and eR.grip >= 1.0 					and absf(pod.vz) <= float(pw.climb) * v
 			if power_state == "active":
 				if held and split < float(pw.hardSplit):
-					k_drag *= pw.drag
 					_power_run(dt, false)
 				else:
 					_power_end()
@@ -1065,7 +1055,18 @@ func _power_step(inp: Dictionary, dt: float) -> void:
 				_settled = _settled + dt if held and split < float(pw.split) else 0.0
 				if _settled >= float(pw.settle):
 					_power_start(0.0)
-					k_drag *= pw.drag
+	# what it does, every step it is on (the step it starts in too; not the one it ends in)
+	if power_state == "active":
+		match power:
+			"slipstream", "kickdown":
+				k_thrust *= pw.thrust
+			"gyro":
+				k_grip *= pw.grip
+			"ram":
+				_ram = true
+				k_wall *= pw.wallShove
+			"ground":
+				k_drag *= pw.drag
 
 
 ## A step of the recharge: ready when it is done.
@@ -2763,20 +2764,10 @@ func _collide_obstacles(b: Body, circles: Array) -> void:
 				else:
 					events.append({"type": "bump", "who": "pod" if b == pod else ("L" if b == eL else "R"), "id": o.id, "v": maxf(0.0, -vn)})
 			inside[o.id] = true
-			var fn: float = P.fieldK * pen - (P.fieldC * vn if vn < 0.0 else 0.0)
 			if ram:
-				# ... and its push has no part against the craft's way: it costs the craft no speed
-				var fx := fn * nx
-				var fy := fn * ny
-				var bv := sqrt(b.vx * b.vx + b.vy * b.vy)
-				if bv > 1.0:
-					var against := (fx * b.vx + fy * b.vy) / bv
-					if against < 0.0:
-						fx -= against * b.vx / bv
-						fy -= against * b.vy / bv
-				_apply_at(b, fx, fy, cx, cy)
-			else:
-				_apply_at(b, fn * nx, fn * ny, cx, cy)
+				continue   # ... and it is the vehicle that gives way (the view shoves it aside): the craft goes on through, its speed its own
+			var fn: float = P.fieldK * pen - (P.fieldC * vn if vn < 0.0 else 0.0)
+			_apply_at(b, fn * nx, fn * ny, cx, cy)
 	b.touch = inside
 
 
