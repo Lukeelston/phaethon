@@ -4,7 +4,9 @@
 ## the pod from the side and from above. Then how far below the horizon the view from the eye is first cut off
 ## by the craft itself, straight ahead and either side (the road nearer than that is hidden).
 ## Needs a window: --xr-mode off --fixed-fps 120 -s res://tests/render_talon.gd -- --mute --out=ABSOLUTE_DIRECTORY
-##   [--vehicles=phaethon,talon] [--paint=factory|<a view/livery.gd id>] [--views=exterior,seat,...]
+##   [--vehicles=phaethon,talon] [--paint=factory|<a view/livery.gd id>] [--views=exterior,seat,...] [--arms=out]
+## --arms=out brings the craft's arms out (view/arms/<craft>_arms.gd set_deploy(1)) where it has them; the "gun" view
+## (not in the default list) looks at the starboard gun from ahead: the Phaethon's engine's nose, the Talon's wing root.
 ## (It names no craft or script that the Phaethon's own line lacks, so the same file renders a base checkout's.)
 extends SceneTree
 
@@ -27,6 +29,7 @@ func _run() -> void:
 		return
 	var vehicles := ["phaethon", "talon"]
 	var views := VIEWS.duplicate()
+	var arms_out := false
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--out="):
 			output = arg.trim_prefix("--out=")
@@ -34,6 +37,8 @@ func _run() -> void:
 			vehicles = Array(arg.trim_prefix("--vehicles=").split(","))
 		elif arg.begins_with("--views="):
 			views = Array(arg.trim_prefix("--views=").split(","))
+		elif arg == "--arms=out":
+			arms_out = true
 		elif arg.begins_with("--paint="):
 			load("res://view/talon_airframe.gd").paint = arg.trim_prefix("--paint=")
 	if output.is_empty() or DirAccess.make_dir_recursive_absolute(output) != OK:
@@ -63,6 +68,10 @@ func _run() -> void:
 		game.set_process(false)
 		for i in 12:
 			game._process(1.0 / 120.0)
+		var arms = game.craft.get("arms")      # (a base checkout's craft has none: get, not .arms)
+		if arms_out and arms != null:
+			arms.set_deploy(1.0)
+			print("TALON ARMS out: ", id)
 		for child in game.get_children():
 			if child is CanvasLayer:
 				child.hide()
@@ -99,6 +108,13 @@ func _run() -> void:
 				"above":
 					cam.global_position = cab * Vector3(0.0, 11.0, 0.4)
 					cam.look_at(cab * Vector3(0, 0, 0.4), -cab.basis.z)
+				"gun":      # the starboard gun, from ahead and outboard: the Talon's wing root, the Phaethon's engine's nose
+					if id == "talon":
+						cam.global_position = cab * Vector3(3.0, 0.9, -3.6)
+						cam.look_at(cab * Vector3(1.18, -0.14, -1.2), cab.basis.y)
+					else:
+						cam.global_position = engine * Vector3(1.5, 0.9, -7.2)
+						cam.look_at(engine * Vector3(0.0, 0.0, -4.1), engine.basis.y)
 			for i in 3:
 				await process_frame
 			await RenderingServer.frame_post_draw

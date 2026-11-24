@@ -61,11 +61,23 @@ const TUNING := {
 #                s: the cruise drag x`drag`, until the split passes `hardSplit` (turning hard) or the rest fails
 #   turret       the Basilisk's gun (view/gunnery.gd; the GUN switch and X: the POWER switch and button do nothing):
 #                out, the cruise drag x`drag`; `fireS` s of fire on end overheats it, and it is dead till `coolS` s cool
+# The weapon (`weapon`: Raids, 2026-11-24, Luke: "every vehicle should have their own weapon system like the basilisk's
+# hidden cannon"): the view's figures alone (view/gunnery.gd and the craft's mount; the sim never reads them, and
+# sim-core.js has none), {} for a craft whose weapon is not built yet. Which weapon a craft carries is WEAPONS.
+#   rate         shots a second, the barrels taking turns
+#   boltV        m/s: a bolt's speed
+#   hits         hits a bolt does
+#   reach        m: how far the aim is looked for
+#   fireS        s of fire on end that overheat it; it is dead till it has cooled `coolS` s
+#   assistDeg    how far off its bore (degrees) the fire control may take a target for it (fixed guns)
+# The Basilisk's repeats its power's fireS/coolS: its gun is its power.
 const TRAITS := {
 	STANDARD: {"power": {"id": "slipstream", "name": "Slipstream", "lcd": "SLIPSTREAM",
-		"thrust": 1.15, "last": 4.0, "fill": 6.0, "reach": 120.0, "lane": 22.0}},
+		"thrust": 1.15, "last": 4.0, "fill": 6.0, "reach": 120.0, "lane": 22.0},
+		"weapon": {"rate": 10.0, "boltV": 1300.0, "hits": 1, "reach": 2600.0, "fireS": 5.0, "coolS": 3.0, "assistDeg": 3.0}},
 	"talon": {"gripCapG": 0.93, "engineCd": 0.98, "lift": 0.1,
-		"power": {"id": "glide", "name": "Glide", "lcd": "GLIDE", "hang": 1.4, "airGrip": 0.3}},
+		"power": {"id": "glide", "name": "Glide", "lcd": "GLIDE", "hang": 1.4, "airGrip": 0.3},
+		"weapon": {"rate": 18.0, "boltV": 1400.0, "hits": 1, "reach": 2200.0, "fireS": 4.0, "coolS": 2.5, "assistDeg": 3.0}},
 	SHRIKE: {"engineCd": 1.04, "gripCapG": 1.07, "brakes": 1.15,
 		"power": {"id": "kickdown", "name": "Kickdown", "lcd": "KICKDOWN",
 			"thrust": 1.35, "last": 1.5, "recharge": 12.0, "low": 0.3, "full": 0.85, "within": 0.3}},
@@ -77,7 +89,8 @@ const TRAITS := {
 		"power": {"id": "ground", "name": "Ground Effect", "lcd": "GROUND EFFECT", "drag": 0.85,
 			"minV": 894.08, "climb": 0.03, "split": 0.08, "hardSplit": 0.12, "settle": 0.5}},
 	BASILISK: {"engineCd": 1.02, "driftReach": 0.85,
-		"power": {"id": "turret", "name": "Gaze Turret", "lcd": "GUN", "drag": 1.04, "fireS": 4.0, "coolS": 3.0}},
+		"power": {"id": "turret", "name": "Gaze Turret", "lcd": "GUN", "drag": 1.04, "fireS": 4.0, "coolS": 3.0},
+		"weapon": {"fireS": 4.0, "coolS": 3.0}},
 }
 const TRAIT_DEFAULTS := {"thrustMax": 1.0, "engineCd": 1.0, "gripCapG": 1.0, "brakes": 1.0, "wallShove": 1.0, "lift": 0.0, "driftReach": 1.0}
 
@@ -86,7 +99,8 @@ static func known(id: Variant) -> String:
 	return id if id is String and NAMES.has(id) else STANDARD
 
 
-## A craft's attributes, every one (1 where it has none: TRAIT_DEFAULTS), and its power (`power`: {} for none).
+## A craft's attributes, every one (1 where it has none: TRAIT_DEFAULTS), its power (`power`: {} for none) and its
+## weapon's figures (`weapon`: {} for none).
 ## By its id string as given: a row this file's NAMES does not know yet (the Talon's, before it is merged) is read too.
 static func traits(id: Variant) -> Dictionary:
 	var out := TRAIT_DEFAULTS.duplicate()
@@ -94,6 +108,7 @@ static func traits(id: Variant) -> Dictionary:
 	for k in row:
 		out[k] = row[k]
 	out["power"] = (out.get("power", {}) as Dictionary).duplicate()   # (a copy: the table is a constant)
+	out["weapon"] = (out.get("weapon", {}) as Dictionary).duplicate()
 	return out
 
 
@@ -105,6 +120,20 @@ static func power_of(id: Variant) -> Dictionary:
 ## Does this airframe carry a gun (the Basilisk's turret)?
 static func armed(id: Variant) -> bool:
 	return known(id) == BASILISK
+
+
+## Each craft's weapon, hidden in its hull until its GUN switch is armed (Raids; Luke: "Modelled and hidden - have codex
+## work on the art"): its hardware is view/arms/<craft>_arms.gd (the Basilisk's, its turret: view/turret.gd), built with
+## its model (view/craft_model.gd `arms`), and its figures are TRAITS[..].weapon. The rest of the fleet's come later.
+##   cannons     the Phaethon's: one in the nose of each engine, fixed along the engine's heading
+##   wing_guns   the Talon's: one at each wing root, fixed forward; faster and lighter than the Phaethon's
+##   turret      the Basilisk's gaze-slaved turret
+const WEAPONS := {STANDARD: "cannons", TALON: "wing_guns", BASILISK: "turret"}
+
+
+## A craft's weapon (WEAPONS), "" for none.
+static func weapon_of(id: Variant) -> String:
+	return WEAPONS.get(known(id), "")
 
 
 ## The airframe a craft was drawn from, where it has no part of its own. The Basilisk came in (2026-11-23) after

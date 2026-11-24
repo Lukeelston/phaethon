@@ -842,6 +842,8 @@ func _build_cockpit() -> void:
 			craft.tail_lights.reparent(hull, false)
 		if craft.turret:
 			craft.turret.reparent(hull, false)   # (the Basilisk's gun: on the hull the seat sees)
+	if craft and craft.arms and craft.arms.get_parent() == craft.pod:
+		craft.arms.reparent(hull, false)   # (a craft's arms that ride on its pod, the Talon's wing guns: on the hull the seat sees, as the turret)
 	for s in [-1.0, 1.0]:   # where the cables hook (the hull carries the eyes themselves)
 		var mark := Marker3D.new()
 		mark.name = "hardpoint_%s" % ("l" if s < 0.0 else "r")
