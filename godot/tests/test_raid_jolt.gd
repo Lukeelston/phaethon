@@ -185,6 +185,21 @@ func _run() -> void:
 	_check("a raider on the craft: %d hit in 0.9 s (want 1), %d in 2.1 s (want 3); one 4.8 km off: %d (want 0)" % [h09, h21, hfar],
 		h09 == 1 and h21 == 3 and hfar == 0)
 
+	# a raider at the craft's x, y on another deck (the craft's bodies lifted or dropped 30 m: the sim would put them back
+	# on a step, so the director is stepped alone) gives no hit; the same raider on the craft's own deck does
+	var counts := []
+	for dz in [0.0, 30.0, -30.0]:
+		c = _stage(v, 0.0)
+		for body in sim.bodies:
+			body.z += dz
+		hits = 0
+		for k in 120:
+			R.update(STEP)
+		counts.append(hits)
+		for body in sim.bodies:
+			body.z -= dz
+	_check("other deck: same x, y, same deck %d hit, 30 m above %d, 30 m below %d in 1 s (want 1, 0, 0)" % counts, counts == [1, 0, 0])
+
 	# the buzz: both hands
 	v.buzzed.clear()
 	v.jolt(1.0)
