@@ -113,6 +113,7 @@ const ROLL_MAX := deg_to_rad(70.0)    # lean plus the track's banking never roll
 
 var view
 var engines: Array[Node3D] = []
+var _phaethon_guns: RefCounted
 var hot_mats: Array[StandardMaterial3D] = []
 var glow_mats: Array[StandardMaterial3D] = []
 var fans: Array[Node3D] = []         # per engine: holds its twin intake rotors
@@ -674,6 +675,16 @@ func build(v, checkpoint := Callable(), reuse_engine_body := Callable()) -> void
 	binder_arc = BinderArc.new()
 	arc = binder_arc.mesh
 	add_child(binder_arc)
+
+
+## Called on first arm by the flight controls. Flat and VR use these same two engine nodes.
+func phaethon_arms() -> RefCounted:
+	if not view or view.sim.P.vehicle != PilotCraft.STANDARD or engines.size() != 2:
+		return null
+	if not _phaethon_guns:
+		_phaethon_guns = preload("res://view/arms/phaethon_arms.gd").new()
+		_phaethon_guns.build(engines)
+	return _phaethon_guns
 
 
 ## The dress kit also carries the two UV-mapped movable mesh masters at their local hinge.
