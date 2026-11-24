@@ -20,6 +20,7 @@ extends Node3D
 const Kit := preload("res://view/mesh_kit.gd")
 const Finishes := preload("res://view/craft_materials.gd")
 const TurretScript := preload("res://view/turret.gd")
+const STAND_IN := true      # (tests/test_arms.gd checks the stand-ins' own parts only where this is: Codex's art drops it)
 
 const SPLITTER := Color(0.391, 0.391, 0.405)   # the splitter's colour (craft_model._engine_body: DARK.lightened(0.3)); its face is at z -3.88
 const CAVITY := Color(0.035, 0.04, 0.05)

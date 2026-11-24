@@ -99,6 +99,10 @@ var heat: float                  # 0..1: a glow material on the barrels or emitt
 
 The Orrery also needs `docks() -> Array` (a global Transform3D for each orb's seat).
 
+**Riding the pod in VR.** Parts that ride the pod must be children of the arms node, and `build()` puts that node on `craft.pod`; the VR cockpit hides the pod and carries the arms node onto its own hull. Never add parts to `craft.pod` directly: in VR they would vanish with the pod. (Parts on the engines may go straight onto `craft.engines[k]`.)
+
+**What the test checks.** `tests/test_arms.gd` checks only the four members: that they exist, that `heat` clamps to 0..1, that the muzzles point forward and move when deployed, and the riding rule above. Part names and materials are yours to choose. Its stand-in checks run only where a script says `const STAND_IN := true`: drop that line when your art replaces a stand-in.
+
 **Paint.** Hull panels that cover a weapon take the craft's paint (`view/livery.gd`), so a stowed weapon disappears into the livery.
 
 **The pilot's view.** Deployed hardware must not block what the pilot sees from the seat in VR. Run `tests/test_cockpit_clash.gd`, and render from the seat with the weapon out.

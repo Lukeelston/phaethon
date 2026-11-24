@@ -2,16 +2,23 @@
 ## fill later (docs/superpowers/specs/2026-11-24-raids-art-brief-codex.md), the stand-ins for the Phaethon (a cannon
 ## in the nose of each engine) and the Talon (a gun at each wing root), and the weapon table (sim/pilot_craft.gd
 ## WEAPONS, weapon_of, TRAITS[..].weapon).
-##   contract     the Phaethon's and the Talon's arms have build, set_deploy, muzzles and heat; where they ride
-##   stowed       at t = 0 no barrel's box pokes out of its housing's, and nothing of them is drawn
-##   deployed     set_deploy(1): two muzzles, each -Z within 2 degrees of the craft's forward, each barrel run out
-##                0.6 m, and nothing of the craft ahead of either muzzle
-##   table        weapon_of for all seven; the rows (the Basilisk's repeats its power's fireS/coolS); {} for the rest
-##   Basilisk     its turret built exactly as turret.gd builds it, fired through its own mount, and no arms
-##   others       the Shrike carries none
-##   VR seat      the Talon's arms ride on the hull the seat sees; the Phaethon's stay on its engines; stowed, none
-##                drawn; with the GUN switch never armed, no fire control made
-## (The barrels and housings are found by name: a "Barrel" and its sibling "Housing" under one gun node.)
+## Two kinds of check. The CONTRACT's hold for any arms script that keeps the four members, whatever its parts are
+## named or made of (Codex's art must pass them unchanged):
+##   members      build, set_deploy, muzzles and heat; heat clamps to 0..1 and reads back
+##   muzzles      out (set_deploy(1)): at least one, each -Z within 2 degrees of the craft's forward; each moves between
+##                set_deploy(0) and set_deploy(1)
+##   riding       what set_deploy moves or shows that rides on the pod is under the arms node (flat view); in the VR
+##                seat none of it is left on the hidden pod, and something it brings out is drawn
+##   no mount     craft.weapon is still null for the Phaethon and the Talon (task 8 makes their mounts), and with the
+##                GUN switch never armed no fire control is made
+## The STAND-INS' (only where the arms script says `const STAND_IN := true`; Codex's art drops that line):
+##   their parts  a "Barrel" with a sibling "Housing" under each gun node: one cannon on each Phaethon engine, two guns
+##                on the Talon's pod; the barrels' glow (a StandardMaterial3D's emission) follows the heat
+##   stowed       no barrel's box pokes out of its housing's, and nothing of them is drawn
+##   deployed     two muzzles; each barrel run out 0.6 m, drawn and out of its housing; nothing of the craft ahead
+##   VR seat      the Talon's on the hull the seat sees, the Phaethon's on its engines; stowed, none drawn
+## And the table: weapon_of for all seven; the rows (the Basilisk's repeats its power's fireS/coolS); {} for the rest;
+## the Basilisk's turret built exactly as turret.gd builds it, fired through its own mount, and no arms; the Shrike none.
 ## --headless --xr-mode off --audio-driver Dummy -s res://tests/test_arms.gd -- --mute
 ## Prints ARMS PASS.
 extends SceneTree
@@ -28,8 +35,10 @@ const ROWS := {
 	"talon": {"rate": 18.0, "boltV": 1400.0, "hits": 1, "reach": 2200.0, "fireS": 4.0, "coolS": 2.5, "assistDeg": 3.0},
 }
 const RUN := 0.6      # the stand-ins' barrels run this far out
+const SECTIONS := 10  # table, three a craft for two craft, the Basilisk, the Shrike, the VR seat
 var failures := 0
 var checks := 0
+var sections := 0     # (a section that dies on a script error never counts itself: the verdict then fails)
 
 
 func _initialize() -> void:
@@ -72,7 +81,8 @@ func _run() -> void:
 		file.close()
 	elif FileAccess.file_exists(PREFS):
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(PREFS))
-	print("ARMS %s (%d checks, %d failed)" % ["PASS" if failures == 0 and checks >= 20 else "FAIL", checks, failures])
+	check("every section ran to its end (%d of %d)" % [sections, SECTIONS], sections == SECTIONS)
+	print("ARMS %s (%d checks, %d failed)" % ["PASS" if failures == 0 else "FAIL", checks, failures])
 	quit(0 if failures == 0 else 1)
 
 
@@ -89,7 +99,90 @@ func _flat(id: String):
 	return game
 
 
-## Each gun's [barrel, its housing] under `top`.
+## Are these arms the stand-ins (view/arms/*_arms.gd as Claude built them, `const STAND_IN := true`)? Codex's art,
+## written into the same files, drops that line: then only the contract's checks run.
+static func _stand_in(arms) -> bool:
+	return arms != null and arms.get_script() != null and (arms.get_script() as Script).get_script_constant_map().get("STAND_IN", false) == true
+
+
+# --- the contract ------------------------------------------------------------------------------------------
+
+## What set_deploy moves or shows, anywhere under `top`: the Node3Ds whose place or whether they are drawn differs
+## between set_deploy(0) and set_deploy(1). Leaves the arms stowed.
+static func _deploy_changes(top: Node, arms) -> Array:
+	var nodes := top.find_children("*", "Node3D", true, false)
+	arms.set_deploy(0.0)
+	var before := []
+	for n: Node3D in nodes:
+		before.append([n.global_transform, n.is_visible_in_tree()])
+	arms.set_deploy(1.0)
+	var changed := []
+	for i in nodes.size():
+		var n: Node3D = nodes[i]
+		if not n.global_transform.is_equal_approx(before[i][0]) or n.is_visible_in_tree() != before[i][1]:
+			changed.append(n)
+	arms.set_deploy(0.0)
+	return changed
+
+
+## Is `node` the arms node or under it?
+static func _of_arms(node: Node, arms) -> bool:
+	return node == arms or (arms is Node and (arms as Node).is_ancestor_of(node))
+
+
+func check_contract(id: String, craft) -> void:
+	var arms = craft.get("arms")
+	var has := []
+	if arms != null:
+		for member: String in ["build", "set_deploy", "muzzles"]:
+			if arms.has_method(member):
+				has.append(member)
+		if "heat" in arms and typeof(arms.heat) == TYPE_FLOAT:
+			has.append("heat")
+	check("%s carries arms with the contract's four members (%s)" % [id, has], has.size() == 4)
+	check("%s: no mount is made for them yet (craft.weapon is task 8's)" % id, craft.get("weapon") == null)
+	if has.size() < 4:
+		sections += 1
+		return
+	var read := []
+	for h: float in [0.5, 2.0, -1.0, 0.0]:
+		arms.heat = h
+		read.append(arms.heat)
+	check("%s: its heat reads back and clamps to 0..1 (0.5, 2, -1, 0 read %s)" % [id, read], read == [0.5, 1.0, 0.0, 0.0])
+	var stowed: Array = _muzzles(arms, 0.0)
+	var out: Array = _muzzles(arms, 1.0)
+	var forward: Vector3 = -craft.pod.global_basis.z.normalized()
+	var worst := 0.0
+	var moved := []
+	for i in out.size():
+		var m: Transform3D = out[i]
+		worst = maxf(worst, rad_to_deg((-m.basis.z).normalized().angle_to(forward)))
+		if i < stowed.size():
+			moved.append(snappedf((m.origin - (stowed[i] as Transform3D).origin).length(), 0.001))
+	check("%s out: %d muzzles, each firing within 2 degrees of the craft's forward (the worst %.3f deg)" % [id, out.size(), worst], out.size() >= 1 and worst < 2.0)
+	check("%s: each muzzle moves between stowed and out (%s m)" % [id, moved], stowed.size() == out.size() and moved.size() == out.size()
+		and moved.all(func(d: float) -> bool: return d > 0.001))
+	var changed := _deploy_changes(craft, arms)
+	var astray := []
+	for n: Node3D in changed:
+		if craft.pod.is_ancestor_of(n) and not _of_arms(n, arms):
+			astray.append(String(craft.get_path_to(n)))
+	check("%s: what its deploy moves or shows that rides the pod is under the arms node (%d parts move; astray: %s)" % [id, changed.size(), astray],
+		not changed.is_empty() and astray.is_empty())
+	sections += 1
+
+
+## The muzzles at deploy `t` (the arms then left stowed).
+static func _muzzles(arms, t: float) -> Array:
+	arms.set_deploy(t)
+	var out: Array = arms.muzzles()
+	arms.set_deploy(0.0)
+	return out
+
+
+# --- the stand-ins ------------------------------------------------------------------------------------------
+
+## Each gun's [barrel, its housing] under `top` (the stand-ins' names).
 static func _guns(top: Node) -> Array:
 	var out := []
 	for barrel: MeshInstance3D in top.find_children("Barrel*", "MeshInstance3D", true, false):
@@ -113,7 +206,7 @@ static func _poking(guns: Array) -> Array:
 	return out
 
 
-## Is anything of the guns under `top` drawn?
+## Is anything of the stand-ins' guns under `top` drawn?
 static func _drawn(top: Node) -> Array:
 	var shown := []
 	for gun: Array in _guns(top):
@@ -122,6 +215,81 @@ static func _drawn(top: Node) -> Array:
 				shown.append(part.name)
 	return shown
 
+
+## The barrels' glow: their material's emission, energy times brightness.
+static func _glow(guns: Array) -> float:
+	var most := 0.0
+	for gun: Array in guns:
+		var mat := (gun[0] as MeshInstance3D).get_active_material(0) as StandardMaterial3D
+		if mat and mat.emission_enabled:
+			most = maxf(most, mat.emission_energy_multiplier * mat.emission.get_luminance())
+	return most * 10.0
+
+
+func check_stowed(id: String, craft) -> void:
+	var arms = craft.get("arms")
+	if not _stand_in(arms):
+		print("  (%s: not a stand-in, its own art: the stand-ins' parts, stowed, are not checked)" % id)
+		sections += 1
+		return
+	var guns := _guns(craft)
+	if id == Pilot.STANDARD:
+		var on := []
+		for eng: Node3D in craft.engines:
+			on.append(_guns(eng).size())
+		check("stand-in: one cannon in the nose of each engine (%s)" % [on], on == [1, 1] and guns.size() == 2)
+	else:
+		check("stand-in: two guns, under the arms node on the pod (%d)" % guns.size(), arms.get_parent() == craft.pod and _guns(arms).size() == 2 and guns.size() == 2)
+	arms.heat = 0.0
+	var cold := _glow(guns)
+	arms.heat = 1.0
+	var hot := _glow(guns)
+	arms.heat = 0.0
+	check("stand-in: the barrels' glow follows the heat (%.2f cold, %.2f hot)" % [cold, hot], hot > cold + 1.0)
+	arms.set_deploy(0.0)
+	var poking := _poking(guns)
+	check("stand-in %s stowed: %d barrels, none poking out of its housing %s" % [id, guns.size(), poking], guns.size() == 2 and poking.is_empty())
+	var shown := _drawn(craft)
+	check("stand-in %s stowed: nothing of them is drawn (%s)" % [id, shown], shown.is_empty())
+	sections += 1
+
+
+func check_deployed(id: String, craft) -> void:
+	var arms = craft.get("arms")
+	if not _stand_in(arms):
+		print("  (%s: not a stand-in, its own art: the stand-ins' parts, out, are not checked)" % id)
+		sections += 1
+		return
+	var forward: Vector3 = -craft.pod.global_basis.z.normalized()
+	var stowed: Array = _muzzles(arms, 0.0)
+	arms.set_deploy(1.0)
+	var out: Array = arms.muzzles()
+	var runs := []
+	for i in mini(out.size(), stowed.size()):
+		runs.append(snappedf(((out[i] as Transform3D).origin - (stowed[i] as Transform3D).origin).dot(forward), 0.001))
+	check("stand-in %s out: two muzzles, each barrel run %s m forward (%.1f)" % [id, runs, RUN], out.size() == 2 and runs.size() == 2
+		and runs.all(func(r: float) -> bool: return absf(r - RUN) < 0.005))
+	var shown := _drawn(craft)
+	check("stand-in %s out: its barrels and housings are drawn (%s), each barrel out of its housing (%d of 2)" % [id, shown, _poking(_guns(craft)).size()],
+		shown.count("Barrel") == 2 and shown.count("Housing") == 2 and _poking(_guns(craft)).size() == 2)
+	# Nothing of the craft ahead of a muzzle: a ray forward from each meets neither the pod's hull nor an engine's fairing.
+	var meshes := [craft.pod]
+	for eng: Node3D in craft.engines:
+		for part: MeshInstance3D in eng.get_children().filter(func(n): return n is MeshInstance3D and String(n.name).ends_with("Fairing")):
+			meshes.append(part)
+	var blocked := []
+	for m: Transform3D in out:
+		for part: MeshInstance3D in meshes:
+			var into := part.global_transform.affine_inverse()
+			var hit := part.mesh.generate_triangle_mesh().intersect_ray(into * m.origin, (into.basis * -m.basis.z).normalized())
+			if not hit.is_empty():
+				blocked.append("%s at %s" % [part.name, hit.position])
+	check("stand-in %s out: nothing of the craft stands ahead of either muzzle (%s)" % [id, blocked], out.size() == 2 and blocked.is_empty())
+	arms.set_deploy(0.0)
+	sections += 1
+
+
+# --- the table, the Basilisk, the rest of the fleet ----------------------------------------------------------
 
 func check_weapon_rows() -> void:
 	var want := {"phaethon": "cannons", "talon": "wing_guns", "shrike": "", "orrery": "", "kiln": "", "vesper": "", "basilisk": "turret"}
@@ -145,94 +313,7 @@ func check_weapon_rows() -> void:
 	var copy: Dictionary = Pilot.traits(Pilot.STANDARD).weapon
 	copy.rate = 99.0
 	check("traits() hands out a copy of the weapon row, as of the power", Pilot.traits(Pilot.STANDARD).weapon.rate == 10.0)
-
-
-func check_contract(id: String, craft) -> void:
-	var arms = craft.arms
-	var has := []
-	if arms != null:
-		for member: String in ["build", "set_deploy", "muzzles"]:
-			if arms.has_method(member):
-				has.append(member)
-		if "heat" in arms and typeof(arms.heat) == TYPE_FLOAT:
-			has.append("heat")
-	check("%s carries arms with the contract's four members (%s)" % [id, has], has.size() == 4)
-	if arms == null:
-		return
-	var guns := _guns(craft)
-	if id == Pilot.STANDARD:
-		var on := []
-		for eng: Node3D in craft.engines:
-			on.append(_guns(eng).size())
-		check("one cannon in the nose of each engine (%s)" % [on], on == [1, 1] and guns.size() == 2)
-	else:
-		check("two guns, on the pod (%d)" % guns.size(), arms.get_parent() == craft.pod and _guns(arms).size() == 2 and guns.size() == 2)
-	arms.heat = 0.5
-	var half: float = arms.heat
-	arms.heat = 0.0
-	var cold := _glow(guns)
-	arms.heat = 1.0
-	var hot := _glow(guns)
-	arms.heat = 0.0
-	check("its heat reads back (%.2f) and the barrels' glow follows it (%.2f cold, %.2f hot)" % [half, cold, hot], is_equal_approx(half, 0.5) and hot > cold + 1.0)
-
-
-## The barrels' glow: their material's emission, energy times brightness.
-static func _glow(guns: Array) -> float:
-	var most := 0.0
-	for gun: Array in guns:
-		var mat := (gun[0] as MeshInstance3D).get_active_material(0) as StandardMaterial3D
-		if mat and mat.emission_enabled:
-			most = maxf(most, mat.emission_energy_multiplier * mat.emission.get_luminance())
-	return most * 10.0
-
-
-func check_stowed(id: String, craft) -> void:
-	if craft.arms == null:
-		check("%s stowed: no arms to stow" % id, false)
-		return
-	craft.arms.set_deploy(0.0)
-	var guns := _guns(craft)
-	var poking := _poking(guns)
-	check("%s stowed: %d barrels, none poking out of its housing %s" % [id, guns.size(), poking], guns.size() == 2 and poking.is_empty())
-	var shown := _drawn(craft)
-	check("%s stowed: nothing of the arms is drawn (%s)" % [id, shown], shown.is_empty())
-
-
-func check_deployed(id: String, craft) -> void:
-	if craft.arms == null:
-		check("%s deployed: no arms to deploy" % id, false)
-		return
-	var stowed: Array = craft.arms.muzzles()
-	craft.arms.set_deploy(1.0)
-	var out: Array = craft.arms.muzzles()
-	var forward: Vector3 = -craft.pod.global_basis.z.normalized()
-	var worst := 0.0
-	var runs := []
-	for i in out.size():
-		var m: Transform3D = out[i]
-		worst = maxf(worst, rad_to_deg((-m.basis.z).normalized().angle_to(forward)))
-		if i < stowed.size():
-			runs.append(snappedf(((m.origin - (stowed[i] as Transform3D).origin)).dot(forward), 0.001))
-	check("%s deployed: %d muzzles, each firing within 2 degrees of the craft's forward (the worst %.3f deg)" % [id, out.size(), worst], out.size() == 2 and worst < 2.0)
-	check("%s deployed: each barrel run %s m out (%.1f)" % [id, runs, RUN], runs.size() == 2 and runs.all(func(r: float) -> bool: return absf(r - RUN) < 0.005))
-	var shown := _drawn(craft)
-	check("%s deployed: its barrels and housings are drawn (%s)" % [id, shown], shown.count("Barrel") == 2 and shown.count("Housing") == 2)
-	check("%s deployed: each barrel stands out of its housing (%d of 2)" % [id, _poking(_guns(craft)).size()], _poking(_guns(craft)).size() == 2)
-	# Nothing of the craft ahead of a muzzle: a ray forward from each meets neither the pod's hull nor an engine's fairing.
-	var meshes := [craft.pod]
-	for eng: Node3D in craft.engines:
-		for part: MeshInstance3D in eng.get_children().filter(func(n): return n is MeshInstance3D and String(n.name).ends_with("Fairing")):
-			meshes.append(part)
-	var blocked := []
-	for m: Transform3D in out:
-		for part: MeshInstance3D in meshes:
-			var into := part.global_transform.affine_inverse()
-			var hit := part.mesh.generate_triangle_mesh().intersect_ray(into * m.origin, (into.basis * -m.basis.z).normalized())
-			if not hit.is_empty():
-				blocked.append("%s at %s" % [part.name, hit.position])
-	check("%s deployed: nothing of the craft stands ahead of either muzzle (%s)" % [id, blocked], out.size() == 2 and blocked.is_empty())
-	craft.arms.set_deploy(0.0)
+	sections += 1
 
 
 ## A node's parts, for comparing two builds: each descendant's path, transform, and its mesh's box and surfaces.
@@ -259,17 +340,19 @@ func check_basilisk_unchanged() -> void:
 	check("the Basilisk's turret is built exactly as turret.gd builds it (%d parts), on its pod, stowed" % (_signature(fresh).size()),
 		same and turret.get_parent() == craft.pod and turret.t == 0.0 and turret.hatch.rotation.z == 0.0)
 	check("... and is fired through its own mount", craft.weapon != null and craft.weapon.get("turret") == turret)
-	check("... and the Basilisk carries no arms", craft.get("arms") == null and _guns(craft).is_empty())
+	check("... and the Basilisk carries no arms", craft.get("arms") == null)
 	fresh.free()
 	game.free()
 	await process_frame
+	sections += 1
 
 
 func check_no_arms(id: String) -> void:
 	var game = await _flat(id)
-	check("the %s carries no arms (its weapon is not built yet), nor a turret" % id, game.craft.get("arms") == null and _guns(game.craft).is_empty() and game.craft.turret == null)
+	check("the %s carries no arms (its weapon is not built yet), nor a turret" % id, game.craft.get("arms") == null and game.craft.turret == null)
 	game.free()
 	await process_frame
+	sections += 1
 
 
 func check_vr_seat() -> void:
@@ -288,11 +371,28 @@ func check_vr_seat() -> void:
 		game.set_process(false)
 		for i in 6:
 			game._process(1.0 / 120.0)
-		var arms = game.craft.arms
+		var craft = game.craft
+		var arms = craft.get("arms")
 		var hull := game.shell.get_node("PodHull") as MeshInstance3D
-		if id == Pilot.TALON:
-			check("in the VR seat the Talon's arms ride on the hull the seat sees", arms != null and arms.get_parent() == hull and _guns(hull).size() == 2)
-			if arms != null:      # (for the fire control: the hull stands nose-down under the pilot, vr_cockpit.gd POD_PITCH, and the guns with it)
+		# The contract: in VR the pod is hidden; what the arms bring out must not be left on it, and must be drawn.
+		var changed := []
+		var on_pod := []
+		var seen := 0
+		if arms != null:
+			changed = _deploy_changes(game, arms)
+			arms.set_deploy(1.0)
+			for n: Node3D in changed:
+				if craft.pod.is_ancestor_of(n):
+					on_pod.append(String(craft.get_path_to(n)))
+				seen += int(n.is_visible_in_tree())
+			arms.set_deploy(0.0)
+		check("in the VR seat nothing the %s's arms move is left on the hidden pod (%d parts move; on the pod: %s), and something they bring out is drawn (%d)" % [
+			id, changed.size(), on_pod, seen], arms != null and not changed.is_empty() and on_pod.is_empty() and seen > 0)
+		check("... and with the GUN switch never armed no fire control is made (%s)" % [game.gunnery], game.gunnery == null)
+		if _stand_in(arms):
+			if id == Pilot.TALON:
+				check("stand-in: in the VR seat the Talon's arms ride on the hull the seat sees", arms.get_parent() == hull and _guns(hull).size() == 2)
+				# (for the fire control: the hull stands nose-down under the pilot, vr_cockpit.gd POD_PITCH, and the guns with it)
 				arms.set_deploy(1.0)
 				var bore := Vector3.ZERO
 				for m: Transform3D in arms.muzzles():
@@ -301,13 +401,13 @@ func check_vr_seat() -> void:
 				print("  (out, the Talon's bore in the VR seat stands %.2f deg %s the rig's level forward)" % [rad_to_deg(bore.normalized().angle_to(-rig.z)),
 					"below" if bore.dot(rig.y) < 0.0 else "above"])
 				arms.set_deploy(0.0)
-		else:
-			var on := []
-			for eng: Node3D in game.craft.engines:
-				on.append(_guns(eng).size())
-			check("in the VR seat the Phaethon's cannons stay on its engines (%s), none on the hull" % [on], arms != null and on == [1, 1] and _guns(hull).is_empty())
-		check("... stowed, nothing of them is drawn (%s)" % [_drawn(game)], _drawn(game).is_empty())
-		check("... and with the GUN switch never armed no fire control is made (%s)" % [game.gunnery], game.gunnery == null)
+			else:
+				var on := []
+				for eng: Node3D in craft.engines:
+					on.append(_guns(eng).size())
+				check("stand-in: in the VR seat the Phaethon's cannons stay on its engines (%s), none on the hull" % [on], on == [1, 1] and _guns(hull).is_empty())
+			check("stand-in: ... stowed, nothing of them is drawn (%s)" % [_drawn(game)], _drawn(game).is_empty())
 		Seat.vehicle_override = ""
 		game.free()
 		await process_frame
+	sections += 1

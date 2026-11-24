@@ -21,6 +21,7 @@ const Kit := preload("res://view/mesh_kit.gd")
 const Finishes := preload("res://view/craft_materials.gd")
 const TurretScript := preload("res://view/turret.gd")
 const Talon := preload("res://view/talon_airframe.gd")
+const STAND_IN := true      # (tests/test_arms.gd checks the stand-ins' own parts only where this is: Codex's art drops it)
 
 const GUN := Vector3(1.18, -0.14, 0.0)         # each gun's line, pod-local (the starboard one's; x mirrored to port)
 const GUNMETAL := Color(0.20, 0.21, 0.23)
