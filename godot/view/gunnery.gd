@@ -53,6 +53,13 @@ var shots := 0                     # tests and the log read these
 var hits := 0
 var kills := 0
 var march_ms := 0.0                # the ground search's cost this frame
+# Heat (the Basilisk's power's figures, sim/pilot_craft.gd TRAITS: fireS, coolS; Luke's sheet, 2026-11-24): fire held
+# on for fireS s on end overheats the gun, and it will not fire again until it has cooled coolS s. A pause in the
+# fire starts the count again. In the log as its power: "POWER: Basilisk Gaze Turret fired|active|ended|ready".
+var firing := false                # firing this frame
+var fire_s := 0.0                  # s of fire on end
+var hot := 0.0                     # s of cooling left (0: it fires)
+var _fire_shown := 0               # (whole seconds of fire told)
 var _cool := 0.0
 var _barrel := 0
 var _damage := {}                  # vehicle id -> hits taken
@@ -189,13 +196,50 @@ func step(delta: float) -> void:
 	on_aim = turret.is_out() and bore_cab.angle_to(line_cab) < TurretScript.ON_TARGET
 	fouled = turret.is_out() and (not turret.clear_of_cab(line_cab) or _crosses_engines(turret.global_transform * turret.trunnion(), target_r))
 	_cool = maxf(0.0, _cool - delta)
-	if (trigger or hold_fire) and turret.ready_to_fire() and on_aim and not fouled:
+	var was_firing := firing
+	firing = (trigger or hold_fire) and turret.ready_to_fire() and on_aim and not fouled and hot <= 0.0
+	if firing:
 		while _cool <= 0.0:
 			_fire(target)
 			_cool += 1.0 / RATE
+	_heat_step(delta, was_firing)
 	_sounds_step()
 	_fly(delta)
 	_draw(cam)
+
+
+## The gun's heat, a frame: fire on end counted (and told a second at a time), overheated at fireS, cooled coolS
+## later. The figures are the craft's power's (the Basilisk's row); with none, the gun never overheats.
+func _heat_step(delta: float, was_firing: bool) -> void:
+	var pw: Dictionary = view.sim.traits.get("power", {})
+	var fire_max := float(pw.get("fireS", INF))
+	var title: String = view.power_title() if view.has_method("power_title") else "Gun"
+	if hot > 0.0:
+		hot = maxf(0.0, hot - delta)
+		if hot == 0.0:
+			print("POWER: %s ready (cooled)" % title)
+			if view.has_method("_power_say"):
+				view._power_say("GUN READY")
+		return
+	if firing:
+		if not was_firing:
+			fire_s = 0.0
+			_fire_shown = 0
+			print("POWER: %s fired" % title)
+		fire_s += delta
+		if floori(fire_s) > _fire_shown:
+			_fire_shown = floori(fire_s)
+			print("POWER: %s active %d s of fire" % [title, _fire_shown])
+		if fire_s >= fire_max:
+			hot = float(pw.get("coolS", 3.0))
+			firing = false
+			print("POWER: %s ended (overheated after %.1f s of fire: %.0f s to cool)" % [title, fire_s, hot])
+			if view.has_method("_power_say"):
+				view._power_say("GUN HOT")
+			fire_s = 0.0
+	elif was_firing:
+		print("POWER: %s ended after %.1f s of fire" % [title, fire_s])
+		fire_s = 0.0
 
 
 ## What the gaze is on: the first vehicle, else the ground, else the sky.

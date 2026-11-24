@@ -748,6 +748,28 @@ var _avoid_ny := 0.0
 var armed := false
 var mode := "normal"
 var boost := 0            # the boost's stages this step: the held one, a power-up's surge (0, 1 or 2)
+# The craft's attributes and its power (PilotCraft.TRAITS; _power_step), mirroring sim-core.js. Its inputs, all
+# new and all off unless given (the replays give none): inp.power (the POWER switch at ARM), inp.powerFire (the
+# button, one step), inp.draft (the view: drafting a traffic vehicle), inp.turretOut (the view: the Basilisk's gun
+# out). Events: {"type": "power", "power": id, "state": "ready" | "fired" | "active" (each whole second of it) |
+# "ended" | "refused", "t": s it has run, "gauge": 0..1}.
+var power := ""            # the craft's power's id ("slipstream", "glide", "kickdown", "gyro", "ram", "ground", "turret")
+var power_state := ""      # "charging", "ready" or "active" ("" for a craft without one)
+var power_t := 0.0         # s: of it left while active; of the recharge left while charging (Slipstream: none)
+var power_gauge := 0.0     # 0..1: Slipstream's charge; the others' recharge done (1 ready)
+var power_live := 0.0      # s it has been active
+var traits := {}           # PilotCraft.traits: every attribute (1 where none) and the power's figures (`power`)
+var k_thrust := 1.0        # this step's multipliers, the attributes' and the power's: the thrust, the cruise drag,
+var k_drag := 1.0          # the engines' grip limit, the air brakes, a wall's spring; g of lift in the air
+var k_grip := 1.0
+var k_brake := 1.0
+var k_wall := 1.0
+var lift := 0.0
+var _ram := false          # Ram Plate this step: traffic is shoved aside
+var _air_grip := 0.0       # Glide: the least grip in the air this step
+var _pod_clear := 1.0      # the pod's grip as its repulsors give it (before Glide's), at the last step: 0 in the air
+var _kick_low := [-INF, -INF]   # Kickdown: when each lever was last under its low mark
+var _settled := 0.0        # Ground Effect: s its conditions have held
 # Live handling switch, mirroring sim-core.js: inp.handling asks for "speed" or "starfighter";
 # STARFIGHTER only engages below P.sfEngageV, then the handling keys blend over P.modeBlendT s.
 var hwant := "speed"
@@ -822,6 +844,9 @@ func _init(overrides: Dictionary = {}) -> void:
 	_rng = int(P.seed) & 0xFFFFFFFF
 	if _rng == 0:
 		_rng = 1
+	# (overrides.traitsOf: another row's traits on this chassis; the tests fly the Talon's before it is merged)
+	traits = PilotCraft.traits(overrides.get("traitsOf", vehicle))
+	_power_reset()
 	if P.track == "range":
 		kind = "range"
 		_build_range()
@@ -891,6 +916,171 @@ func _boost(inp: Dictionary, repair: bool, dt: float) -> float:
 	return pow(P.boostMult, boost) if boost > 0 else 1.0
 
 
+## The power as a flight finds it (a fresh craft, a restart): Slipstream's gauge empty, the rest ready.
+func _power_reset() -> void:
+	var pw: Dictionary = traits.power
+	power = String(pw.get("id", ""))
+	power_state = "" if power == "" else ("charging" if power == "slipstream" else "ready")
+	power_gauge = 0.0 if power == "slipstream" else 1.0
+	power_t = 0.0
+	power_live = 0.0
+	_kick_low = [-INF, -INF]
+	_settled = 0.0
+
+
+func _power_event(state: String) -> void:
+	events.append({"type": "power", "power": power, "state": state, "t": power_live, "gauge": power_gauge})
+
+
+## Start it (`last` s), or end it: then a recharge (`recharge` s) if it has one, else Slipstream's empty gauge or ready.
+func _power_start(last: float) -> void:
+	power_state = "active"
+	power_t = last
+	power_live = 0.0
+	if power == "slipstream":
+		power_gauge = 0.0
+	_power_event("fired")
+
+
+func _power_end() -> void:
+	var recharge: float = float(traits.power.get("recharge", 0.0))
+	_power_event("ended")
+	power_live = 0.0
+	if recharge > 0.0:
+		power_state = "charging"
+		power_t = recharge
+		power_gauge = 0.0
+	elif power == "slipstream":
+		power_state = "charging"
+		power_t = 0.0
+	else:
+		power_state = "ready"
+		power_t = 0.0
+
+
+## A step of it running: the once-a-second "active" line, and (with `last`) its end when that runs out.
+func _power_run(dt: float, timed: bool) -> void:
+	var was := power_live
+	power_live += dt
+	if timed:
+		power_t -= dt
+		if power_t <= 0.0:
+			_power_end()
+			return
+	if floor(power_live) > floor(was):
+		_power_event("active")
+
+
+## The craft's attributes and its power, a step (PilotCraft.TRAITS; mirrors sim-core.js powerStep): this step's
+## multipliers (k_thrust, k_drag, k_grip, k_brake, k_wall, lift), Ram Plate (_ram) and Glide's grip in the air
+## (_air_grip), and the power's own clock. Run before the repulsors, on what the last step left. With no
+## inp.power (SAFE, the replays) no power works, and the multipliers are the attributes alone; a recharge goes on.
+func _power_step(inp: Dictionary, dt: float) -> void:
+	k_thrust = traits.thrustMax
+	k_drag = traits.engineCd
+	k_grip = traits.gripCapG
+	k_brake = traits.brakes
+	k_wall = traits.wallShove
+	lift = traits.lift
+	_ram = false
+	_air_grip = 0.0
+	if power == "":
+		return
+	var pw: Dictionary = traits.power
+	var on: bool = bool(inp.get("power", false))
+	var fire: bool = on and bool(inp.get("powerFire", false))
+	if power == "turret":
+		if bool(inp.get("turretOut", false)):
+			k_drag *= pw.drag
+		return
+	if power_state == "active" and not on:   # SAFE ends it
+		_power_end()
+	match power:
+		"slipstream":
+			if power_state == "active":
+				_power_run(dt, true)
+			elif on:
+				if bool(inp.get("draft", false)) and power_gauge < 1.0:
+					power_gauge = minf(1.0, power_gauge + dt / float(pw.fill))
+					if power_gauge >= 1.0:
+						power_state = "ready"
+						_power_event("ready")
+				if fire:
+					if power_state == "ready":
+						_power_start(pw.last)
+					else:
+						_power_event("refused")
+		"glide":
+			if on:
+				lift += (1.0 - lift) * (1.0 - 1.0 / float(pw.hang))
+				_air_grip = pw.airGrip
+				if power_state == "active":
+					if _pod_clear >= 1.0:   # down again
+						_power_end()
+					else:
+						_power_run(dt, false)
+				elif _pod_clear <= 0.0:     # clear of the ground: away
+					_power_start(0.0)
+		"kickdown":
+			var levers := [float(inp.thrL), float(inp.thrR)]
+			for k in 2:
+				if levers[k] < float(pw.low):
+					_kick_low[k] = time
+			if power_state == "active":
+				_power_run(dt, true)
+			elif power_state == "charging":
+				_recharge(dt)
+			elif on and levers[0] >= float(pw.full) and levers[1] >= float(pw.full) 					and time - float(_kick_low[0]) <= float(pw.within) and time - float(_kick_low[1]) <= float(pw.within):
+				_power_start(pw.last)
+		"gyro", "ram":
+			if power_state == "active":
+				_power_run(dt, true)
+			elif power_state == "charging":
+				_recharge(dt)
+				if fire:
+					_power_event("refused")
+			elif fire:
+				_power_start(pw.last)
+		"ground":
+			var v := sqrt(pod.vx * pod.vx + pod.vy * pod.vy)
+			var split: float = absf(float(inp.thrL) - float(inp.thrR)) + absf(float(inp.brkL) - float(inp.brkR))
+			var held: bool = on and v > float(pw.minV) and _pod_clear >= 1.0 and eL.grip >= 1.0 and eR.grip >= 1.0 					and absf(pod.vz) <= float(pw.climb) * v
+			if power_state == "active":
+				if held and split < float(pw.hardSplit):
+					_power_run(dt, false)
+				else:
+					_power_end()
+					_settled = 0.0
+			else:
+				_settled = _settled + dt if held and split < float(pw.split) else 0.0
+				if _settled >= float(pw.settle):
+					_power_start(0.0)
+	# what it does, every step it is on (the step it starts in too; not the one it ends in)
+	if power_state == "active":
+		match power:
+			"slipstream", "kickdown":
+				k_thrust *= pw.thrust
+			"gyro":
+				k_grip *= pw.grip
+			"ram":
+				_ram = true
+				k_wall *= pw.wallShove
+			"ground":
+				k_drag *= pw.drag
+
+
+## A step of the recharge: ready when it is done.
+func _recharge(dt: float) -> void:
+	var recharge: float = float(traits.power.get("recharge", 0.0))
+	power_t -= dt
+	power_gauge = clampf(1.0 - power_t / recharge, 0.0, 1.0) if recharge > 0.0 else 1.0
+	if power_t <= 0.0:
+		power_t = 0.0
+		power_gauge = 1.0
+		power_state = "ready"
+		_power_event("ready")
+
+
 func _build_range() -> void:
 	var i := 0
 	while RAMP_X0 + RAMP_EVERY * i < RANGE_LEN - 500.0:
@@ -926,6 +1116,8 @@ func _hover(b: Body, dt: float, az: float) -> void:
 	var dhdt := (ground(b.x + b.vx * dt, b.y + b.vy * dt) - h) / dt
 	var w: float = P.hoverOmega
 	var up := maxf(0.0, G + w * w * (P.rideH - (b.z - h)) - 2.0 * P.hoverZeta * w * (b.vz - dhdt))
+	if lift != 0.0:   # (the Talon's wings: lift in the air, coming in as the repulsors' grip goes; none on the ground)
+		b.vz += lift * G * clampf((b.z - h - P.rideH - 0.5) / 1.5, 0.0, 1.0) * dt
 	b.vz += (up - G + az) * dt
 	b.z += b.vz * dt
 	if b.z - h < 0.3:
@@ -1158,7 +1350,7 @@ func _free_contact(b: Body, circles: Array, dt: float) -> void:
 			var vx := _pvx
 			var vy := _pvy
 			var vn := vx * nx + vy * ny
-			var fn: float = P.wallK * pen - (P.wallC * vn if vn < 0.0 else 0.0)
+			var fn: float = P.wallK * k_wall * pen - (P.wallC * vn if vn < 0.0 else 0.0)
 			var tx := -ny
 			var ty := nx
 			var vt := vx * tx + vy * ty
@@ -2193,6 +2385,7 @@ func restart() -> void:
 		e.heat = 0.3 if P.limits else 0.0
 	pod.health = 1.0
 	battery = 1.0
+	_power_reset()
 	if kind == "range":
 		pod.x = 30.0
 		pod.y = 0.0
@@ -2437,7 +2630,7 @@ func _collide_walls(b: Body, circles: Array, dt: float) -> void:
 			else:
 				events.append({"type": "scrape", "who": who})   # contact without (much) damage
 			b.contact[ci] = true
-		var fn: float = P.wallK * pen - (P.wallC * vn if vn < 0.0 else 0.0)
+		var fn: float = P.wallK * k_wall * pen - (P.wallC * vn if vn < 0.0 else 0.0)
 		var tx := -ny
 		var ty := nx
 		var vt := vx * tx + vy * ty
@@ -2560,13 +2753,19 @@ func _collide_obstacles(b: Body, circles: Array) -> void:
 			var ny := dy / d
 			_point_vel(b, cx, cy)
 			var vn: float = (_pvx - o.vx) * nx + (_pvy - o.vy) * ny
+			# Ram Plate: a vehicle (not a pillar: those have a halfSize) is shoved aside, not smashed into
+			var ram: bool = _ram and float(o.get("halfSize", 0.0)) <= 0.0
 			if not b.touch.has(o.id) and not inside.has(o.id):
-				if -vn > P.smashV and crash_t <= 0.0:
+				if -vn > P.smashV and crash_t <= 0.0 and not ram:
 					events.append({"type": "smash", "id": o.id, "v": -vn})
 					crash_t = 1.6
+				elif ram:
+					events.append({"type": "bump", "who": "pod" if b == pod else ("L" if b == eL else "R"), "id": o.id, "v": maxf(0.0, -vn), "ram": true})
 				else:
 					events.append({"type": "bump", "who": "pod" if b == pod else ("L" if b == eL else "R"), "id": o.id, "v": maxf(0.0, -vn)})
 			inside[o.id] = true
+			if ram:
+				continue   # ... and it is the vehicle that gives way (the view shoves it aside): the craft goes on through, its speed its own
 			var fn: float = P.fieldK * pen - (P.fieldC * vn if vn < 0.0 else 0.0)
 			_apply_at(b, fn * nx, fn * ny, cx, cy)
 	b.touch = inside
@@ -2643,6 +2842,7 @@ func step(inp: Dictionary, dt: float) -> void:
 		P.handling = "starfighter" if hblend >= 0.5 else "speed"
 		if hblend == htgt:
 			events.append({"type": "handling", "mode": P.handling})
+	_power_step(inp, dt)   # the craft's attributes and its power: this step's multipliers (PilotCraft.TRAITS)
 	# Vertical ties: the binder holds both engines at one height and the tow bar lifts the
 	# pod toward their mean, so a one-sided ramp hit lifts the whole craft instead of
 	# flinging one engine skyward. Exactly zero when heights match (flat ground).
@@ -2661,6 +2861,10 @@ func step(inp: Dictionary, dt: float) -> void:
 		b.fy = 0.0
 		b.t = 0.0
 		_hover(b, dt, az[k])
+	_pod_clear = pod.grip
+	if _air_grip > 0.0:   # Glide: the wings bite the air, and the levers steer in it
+		for b: Body in bodies:
+			b.grip = maxf(b.grip, _air_grip)
 	time += dt
 	var repair: bool = inp.get("repair", false)
 	var reignite: bool = inp.get("reignite", false)
@@ -2697,8 +2901,8 @@ func step(inp: Dictionary, dt: float) -> void:
 		var drive_mult: float = P.ramjetMult if ramjet else (P.burnerMult if burner else 1.0)
 		if boost > 0:   # (the drag fourth is shaped to follows the boost up: more speed, still no runaway)
 			drive_mult *= boost_mult
-		var nominal_thrust: float = 2.0 * P.thrustMax * (0.87 / P.gate) * drive_mult * gm
-		var total_cd: float = (2.0 * P.engineCd + P.podCd) * line
+		var nominal_thrust: float = 2.0 * P.thrustMax * k_thrust * (0.87 / P.gate) * drive_mult * gm
+		var total_cd: float = (2.0 * P.engineCd * k_drag + P.podCd * k_drag) * line
 		var reference_speed := sqrt(maxf(1.0, nominal_thrust / total_cd))
 		var blend := smoothstep(0.6, 0.8, speed / reference_speed)
 		var shaped_drag := nominal_thrust * (1.0 - exp(-speed / (0.65 * reference_speed)))
@@ -2733,7 +2937,7 @@ func step(inp: Dictionary, dt: float) -> void:
 		var mult: float = P.ramjetMult if ramjet else (P.burnerMult if burner else 1.0)
 		if boost > 0:
 			mult *= boost_mult
-		var thrust: float = 0.0 if e.flameout else P.thrustMax * lever * mult * (0.45 + 0.55 * e.health) * e.sputter
+		var thrust: float = 0.0 if e.flameout else P.thrustMax * k_thrust * lever * mult * (0.45 + 0.55 * e.health) * e.sputter
 		e.thrust = thrust / P.thrustMax
 		e.fx += thrust * P.forceScale * gm * c
 		e.fy += thrust * P.forceScale * gm * s
@@ -2749,15 +2953,15 @@ func step(inp: Dictionary, dt: float) -> void:
 			var response := brake_response(v,e.m)
 			e.front = brk*response[0]
 			front_drag = brk*response[1]
-		var cd: float = (P.engineCd * cruise_drag + P.brakeCd * brk + front_drag) * P.forceScale
-		var bl: float = (P.brakeLin * brk + P.brakeConst * brk / maxf(v, 2.0)) * P.forceScale
+		var cd: float = (P.engineCd * k_drag * cruise_drag + P.brakeCd * k_brake * brk + front_drag * k_brake) * P.forceScale
+		var bl: float = (P.brakeLin * brk + P.brakeConst * brk / maxf(v, 2.0)) * k_brake * P.forceScale
 		e.fx -= cd * v * e.vx + bl * e.vx
 		e.fy -= cd * v * e.vy + bl * e.vy
 		var fxp: float = e.x - c * P.finOffset
 		var fyp: float = e.y - s * P.finOffset
 		_point_vel(e, fxp, fyp)
 		var vlat := -s * _pvx + c * _pvy
-		var cap: float = e.m * G * (P.gripCapG * (1.0 - 0.45 * brk) + brake_grip)
+		var cap: float = e.m * G * (P.gripCapG * k_grip * (1.0 - 0.45 * brk) + brake_grip)
 		var flat := clampf(-e.m * P.engineGrip * vlat, -cap, cap) * e.grip
 		_apply_at(e, -s * flat, c * flat, fxp, fyp)
 		e.t -= P.yawDamp * e.w
@@ -2842,8 +3046,8 @@ func step(inp: Dictionary, dt: float) -> void:
 
 	var pb := minf(inp.brkL, inp.brkR)
 	var pv := sqrt(Pd.vx * Pd.vx + Pd.vy * Pd.vy)
-	var pcd: float = (P.podCd * cruise_drag + 0.5 * P.brakeCd * pb) * P.forceScale
-	var pbl: float = 0.5 * (P.brakeLin * pb + P.brakeConst * pb / maxf(pv, 2.0)) * P.forceScale
+	var pcd: float = (P.podCd * k_drag * cruise_drag + 0.5 * P.brakeCd * k_brake * pb) * P.forceScale
+	var pbl: float = 0.5 * (P.brakeLin * pb + P.brakeConst * pb / maxf(pv, 2.0)) * k_brake * P.forceScale
 	Pd.fx -= pcd * pv * Pd.vx + pbl * Pd.vx
 	Pd.fy -= pcd * pv * Pd.vy + pbl * Pd.vy
 	var qx := Pd.x - pc * 1.2

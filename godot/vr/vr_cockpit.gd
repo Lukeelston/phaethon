@@ -14,6 +14,9 @@
 ##   the SLIDE / GRIP switch on the left console: whether the cockpit steps out in a turn; and behind it
 ##   the drift slider (vr/drift_slider.gd): how far. A controller's tip rested on its knob takes hold of
 ##   it, and it goes fore and aft with the hand (forward is more)
+##   the craft's power (sim/pilot_craft.gd TRAITS): its guarded POWER switch (ARM up, SAFE down) on the left console's
+##   inboard face under the drift slider, and its button beside it (a fingertip on the cap fires it; P in the flat
+##   view). Its ring is dark while the power charges, steady when it is ready, pulsing while it runs
 ##   the consoles' toggles (vr/console_switches.gd): TAC HUD (the tactical display), FIELD, AUTOPILOT on the left, GATES, HEAT, RUSH on
 ##   the right, each the OPTIONS line of that name; a tip rested on a bat has it, a push along the console throws
 ##   it (forward ON). The knobs TAC DIM (left, aft) and TAC WARN (right, forward): a tip rested on one takes it,
@@ -88,6 +91,7 @@ const SpeedRushScript := preload("res://vr/speed_rush.gd")
 const DriftSliderScript := preload("res://vr/drift_slider.gd")
 const TacticalScript := preload("res://view/tactical_display.gd")   # the tactical display: the road ahead, the traffic and the exits marked out in the world
 const ConsoleSwitchesScript := preload("res://vr/console_switches.gd")   # the consoles' toggles and two knobs
+const PowerButtonScript := preload("res://vr/power_button.gd")           # the craft's power's button (its switch is a ModeSwitch)
 var _brake_trace: RefCounted
 static var require_neutral_on_entry := false
 var _await_neutral_controls := false
@@ -208,6 +212,16 @@ var slide_switch                          # vr/mode_switch.gd again: SLIDE up, G
 var gun_switch                            # ... and the Basilisk's: GUN up (the gun out and laid where you look), SAFE down
 var _gun_shots := 0                       # (the shots the hand has felt)
 var drift_slider                          # vr/drift_slider.gd: how far it steps out (slide_amount)
+# The craft's power (sim/pilot_craft.gd TRAITS; Luke, 2026-11-24: "build the attributes and powers into the game"): its
+# guarded POWER switch (vr/mode_switch.gd again, 0.7 of its size: ARM up, SAFE down) on the port console's inboard
+# face under the drift slider, and its button (vr/power_button.gd) beside it, forward. The switch
+# is CraftView.power_armed, saved as "power"; the button fires the power (CraftView.fire_power). Its ring: dark while
+# the power charges, steady ready, pulsing while it runs.
+var power_switch
+var power_button
+static var _power_loaded := false         # (its saved setting is read once a run, as the slide's)
+var _power_note := ""                     # the power's word on the status strip (_power_say), and when it was put there (ms)
+var _power_note_at := -1000000
 var _slide_stop := 0.0                    # the slide's overshoot is stopped here (it goes out with the amount past 1)
 var _slide := 0.0
 var _slide_rate := 0.0
@@ -324,6 +338,11 @@ func _ready() -> void:
 	_slide_loaded = true
 	if drift_slider:      # (its knob stands where the amount is)
 		drift_slider.amount = slide_amount
+	if not _power_loaded and prefs.has("power"):
+		power_armed = prefs.power != "safe"
+	_power_loaded = true
+	if sim.power != "":
+		print("POWER: %s, the switch at %s, %s" % [power_title(), "ARM" if power_armed else "SAFE", sim.power_state])
 	if not _rush_loaded and prefs.has("rush"):
 		speed_rush = prefs.rush != "off"
 	_rush_loaded = true
@@ -433,6 +452,7 @@ func _save_prefs() -> void:
 			"startup": "cold" if cold_start else "hot", "school": "on" if school else "done",
 			"consumables": "on" if consumables else "off", "powerups": "on" if power_ups_on else "off",
 			"field": "on" if avoid_on else "off", "rush": "on" if speed_rush else "off", "tactical": "on" if TacticalScript.wanted else "off",
+			"power": "arm" if power_armed else "safe",
 			"tactical_dim": snappedf(tactical_dim, 0.001), "tactical_pace": snappedf(tactical_pace, 0.001),
 			"map": "global" if map_whole else "local", "map_scheme": String(MinimapPanelScript.SCHEMES[map_scheme].name),
 			"map_hud": "on" if map_hud else "off"}))
@@ -958,6 +978,25 @@ func _build_cockpit() -> void:
 	drift_slider.transform = DriftSliderScript.mount()
 	drift_slider.build()
 	drift_slider.amount = slide_amount
+	# The craft's power: its guarded switch on the same console's inboard face, aft of the lever and under the slider,
+	# its face turned up at the seat; and its button beside it, forward.
+	power_switch = ModeSwitchScript.new()
+	power_switch.name = "PowerSwitch"
+	power_switch.legends = ["ARM", "SAFE"]
+	power_switch.colours = [PowerButtonScript.COLOUR, Color(0.35, 0.9, 0.45)]
+	power_switch.throws = ["arm", "safe"]
+	shell.add_child(power_switch)
+	power_switch.transform = power_switch_mount()
+	power_switch.build(bespoke_controls)
+	var plinth := MeshInstance3D.new()      # (what it stands on: from its panel's back into the console's side, under its proud foot)
+	plinth.name = "plinth"
+	plinth.mesh = Kit.compound([[SeatFinish.beveled_plate(Vector3(0.112, 0.06, 0.142), 0.003), Kit.at(Vector3(0.0, 0.0, -0.064), Vector3(PI / 2.0, 0.0, 0.0)), Color(0.09, 0.1, 0.115)]])
+	plinth.material_override = SeatFinish.powder_coat()
+	power_switch.add_child(plinth)
+	power_button = PowerButtonScript.new()
+	shell.add_child(power_button)
+	power_button.transform = PowerButtonScript.mount()
+	power_button.build(String(sim.traits.power.get("lcd", "POWER")) if sim != null else "POWER")
 	if console:      # what is the SLIDE and MODE switches' is not the consoles': their bats' tips and middles, either way thrown, and the drift slider's knob
 		var into: Transform3D = (interior.transform * console.transform).affine_inverse()
 		for sw: Node3D in [mode_switch, slide_switch]:
@@ -1263,6 +1302,20 @@ func _work_controls(l: XRController3D, r: XRController3D, delta: float) -> void:
 			if slid != "":
 				_hand_busy[hand] = ConsoleSwitchesScript.CLAIM_S
 			_work_slider(slid, hand)
+	# the craft's power: its POWER switch (as the SLIDE switch) and its button (a fingertip on its cap fires it)
+	if power_switch and hands_live and not _await_neutral_controls:
+		for hand in [l, r]:
+			var held: bool = at_console.get(hand, false) or (drift_slider != null and drift_slider.held_by == hand)
+			var armed: String = power_switch.poke(hand, delta, held)
+			if armed != "":
+				_hand_busy[hand] = ConsoleSwitchesScript.CLAIM_S
+				set_power_armed(armed == "arm")
+				_buzz(hand, 0.9, 0.06)
+			if power_button and power_button.poke(hand, delta, held or float(_hand_busy.get(hand, 0.0)) > 0.0):
+				_hand_busy[hand] = ConsoleSwitchesScript.CLAIM_S
+				_buzz(hand, 0.5, 0.03)      # (the click under the finger; its firing is felt in both hands)
+				print("POWER: the button pressed")
+				fire_power()
 	# the map's own switch and button, on its pod
 	if minimap_panel and hands_live and not _await_neutral_controls:
 		for hand in [l, r]:
@@ -2174,6 +2227,53 @@ static func gun_switch_mount() -> Transform3D:
 	return Transform3D(Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, -0.55), at)
 
 
+## Where the POWER switch stands (cockpit rig): on the port console's inboard face (0.55 out), under the drift
+## slider's middle, between the lever's idle place ahead of it and the seat's bolster aft (which hides the face from
+## the seat further aft), its panel 0.7 of the MODE switch's size, its face turned 20 degrees up from the console's
+## side at the seat (its top edge at the console's face, its foot standing proud), across it forward: ARM up, SAFE
+## down, the legends read along the console. Its button (vr/power_button.gd) is beside it, forward, on the same face.
+const POWER_AT := Vector3(-0.532, 0.305, 0.47)
+const POWER_TILT := deg_to_rad(20.0)
+const POWER_SCALE := 0.7
+
+
+static func power_switch_mount() -> Transform3D:
+	var x := Vector3(0.0, 0.0, -1.0)
+	var z := Vector3(cos(POWER_TILT), sin(POWER_TILT), 0.0)
+	return Transform3D(Basis(x, z.cross(x), z).scaled(Vector3.ONE * POWER_SCALE), POWER_AT)
+
+
+## The POWER switch thrown: ARM or SAFE, now and saved. SAFE ends a power that is running (the sims' own rule).
+func set_power_armed(on: bool) -> void:
+	power_armed = on
+	_save_prefs()
+	print("POWER: %s, the switch to %s" % [power_title(), "ARM" if on else "SAFE"])
+	_power_say("POWER ARMED" if on else "POWER SAFE")
+
+
+## The power's word on the status strip, in the footer's place, as a feat's is (_update_hud).
+func _power_say(msg: String) -> void:
+	_power_note = msg
+	_power_note_at = Time.get_ticks_msec()
+
+
+## The power firing: a light buzz in both hands.
+func _power_felt() -> void:
+	if hands.has("left"):
+		_buzz(hands.left, 0.35, 0.06)
+		_buzz(hands.right, 0.35, 0.06)
+
+
+## How the button's ring stands: "pulse" while the power runs, "steady" ready, "dark" charging, at SAFE, and for the
+## Basilisk (its gun is the GUN switch's).
+func power_ring() -> String:
+	if not power_armed or sim.power == "" or sim.power == "turret":
+		return "dark"
+	if sim.power_state == "active":
+		return "pulse"
+	return "steady" if sim.power_state == "ready" else "dark"
+
+
 ## The gun from the cockpit: the GUN switch (set_gun), X held fires it while it is out, F too; it
 ## comes out only with the battery on.
 func _gun_controls() -> void:
@@ -2248,9 +2348,12 @@ func _ease_slide(delta: float) -> float:
 	var covered: float = clampf((_slide_lean - lean_was) / way, 0.0, 1.0) if absf(way) > 0.00001 else 1.0
 	_slide_ask += (signf(_slide_load) * smoothstep(SLIDE_LOAD.x, SLIDE_LOAD.y, absf(_slide_load)) - _slide_ask) * covered
 	var asked := _slide_ask
-	var target := asked * SLIDE_MAX * slide_amount if slide_feel else 0.0      # (the drift slider's amount: at 1, as it was)
+	# (the drift slider's amount: at 1, as it was; and the craft's own reach, its "drift" attribute: sim/pilot_craft.gd
+	# TRAITS driftReach, the Orrery's 0.8 to the Vesper's 1.2. The slide is the cockpit's alone: the sim never sees it)
+	var reach := drift_reach()
+	var target := asked * SLIDE_MAX * slide_amount * reach if slide_feel else 0.0
 	# its overshoot's stop goes out with an amount past 1, and comes back in no faster than the slide itself moves
-	var stop := SLIDE_MAX * 1.25 * maxf(1.0, slide_amount)
+	var stop := SLIDE_MAX * 1.25 * maxf(1.0, slide_amount * reach)
 	var w := TAU * SLIDE_HZ
 	var remaining := clampf(delta, 0.0, 0.05)
 	while remaining > 0.000001:
@@ -2260,6 +2363,12 @@ func _ease_slide(delta: float) -> float:
 		_slide = clampf(_slide + _slide_rate * step, -_slide_stop, _slide_stop)
 		remaining -= step
 	return _slide
+
+
+## The craft's drift reach (sim/pilot_craft.gd TRAITS driftReach): how far its cockpit steps out, of the Phaethon's,
+## at the same slider. 1 for a cockpit without a sim.
+func drift_reach() -> float:
+	return float(sim.traits.get("driftReach", 1.0)) if sim != null else 1.0
 
 
 ## How hard the slide scrubs in a hand, 0..1: mostly while the rear is moving, a little while it is
@@ -2397,6 +2506,11 @@ func _process(delta: float) -> void:
 		gun_switch.show_state(not gun_wanted, 1.0 - out, false)
 	if drift_slider:
 		drift_slider.show_state(slide_feel, startup.power)
+	if power_switch:
+		power_switch.power = startup.power
+		power_switch.show_state(not power_armed, 0.0 if power_armed else 1.0, false)
+	if power_button:
+		power_button.show_state(power_ring(), startup.power, delta)
 	_show_console(delta)
 	# Crash: fade to black, respawn happens in the dark, fade back up.
 	var target := 1.0 if sim.crash_t > 0.0 else 0.0
@@ -2517,7 +2631,7 @@ func _update_hud() -> void:
 	dashboard.show_state({
 		"mph": kmh / 1.609344, "kmh": kmh, "mach": cues.mach, "backlight": panel_level, "mach_line": cues.readout() + boost_text() + autopilot.suffix(), "progress": progress,
 		"footer": "%s   /   %s" % [handling_text(), ctl],
-		"points": int(_skill_shown.get("points", 0)) if _skill_on else 0, "feat": String(_skill_shown.get("award", "")) if _skill_on else "", "feat_age": float(_skill_shown.get("age", 1e9)),
+		"points": int(_skill_shown.get("points", 0)) if _skill_on else 0, "feat": _strip_feat()[0], "feat_age": _strip_feat()[1],
 		"thr": [inp.thrL * startup.engine_k(0), inp.thrR * startup.engine_k(1)],
 		"brk": brakes, "heat": [sim.eL.heat, sim.eR.heat],
 		"health": [sim.eL.health, sim.eR.health],
@@ -2536,6 +2650,17 @@ func _update_hud() -> void:
 		var lit: String = {"ramjet": "RAMJET", "burner": "AFTERBURNER"}.get(sim.mode, "RAMJET ARMED" if sim.armed else "")
 		chase_hud.text = "%s MPH\n%s%s%s" % [_thousands(roundi(kmh / 1.609344)), cues.readout(), (("   " + lit) if lit != "" else "") + boost_text(),
 			("\n\n" + guide) if guide != "" else ""]
+
+
+## What the status strip shows in the footer's place, and how long it has: the power's word (_power_say) or a skill's
+## feat, whichever is the fresher.
+func _strip_feat() -> Array:
+	var feat: String = String(_skill_shown.get("award", "")) if _skill_on else ""
+	var age: float = float(_skill_shown.get("age", 1e9))
+	var note_age := (Time.get_ticks_msec() - _power_note_at) / 1000.0
+	if _power_note != "" and (feat == "" or note_age < age):
+		return [_power_note, note_age]
+	return [feat, age]
 
 
 static func _thousands(n: int) -> String:

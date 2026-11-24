@@ -393,7 +393,10 @@ func _run() -> void:
 		check(id + " reaches 1,000 mph and turns under differential thrust", result.x < 10.0 and result.y > 0)
 		print(id, " 1000 mph seconds / split-lever yaw degrees ", result)
 	var stock := trial("phaethon")
-	check("the Talon flies as the Phaethon does (the same tuning)", trial("talon") == stock)
+	# (the Talon is the Phaethon's chassis; since the fleet's attributes, 2026-11-24, it has its own grip, drag and lift)
+	var talon := trial("talon")
+	check("the Talon is the Phaethon's chassis with its own attributes: the same tuning, 1,000 mph within 2%% of its time (%.2f s, %.2f s), and it turns" % [talon.x, stock.x],
+		Sim.PilotCraft.tuning("talon") == Sim.PilotCraft.tuning("phaethon") and absf(talon.x - stock.x) < 0.02 * stock.x and talon.y > 0)
 	var shrike := trial("shrike")
 	print("1000 mph, then degrees after 0.5 s at 350 mph: Phaethon ", stock, ", Shrike ", shrike)
 	check("Shrike launches faster at equal throttle", shrike.x < stock.x * 0.9 and stock.x < 10)

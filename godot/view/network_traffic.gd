@@ -1571,6 +1571,56 @@ func knock_out(c: Car) -> void:
 	cars.erase(c)
 
 
+## Slipstream's (the Phaethon's power, sim/pilot_craft.gd): how far ahead of a craft at (x, y) going (vx, vy) the
+## nearest vehicle it is drafting is, m: one going its way (within 25 degrees), ahead of it by no more than `reach`
+## (to its tail: a transport's last car), and in its lane (its middle within `lane` m of the craft's line). INF
+## for none. Once a frame (craft_view.gd), over the vehicles kept: a few hundred subtractions.
+func draft_gap(x: float, y: float, vx: float, vy: float, reach: float, lane: float) -> float:
+	var v := sqrt(vx * vx + vy * vy)
+	if v < 20.0:
+		return INF
+	var ux := vx / v
+	var uy := vy / v
+	var best := INF
+	for c in cars:
+		if c.v <= 0.0 or c.hx * ux + c.hy * uy < 0.906:      # (cos 25 degrees: going the craft's way)
+			continue
+		var dx := c.x - x
+		var dy := c.y - y
+		var ahead := dx * ux + dy * uy - c.train_tail
+		if ahead <= 0.0 or ahead > reach or ahead >= best:
+			continue
+		if absf(-dx * uy + dy * ux) < lane:
+			best = ahead
+	return best
+
+
+## Ram Plate's (the Kiln's power): vehicle `id` (the sims' obstacle id over 32) hit by a craft at (x, y) going `speed`
+## m/s is shoved aside: thrown across, away from the craft, and on into the next lane over (its own driving takes it
+## the rest of the way there), knocked back a little. Nothing if it has gone.
+func shove(id: int, x: float, y: float, speed: float) -> void:
+	for c in cars:
+		if c.id != id or c.craft or c == racer:
+			continue
+		var R := sim.roads[c.road]
+		var i := clampi(int(c.f), 0, R.N - 1)
+		var side := -1.0 if (x - c.x) * R.nx[i] + (y - c.y) * R.ny[i] > 0.0 else 1.0      # across the road: away from the craft
+		var lanes: Array = _lanes[c.road]
+		var best := c.lane
+		var want := c.lat + side * 45.0
+		for k in lanes.size():
+			if absf(_lane_lat(c, k) - want) < absf(_lane_lat(c, best) - want):
+				best = k
+		c.lane = best
+		c.lc_cool = 2.0
+		c.lat += side * 8.0          # the shove itself: there at once, the next lane after
+		c.v = maxf(0.0, c.v - 0.05 * speed)
+		c.place_pending = false
+		c.place(R)
+		print("RAM: vehicle %d shoved %s into lane %d" % [id, "left" if side > 0.0 else "right", best])
+		return
+
+
 ## The vehicles on the map: [[x, y, kind], ...] within r of (x, y).
 func marks(x: float, y: float, r: float) -> Array:
 	var out := []
