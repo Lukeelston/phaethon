@@ -266,7 +266,7 @@ func setup(craft_sim) -> void:
 		safety.ceiling_db = -0.3
 		AudioServer.add_bus_effect(0, safety)
 	var engines_bus := _bus("Engines", "Master")
-	_paired_fleet = PilotCraft.known(sim.P.get("vehicle", PilotCraft.STANDARD)) != PilotCraft.STANDARD
+	_paired_fleet = not PilotCraft.phaethon_based(sim.P.get("vehicle", PilotCraft.STANDARD))   # (the Talon plays the Phaethon's own)
 	var tonal_starts := {}
 	if AudioServer.get_bus_effect_count(engines_bus) == 0:
 		var lim := AudioEffectHardLimiter.new()
@@ -394,7 +394,7 @@ func _load_streams() -> void:
 	var fleet_layers := {}
 	var shots_dir := DIR
 	var shots: Dictionary = manifest.oneshots
-	if craft_id != PilotCraft.STANDARD:
+	if PilotCraft.sound_bank(craft_id) != PilotCraft.STANDARD:      # (the Phaethon's own bank is the manifests': the Talon's too)
 		var bank: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(fleet_dir + "engine.json"))
 		fleet_layers = bank.layers
 		shots = bank.oneshots

@@ -886,11 +886,14 @@ static func _display_body(out: float) -> ArrayMesh:
 	return _display_bodies[out]
 
 
-## The turntable Phaethon's fairing in the paint it is being built in (Livery.current while it builds).
-static func _show_body(out: float) -> ArrayMesh:
+## The turntable Phaethon's fairing in the paint it is being built in (Livery.current while it builds); with
+## `talon`, the Talon's (its fins, in its own palette: view/talon_airframe.gd).
+static func _show_body(out: float, talon := false) -> ArrayMesh:
 	var key := "%s/%d" % [Livery.current, int(out)]
+	if talon:
+		key = "talon/%s/%s" % [ModelScript.Talon.paint, key]
 	if not _show_bodies.has(key):
-		_show_bodies[key] = ModelScript._engine_body(out, false)
+		_show_bodies[key] = ModelScript._engine_body(out, false, talon)
 	return _show_bodies[key]
 
 
@@ -1231,7 +1234,7 @@ func _build_showcase(arrive := true) -> void:
 		# stood on the deck with its middle (half way from the pod's tail to the intake lips) over the hub
 		var place := func(holder: Node3D, reach: float) -> void:
 			holder.position = Vector3(-(reach - 2.0) / 2.0, SHOW_H, 0.0)
-		var c := await _build_craft(vehicle, livery, "speed", turntable, "showcase_%s_%s" % [vehicle, livery], place, _show_body)
+		var c := await _build_craft(vehicle, livery, "speed", turntable, "showcase_%s_%s" % [vehicle, livery], place, _show_body.bind(vehicle == Pilot.TALON))
 		c.key = key
 		c.phase = 4.2
 		_show_cache[key] = c

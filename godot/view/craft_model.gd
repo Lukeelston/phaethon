@@ -25,6 +25,9 @@
 ## (_trace_plume). What they do, and what in real engines each part of that rests on, is
 ## view/jet_exhaust.gd's. The fins answer a turn as well: the Phaethon's rudders and stabilisers, the
 ## Shrike's fin panels and rams (view/fin_steering.gd, view/shrike_airframe.gd).
+## The Talon (sim/pilot_craft.gd TALON) is this craft, the Phaethon, in Codex's swept twin-tail starfighter body
+## (view/talon_airframe.gd): the same hull and engines, his plating on the hull, his fins on the engines in place of
+## the dorsal fin and stabiliser (and their moving parts), his ventral brakes in place of the pod's flaps, his lamps.
 ##   add_child(model); model.build(view)          once
 ##   model.sync(sim, inp, delta)                  every frame, after the floating origin moves
 extends Node3D
@@ -87,6 +90,7 @@ var fleet: Fleet
 var turret = null    # the Basilisk's gun (view/turret.gd), on the pod; view/gunnery.gd lays and fires it
 const TurretScript := preload("res://view/turret.gd")
 const Shrike := preload("res://view/shrike_airframe.gd")
+const Talon := preload("res://view/talon_airframe.gd")
 const PilotCraft := preload("res://sim/pilot_craft.gd")
 const ENG_W := 2.4
 const ENG_H := 0.96
@@ -219,6 +223,7 @@ func build(v, checkpoint := Callable(), reuse_engine_body := Callable()) -> void
 	view = v
 	var sim = v.sim
 	var shrike: bool = sim.P.vehicle == PilotCraft.SHRIKE
+	var talon: bool = sim.P.vehicle == PilotCraft.TALON      # (the Phaethon in Codex's body: what differs is asked of view/talon_airframe.gd)
 	if Fleet.supports(sim.P.vehicle):
 		fleet = Fleet.new(sim.P.vehicle)
 	var nacelle_scene: PackedScene = null if shrike or fleet != null else load("res://art/engine/nacelle.glb")
@@ -242,7 +247,7 @@ func build(v, checkpoint := Callable(), reuse_engine_body := Callable()) -> void
 		[Kit.cyl(0.38, 0.38, 0.03, 24), emitter_at * Kit.at(Vector3(0, -0.03, 0)), Livery.coat("engine")],
 		[wall_skins, Transform3D.IDENTITY, Color.WHITE, true],
 	])
-	if not shrike and not fleet:
+	if not shrike and not fleet and not talon:
 		# The Phaethon's rudders and stabiliser panels: one mesh of each for both engines, and each pair drawn
 		# as one batch (with the ring and walls, the engines draw no more things than they did). The batches
 		# are the model's own, since each spans both engines: sync() puts their two where the engines are.
@@ -272,9 +277,10 @@ func build(v, checkpoint := Callable(), reuse_engine_body := Callable()) -> void
 			body.name = "ShrikeFairing"
 			body.mesh = Shrike.part(side_part)
 		else:
-			body.name = "PhaethonFairing"
-			# (without its rudder and stabiliser, which are their own parts; or the caller's own copy of that fixed mesh: title_stage._display_body)
-			body.mesh = reuse_engine_body.call(out) if reuse_engine_body.is_valid() else _engine_body(out, false)
+			body.name = "TalonFairing" if talon else "PhaethonFairing"
+			# (without its rudder and stabiliser, which are their own parts; or the caller's own copy of that fixed mesh: title_stage._display_body.
+			# The Talon's carries Codex's fins in their place, fixed)
+			body.mesh = reuse_engine_body.call(out) if reuse_engine_body.is_valid() else _engine_body(out, false, talon)
 			body.material_override = Finishes.painted_metal()
 		eng.add_child(body)
 		# One shared UV-mapped shell on each engine. The hot section, brakes and
@@ -295,7 +301,7 @@ func build(v, checkpoint := Callable(), reuse_engine_body := Callable()) -> void
 			eng.add_child(shell)
 			Accent.dress_all(shell)      # its armour plates and fairing band are the livery's (Ember: as made)
 		var lights := MeshInstance3D.new()   # nav, tail, landing lights and the repulsor underglow
-		lights.mesh = fleet.lights(out) if fleet else (Shrike.lights(out) if shrike else _engine_lights(out))
+		lights.mesh = fleet.lights(out) if fleet else (Shrike.lights(out) if shrike else _engine_lights(out, talon))
 		lights.material_override = lit_mat
 		lights.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		eng.add_child(lights)
@@ -411,6 +417,7 @@ func build(v, checkpoint := Callable(), reuse_engine_body := Callable()) -> void
 			legend.rotation.x = -PI / 2.0
 			legend.position = Vector3(0, ENG_H / 2.0 + 0.036, -0.15)
 			eng.add_child(legend)
+		if not shrike and not fleet and not talon:
 			# Where the dorsal fin's rudder stands on its post and the outboard fin's panel on its spindle
 			# (view/fin_steering.gd: sync() turns them with the turn). What they stand on is in the engine's fixed mesh.
 			var rudder := Node3D.new()
@@ -489,14 +496,17 @@ func build(v, checkpoint := Callable(), reuse_engine_body := Callable()) -> void
 			face.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 			hinge.add_child(face)
 			nozzle_flaps[k].append(hinge)
-		# the fin-tip strobe: it rides the fin's tip (the Shrike's fin panel, the Phaethon's rudder)
+		# the fin-tip strobe: it rides the fin's tip (the Shrike's fin panel, the Phaethon's rudder, the Talon's dorsal fin)
 		var strobe := MeshInstance3D.new()
 		strobe.mesh = Kit.ball(0.08, 10)
 		strobe.material_override = view._mat(Color(1.0, 1.0, 1.0), true)
-		strobe.position = fleet.strobe_at(out) if fleet else (Shrike.panel_tip(out) if shrike else Vector3(0, 1.08 - ENG_H / 2.0, 1.35 - Fins.RUDDER_Z))
+		if talon:
+			strobe.position = Talon.STROBE * Vector3(out, 1.0, 1.0)
+		else:
+			strobe.position = fleet.strobe_at(out) if fleet else (Shrike.panel_tip(out) if shrike else Vector3(0, 1.08 - ENG_H / 2.0, 1.35 - Fins.RUDDER_Z))
 		strobe.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		if fleet:
-			eng.add_child(strobe)      # (the fleet's fins are fixed, in its airframe: the strobe stands on the engine)
+		if fleet or talon:
+			eng.add_child(strobe)      # (the fleet's fins are fixed, in its airframe, and the Talon's in its engine: the strobe stands on the engine)
 		elif shrike:
 			(fin_parts[k][3] as Node3D).add_child(strobe)
 		else:
@@ -578,7 +588,7 @@ func build(v, checkpoint := Callable(), reuse_engine_body := Callable()) -> void
 	if fleet:
 		fleet.dress_cab(pod, nose_closed)
 	else:
-		pod.mesh = pod_hull(shrike)
+		pod.mesh = pod_hull(shrike, talon)
 	if shrike:
 		Shrike.dress_pod(pod)
 		Shrike.fit_seat(pod, Vector3.DOWN * POD_FRAME_UP)
@@ -612,6 +622,10 @@ func build(v, checkpoint := Callable(), reuse_engine_body := Callable()) -> void
 		elif shrike:
 			hinge.position = Vector3(s * 1.247, -0.185, 0.80)
 			pm.mesh = Shrike.part(&"PortPodBrake" if s < 0 else &"StarboardPodBrake")
+		elif talon:      # Codex's ventral split brakes, under the wing roots
+			hinge.position = Talon.BRAKE_HINGE * Vector3(s, 1.0, 1.0)
+			pm.mesh = Talon.pod_brake(s, Talon.palette())
+			pm.material_override = Finishes.painted_metal()
 		else:
 			hinge.position = Vector3(s * 1.16, -0.28, 0.85)
 			pm.mesh = Kit.compound([
@@ -676,7 +690,9 @@ static func _take_brake_mesh(shell: Node3D, part: String) -> Mesh:
 ## nozzle's upper and lower lips.
 ## `fins` false: without the dorsal fin's rudder and the stabiliser's panel, which the pilot's own craft
 ## carries as parts that move (view/fin_steering.gd); what they stand on is here in their place.
-static func _engine_body(out: float, fins := true) -> ArrayMesh:
+## `talon`: the Talon's, with neither fin nor what they stand on, and Codex's fins, cheeks and eyebrows
+## (view/talon_airframe.gd add_engine) in their place, fixed.
+static func _engine_body(out: float, fins := true, talon := false) -> ArrayMesh:
 	var top := ENG_H / 2.0
 	var side := ENG_W / 2.0
 	var surfaces := [
@@ -684,7 +700,9 @@ static func _engine_body(out: float, fins := true) -> ArrayMesh:
 		[Fairings.fin(PackedVector2Array([Vector2(0.49,0.65), Vector2(0.64,0.95), Vector2(0.59,1.45), Vector2(0.49,1.35)]), 0.075), Kit.at(Vector3(0, top, 0)), Livery.coat("engine")],
 		[Fairings.fin(PackedVector2Array([Vector2(0,-0.3),Vector2(1.05,0.95),Vector2(0.99,1.38),Vector2(0,1.05)]), 0.065), Kit.at(Vector3(out*side,-0.1,0), Vector3(0,0,-out*PI/2)), STEEL],
 	]
-	if not fins:
+	if talon:
+		surfaces = []
+	elif not fins:
 		surfaces = Fins.rudder_fittings(top, STEEL, DARK, SILVER)
 		surfaces.append_array(Fins.stabiliser_fittings(out, side, STEEL, DARK))
 	var parts := [
@@ -725,16 +743,23 @@ static func _engine_body(out: float, fins := true) -> ArrayMesh:
 		parts.append([Kit.cyl(0.1, 0.1, 0.035, 16), Kit.at(Vector3(px, top + 0.015, 1.75)), Color(0.04, 0.04, 0.05)])
 	for li in 6:
 		parts.append([Kit.box(Vector3(1.5, 0.02, 0.07)), Kit.at(Vector3(0, top + 0.02, 2.0 + li * 0.08), Vector3(-0.5, 0, 0)), DARK.lightened(0.1)])
-	return Kit.compound(parts)
+	if not talon:
+		return Kit.compound(parts)
+	var body := SurfaceTool.new()
+	body.begin(Mesh.PRIMITIVE_TRIANGLES)
+	Kit.add_parts(body, parts)
+	Talon.add_engine(body, out, Talon.palette())
+	body.index()
+	return body.commit()
 
 
 ## The engine's lights (unshaded, so they read at any distance): a nav light at the stabiliser's
 ## tip (red on the left engine, green on the right), a red tail light, two landing lights under
-## the intake lip, and a cyan repulsor underglow along the belly.
-static func _engine_lights(out: float) -> ArrayMesh:
+## the intake lip, and a cyan repulsor underglow along the belly. (The Talon's nav light is at its outboard fin's tip.)
+static func _engine_lights(out: float, talon := false) -> ArrayMesh:
 	var nav := NAV_L if out < 0.0 else NAV_R
 	return Kit.compound([
-		[Kit.ball(0.065, 10), Kit.at(Vector3(out * (ENG_W / 2.0 + 1.02), -0.1, 1.1)), nav],
+		[Kit.ball(0.065, 10), Kit.at(Talon.NAV_LAMP * Vector3(out, 1.0, 1.0) if talon else Vector3(out * (ENG_W / 2.0 + 1.02), -0.1, 1.1)), nav],
 		[Kit.box(Vector3(0.5, 0.06, 0.05)), Kit.at(Vector3(0, ENG_H / 2.0 - 0.08, 4.0)), Color(1.0, 0.1, 0.08)],
 		[Kit.box(Vector3(0.22, 0.08, 0.03)), Kit.at(Vector3(-0.8, -0.38, -3.84)), Color(1.0, 0.97, 0.88)],
 		[Kit.box(Vector3(0.22, 0.08, 0.03)), Kit.at(Vector3(0.8, -0.38, -3.84)), Color(1.0, 0.97, 0.88)],
@@ -824,8 +849,10 @@ static func _tri(st: SurfaceTool, i0: int, i1: int, i2: int, p0: Vector3, p1: Ve
 ## The pod: polished-metal outer skin (surface 0), matte trim inside (1), the leather lip round
 ## the cockpit (2), fittings (3), the nose cage (4), the paint (5: _outer_skin), the pinstripes and
 ## the lip's piping (6), lamps (7). Built once and shared (the flat view's pod and the VR cockpit).
-static func pod_hull(shrike := false) -> ArrayMesh:
-	var which := "%s:%s:%s" % [Livery.current, "closed" if nose_closed else "open", "shrike" if shrike else "phaethon"]
+## `talon`: the Talon's: Codex's anti-glare panel on the decks, without the Phaethon's raked fin, side intakes and
+## trim thrusters, with his lamps, and his plating (8: view/talon_airframe.gd add_pod, in Talon.paint's palette).
+static func pod_hull(shrike := false, talon := false) -> ArrayMesh:
+	var which := "%s:%s:%s" % [Livery.current, "closed" if nose_closed else "open", "shrike" if shrike else ("talon/" + Talon.paint if talon else "phaethon")]
 	if _hulls.has(which):
 		return _hulls[which]
 	var nz := 76
@@ -848,7 +875,7 @@ static func pod_hull(shrike := false) -> ArrayMesh:
 	paint.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var pins := SurfaceTool.new()
 	pins.begin(Mesh.PRIMITIVE_TRIANGLES)
-	_outer_skin(grid, nz, na, mesh, paint, pins)   # surface 0
+	_outer_skin(grid, nz, na, mesh, paint, pins, talon)   # surface 0
 	for layer in [1]:   # the inner trim (the outer skin: _outer_skin)
 		var st := SurfaceTool.new()
 		st.begin(Mesh.PRIMITIVE_TRIANGLES)
@@ -953,7 +980,7 @@ static func pod_hull(shrike := false) -> ArrayMesh:
 	var hardware := [
 	]
 	hardware.append_array(_bullring())
-	if not shrike:
+	if not shrike and not talon:
 		hardware.append_array([
 			[Kit.rounded_box(Vector3(0.07, 0.62, 0.85), 4.0), Kit.at(Vector3(0, 0.42, 1.6), Vector3(-0.35, 0, 0)), Livery.coat("paint")],   # raked fin, painted
 			[Kit.rounded_box(Vector3(0.076, 0.6, 0.09), 4.0), _fin_xf() * Transform3D(Basis(), Vector3(0, 0, -0.39)), DARK.lightened(0.15)],   # its leading edge
@@ -1045,7 +1072,11 @@ static func pod_hull(shrike := false) -> ArrayMesh:
 		[Kit.box(Vector3(0.035, 0.01, 1.5)), Kit.at(Vector3(-0.5, -0.59, 0.3)), UNDERGLOW],
 		[Kit.box(Vector3(0.035, 0.01, 1.5)), Kit.at(Vector3(0.5, -0.59, 0.3)), UNDERGLOW],
 	]
-	if not shrike:
+	if talon:      # Codex's: the wingtips' position lights, and tail lamps across the trim jets' mouths
+		for side: float in [-1.0, 1.0]:
+			lamps.append([Kit.box(Vector3(0.027, 0.018, 0.16)), Kit.at(Talon.WINGTIP_LAMP * Vector3(side, 1.0, 1.0)), NAV_L if side < 0 else NAV_R])
+			lamps.append([Kit.box(Vector3(0.23, 0.021, 0.014)), Kit.at(Talon.JET_LAMP * Vector3(side, 1.0, 1.0)), Color(1.0, 0.13, 0.06)])
+	elif not shrike:
 		lamps.append_array([
 			[Kit.box(Vector3(0.11, 0.022, 0.07)), Kit.at(Vector3(-0.5, -0.07, 2.2)), Color(1.0, 0.1, 0.08)],
 			[Kit.box(Vector3(0.11, 0.022, 0.07)), Kit.at(Vector3(0.5, -0.07, 2.2)), Color(1.0, 0.1, 0.08)],
@@ -1053,6 +1084,9 @@ static func pod_hull(shrike := false) -> ArrayMesh:
 		])
 	Kit.compound(lamps, mesh)
 	mesh.surface_set_material(7, Kit.vertex_colors(true))
+	if talon:
+		Talon.add_pod(mesh, nose_closed, Talon.palette())      # surface 8
+		mesh.set_meta(&"talon_hull", true)
 	mesh.set_meta(&"shrike_hull", shrike)
 	mesh.set_meta(&"livery", Livery.current)
 	_hulls[which] = mesh
@@ -1134,10 +1168,10 @@ static func _bullring() -> Array:
 
 
 ## The pod's hull in another livery than the craft's own (a patrol's black and white, say).
-static func pod_hull_in(which: String, shrike := false) -> ArrayMesh:
+static func pod_hull_in(which: String, shrike := false, talon := false) -> ArrayMesh:
 	var own := Livery.current
 	Livery.current = which
-	var mesh := pod_hull(shrike)
+	var mesh := pod_hull(shrike, talon)
 	Livery.current = own
 	return mesh
 
@@ -1153,14 +1187,14 @@ static func set_nose_closed(closed: bool, under: Node = null) -> void:
 			if part.has_meta(&"service_bonnet"):
 				part.visible = closed
 			elif part.mesh and part.mesh.has_meta(&"shrike_hull"):
-				part.mesh = pod_hull_in(String(part.mesh.get_meta(&"livery", Livery.current)), part.mesh.get_meta(&"shrike_hull"))
+				part.mesh = pod_hull_in(String(part.mesh.get_meta(&"livery", Livery.current)), part.mesh.get_meta(&"shrike_hull"), part.mesh.get_meta(&"talon_hull", false))
 
 
 
 ## The outer skin (surface 0, polished metal) and its paint (into `paint`: the top decks and the
 ## nose candy orange, a gunmetal stripe down each flank), smooth normals across both so the seams
 ## don't show in the shading; a pinstripe (into `pins`) along each edge of the top decks' paint.
-static func _outer_skin(grid: Array, nz: int, na: int, mesh: ArrayMesh, paint: SurfaceTool, pins: SurfaceTool) -> void:
+static func _outer_skin(grid: Array, nz: int, na: int, mesh: ArrayMesh, paint: SurfaceTool, pins: SurfaceTool, talon := false) -> void:
 	var z0: float = HULL[0][0]
 	var z1: float = HULL[HULL.size() - 1][0]
 	var pts: Array[Vector3] = []
@@ -1183,7 +1217,7 @@ static func _outer_skin(grid: Array, nz: int, na: int, mesh: ArrayMesh, paint: S
 				continue   # the open cage
 			var ha: float = (grid[i][j][2] + grid[i + 1][j][2]) / 2.0
 			var hb: float = (grid[i][j][3] + grid[i + 1][j][3]) / 2.0
-			var col = _paint_at(absf(cen.x) / ha, (cen.y - cc) / hb, cen.z)
+			var col = _paint_at(absf(cen.x) / ha, (cen.y - cc) / hb, cen.z, talon)
 			var outward := Vector3(cen.x, cen.y - cc, 0.0)
 			faces.append([a, b, c, outward, col])
 			faces.append([b, d, c, outward, col])
@@ -1246,8 +1280,12 @@ static func _outer_skin(grid: Array, nz: int, na: int, mesh: ArrayMesh, paint: S
 
 ## The paint at a skin quad: |x| over the half-width, height over the half-height (from the
 ## section's centre), station z. Null where it's bare metal.
-static func _paint_at(ax: float, sy: float, z: float):
+static func _paint_at(ax: float, sy: float, z: float, talon := false):
 	if z < -1.98 or sy > PAINT_SY:
+		# (The Talon's, Codex's: an anti-glare panel under the windshield, with a narrow painted shoulder
+		# widening round the canopy's sills.)
+		if talon and ax < clampf(0.64 + absf(z) * 0.11, 0.64, 0.90):
+			return Livery.coat("stripe")
 		return Livery.coat("paint")
 	if ax > 0.7 and sy > -0.2 and sy < 0.22:
 		return Livery.coat("stripe")

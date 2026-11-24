@@ -800,22 +800,25 @@ func _build_cockpit() -> void:
 	var hull := MeshInstance3D.new()
 	hull.name = "PodHull"
 	var shrike: bool = sim != null and sim.P.vehicle == CraftModelScript.PilotCraft.SHRIKE
+	var talon: bool = sim != null and sim.P.vehicle == CraftModelScript.PilotCraft.TALON      # (the Phaethon's cockpit, in Codex's body: view/talon_airframe.gd)
 	var fleet = craft.fleet if craft else null
 	var bespoke_controls := sim != null and FleetDeck.has_deck(sim.P.vehicle)   # (the Basilisk: the Kiln's deck)
 	if fleet:
 		fleet.dress_cab(hull, CraftModelScript.nose_closed)
 	else:
-		hull.mesh = CraftModelScript.pod_hull(shrike)
+		hull.mesh = CraftModelScript.pod_hull(shrike, talon)
 	if shrike:
 		CraftModelScript.Shrike.dress_pod(hull)
 	hull.position = Vector3(0, CraftModelScript.POD_FRAME_UP, 0)
 	shell.add_child(hull)
-	if (shrike or fleet) and craft:
+	if (shrike or fleet or talon) and craft:
 		# The seat and chase cameras both see the hull on the cockpit rig. Carry the
 		# working hinges and lamps with that hull, including its bank and shudder.
+		# (The Talon's ventral brakes too, as Codex had them; its lamps are in its hull.)
 		for hinge in craft.pod_flaps:
 			hinge.reparent(hull, false)
-		craft.tail_lights.reparent(hull, false)
+		if craft.tail_lights:
+			craft.tail_lights.reparent(hull, false)
 		if craft.turret:
 			craft.turret.reparent(hull, false)   # (the Basilisk's gun: on the hull the seat sees)
 	for s in [-1.0, 1.0]:   # where the cables hook (the hull carries the eyes themselves)
