@@ -128,13 +128,14 @@ func _lamp(at: Vector3, text: String) -> StandardMaterial3D:
 	return m
 
 
-## A controller pushing the lever: returns "speed" or "starfighter" when this push throws it.
-func poke(ctrl: Node3D, delta: float) -> String:
+## A controller pushing the lever: returns "speed" or "starfighter" when this push throws it. `blocked`: the hand
+## is another control's this frame (vr/console_switches.gd has it): it is followed, and throws nothing.
+func poke(ctrl: Node3D, delta: float, blocked := false) -> String:
 	_cool = maxf(0.0, _cool - delta)
 	var tip: Vector3 = global_transform.affine_inverse() * (ctrl.global_transform * TIP)
 	var was: Variant = _prev.get(ctrl)
 	_prev[ctrl] = tip
-	if was == null or delta <= 0.0 or _cool > 0.0:
+	if was == null or delta <= 0.0 or _cool > 0.0 or blocked:
 		return ""
 	var inside := absf(tip.x) < ZONE.x and absf(tip.y) < ZONE.y and tip.z > -0.01 and tip.z < ZONE.z
 	if not inside:

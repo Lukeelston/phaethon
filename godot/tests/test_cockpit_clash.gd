@@ -205,13 +205,13 @@ func _run() -> void:
 	_check("nothing of the drift slider stands in the box before the SLIDE switch (%d of its vertices), and from the seat nothing in the cockpit hides its knob, legends or ramp (hidden: %s)" % [slider_in_slide, hidden],
 		slider_in_slide == 0 and hidden.is_empty())
 	var legend_z := INF
-	for child in cockpit.interior.get_children():
-		if child is Label3D and (child as Label3D).text == "AUX PWR":
-			legend_z = (to_rig * (child as Label3D).global_position).z
+	var first_legend := cockpit.interior.find_child("legend_tactical", true, false) as Label3D      # (push 44: the console's first toggle, AUX PWR that was, is TAC HUD: vr/console_switches.gd)
+	if first_legend != null:
+		legend_z = (to_rig * first_legend.global_position).z
 	var foot: Vector3 = to_rig * (slide.global_transform * Vector3(0, -0.075, 0))
 	var up: Vector3 = (to_rig * slide.global_transform).basis.y   # (up the panel's face)
 	var meets := foot.z + (0.386 - foot.y) * up.z / up.y           # (where the face comes down to the console's top, 0.386 up)
-	_check("the SLIDE switch's panel meets the console's top %.0f mm short of the middle of its first legend (AUX PWR)" % ((legend_z - meets) * 1000.0),
+	_check("the SLIDE switch's panel meets the console's top %.0f mm short of the middle of its first legend (TAC HUD, where AUX PWR was)" % ((legend_z - meets) * 1000.0),
 		legend_z < INF and legend_z - meets >= 0.012)
 
 	# ---- the gauges: nothing of the binnacle inside a tube's bore but its own hub (and, by design, the wall of the bigger neighbour it stands under)

@@ -224,8 +224,13 @@ func build() -> void:
 ## A controller at the slider, a frame: "held" as its tip takes hold of the knob; while it has it,
 ## "moved" when the amount changed, or in place of that "tick" as it crosses a detent, "notch" as it falls
 ## into STANDARD and "end" as it reaches either end; "let_go" as the hand leaves the rail; else "".
-func poke(ctrl: Node3D, delta: float) -> String:
+## `blocked`: the hand is another control's this frame (vr/console_switches.gd has it): it takes nothing (a hand
+## that already has the knob keeps it).
+func poke(ctrl: Node3D, delta: float, blocked := false) -> String:
 	var tip: Vector3 = global_transform.orthonormalized().affine_inverse() * (ctrl.global_transform * TIP)
+	if blocked and held_by != ctrl:
+		_tips[ctrl] = [tip, 0.0]
+		return ""
 	var was: Variant = _tips.get(ctrl)
 	var rested: float = 0.0 if was == null else float((was as Array)[1])
 	var speed: float = INF if was == null or delta <= 0.0 else tip.distance_to((was as Array)[0]) / delta

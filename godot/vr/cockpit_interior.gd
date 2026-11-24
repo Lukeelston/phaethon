@@ -7,7 +7,8 @@
 ##   dash      the dashboard, from the underside of the rim down to the deck and round to the
 ##             consoles; the instruments stand on its fascia (vr/gauge_cluster.gd)
 ##   frames    ribs round the inner walls every 0.4 m, hoses and conduits along the sides
-##   consoles  a console down each side: toggle switches, backlit buttons, stencilled placards
+##   consoles  a console down each side: toggle switches, backlit buttons, stencilled placards (the toggles and
+##             two of the knobs work: vr/console_switches.gd, built here last as `switches`)
 ##   quadrant  a gate plate round each throttle lever, the burner gate marked in orange
 ##   harness   shoulder straps and a lap belt on the seat, a buckle
 ##   tub       a moulded carbon panel each side of the seat, from its flank up to the console and,
@@ -24,6 +25,7 @@ const CM := preload("res://view/craft_model.gd")
 const Kit := preload("res://view/mesh_kit.gd")
 const Finish := preload("res://view/craft_materials.gd")
 const Accent := preload("res://view/accent.gd")      # the livery's accent on the authored fittings' enamel and thread
+const ConsoleSwitchesScript := preload("res://vr/console_switches.gd")   # the consoles' toggles and two knobs, live
 static var _flight_deck_meshes: Dictionary = {}
 const UP := CM.POD_FRAME_UP
 const MODE_LIGHT := {"normal": Color(0.25, 0.6, 1.0), "burner": Color(1.0, 0.55, 0.12), "ramjet": Color(0.7, 0.3, 1.0)}
@@ -34,6 +36,7 @@ var _sf := -1.0
 var _power := 1.0     # the battery bus (the start-up): the rim light's level
 const SF_LIGHT := Color(1.0, 0.3, 0.75)   # STARFIGHTER's resting colour (ModeSwitch.SF_COL)
 var parts_built := 0   # tests read this
+var switches           # vr/console_switches.gd: the consoles' toggles and live knobs (after build())
 
 
 ## A point on the inner wall at station z, angle th round the section, inset from the trim.
@@ -178,21 +181,21 @@ func build() -> void:
 			for z in [0.026, 0.844]:
 				if not hd_console:
 					_fastener(Vector3(cx + dx, face_y, z), metal, rubber)
-		var names: Array = ["AUX PWR", "COMMS", "TRIM"] if s < 0.0 else ["BINDER", "COOLANT", "STAB"]
+		# (push 44: the toggles' legends, their lenses and their bats are the live switches' own, built last;
+		# vr/console_switches.gd. AUX PWR, COMMS, TRIM and BINDER, COOLANT, STAB are TAC HUD, FIELD,
+		# AUTOPILOT and GATES, HEAT, RUSH.)
 		for k in 3:
 			var z := 0.28 + k * 0.14
 			if not hd_console:
 				_toggle(Vector3(cx, face_y, z), metal, rubber, paint)
-			_top_legend(Vector3(cx, face_y + 0.001, z - 0.045), names[k])
 			# Tiny inset status lens, with a metal socket: no luminous button slabs.
 			metal.append([Finish.washer(0.0028, 0.0042, 0.0018, 10), Kit.at(Vector3(cx + 0.042 * s, face_y + 0.001, z)), gunmetal])
-			lit.append([Kit.cyl(0.0027, 0.0027, 0.0018, 10), Kit.at(Vector3(cx + 0.042 * s, face_y + 0.0015, z)), Color(0.25, 0.58, 0.34) if k < 2 else Color(0.68, 0.4, 0.15)])
 		for k in 2:
 			var z := 0.70 + k * 0.135
-			if not hd_console:
+			if not hd_console and not ConsoleSwitchesScript.live_knob(s, k):
 				_knob(Vector3(cx, face_y, z), metal, rubber, paint)
-			_top_legend(Vector3(cx, face_y + 0.001, z - 0.042), ("CABIN" if k == 0 else "DIMMER") if s < 0.0 else ("SENS" if k == 0 else "BALANCE"))
-		_placard(Vector3(cx - 0.066 * s, UP - 0.31, 0.48), "AUXILIARY  /  01" if s < 0.0 else "PROPULSION  /  02", s)
+			_top_legend(Vector3(cx, face_y + 0.001, z - 0.042), ConsoleSwitchesScript.knob_legend(s, k))
+		_placard(Vector3(cx - 0.066 * s, UP - 0.31, 0.48), ConsoleSwitchesScript.PLACARDS[int(s)], s)
 
 	# throttle quadrant: a gate plate round each lever, slot and burner gate
 	for s in [-1.0, 1.0]:
@@ -219,7 +222,8 @@ func build() -> void:
 	_batch(metal, Finish.machined(), "MachinedHardware")
 	_batch(rubber, Finish.rubber(), "RubberAndHarness")
 	_batch(paint, Finish.painted_metal(), "GuardAndGatePaint")
-	_batch(lit, Finish.indicator(), "InsetIndicators")
+	if not lit.is_empty():      # (the consoles' lenses were its only parts: they are the live switches' now)
+		_batch(lit, Finish.indicator(), "InsetIndicators")
 	if Finish.hd:
 		_batch(web, Finish.webbing(), "HarnessWebbing")
 
@@ -268,6 +272,10 @@ func build() -> void:
 	for bar: MeshInstance3D in [holder, rmi]:
 		bar.add_to_group("under_the_lip")    # fastened against the lip's underside: the fittings' check holds it out of the lip, not a margin clear of it (tests/test_cables.gd)
 	parts_built = solid.size() + metal.size() + rubber.size() + paint.size() + lit.size() + 5 + hoses.size() + 1
+	# the consoles' live switches: their bats and two knobs cut out of the consoles just built, their lenses and legends
+	switches = ConsoleSwitchesScript.new()
+	add_child(switches)
+	switches.build(self)
 
 
 const RIM_STATIONS := 384         # round the opening: 12 mm apart at most, no facet wider than a quarter of a degree from the seat
@@ -375,8 +383,7 @@ func _toggle(at: Vector3, metal: Array, rubber: Array, paint: Array) -> void:
 	metal.append([Finish.washer(0.005, 0.0115, 0.0022, 14), Kit.at(at + Vector3(0, 0.0011, 0)), Color(0.5, 0.53, 0.57)])
 	metal.append([Finish.washer(0.0044, 0.008, 0.0045, 6), Kit.at(at + Vector3(0, 0.004, 0)), Color(0.72, 0.74, 0.77)])
 	rubber.append([Kit.cyl(0.0045, 0.006, 0.008, 10), Kit.at(at + Vector3(0, 0.009, 0)), Color(0.025, 0.028, 0.03)])
-	metal.append([Kit.cyl(0.0035, 0.003, 0.027, 10), Kit.at(at + Vector3(0, 0.023, -0.003), Vector3(-0.3, 0, 0)), Color(0.7, 0.73, 0.77)])
-	metal.append([Kit.ball(0.0048, 8), Kit.at(at + Vector3(0, 0.036, -0.007)), Color(0.7, 0.73, 0.77)])
+	# (the bat itself, a stem and its ball, is the live switch's: vr/console_switches.gd)
 	for s in [-1.0, 1.0]:
 		for z in [-0.02, 0.02]:
 			paint.append([Kit.cyl(0.0022, 0.0022, 0.034, 8), Kit.at(at + Vector3(s * 0.024, 0.019, z)), Color(0.49, 0.11, 0.055)])

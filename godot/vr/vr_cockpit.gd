@@ -12,6 +12,10 @@
 ##   the SLIDE / GRIP switch on the left console: whether the cockpit steps out in a turn; and behind it
 ##   the drift slider (vr/drift_slider.gd): how far. A controller's tip rested on its knob takes hold of
 ##   it, and it goes fore and aft with the hand (forward is more)
+##   the consoles' toggles (vr/console_switches.gd): TAC HUD (the tactical display), FIELD, AUTOPILOT on the left, GATES, HEAT, RUSH on
+##   the right, each the OPTIONS line of that name; a tip rested on a bat has it, a push along the console throws
+##   it (forward ON). The knobs TAC DIM (left, aft) and TAC WARN (right, forward): a tip rested on one takes it,
+##   and it turns with the wrist's roll
 ##   menu tap: quick menu (driving partner, controls, camera: the seat or a chase view) Â· menu hold
 ##   1.5 s: main menu / map selection
 ##   the start panel across the windscreen's header (vr/overhead_panel.gd): 1 BATT, 2 ENGINE under its
@@ -78,6 +82,7 @@ const StartupAudioScript := preload("res://audio/startup_audio.gd")
 const SpeedRushScript := preload("res://vr/speed_rush.gd")
 const DriftSliderScript := preload("res://vr/drift_slider.gd")
 const TacticalScript := preload("res://view/tactical_display.gd")   # the tactical display: the road ahead, the traffic and the exits marked out in the world
+const ConsoleSwitchesScript := preload("res://vr/console_switches.gd")   # the consoles' toggles and two knobs
 var _brake_trace: RefCounted
 static var require_neutral_on_entry := false
 var _await_neutral_controls := false
@@ -86,6 +91,8 @@ var xr: XRInterface
 var rig: Node3D
 var shell: Node3D   # the cockpit's fittings (hull, seat, levers, panel): shudders, your head doesn't
 var interior   # vr/cockpit_interior.gd
+var console    # vr/console_switches.gd: the consoles' six toggles and two knobs (the interior builds it)
+var _hand_busy := {}   # controller -> s till the consoles may have it: it has just worked another control (ConsoleSwitches.CLAIM_S)
 var mode_switch   # vr/mode_switch.gd: the SPEEDCRAFT / STARFIGHTER toggle on the right console
 var canopy: Node3D   # view/canopy.gd: the windscreen ahead and the forcefield round the nose
 var minimap_panel: Node3D   # vr/minimap_panel.gd
@@ -161,6 +168,11 @@ static var _options_loaded := false       # (both read once a run)
 # switched off, when the shell stands exactly where it did.
 static var speed_rush := true
 static var _rush_loaded := false          # (its saved setting is read once a run, as the camera's)
+# The consoles' two live knobs (Luke, 2026-11-23: "if there are any menu items that could replace the vanity
+# switches/buttons in the cockpit even better"; vr/console_switches.gd), settings of the tactical display's, kept here,
+# saved as "tactical_dim" and "tactical_pace" and read with the OPTIONS page's (_apply_tactical_knobs hands them on):
+static var tactical_dim := 1.0            # the left console's TAC DIM: the display's brightness, 0.3 .. 1 (1: as it is drawn)
+static var tactical_pace := 1.0           # the right console's TAC WARN: how soon the rails warn of a bend, 0.35 .. 1.5 of the display's own (lower sooner)
 var rush                                  # vr/speed_rush.gd; null in a cockpit without its view (the camera's own tests)
 var tactical                              # view/tactical_display.gd; null while its switch is off (the OPTIONS pages' TACTICAL DISPLAY)
 var _shake := Vector3.ZERO                # the shell's shudder (the air brakes', the gear's grab, the run-up's tremble) ...
@@ -333,7 +345,15 @@ func _ready() -> void:
 		power_ups_on = String(prefs.get("powerups", "on")) != "off"
 		avoid_on = String(prefs.get("field", "off")) == "on"      # the avoidance field: off until he asks for it
 		TacticalScript.wanted = String(prefs.get("tactical", "off")) == "on"      # the tactical display: the same
+		if typeof(prefs.get("tactical_dim")) in [TYPE_FLOAT, TYPE_INT]:          # the consoles' two knobs
+			tactical_dim = clampf(float(prefs.tactical_dim), ConsoleSwitchesScript.DIM_LEAST, 1.0)
+		if typeof(prefs.get("tactical_pace")) in [TYPE_FLOAT, TYPE_INT]:
+			tactical_pace = clampf(float(prefs.tactical_pace), ConsoleSwitchesScript.PACE_SOONEST, ConsoleSwitchesScript.PACE_LATEST)
 	_options_loaded = true
+	if console:      # (their pointers stand where the settings are)
+		console.set_knob("dim", tactical_dim)
+		console.set_knob("pace", tactical_pace)
+	_apply_tactical_knobs()
 	if bool(sim.P.limits) != consumables:
 		sim.set_limits(consumables)
 	set_power_ups(power_ups_on)
@@ -404,6 +424,7 @@ func _save_prefs() -> void:
 			"startup": "cold" if cold_start else "hot", "school": "on" if school else "done",
 			"consumables": "on" if consumables else "off", "powerups": "on" if power_ups_on else "off",
 			"field": "on" if avoid_on else "off", "rush": "on" if speed_rush else "off", "tactical": "on" if TacticalScript.wanted else "off",
+			"tactical_dim": snappedf(tactical_dim, 0.001), "tactical_pace": snappedf(tactical_pace, 0.001),
 			"map": "global" if map_whole else "local", "map_scheme": String(MinimapPanelScript.SCHEMES[map_scheme].name),
 			"map_hud": "on" if map_hud else "off"}))
 
@@ -630,6 +651,8 @@ func _set_hands(on: bool) -> void:
 	print("CONTROLS: Quest controllers ", "live" if on else "let go (the session isn't focused)")
 	if not on and drift_slider:
 		drift_slider.let_go()
+	if not on and console:
+		console.let_go()
 	if not on:
 		quest.thr_l = 0.0
 		quest.thr_r = 0.0
@@ -852,6 +875,7 @@ func _build_cockpit() -> void:
 	interior = CockpitInteriorScript.new()   # floor, frames, consoles, harness, rim light
 	shell.add_child(interior)
 	interior.build()
+	console = interior.switches              # (the consoles' live toggles and knobs: vr/console_switches.gd)
 	if fleet:
 		var rim: MeshInstance3D = interior.get_node("SegmentedCoaming")
 		rim.mesh = fleet.part(&"Coaming")
@@ -880,6 +904,13 @@ func _build_cockpit() -> void:
 	drift_slider.transform = DriftSliderScript.mount()
 	drift_slider.build()
 	drift_slider.amount = slide_amount
+	if console:      # what is the SLIDE and MODE switches' is not the consoles': their bats' tips and middles, either way thrown, and the drift slider's knob
+		var into: Transform3D = (interior.transform * console.transform).affine_inverse()
+		for sw: Node3D in [mode_switch, slide_switch]:
+			for y in [-1.0, 1.0]:
+				for at: Vector3 in [Vector3(0.0, 0.045 * y, 0.08), Vector3(0.0, 0.025 * y, 0.045)]:
+					console.keep_out.append([into * (sw.transform * at), ConsoleSwitchesScript.KEEP_OUT_R])
+		console.slider = drift_slider
 	canopy = CanopyScript.build(fleet)
 	canopy.position = Vector3(0, CraftModelScript.POD_FRAME_UP, 0)
 	shell.add_child(canopy)
@@ -1116,38 +1147,7 @@ func _read_input(delta: float) -> void:
 	_frames += 1
 	if _switch_at > 0 and _frames == _switch_at and track_override == "":   # once
 		switch_track()
-	# the MODE switch: either hand can throw it
-	if mode_switch and hands_live and not _await_neutral_controls:
-		for hand in [l, r]:
-			var flip: String = mode_switch.poke(hand, delta)
-			if flip != "" and ask_handling(flip):   # (refused inside the cooldown: the lever springs back)
-				_save_prefs()
-				_buzz(hand, 0.9, 0.06)
-				print("HANDLING: switch to ", flip)
-	# the SLIDE switch, the same way
-	if slide_switch and hands_live and not _await_neutral_controls:
-		for hand in [l, r]:
-			var thrown: String = slide_switch.poke(hand, delta)
-			if thrown != "":
-				set_slide(thrown == "slide")
-				_buzz(hand, 0.9, 0.06)
-	# ... and the drift slider behind it: a tip rested on its knob has it, and it goes with the hand
-	if drift_slider and hands_live and not _await_neutral_controls:
-		for hand in [l, r]:
-			_work_slider(drift_slider.poke(hand, delta), hand)
-	# the map's own switch and button, on its pod
-	if minimap_panel and hands_live and not _await_neutral_controls:
-		for hand in [l, r]:
-			var worked: String = minimap_panel.poke(hand, delta)
-			if worked == "global" or worked == "local":
-				set_map_whole(worked == "global")
-				_buzz(hand, 0.9, 0.06)
-			elif worked == "hud_on" or worked == "hud_off":
-				set_map_hud(worked == "hud_on")
-				_buzz(hand, 0.9, 0.06)
-			elif worked == "scheme":
-				set_map_scheme(map_scheme + 1)
-				_buzz(hand, 0.6, 0.04)
+	_work_controls(l, r, delta)      # the consoles' toggles and knobs, the MODE and SLIDE switches, the drift slider, the map's controls
 	if _pressed_once("recenter", _button(l, "primary_click") or _button(r, "primary_click")):
 		recenter()
 	# the start panel: either hand can work it
@@ -1161,6 +1161,62 @@ func _read_input(delta: float) -> void:
 		_coach_step(delta, [l.get_float("grip"), r.get_float("grip")])
 	_apply_startup(delta)
 	_diag(delta, l, r, p)
+
+
+## The controls the hands work by reaching for them, a frame: the consoles' toggles and knobs, the MODE and SLIDE
+## switches, the drift slider and the map's switches and button (`l`, `r`: the two controllers; a test's own nodes).
+func _work_controls(l: XRController3D, r: XRController3D, delta: float) -> void:
+	# the consoles' toggles and knobs (vr/console_switches.gd), first: a hand they have is theirs this frame, and the
+	# switches, the slider and the map below let it pass; one that has just worked any of those is not given a bat
+	var at_console := {}
+	if console and hands_live and not _await_neutral_controls:
+		for hand in [l, r]:
+			_hand_busy[hand] = maxf(0.0, float(_hand_busy.get(hand, 0.0)) - delta)
+			var busy: bool = float(_hand_busy[hand]) > 0.0 or (drift_slider != null and drift_slider.held_by == hand)
+			_work_console(console.poke(hand, delta, busy), hand)
+			at_console[hand] = console.claims(hand)
+	# the MODE switch: either hand can throw it
+	if mode_switch and hands_live and not _await_neutral_controls:
+		for hand in [l, r]:
+			var flip: String = mode_switch.poke(hand, delta, at_console.get(hand, false))
+			if flip != "":
+				_hand_busy[hand] = ConsoleSwitchesScript.CLAIM_S
+			if flip != "" and ask_handling(flip):   # (refused inside the cooldown: the lever springs back)
+				_save_prefs()
+				_buzz(hand, 0.9, 0.06)
+				print("HANDLING: switch to ", flip)
+	# the SLIDE switch, the same way
+	if slide_switch and hands_live and not _await_neutral_controls:
+		for hand in [l, r]:
+			var thrown: String = slide_switch.poke(hand, delta, at_console.get(hand, false))
+			if thrown != "":
+				_hand_busy[hand] = ConsoleSwitchesScript.CLAIM_S
+				set_slide(thrown == "slide")
+				_buzz(hand, 0.9, 0.06)
+	# ... and the drift slider behind it: a tip rested on its knob has it, and it goes with the hand
+	if drift_slider and hands_live and not _await_neutral_controls:
+		for hand in [l, r]:
+			var slid: String = drift_slider.poke(hand, delta, at_console.get(hand, false))
+			if slid != "":
+				_hand_busy[hand] = ConsoleSwitchesScript.CLAIM_S
+			_work_slider(slid, hand)
+	# the map's own switch and button, on its pod
+	if minimap_panel and hands_live and not _await_neutral_controls:
+		for hand in [l, r]:
+			var worked: String = minimap_panel.poke(hand, delta)
+			if at_console.get(hand, false):      # (a hand the consoles have works nothing else)
+				worked = ""
+			elif worked != "":
+				_hand_busy[hand] = ConsoleSwitchesScript.CLAIM_S
+			if worked == "global" or worked == "local":
+				set_map_whole(worked == "global")
+				_buzz(hand, 0.9, 0.06)
+			elif worked == "hud_on" or worked == "hud_off":
+				set_map_hud(worked == "hud_on")
+				_buzz(hand, 0.9, 0.06)
+			elif worked == "scheme":
+				set_map_scheme(map_scheme + 1)
+				_buzz(hand, 0.6, 0.04)
 
 
 ## The autopilot's control and the hands' part while it flies, a frame (see AUTO_FLICK). `c` is the
@@ -1328,6 +1384,8 @@ func menu_open(on: bool) -> void:
 		return
 	if drift_slider:      # (a hand that had the slider's knob has let it go)
 		drift_slider.let_go()
+	if console:           # (... and a bat or a knob of the consoles')
+		console.let_go()
 	_a_held = 0.0
 	_a_fired = false
 	_y_held = 0.0
@@ -1504,55 +1562,11 @@ func menu_choose() -> bool:
 					menu.at = k
 			_menu_show()
 			return true
-		"consumables":               # the battery and the engines' heat, from this moment
-			set_consumables(not consumables)
-			_save_prefs()
-			var at: int = menu.at
+		"consumables", "powerups", "field", "autopilot", "rush", "tactical":      # the on-and-off lines, which the consoles' toggles work too (flip_option)
+			flip_option(menu.key())
+			var option_at: int = menu.at
 			menu.items = _menu_items()
-			menu.at = at
-			_menu_show()
-			return true
-		"powerups":                  # the gates over the road
-			set_power_ups(not power_ups_on)
-			_save_prefs()
-			print("OPTIONS: power-ups ", "on" if power_ups_on else "off")
-			var at: int = menu.at
-			menu.items = _menu_items()
-			menu.at = at
-			_menu_show()
-			return true
-		"field":                     # the avoidance field (sim/craft_sim.gd inp.avoid; view/avoidance_field.gd)
-			avoid_on = not avoid_on
-			_save_prefs()
-			print("OPTIONS: avoidance field ", "on" if avoid_on else "off")
-			var field_at: int = menu.at
-			menu.items = _menu_items()
-			menu.at = field_at
-			_menu_show()
-			return true
-		"autopilot":                 # the autopilot, from the moment the menu closes (in flight: the left stick flicked across)
-			_autopilot_toggle(hands.get("left"), hands.get("right"))
-			var at_auto: int = menu.at
-			menu.items = _menu_items()
-			menu.at = at_auto
-			_menu_show()
-			return true
-		"rush":                      # the speed rush: the cockpit's easing with the load and the speed, the streaks alongside
-			speed_rush = not speed_rush
-			_save_prefs()
-			print("OPTIONS: speed rush ", "on" if speed_rush else "off")
-			var rush_at: int = menu.at
-			menu.items = _menu_items()
-			menu.at = rush_at
-			_menu_show()
-			return true
-		"tactical":                  # the tactical display (view/tactical_display.gd): built at the next frame, or gone at it
-			TacticalScript.wanted = not TacticalScript.wanted
-			_save_prefs()
-			print("OPTIONS: tactical display ", "on" if TacticalScript.wanted else "off")
-			var tactical_at: int = menu.at
-			menu.items = _menu_items()
-			menu.at = tactical_at
+			menu.at = option_at
 			_menu_show()
 			return true
 		"race_pace", "race_laps":
@@ -1572,6 +1586,111 @@ func menu_choose() -> bool:
 			return_to_menu()
 			return false
 	return super()
+
+
+## Whether one of the OPTIONS page's on-and-off lines is on: the consoles' toggles show it (vr/console_switches.gd).
+func option_on(key: String) -> bool:
+	match key:
+		"consumables":
+			return consumables
+		"powerups":
+			return power_ups_on
+		"field":
+			return avoid_on
+		"autopilot":
+			return autopilot.on
+		"rush":
+			return speed_rush
+		"tactical":
+			return TacticalScript.wanted
+	return false
+
+
+## One of those lines switched, by its line in the quick menu or by its toggle on a console: what the line does, and
+## saved as it is. -> whether there is such a line.
+func flip_option(key: String) -> bool:
+	match key:
+		"consumables":               # the battery and the engines' heat, from this moment
+			set_consumables(not consumables)
+			_save_prefs()
+		"powerups":                  # the gates over the road
+			set_power_ups(not power_ups_on)
+			_save_prefs()
+			print("OPTIONS: power-ups ", "on" if power_ups_on else "off")
+		"field":                     # the avoidance field (sim/craft_sim.gd inp.avoid; view/avoidance_field.gd)
+			avoid_on = not avoid_on
+			_save_prefs()
+			print("OPTIONS: avoidance field ", "on" if avoid_on else "off")
+		"autopilot":                 # the autopilot, from the moment the menu closes (in flight: the left stick flicked across, or its toggle),
+			_autopilot_toggle(hands.get("left"), hands.get("right"))      # refused cold or off the Network
+		"rush":                      # the speed rush: the cockpit's easing with the load and the speed, the streaks alongside
+			speed_rush = not speed_rush
+			_save_prefs()
+			print("OPTIONS: speed rush ", "on" if speed_rush else "off")
+		"tactical":                  # the tactical display (view/tactical_display.gd): built at the next frame, or gone at it
+			TacticalScript.wanted = not TacticalScript.wanted
+			_save_prefs()
+			print("OPTIONS: tactical display ", "on" if TacticalScript.wanted else "off")
+		_:
+			return false
+	return true
+
+
+## Stand one of those lines on or off, as its toggle would (a test, a picture).
+func console_set(key: String, on: bool) -> void:
+	if option_on(key) != on:
+		flip_option(key)
+
+
+## What a hand did at the consoles this frame (ConsoleSwitches.poke), acted on: a bat had is a light tick in that
+## hand, as of a finger on it; a bat thrown a click, and its OPTIONS line switched as the menu switches it (refused,
+## the autopilot's as the menu's is refused: two taps, the glass says why, and the bat goes back); a knob felt as the
+## drift slider is, its setting the cockpit's from the moment it turns, saved when it is let go.
+func _work_console(did: String, hand: XRController3D = null) -> void:
+	if did == "":
+		return
+	if did == "rest":
+		if hand:
+			_buzz(hand, 0.25, 0.015)
+		return
+	if did.begins_with("on:") or did.begins_with("off:"):
+		var key := did.get_slice(":", 1)
+		var asked := did.begins_with("on:")
+		if hand:
+			_buzz(hand, 0.9, 0.06)
+		if option_on(key) != asked:
+			flip_option(key)
+		print("CONSOLE: %s %s%s" % [key, "on" if asked else "off", "" if option_on(key) == asked else " refused"])
+		return
+	var felt := {"held": [0.5, 0.03], "tick": [0.3, 0.02], "notch": [0.9, 0.05], "end": [0.7, 0.04]}
+	if hand and felt.has(did):
+		_buzz(hand, float(felt[did][0]), float(felt[did][1]))
+	tactical_dim = console.knob_value("dim")
+	tactical_pace = console.knob_value("pace")
+	_apply_tactical_knobs()
+	if did == "let_go" and console.take_changed():
+		_save_prefs()
+		print("CONSOLE: tactical dim %.2f, pace %.2f" % [tactical_dim, tactical_pace])
+
+
+## The two knobs' settings, handed to the tactical display. MERGE: the main session connects this to the display's
+## own settings, which another helper is adding in view/tactical_display.gd (neither is there at d193f50, so this does
+## nothing yet):
+##   TacticalScript.pace = tactical_pace      # the right console's TAC WARN: how soon the rails warn of a bend
+##   TacticalScript.dim = tactical_dim        # the left console's TAC DIM: the display's brightness
+func _apply_tactical_knobs() -> void:
+	pass
+
+
+## The consoles' switches, a frame: each bat where its OPTIONS line stands (the menu's change shows at once), lit at
+## the battery's level; the knobs' pointers where their settings are.
+func _show_console(delta: float) -> void:
+	if console == null:
+		return
+	var states := {}
+	for key: String in ConsoleSwitchesScript.KEYS:
+		states[key] = option_on(key)
+	console.show_state(states, startup.power, delta)
 
 
 # --- the start-up ---
@@ -2151,6 +2270,7 @@ func _process(delta: float) -> void:
 		_memory_t = fmod(_memory_t, 60.0)
 		FlightDiagnostics.log_memory()
 	if menu.open:
+		_show_console(delta)      # (the consoles' bats follow the menu's lines while it is up)
 		return   # OpenXR still updates the tracked camera and controllers while flight waits.
 	if _brake_trace:
 		_brake_trace.capture(self, delta)
@@ -2182,6 +2302,7 @@ func _process(delta: float) -> void:
 		slide_switch.show_state(not slide_feel, 0.0 if slide_feel else 1.0, false)
 	if drift_slider:
 		drift_slider.show_state(slide_feel, startup.power)
+	_show_console(delta)
 	# Crash: fade to black, respawn happens in the dark, fade back up.
 	var target := 1.0 if sim.crash_t > 0.0 else 0.0
 	fade_v = move_toward(fade_v, target, delta * 4.0)
