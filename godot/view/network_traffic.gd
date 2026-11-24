@@ -572,7 +572,7 @@ var _brake_by := PackedFloat64Array()
 var racer: Car = null
 var raids = null          # raids, when they are on (view/network_raids.gd)
 var chase = null          # chase mode, when it is on (view/network_chase.gd): its craft has the racer's slot while one runs
-var race_state := ""      # "" | "tail" | "race" | "done"
+var race_state := ""      # "" | "tail" | "race" | "done"; "chase" (network_chase.gd) or "raid" (network_raids.gd) while they hold the floor
 var race_t := 0.0         # s in this state
 var race_gap := 0.0       # m: + the craft ahead
 var race_result := ""     # "won" | "lost" | "peeled", once, for the view to take
@@ -1271,6 +1271,8 @@ func _gap_to_pod(c: Car) -> float:
 
 
 func _race(delta: float, pod_car: Car) -> void:
+	if race_state == "raid":      # a raid holds the floor (view/network_raids.gd): no racer comes, and there is none to follow
+		return
 	var P := sim.pod
 	var pv := Vector2(P.vx, P.vy).length()
 	var on_hwy: bool = sim.roads[P.path].w[0] >= 300.0 and _public_road(sim.roads[P.path])
