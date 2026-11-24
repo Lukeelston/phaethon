@@ -73,7 +73,10 @@ func set_deploy(t: float) -> void:
 	_deploy = at
 	# Equal-length front and rear links keep the carriage level. Drive its rise directly
 	# so the last part of the motion still changes the silhouette from the tow pod.
-	var travel := at + 0.55 * at * (1.0 - at) * exp(-4.0 * at)
+	# Lead with a quick lift out of the intake's shadow, then carry the carriage
+	# to its stop at a steady rate. The same curve governs the return stroke.
+	var quick_lift := (1.0 - exp(-8.0 * at)) / (1.0 - exp(-8.0))
+	var travel := lerpf(at, quick_lift, lerpf(0.47, 0.16, at))
 	var rise := lerpf(STOW_LIFT, FULL_LIFT, travel)
 	var angle := asin(rise / LINK_LENGTH)
 	var carriage_position := Vector3(0.0, rise, LINK_LENGTH * cos(angle))
