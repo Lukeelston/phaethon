@@ -207,6 +207,16 @@ static func fit_seat(parent: Node3D, offset := Vector3.ZERO) -> void:
 		parent.add_child(piece)
 
 
+## The flat pod and VR PodHull both carry the same dressed ShrikeStrakes.
+## The first GUN request creates the moving panels on whichever hull is visible.
+static func ensure_arms(hull: Node3D) -> Node3D:
+	var arms := hull.get_node_or_null("Arms") as Node3D
+	if not arms:
+		arms = load("res://view/arms/shrike_arms.gd").new()
+		arms.build(hull)
+	return arms
+
+
 # The HD coaming's colour map carries the Phaethon's own nameplate on its facing (tools/art_coaming_hd.py
 # paints it there; the Shrike's map is that one re-enamelled). In the cabin it is this rectangle, found by
 # following the map's texels through the model: 183 by 46 mm, upright. The Shrike's badge goes over it.
