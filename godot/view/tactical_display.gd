@@ -127,6 +127,12 @@ const REANCHOR := 60000.0                   # m from where the rails' own places
 const RAIL_CALM := Color(0.5, 0.42, 1.0)    # the rails' own: a blue violet (darker than the vehicles' cyan, so it stands off a pale sky) ...
 const RAIL_WARM := Color(0.8, 0.3, 1.0)     # ... violet ...
 const RAIL_HOT := Color(1.0, 0.18, 0.86)    # ... magenta: none of them the vehicles' cyan, amber or red, nor the exits' green
+# The right-hand rail's own (Luke, 2026-11-23: "make the tac hud lane guides different colors on each side? the purple
+# and purple are hard to see together"): the left rail keeps the violets above, the right runs rose to pink, and both
+# meet in the same magenta where a bend is red, so a hot bend reads the same whichever wall it is on. Left and right
+# are hers, the way she flies the road, not the way its samples run.
+const RAIL_CALM_RIGHT := Color(1.0, 0.42, 0.62)   # a rose: as far from the left's blue violet as the vehicles' and exits' colours leave room for ...
+const RAIL_WARM_RIGHT := Color(1.0, 0.3, 0.75)    # ... a hot pink ...
 const CALM := Color(0.0, 0.8, 1.0)          # the vehicles': a cyan that stands off a pale sky and a dark road alike ...
 const WARM := Color(1.0, 0.7, 0.1)          # ... amber ...
 const HOT := Color(1.0, 0.16, 0.08)         # ... red
@@ -232,6 +238,7 @@ var _ay := 0.0
 var _verts := PackedVector3Array()
 var _uv := PackedVector2Array()             # x: 0 the rail's foot, 1 its top; y: the bank into the bend
 var _uv2 := PackedVector2Array()            # x: m along the route; y: the curvature, 1/m
+var _side := PackedColorArray()             # r: 0 her left-hand rail, 1 her right (the rails' colours differ by side)
 var _index := PackedInt32Array()
 var _dirty := false
 var _net := false
@@ -295,11 +302,15 @@ uniform vec4 at_load = vec4(1.8, 2.2, 2.7, 3.0);
 uniform vec3 calm : source_color = vec3(0.5, 0.42, 1.0);
 uniform vec3 warm : source_color = vec3(0.8, 0.3, 1.0);
 uniform vec3 hot : source_color = vec3(1.0, 0.18, 0.86);
+uniform vec3 calm_right : source_color = vec3(1.0, 0.42, 0.62);   // the right-hand rail's calm and amber (COLOR.r 1: her right) ...
+uniform vec3 warm_right : source_color = vec3(1.0, 0.3, 0.75);    // ... meeting the left's in `hot`
 uniform float gain = 1.0;
 varying float ask;
 varying float fade;
+varying float right_side;
 
 void vertex() {
+	right_side = COLOR.r;
 	float along = UV2.x - pod_s;
 	float dist = length((MODELVIEW_MATRIX * vec4(VERTEX, 1.0)).xyz);
 	float hold = grip + bank_law.x * (9.81 * tan(UV.y) + bank_law.y * speed2 * sin(UV.y));
@@ -313,7 +324,8 @@ void vertex() {
 void fragment() {
 	float amber = smoothstep(at_load.x, at_load.y, ask);
 	float red = smoothstep(at_load.z, at_load.w, ask);
-	vec3 colour = mix(mix(calm, warm, amber), hot, red);
+	float r_side = step(0.5, right_side);
+	vec3 colour = mix(mix(mix(calm, calm_right, r_side), mix(warm, warm_right, r_side), amber), hot, red);
 	float t = clamp(UV.x, 0.0, 1.0);
 	float edge = clamp(rail_line * mix(1.0, hot_line, red) * fwidth(UV.x), 0.004, 0.6);      // the line along its top, a few pixels of it (more where it is red)
 	float line = smoothstep(1.0 - edge, 1.0 - 0.5 * edge, t);
@@ -579,6 +591,8 @@ func build(v) -> void:
 	rail_mat.set_shader_parameter("calm", RAIL_CALM)
 	rail_mat.set_shader_parameter("warm", RAIL_WARM)
 	rail_mat.set_shader_parameter("hot", RAIL_HOT)
+	rail_mat.set_shader_parameter("calm_right", RAIL_CALM_RIGHT)
+	rail_mat.set_shader_parameter("warm_right", RAIL_WARM_RIGHT)
 	rail_mesh = ArrayMesh.new()
 	rails = MeshInstance3D.new()
 	rails.name = "tactical_rails"
@@ -848,6 +862,7 @@ func _lay(road: int, here: int, dir: int) -> void:
 	st_road.clear()
 	st_i.clear()
 	_verts.clear()
+	_side.clear()
 	_uv.clear()
 	_uv2.clear()
 	_ax = float(view.org_x)
@@ -929,8 +944,10 @@ func _station(r: int, i: int, d: int) -> void:
 		var ex: float = _px + _nx * lat * side
 		var ey: float = _py + _ny * lat * side
 		var foot := Vector3(ex - _ax, float(sim.surface_at(ex, ey, i, path).x) + 0.3, -(ey - _ay))
+		var hers := Color(0.0 if side * d > 0.0 else 1.0, 0.0, 0.0, 1.0)      # (flown against its samples, the road's left is her right)
 		for top in 2:
 			_verts.append(foot)
+			_side.append(hers)
 			_uv.append(Vector2(float(top), 0.0))
 			_uv2.append(Vector2(s, 0.0))
 	_unsent += 1
@@ -965,6 +982,7 @@ func _trim(count: int) -> void:
 	st_road = st_road.slice(count)
 	st_i = st_i.slice(count)
 	_verts = _verts.slice(4 * count)
+	_side = _side.slice(4 * count)
 	_uv = _uv.slice(4 * count)
 	_uv2 = _uv2.slice(4 * count)
 	at -= count
@@ -983,6 +1001,7 @@ func _upload() -> void:
 	arrays[Mesh.ARRAY_VERTEX] = _verts
 	arrays[Mesh.ARRAY_TEX_UV] = _uv
 	arrays[Mesh.ARRAY_TEX_UV2] = _uv2
+	arrays[Mesh.ARRAY_COLOR] = _side
 	arrays[Mesh.ARRAY_INDEX] = _index.slice(0, (m - 1) * 12)
 	rail_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 

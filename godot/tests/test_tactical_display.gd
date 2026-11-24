@@ -102,6 +102,31 @@ func _place(v, road: int, i: int, dir: int, mph: float, left := 0.0) -> void:
 
 
 ## Frames of the display until its rails reach as far as they are to (or the road runs out).
+## Stations whose rail sides are marked right for the way she flies (Vector2i(right, all)): a rail's vertices lie to
+## her left of the station's middle (tx * dy - ty * dx > 0 along her heading) when they carry 0, to her right with 1.
+func _sides(t) -> Vector2i:
+	var good := 0
+	var n: int = t.st_s.size()
+	for k in n:
+		var a: Vector3 = t._verts[4 * k]
+		var b: Vector3 = t._verts[4 * k + 2]
+		var mid := (a + b) * 0.5
+		var ok := true
+		for side in 2:
+			for top in 2:
+				var at: Vector3 = t._verts[4 * k + 2 * side + top] - mid
+				var leftward: float = t.st_tx[k] * -at.z - t.st_ty[k] * at.x      # (the views' z is -y)
+				var marked: float = t._side[4 * k + 2 * side + top].r
+				ok = ok and ((leftward > 0.0 and marked == 0.0) or (leftward < 0.0 and marked == 1.0))
+		good += 1 if ok else 0
+	return Vector2i(good, n)
+
+
+## How far apart two colours are (straight-line distance in RGB, 0 .. 1.73).
+func _apart(a: Color, b: Color) -> float:
+	return Vector3(a.r - b.r, a.g - b.g, a.b - b.b).length()
+
+
 func _settle(v, t, frames := 600) -> int:
 	var sim = v.sim
 	var speed: float = Vector2(sim.pod.vx, sim.pod.vy).length()
@@ -375,6 +400,22 @@ func _run() -> void:
 	_place(v, e1, 4000, -1, 5000.0)
 	_settle(v, t)
 	_check("turned round, they are laid again the other way (the first station sample %d, the next %d)" % [t.st_i[0], t.st_i[1]], t.route_dir == -1 and t.st_i[0] == 4000 and t.st_i[1] == 3996 and t.st_tx[0] == -E.tx[4000])
+	# the two rails in their own colours (Luke: "different colors on each side"): her left the violets, her right the
+	# rose and pink, by where each rail lies from the way she flies, both ways along the road; red the same on both
+	var against := _sides(t)
+	_place(v, e1, 4000, 1, 5000.0)
+	_settle(v, t)
+	var along := _sides(t)
+	_check("each rail carries its side for the shader, hers, not the road's: flown against its samples %d of %d stations right, with them %d of %d" % [against.x, against.y, along.x, along.y],
+		against.y > 100 and against.x == against.y and along.y > 100 and along.x == along.y)
+	_check("... and the sides differ in colour where the bend is calm and amber (left %s, right %s; amber %s, %s), not where it is red (both %s), and the shader has the right's" % [
+			Tactical.RAIL_CALM.to_html(false), Tactical.RAIL_CALM_RIGHT.to_html(false), Tactical.RAIL_WARM.to_html(false), Tactical.RAIL_WARM_RIGHT.to_html(false), Tactical.RAIL_HOT.to_html(false)],
+		_apart(Tactical.RAIL_CALM, Tactical.RAIL_CALM_RIGHT) > 0.3 and _apart(Tactical.RAIL_WARM, Tactical.RAIL_WARM_RIGHT) > 0.15
+		and _apart(Tactical.RAIL_CALM_RIGHT, Tactical.CALM) > 0.3 and _apart(Tactical.RAIL_CALM_RIGHT, Tactical.WARM) > 0.3 and _apart(Tactical.RAIL_CALM_RIGHT, Tactical.HOT) > 0.3
+		and _apart(Tactical.RAIL_WARM_RIGHT, Tactical.HOT) > 0.3 and _apart(Tactical.RAIL_CALM_RIGHT, Tactical.EXIT_GREEN) > 0.3
+		and (t.rail_mat.get_shader_parameter("calm_right") as Color).is_equal_approx(Tactical.RAIL_CALM_RIGHT)
+		and (t.rail_mat.get_shader_parameter("warm_right") as Color).is_equal_approx(Tactical.RAIL_WARM_RIGHT)
+		and t.rail_mesh.surface_get_format(0) & Mesh.ARRAY_FORMAT_COLOR != 0)
 
 	# ---- the vehicles ----
 	_place(v, e1, 4000, 1, 5000.0, 22.5)
