@@ -1,7 +1,12 @@
-// The finish of the pilot craft's baked bodywork (Shrike RS, Orrery IX, Kiln Six, Vesper): the atlas's
-// colour, normal and occlusion/roughness/metal maps, as their StandardMaterial3D drew them, plus:
-//  - custom paint replaces the enamel islands of the fleet atlas (`repaint`). Inscriptions, seat
-//    fabric, bare hardware and inset trim keep their original material response;
+// The finish of the pilot craft's baked bodywork (Shrike RS, Orrery IX, Kiln Six, Vesper, Basilisk): the
+// atlas's colour, normal and occlusion/roughness/metal maps, as their StandardMaterial3D drew them, plus:
+//  - a livery (`repaint`, view/livery.gd): its mask (tools/art_livery_masks.py) gives each texel's share
+//    of each of four of the craft's own colours (R its enamel, G its bands, B its trim lines, A the
+//    lettering on its bands: `from_` the colour the atlas was painted in, `to_` the livery's), and just
+//    that share moves, carrying the texel's own light and dark with it (its luminance against the colour
+//    it was painted in): the grain, the mottling and the soft edges of the atlas stay, and what the mask leaves out
+//    (metal, rubber, ceramics, printed numbers and names, panel lines, fasteners) is drawn exactly as it
+//    was. One texture read more, and only on a craft in a livery. Off, the factory finish;
 //  - the ambient occlusion baked into each vertex's colour alpha by tools/art_bake_ao.py (geometry
 //    pass, 2026-11-23): where a hoop sits on a body or a pipe enters a saddle, the ambient light is
 //    shut out, as it is on a real machine. A mesh without colours reads alpha 1 and is unchanged;
@@ -13,20 +18,32 @@ shader_type spatial;
 uniform sampler2D albedo_map : source_color, filter_linear_mipmap_anisotropic, repeat_disable;
 uniform sampler2D normal_map : hint_normal, filter_linear_mipmap_anisotropic, repeat_disable;
 uniform sampler2D orm_map : filter_linear_mipmap_anisotropic, repeat_disable;
-uniform vec4 enamel : source_color = vec4(1.0);
 uniform bool repaint = false;
+uniform sampler2D livery_mask : hint_default_black, filter_linear_mipmap_anisotropic, repeat_disable;
+uniform vec4 from_r : source_color = vec4(0.0);
+uniform vec4 from_g : source_color = vec4(0.0);
+uniform vec4 from_b : source_color = vec4(0.0);
+uniform vec4 from_a : source_color = vec4(0.0);
+uniform vec4 to_r : source_color = vec4(0.0);
+uniform vec4 to_g : source_color = vec4(0.0);
+uniform vec4 to_b : source_color = vec4(0.0);
+uniform vec4 to_a : source_color = vec4(0.0);
 uniform float normal_depth = 0.74;
 // How much of the baked occlusion also falls on direct light: a little, as a crease's own shadow.
 uniform float occlusion_on_light : hint_range(0.0, 1.0) = 0.3;
+
+const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 
 void fragment() {
 	vec3 base = texture(albedo_map, UV).rgb;
 	vec3 finish = texture(orm_map, UV).rgb;
 	if (repaint) {
-		ivec2 tile = ivec2(floor(UV * 4.0));
-		bool painted = tile == ivec2(0, 0) || tile == ivec2(2, 2);
-		float grain = dot(base, vec3(0.2126, 0.7152, 0.0722));
-		base = painted ? enamel.rgb * clamp(0.65 + grain, 0.65, 1.35) : base;
+		vec4 share = texture(livery_mask, UV);
+		vec3 made = share.r * from_r.rgb + share.g * from_g.rgb + share.b * from_b.rgb + share.a * from_a.rgb;
+		float rest = max(1.0 - share.r - share.g - share.b - share.a, 0.0);
+		float shade = dot(base, LUMA) / max(dot(made + rest * base, LUMA), 0.0005);
+		vec3 turn = share.r * (to_r.rgb - from_r.rgb) + share.g * (to_g.rgb - from_g.rgb) + share.b * (to_b.rgb - from_b.rgb) + share.a * (to_a.rgb - from_a.rgb);
+		base = max(base + turn * clamp(shade, 0.5, 1.6), vec3(0.0));
 	}
 	ALBEDO = base;
 	AO = finish.r * COLOR.a;

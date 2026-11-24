@@ -4,6 +4,7 @@
 ## draws them exactly as they were made: nothing here touches them.
 ##   Accent.dress(mesh_instance)            after its mesh is set: an override, or none for Ember
 ##   Accent.of(material, glow)              the material to draw `material` with
+##   Accent.turned(material, colour)        ... with its orange turned to `colour`, whatever the livery
 extends RefCounted
 
 const Livery := preload("res://view/livery.gd")
@@ -17,22 +18,33 @@ static func of(source: Material, glow := Color(0, 0, 0)) -> Material:
 	var plain := source as BaseMaterial3D
 	if accent == null or plain == null or plain.albedo_texture == null:
 		return source
-	var key := [plain.get_instance_id(), Livery.current, glow]
+	return _recolour(plain, accent, [plain.get_instance_id(), Livery.current, glow], glow)
+
+
+## A fitting's material with its orange turned to `colour` (the Shrike's coaming takes its livery's paint,
+## view/shrike_airframe.gd), made once and kept.
+static func turned(source: Material, colour: Color, glow := Color(0, 0, 0)) -> Material:
+	var plain := source as BaseMaterial3D
+	if plain == null or plain.albedo_texture == null:
+		return source
+	return _recolour(plain, colour, [plain.get_instance_id(), colour, glow], glow)
+
+
+static func _recolour(plain: BaseMaterial3D, c: Color, key: Array, glow: Color) -> Material:
 	if _made.has(key):
 		return _made[key]
-	var c: Color = accent
 	# (the shader reads the maps as they are displayed: the accent's hue, saturation and value there)
-	var turned := ShaderMaterial.new()
-	turned.shader = SHADER
-	turned.set_shader_parameter("albedo_map", plain.albedo_texture)
-	turned.set_shader_parameter("normal_map", plain.normal_texture)
-	turned.set_shader_parameter("orm_map", plain.roughness_texture if plain.roughness_texture else plain.metallic_texture)
-	turned.set_shader_parameter("accent_hsv", Vector3(c.h, c.s, c.v))
-	turned.set_shader_parameter("normal_depth", plain.normal_scale if plain.normal_enabled else 0.0)
-	turned.set_shader_parameter("occlusion", plain.ao_light_affect if plain.ao_enabled else 0.0)
-	turned.set_shader_parameter("glow", Vector3(glow.r, glow.g, glow.b))
-	_made[key] = turned
-	return turned
+	var made := ShaderMaterial.new()
+	made.shader = SHADER
+	made.set_shader_parameter("albedo_map", plain.albedo_texture)
+	made.set_shader_parameter("normal_map", plain.normal_texture)
+	made.set_shader_parameter("orm_map", plain.roughness_texture if plain.roughness_texture else plain.metallic_texture)
+	made.set_shader_parameter("accent_hsv", Vector3(c.h, c.s, c.v))
+	made.set_shader_parameter("normal_depth", plain.normal_scale if plain.normal_enabled else 0.0)
+	made.set_shader_parameter("occlusion", plain.ao_light_affect if plain.ao_enabled else 0.0)
+	made.set_shader_parameter("glow", Vector3(glow.r, glow.g, glow.b))
+	_made[key] = made
+	return made
 
 
 ## Give a fitting the accent: an override on the instance (its mesh, and its mesh's material, are

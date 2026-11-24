@@ -824,10 +824,22 @@ static func _tri(st: SurfaceTool, i0: int, i1: int, i2: int, p0: Vector3, p1: Ve
 ## The pod: polished-metal outer skin (surface 0), matte trim inside (1), the leather lip round
 ## the cockpit (2), fittings (3), the nose cage (4), the paint (5: _outer_skin), the pinstripes and
 ## the lip's piping (6), lamps (7). Built once and shared (the flat view's pod and the VR cockpit).
+## Built in the current livery (Factory's is Ember's: the same hull). The Shrike's is always built as its
+## factory one was: its paint and trim are its own materials over it, in its livery (view/shrike_airframe.gd).
 static func pod_hull(shrike := false) -> ArrayMesh:
-	var which := "%s:%s:%s" % [Livery.current, "closed" if nose_closed else "open", "shrike" if shrike else "phaethon"]
+	var livery := "ember" if shrike else Livery.table_id()
+	var which := "%s:%s:%s" % [livery, "closed" if nose_closed else "open", "shrike" if shrike else "phaethon"]
 	if _hulls.has(which):
 		return _hulls[which]
+	var own := Livery.current
+	Livery.current = livery
+	var mesh := _build_hull(shrike)
+	Livery.current = own
+	_hulls[which] = mesh
+	return mesh
+
+
+static func _build_hull(shrike: bool) -> ArrayMesh:
 	var nz := 76
 	var na := 96
 	var z0: float = HULL[0][0]
@@ -1055,7 +1067,6 @@ static func pod_hull(shrike := false) -> ArrayMesh:
 	mesh.surface_set_material(7, Kit.vertex_colors(true))
 	mesh.set_meta(&"shrike_hull", shrike)
 	mesh.set_meta(&"livery", Livery.current)
-	_hulls[which] = mesh
 	return mesh
 
 

@@ -209,13 +209,13 @@ func _ready() -> void:
 	var opts := {"obstacleCollisions": GameSettings.obstacle_collisions_enabled()}
 	var on_pad := pad_start      # (a menu's word for this flight alone, whatever course it is)
 	pad_start = false
-	if not Livery.pinned:    # the menus' paint (a test or a render that has chosen one keeps it)
-		Livery.current = GameSettings.choice("paint", Livery.ids())
-	Outlook.load_saved()     # ... and their time of day and weather
+	Outlook.load_saved()     # the menus' time of day and weather
 	ChaseScript.load_saved() # ... and the craft, and whether chase mode is on
+	opts["vehicle"] = CraftSimScript.PilotCraft.resolve(OS.get_cmdline_user_args(), vehicle_override)
+	if not Livery.pinned:    # ... and the paint they chose for this pilot craft (a test or a render that has chosen one keeps it)
+		Livery.current = Livery.built(opts["vehicle"])
 	if ChaseScript.craft == "patrol":
 		Livery.current = "police"       # the patrol craft comes in its own black and white
-	opts["vehicle"] = CraftSimScript.PilotCraft.resolve(OS.get_cmdline_user_args(), vehicle_override)
 	var seek := 0.0
 	var mute := false
 	for a in OS.get_cmdline_user_args():

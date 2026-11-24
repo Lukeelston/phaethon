@@ -867,7 +867,7 @@ func _build_craft(vehicle: String, livery: String, handling: String, parent: Nod
 	# a pilot in the seat: helmet, visor, shoulders (the cover's; in a flight the pilot is you)
 	var pilot := MeshInstance3D.new()
 	pilot.name = "pilot"
-	var suit: Color = Shrike.PETROL if vehicle == "shrike" else Livery.coat("paint", livery)
+	var suit: Color = Shrike.PETROL if vehicle == "shrike" and Livery.is_factory(livery) else Livery.coat("paint", livery)
 	pilot.mesh = Kit.compound([
 		[Kit.rounded_box(Vector3(0.54, 0.30, 0.28), 4.0, 8), Kit.at(Vector3(0.0, -0.20, 0.05)), suit],
 		[Kit.cyl(0.07, 0.08, 0.10, 10), Kit.at(Vector3(0.0, -0.03, 0.02)), Color(0.07, 0.07, 0.08)],
@@ -888,7 +888,7 @@ static func _display_body(out: float) -> ArrayMesh:
 
 ## The turntable Phaethon's fairing in the paint it is being built in (Livery.current while it builds).
 static func _show_body(out: float) -> ArrayMesh:
-	var key := "%s/%d" % [Livery.current, int(out)]
+	var key := "%s/%d" % [Livery.table_id(), int(out)]
 	if not _show_bodies.has(key):
 		_show_bodies[key] = ModelScript._engine_body(out, false)
 	return _show_bodies[key]
@@ -1032,19 +1032,21 @@ func _pose_turntable() -> void:
 
 # ---- the turntable ----
 
-## The menus: put this pilot craft on the turntable, in `livery` (by default the paint the next flight will
+## The menus: put this pilot craft on the turntable, in `livery` (by default the paint its next flight will
 ## wear). It is built over the frames that follow, the craft on show staying until it is ready; one built
-## before comes straight back.
+## before comes straight back. (A new paint for the craft on show is a craft to build in it: the menus' paint
+## row calls this again after each press.)
 func show_craft(vehicle: String, livery := "") -> void:
 	show_vehicle = Pilot.known(vehicle)
-	show_livery = livery if Livery.TABLE.has(livery) else flight_livery()
+	show_livery = livery if Livery.known(livery) else flight_livery(show_vehicle)
 
 
-## The paint the next flight will be built in (view/craft_view.gd: the menus' paint, or the patrol's own).
-static func flight_livery() -> String:
+## The paint the next flight in a pilot craft (by default the menus' chosen one) will be built in
+## (view/craft_view.gd: the menus' paint for that craft, or the patrol's own).
+static func flight_livery(vehicle := "") -> String:
 	if Settings.choice("craft", Chase.ids(Chase.CRAFTS)) == "patrol":
 		return "police"
-	return Settings.choice("paint", Livery.ids())
+	return Livery.built(vehicle if Pilot.NAMES.has(vehicle) else Settings.selected_craft())
 
 
 func _show_key() -> String:
@@ -1270,7 +1272,7 @@ func _exit_tree() -> void:
 	# starting is in one: the menus have said so by now), and the nacelle's maps recoloured for the cover's livery
 	var flown: String = load("res://view/craft_view.gd").vehicle_override
 	if not _shrike_was_loaded and flown != "shrike":
-		Shrike.meshes.clear()
+		Shrike.release()
 	for key in Accent._made.keys():
 		if not _accents_before.has(key):
 			Accent._made.erase(key)

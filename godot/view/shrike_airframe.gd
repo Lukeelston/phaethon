@@ -5,18 +5,33 @@ extends RefCounted
 const Kit := preload("res://view/mesh_kit.gd")
 const Finish := preload("res://view/craft_materials.gd")
 const FleetAirframe := preload("res://view/fleet_airframe.gd")
+const Livery := preload("res://view/livery.gd")
+const Accent := preload("res://view/accent.gd")
 const PETROL := Color("#12666a")
 const IVORY := Color("#f1e5c9")
 const COPPER := Color("#e49749")
 const CARBON := Color("#243236")
 const ALLOY := Color("#9caead")
+# The atlas's own colours (tools/art_shrike_finish.py: TEAL, IVORY, GOLD), as its livery mask's channels
+# mark them (tools/art_livery_masks.py): in a livery the teal enamel takes its paint, the ivory bands its
+# pin and the gold pinstripe its stripe, as the other pilot craft's do (FleetAirframe.colours()). Its
+# numbers and names stay as printed, but for the dark ones on its bands when the bands go dark (they are
+# printed in the paint then, to read: FleetAirframe.lettering()).
+const ATLAS_TEAL := Color8(21, 90, 95)
+const ATLAS_IVORY := Color8(218, 214, 191)
+const ATLAS_GOLD := Color8(213, 140, 65)
+const ATLAS_DARK := Color8(23, 33, 37)
+const MASK := "res://art/shrike/livery_mask.png"
 static var meshes: Dictionary
+static var dressed := {}          # the parts again in a livery's finish: {livery: {part: mesh}} (the last livery asked for)
 static var pod_paint: StandardMaterial3D
 static var fittings: ShaderMaterial
+static var _liveried := {}        # livery -> [its pod paint, its fittings]
 
 
 ## Only a selected Shrike loads these meshes and maps. Both engines, all four
-## fans, the moving leaves and the pilot shell share one atlas and material.
+## fans, the moving leaves and the pilot shell share one atlas and material,
+## its factory finish; in a livery (view/livery.gd), copies of them share one in that livery.
 static func part(id: StringName) -> Mesh:
 	if meshes.is_empty():
 		var scene := (load("res://art/shrike/bodywork.glb") as PackedScene).instantiate()
@@ -26,7 +41,32 @@ static func part(id: StringName) -> Mesh:
 			mesh.surface_set_material(0, finish)
 			meshes[node.name] = mesh
 		scene.free()
-	return meshes[id]
+	if Livery.is_factory():
+		return meshes[id]
+	var livery := Livery.table_id()
+	if not dressed.has(livery):
+		var finish := FleetAirframe.finish_for(load("res://art/shrike/enamel.tres") as StandardMaterial3D)
+		FleetAirframe.repaint(finish, load(MASK), colours())
+		var parts := {}
+		for key in meshes:
+			var own := (meshes[key] as Mesh).duplicate() as Mesh
+			own.surface_set_material(0, finish)
+			parts[key] = own
+		dressed = {livery: parts}      # (a craft already built in another keeps its own copies)
+	return dressed[livery][id]
+
+
+## The atlas's colours in the current livery, as [own, livery's] for each of its mask's channels.
+static func colours() -> Array:
+	return [[ATLAS_TEAL, Livery.coat("paint")], [ATLAS_IVORY, Livery.coat("pin")], [ATLAS_GOLD, Livery.coat("stripe")],
+		[ATLAS_DARK, FleetAirframe.lettering(ATLAS_DARK)]]
+
+
+## Let go of what a Shrike loaded (the title does, when the flight starting is not in one).
+static func release() -> void:
+	meshes.clear()
+	dressed.clear()
+	_liveried.clear()
 
 
 ## The fin's tip as it was authored (at FIN_CANT), engine-local. It moves now: see fin_solve().
@@ -135,9 +175,22 @@ static func dress_pod(hull: MeshInstance3D) -> void:
 		pod_paint.clearcoat = 0.8
 		fittings = ShaderMaterial.new()
 		fittings.shader = preload("res://view/shrike_trim.gdshader")
+	var paint := pod_paint
+	var piped := fittings
+	if not Livery.is_factory():      # its paint, and the trim's enamel, in the livery's paint
+		var livery := Livery.table_id()
+		if not _liveried.has(livery):
+			var coat := pod_paint.duplicate() as StandardMaterial3D
+			coat.albedo_color = Livery.coat("paint")
+			var piping := ShaderMaterial.new()
+			piping.shader = fittings.shader
+			piping.set_shader_parameter("enamel", Livery.coat("paint"))
+			_liveried[livery] = [coat, piping]
+		paint = _liveried[livery][0]
+		piped = _liveried[livery][1]
 	# The nose tow pins retain their machined metal finish.
-	hull.set_surface_override_material(5, pod_paint)
-	hull.set_surface_override_material(6, fittings)
+	hull.set_surface_override_material(5, paint)
+	hull.set_surface_override_material(6, piped)
 	var trim := MeshInstance3D.new()
 	trim.name = "ShrikeStrakes"
 	trim.add_to_group("exterior")
@@ -162,11 +215,13 @@ const COAMING_Y := 0.558               # the badge's and the tow-load windows' h
 
 
 static func dress_coaming(coaming: MeshInstance3D, hd: bool) -> ShaderMaterial:
-	if hd:
+	if hd and Livery.is_factory():
 		var original := coaming.mesh.surface_get_material(0) as BaseMaterial3D
 		var livery := original.duplicate() as BaseMaterial3D
 		livery.albedo_texture = load("res://art/cockpit/shrike_coaming.webp")
 		coaming.set_surface_override_material(0, livery)
+	elif hd:      # in a livery: the coaming's own enamel, which its teal map re-enamels, in the livery's paint
+		coaming.set_surface_override_material(0, Accent.turned(coaming.mesh.surface_get_material(0), Livery.coat("paint")))
 	var plate := MeshInstance3D.new()
 	plate.name = "ShrikePlate"
 	# The HD coaming follows the shorter, egg-shaped opening. The original

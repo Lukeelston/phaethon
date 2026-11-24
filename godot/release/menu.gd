@@ -91,7 +91,9 @@ func _ready() -> void:
 	craft_selector.visible = false
 	craft_selector.button.add_theme_font_size_override("font_size", 15)
 	craft_selector.button.clip_text = true
-	for row: Array in [[UI.insertion_button(15), UI.paint_button(15), UI.time_button(15), UI.weather_button(15)], [craft_selector.button, UI.craft_button(15), UI.chase_button(15)]]:
+	var paint_row := UI.paint_button(15)
+	craft_selector.button.pressed.connect(UI.refresh_paint.bind(paint_row))      # (each craft has its own paint)
+	for row: Array in [[UI.insertion_button(15), paint_row, UI.time_button(15), UI.weather_button(15)], [craft_selector.button, UI.craft_button(15), UI.chase_button(15)]]:
 		var options := HBoxContainer.new()
 		options.add_theme_constant_override("separation", 8)
 		left.add_child(options)
@@ -176,6 +178,7 @@ func _over_title() -> void:
 	craft_selector.button.add_theme_font_size_override("font_size", 14)
 	craft_selector.button.clip_text = true
 	var paint := UI.paint_button(14)
+	craft_selector.button.pressed.connect(UI.refresh_paint.bind(paint))      # (each craft has its own paint: after the selector's own handler)
 	var role := UI.craft_button(14)
 	look_buttons = [craft_selector.button, paint, role]
 	for look in look_buttons:
