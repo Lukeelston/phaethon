@@ -38,7 +38,7 @@ func _run() -> void:
 		quit(1)
 		return
 	Livery.pinned = true
-	Livery.current = "ember"
+	Livery.current = Livery.FACTORY      # (each craft as designed: "ember" is the Ember paint on these)
 	Outlook.pinned = true
 	Outlook.time = "afternoon"
 	Outlook.weather = "fair"

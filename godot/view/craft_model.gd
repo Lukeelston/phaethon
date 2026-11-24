@@ -851,10 +851,22 @@ static func _tri(st: SurfaceTool, i0: int, i1: int, i2: int, p0: Vector3, p1: Ve
 ## the lip's piping (6), lamps (7). Built once and shared (the flat view's pod and the VR cockpit).
 ## `talon`: the Talon's: Codex's anti-glare panel on the decks, without the Phaethon's raked fin, side intakes and
 ## trim thrusters, with his lamps, and his plating (8: view/talon_airframe.gd add_pod, in Talon.paint's palette).
+## Built in the current livery (Factory's is Ember's: the same hull). The Shrike's is always built as its
+## factory one was: its paint and trim are its own materials over it, in its livery (view/shrike_airframe.gd).
 static func pod_hull(shrike := false, talon := false) -> ArrayMesh:
-	var which := "%s:%s:%s" % [Livery.current, "closed" if nose_closed else "open", "shrike" if shrike else ("talon/" + Talon.paint if talon else "phaethon")]
+	var livery := "ember" if shrike else Livery.table_id()
+	var which := "%s:%s:%s" % [livery, "closed" if nose_closed else "open", "shrike" if shrike else ("talon/" + Talon.paint if talon else "phaethon")]
 	if _hulls.has(which):
 		return _hulls[which]
+	var own := Livery.current
+	Livery.current = livery
+	var mesh := _build_hull(shrike, talon)
+	Livery.current = own
+	_hulls[which] = mesh
+	return mesh
+
+
+static func _build_hull(shrike: bool, talon := false) -> ArrayMesh:
 	var nz := 76
 	var na := 96
 	var z0: float = HULL[0][0]
@@ -1089,7 +1101,6 @@ static func pod_hull(shrike := false, talon := false) -> ArrayMesh:
 		mesh.set_meta(&"talon_hull", true)
 	mesh.set_meta(&"shrike_hull", shrike)
 	mesh.set_meta(&"livery", Livery.current)
-	_hulls[which] = mesh
 	return mesh
 
 

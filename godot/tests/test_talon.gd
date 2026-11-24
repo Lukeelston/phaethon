@@ -53,7 +53,7 @@ func _run() -> void:
 	var prefs_existed := FileAccess.file_exists(PREFS)
 	var prefs := FileAccess.get_file_as_bytes(PREFS) if prefs_existed else PackedByteArray()
 	Livery.pinned = true
-	Livery.current = "ember"
+	Livery.current = Livery.FACTORY      # (the Talon in its factory finish; the Phaethon's parts in Ember, Factory's table)
 	_on_paper()
 	await _flat_view()
 	await _vr_seat()
@@ -108,6 +108,8 @@ func _on_paper() -> void:
 	check("... and in its pinstripe where it has no accent (Ember)", orange.body == ember.paint and orange.trim == ember.pin)
 	var every := true
 	for id in Livery.ids():
+		if id == Livery.FACTORY:      # (first on the menus' row: Factory, the palette checked above)
+			continue
 		every = every and Talon.palette(id).keys() == factory.keys() and Talon.palette(id).body == Livery.TABLE[id].paint
 	check("every paint on the menus' row gives a whole palette", every)
 

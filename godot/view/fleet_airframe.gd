@@ -6,6 +6,19 @@ const Livery := preload("res://view/livery.gd")
 const Kit := preload("res://view/mesh_kit.gd")
 const FINISH := preload("res://view/fleet_finish.gdshader")
 const ASSET_DIR := "res://art/pilot_fleet/"
+const MASK := "_livery.png"     # <id>_livery.png: where each of its own colours is on its atlas (tools/art_livery_masks.py)
+# Each craft's own colours as tools/art_pilot_fleet_finish.py paints its atlas (FLEET: paint, accent, trim;
+# and the ink its number is printed in on its plates), as the mask's channels mark them: R its enamel, G its
+# accent (its bands, accent panels and number plates), B its trim lines, A its number. (tests/test_paint.gd
+# reads them back off the atlases.)
+const INK := Color("#25343b")
+const DARK_BAND := 0.12          # linear luminance under which a band is too dark for dark lettering on it
+const OWN := {
+	"orrery": [Color("#eee2bd"), Color("#166363"), Color("#c69956")],
+	"kiln": [Color("#bf4636"), Color("#f5af44"), Color("#ad734e")],
+	"vesper": [Color("#6b5894"), Color("#d5e2e8"), Color("#d69f97")],
+	"basilisk": [Color("#474e49"), Color("#e59a2c"), Color("#8c7353")],
+}
 const STROBES := {"orrery": Vector3(1.315, 0.24, 1.04), "kiln": Vector3(1.02, 0.54, 2.34), "vesper": Vector3(2.22, 0.58, 1.83), "basilisk": Vector3(1.42, 0.17, -2.30)}
 const CAB_HINGES := {"orrery": Vector3(1.295, -0.24, 0.77), "kiln": Vector3(1.396, -0.17, 0.70), "vesper": Vector3(1.241, -0.12, 0.69), "basilisk": Vector3(1.36, -0.17, 0.70)}
 
@@ -21,9 +34,8 @@ func _init(vehicle: String) -> void:
 	id = vehicle
 	var source := (load(ASSET_DIR + id + ".glb") as PackedScene).instantiate()
 	var paint := finish_for(load(ASSET_DIR + id + ".tres") as StandardMaterial3D)
-	if Livery.accent() != null:
-		paint.set_shader_parameter("repaint", true)
-		paint.set_shader_parameter("enamel", Livery.coat("paint"))
+	if not Livery.is_factory():      # (Factory: the atlas as it was painted)
+		repaint(paint, load(ASSET_DIR + id + MASK), colours(id))
 	for node: MeshInstance3D in source.find_children("*", "MeshInstance3D", true, false):
 		# The import is shared between flights. Only this flight owns the surface assignment.
 		var own := node.mesh.duplicate() as ArrayMesh
@@ -43,6 +55,37 @@ static func finish_for(atlas: StandardMaterial3D) -> ShaderMaterial:
 	mat.set_shader_parameter("orm_map", atlas.roughness_texture)
 	mat.set_shader_parameter("normal_depth", atlas.normal_scale)
 	return mat
+
+
+## A craft's colours in the current livery, as [its own, the livery's] for each of the mask's channels:
+## its enamel takes the livery's paint; its bands and accent panels the livery's pin, the colour a livery
+## sets against its paint (white on cobalt or crimson, gold on racing green, black on sunflower, red on
+## bone, orange on obsidian); its thin trim lines the livery's stripe. (Not the livery's accent: each is a
+## shade of its own paint, made for the Phaethon's fittings, and on these the bands vanished into the
+## body: evidence/realism-spike/push45/paint/sheet-variants.png.) The number printed on its plates stays
+## as printed, unless the plates go dark (Sunflower's black): then it is printed in the paint, to read.
+## The Shrike's are the same four (view/shrike_airframe.gd colours()).
+static func colours(vehicle: String) -> Array:
+	var own: Array = OWN[vehicle]
+	return [[own[0], Livery.coat("paint")], [own[1], Livery.coat("pin")], [own[2], Livery.coat("stripe")], [INK, lettering(INK)]]
+
+
+## What dark lettering printed on a band or a plate is printed in: as it was, unless the livery's band
+## colour (its pin) is too dark for it to read on (then the livery's paint).
+static func lettering(ink: Color) -> Color:
+	var band := Livery.coat("pin").srgb_to_linear()
+	return Livery.coat("paint") if 0.2126 * band.r + 0.7152 * band.g + 0.0722 * band.b < DARK_BAND else ink
+
+
+## Put a finish (finish_for) into a livery: the mask, and for each of its four channels [the colour the
+## atlas was painted in, the colour it takes] (view/fleet_finish.gdshader). Set once, when the craft is
+## built: nothing a frame.
+static func repaint(finish: ShaderMaterial, mask: Texture2D, colours: Array) -> void:
+	finish.set_shader_parameter("repaint", true)
+	finish.set_shader_parameter("livery_mask", mask)
+	for k in 4:
+		finish.set_shader_parameter("from_" + "rgba"[k], colours[k][0])
+		finish.set_shader_parameter("to_" + "rgba"[k], colours[k][1])
 
 
 func part(key: StringName) -> ArrayMesh:

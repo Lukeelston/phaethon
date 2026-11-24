@@ -59,7 +59,7 @@ func _run() -> void:
 	root.size = Vector2i(int(size[0]), int(size[1]))
 	DisplayServer.window_set_size(root.size)
 	Livery.pinned = true
-	Livery.current = "ember"
+	Livery.current = Livery.FACTORY      # (each craft as designed: "ember" is the Ember paint on these)
 	Outlook.pinned = true
 	Outlook.time = "afternoon"
 	Outlook.weather = "fair"

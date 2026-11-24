@@ -155,11 +155,7 @@ static func partner_checkbox(font_size: int = 18) -> CheckBox:
 ## [[id, name], ...]; `changed` (optional) hears the new id.
 static func option_button(title: String, key: String, choices: Array, font_size: int = 18, changed: Callable = Callable()) -> Button:
 	var ids := choices.map(func(entry): return entry[0])
-	var item := Button.new()
-	item.custom_minimum_size.y = 38
-	item.alignment = HORIZONTAL_ALIGNMENT_LEFT
-	item.clip_text = true
-	item.add_theme_font_size_override("font_size", font_size)
+	var item := _option_row(font_size)
 	var show := func() -> void:
 		item.text = "%s:  %s" % [title, choices[ids.find(Settings.choice(key, ids))][1]]
 	item.pressed.connect(func() -> void:
@@ -172,12 +168,39 @@ static func option_button(title: String, key: String, choices: Array, font_size:
 	return item
 
 
+static func _option_row(font_size: int) -> Button:
+	var item := Button.new()
+	item.custom_minimum_size.y = 38
+	item.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	item.clip_text = true
+	item.add_theme_font_size_override("font_size", font_size)
+	return item
+
+
 static func insertion_button(font_size: int = 18) -> Button:
 	return option_button("Start", "network_start", INSERTIONS, font_size)
 
 
+## The paint row (Luke: "Will you make it so that all vehicles can have a color option?"): the chosen pilot
+## craft's own paint, Factory first (view/livery.gd). Each press takes that craft's next and saves it as
+## that craft's; the other craft keep theirs. When the menus change the pilot craft, refresh_paint() shows
+## the new one's.
 static func paint_button(font_size: int = 18) -> Button:
-	return option_button("Paint", "paint", Livery.CHOICES, font_size)
+	var item := _option_row(font_size)
+	item.pressed.connect(func() -> void:
+		var craft := Settings.selected_craft()
+		var ids := Livery.ids_for(craft)
+		Settings.set_choice(Livery.key_for(craft), ids[(ids.find(Livery.saved_for(craft)) + 1) % ids.size()])
+		refresh_paint(item))
+	refresh_paint(item)
+	return item
+
+
+## Show the chosen pilot craft's paint on the paint row.
+static func refresh_paint(item: Button) -> void:
+	var craft := Settings.selected_craft()
+	var choices := Livery.choices_for(craft)
+	item.text = "Paint:  %s" % choices[Livery.ids_for(craft).find(Livery.saved_for(craft))][1]
 
 
 static func craft_button(font_size: int = 18) -> Button:

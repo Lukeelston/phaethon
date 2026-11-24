@@ -176,6 +176,7 @@ func _build_screen() -> void:
 	craft_selector.button.add_theme_font_size_override("font_size", 22)
 	craft_selector.button.clip_text = true
 	var paint := UI.paint_button(22)
+	craft_selector.button.pressed.connect(UI.refresh_paint.bind(paint))      # (each craft has its own paint: after the selector's own handler)
 	var role := UI.craft_button(22)
 	look_buttons = [craft_selector.button, paint, role]
 	for look in look_buttons:

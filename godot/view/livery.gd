@@ -1,5 +1,6 @@
 ## The craft's paint (Luke: "What about color settings for the vehicle?", and "a police variant of
-## the vehicle"). A livery names the colours a craft is built in:
+## the vehicle"; then "Will you make it so that all vehicles can have a color option?"). A livery names
+## the colours a craft is built in:
 ##   paint    the pod's top decks, nose and fin, and the piping on the cockpit's lip (clear-coated)
 ##   stripe   the racing stripe along the pod's flanks
 ##   pin      the pinstripes where the paint meets the metal
@@ -8,13 +9,23 @@
 ##   accent   what the authored fittings' orange turns to: the coaming's enamel, the stitching, the
 ##            grips' anodised bands, the engines' armour plates (view/accent.gd); none for Ember,
 ##            whose fittings are drawn exactly as they were made
-## "ember" is the craft as it always was. A craft's colours are in its meshes' vertices, so the
+## "ember" is the Phaethon as it always was. A craft's colours are in its meshes' vertices, so the
 ## livery is chosen before the craft is built (CraftView reads the menus' choice) and each has its
 ## own hull (CraftModel.pod_hull()).
+## Every pilot craft takes a paint, and each keeps its own choice (saved under key_for(craft); the
+## Phaethon's is the "paint" it always had). The first on the row is "factory": each craft as it was
+## designed. The Phaethon's factory paint is Ember orange, so its row has no second Ember. The others
+## wear a livery over their painted atlases (view/fleet_airframe.gd, view/shrike_airframe.gd): its paint
+## on their enamel, its accent on their accent, its pin on their trim lines, and nothing else touched.
 ##   Livery.current = "cobalt"            before a craft is built (and `pinned`, so a saved choice is left alone)
-##   Livery.coat("paint")                 the colour of a part in the current livery
+##   Livery.coat("paint")                 the colour of a part in the current livery (Factory's: Ember's)
+##   Livery.built(vehicle)                the livery the menus' choice builds that craft in
 extends RefCounted
 
+const Settings := preload("res://release/game_settings.gd")
+const Pilot := preload("res://sim/pilot_craft.gd")
+
+const FACTORY := "factory"      # each craft as it was designed (the Phaethon: Ember orange)
 const TABLE := {
 	"ember": {"name": "Ember orange", "paint": Color(0.95, 0.42, 0.08), "stripe": Color(0.11, 0.12, 0.14), "pin": Color(0.96, 0.95, 0.9),
 		"engine": Color(0.86, 0.27, 0.09), "skin": Color(0.80, 0.82, 0.86)},
@@ -39,22 +50,72 @@ const TABLE := {
 	"boxcover": {"name": "Box-cover navy", "paint": Color(0.045, 0.085, 0.30), "stripe": Color(0.86, 0.21, 0.07), "pin": Color(0.96, 0.93, 0.84),
 		"engine": Color(0.88, 0.23, 0.07), "skin": Color(0.80, 0.82, 0.86), "accent": Color(0.06, 0.13, 0.46)},
 }
-const CHOICES := [["ember", "Ember orange"], ["cobalt", "Cobalt blue"], ["viridian", "Racing green"], ["crimson", "Crimson"],
+const CHOICES := [["factory", "Factory"], ["ember", "Ember orange"], ["cobalt", "Cobalt blue"], ["viridian", "Racing green"], ["crimson", "Crimson"],
 	["sunflower", "Sunflower yellow"], ["violet", "Violet"], ["bone", "Bone white"], ["obsidian", "Obsidian black"]]   # the menus' paint row: [id, name]
 
-static var current := "ember"     # the livery crafts are built in
-static var pinned := false        # a test or a render chose it: the saved choice does not replace it
+static var current := FACTORY   # the livery crafts are built in
+static var pinned := false      # a test or a render chose it: the saved choice does not replace it
 
 
 static func ids() -> Array:
 	return CHOICES.map(func(entry): return entry[0])
 
 
+## The paint row for a pilot craft: [id, name], Factory first. The Phaethon's Factory is Ember orange, so
+## Ember is not on its row twice.
+static func choices_for(vehicle: String) -> Array:
+	if Pilot.known(vehicle) == Pilot.STANDARD:
+		return CHOICES.filter(func(entry): return entry[0] != "ember")
+	return CHOICES
+
+
+static func ids_for(vehicle: String) -> Array:
+	return choices_for(vehicle).map(func(entry): return entry[0])
+
+
+## Where a craft's paint is saved (release/game_settings.gd's "flight" section): the Phaethon's is the
+## "paint" it always had (a choice saved before every craft had one is its), each other craft its own.
+static func key_for(vehicle: String) -> String:
+	var craft := Pilot.known(vehicle)
+	return "paint" if craft == Pilot.STANDARD else "paint_" + craft
+
+
+## The paint the menus have chosen for a craft (Factory until one is chosen).
+static func saved_for(vehicle: String) -> String:
+	return Settings.choice(key_for(vehicle), ids_for(vehicle))
+
+
+## The livery a craft is built in for a choice from its row: the Phaethon's Factory is Ember.
+static func for_craft(vehicle: String, choice: String) -> String:
+	return "ember" if choice == FACTORY and Pilot.known(vehicle) == Pilot.STANDARD else choice
+
+
+## ... and for the menus' saved choice.
+static func built(vehicle: String) -> String:
+	return for_craft(vehicle, saved_for(vehicle))
+
+
+static func known(which: String) -> bool:
+	return which == FACTORY or TABLE.has(which)
+
+
+## Is a livery (the current one by default) a craft's factory finish?
+static func is_factory(which := "") -> bool:
+	return (which if known(which) else current) == FACTORY
+
+
+## The table entry a livery's colours come from: Factory's are Ember's (the parts every craft shares, such
+## as the binder's ring, are drawn as they were).
+static func table_id(which := "") -> String:
+	var id: String = which if known(which) else current
+	return id if TABLE.has(id) else "ember"
+
+
 ## The colour of a part ("paint", "stripe", "pin", "engine", "skin") in a livery (the current one by default).
 static func coat(part: String, which := "") -> Color:
-	return TABLE[which if TABLE.has(which) else current][part]
+	return TABLE[table_id(which)][part]
 
 
 ## The colour the authored fittings' orange takes, or null to leave them as they were made.
 static func accent(which := ""):
-	return TABLE[which if TABLE.has(which) else current].get("accent")
+	return TABLE[table_id(which)].get("accent")

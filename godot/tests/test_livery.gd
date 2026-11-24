@@ -1,6 +1,7 @@
 ## The craft's paint (Luke: "What about color settings for the vehicle?"; view/livery.gd,
 ## view/accent.gd, CraftModel.pod_hull()):
-##   liveries  eight on the menus' row and the patrol's; every one names all five parts
+##   liveries  Factory and eight on the menus' row, and the patrol's; every one names all five parts;
+##             Factory's colours are Ember's
 ##   ember     the craft as it always was: the constants it was built from, and no accent
 ##   hulls     each livery has its own hull, open nose and closed, built once and kept; its paint
 ##             surface is in that livery's paint and stripe and nothing else; Ember's is untouched by
@@ -9,7 +10,8 @@
 ##             thread are drawn in the accent over the fitting's own maps, one material per fitting kept
 ##   cockpit   a cockpit built in another livery wears it: hull, coaming, grips, tub, dash, roof,
 ##             binnacle; built in Ember again, nothing is overridden
-##   saved     the menus' row steps through the eight and saves the choice
+##   saved     the menus' row steps through the Phaethon's paints (Factory, which is Ember, and seven
+##             more) and saves the choice (every craft's own: tests/test_paint.gd)
 ## Prints LIVERY PASS.
 extends SceneTree
 
@@ -50,14 +52,15 @@ func _near(a: Color, b: Color) -> bool:
 
 
 func _run() -> void:
-	var before := Settings.choice("paint", Livery.ids())
+	var before = FileAccess.get_file_as_bytes(Settings.PREFS) if FileAccess.file_exists(Settings.PREFS) else null
 	var incomplete := []
 	for id in Livery.TABLE:
 		for part in ["name", "paint", "stripe", "pin", "engine", "skin"]:
 			if not Livery.TABLE[id].has(part):
 				incomplete.append("%s.%s" % [id, part])
-	_check("%d liveries, %d of them on the menus' row, every part named (missing: %s)" % [Livery.TABLE.size(), Livery.CHOICES.size(), incomplete],
-		incomplete.is_empty() and Livery.CHOICES.size() == 8 and Livery.TABLE.has("police") and not Livery.ids().has("police") and Livery.ids()[0] == "ember")
+	_check("%d liveries, %d of them and Factory on the menus' row, every part named (missing: %s); Factory's are Ember's" % [Livery.TABLE.size(), Livery.CHOICES.size() - 1, incomplete],
+		incomplete.is_empty() and Livery.CHOICES.size() == 9 and Livery.TABLE.has("police") and not Livery.ids().has("police") and Livery.ids()[0] == Livery.FACTORY
+			and Livery.ids()[1] == "ember" and Livery.coat("paint", Livery.FACTORY) == Livery.coat("paint", "ember") and Livery.accent(Livery.FACTORY) == null)
 	_check("Ember is the craft as it was: paint %s, stripe %s, pin %s, engine %s, no accent" % [Livery.coat("paint"), Livery.coat("stripe"), Livery.coat("pin"), Livery.coat("engine")],
 		Livery.coat("paint") == CM.PAINT and Livery.coat("stripe") == CM.STRIPE and Livery.coat("pin") == CM.PIN and Livery.coat("engine") == CM.LIVERY
 			and Livery.coat("skin") == CM.SILVER and Livery.accent() == null)
@@ -144,18 +147,24 @@ func _run() -> void:
 	await process_frame
 
 	# saved
-	Settings.set_choice("paint", "ember")
+	Settings.set_selected_craft("phaethon")
+	Settings.set_choice("paint", "ember")      # (the old default: the Phaethon's Factory)
 	var row := UI.paint_button()
 	root.add_child(row)
 	var first := row.text
 	row.pressed.emit()
 	var second := row.text
 	var saved := Settings.choice("paint", Livery.ids())
-	for i in Livery.CHOICES.size() - 1:
+	for i in Livery.ids_for("phaethon").size() - 1:
 		row.pressed.emit()
 	_check("the menus' row: \"%s\", a press \"%s\" and saved as %s, round again to \"%s\"" % [first, second, saved, row.text],
-		first.ends_with("Ember orange") and second.ends_with("Cobalt blue") and saved == "cobalt" and row.text == first)
+		first.ends_with("Factory") and second.ends_with("Cobalt blue") and saved == "cobalt" and row.text == first)
 	row.queue_free()
-	Settings.set_choice("paint", before)
+	if before == null:
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(Settings.PREFS))
+	else:
+		var file := FileAccess.open(Settings.PREFS, FileAccess.WRITE)
+		file.store_buffer(before)
+		file.close()
 	print("LIVERY %s (%d failures)" % ["PASS" if failures == 0 else "FAIL", failures])
 	quit(0 if failures == 0 else 1)
