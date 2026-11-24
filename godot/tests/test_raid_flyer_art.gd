@@ -13,7 +13,18 @@ func _initialize() -> void:
 	run.call_deferred()
 
 func run() -> void:
+	check(not ResourceLoader.has_cached(Art.DRONE_PATH) and not ResourceLoader.has_cached(Art.GUNSHIP_PATH),
+			"Preloading the art API keeps both flyer scenes out of the off-state resource cache")
+	var ship: Node3D
+	if "--gunship-first" in OS.get_cmdline_user_args():
+		ship = Art.gunship()
+		check(ResourceLoader.has_cached(Art.GUNSHIP_PATH) and not ResourceLoader.has_cached(Art.DRONE_PATH),
+				"Spawning only the gunship leaves the drone scene unloaded")
 	var drones := Art.drone_batch()
+	if ship == null:
+		check(ResourceLoader.has_cached(Art.DRONE_PATH) and not ResourceLoader.has_cached(Art.GUNSHIP_PATH),
+				"Spawning only drones leaves the gunship scene unloaded")
+		ship = Art.gunship()
 	root.add_child(drones)
 	var mm := drones.multimesh
 	check(mm.instance_count == 10 and mm.visible_instance_count == 0, "Batch starts empty with space for the whole swarm")
@@ -22,7 +33,6 @@ func run() -> void:
 	mm.visible_instance_count = 10
 	check(drones.material_override == Art.FINISH and mm.mesh.get_surface_count() == 1, "All drones share one atlas surface")
 	check(mm.mesh.get_aabb().size.x > 5 and mm.mesh.get_aabb().size.x < 7, "Drone width is in metres")
-	var ship := Art.gunship()
 	root.add_child(ship)
 	var pivot := ship.get_node("TurretPivot") as Node3D
 	var cradle := pivot.get_node("Cradle") as Node3D
