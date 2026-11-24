@@ -228,8 +228,8 @@ func check_throttle_boots(game, id: String) -> void:
 func check_flight_deck(game, id: String) -> void:
 	var cluster = game.dashboard
 	var meter = game.aux_meter
-	if id == Sim.PilotCraft.STANDARD:
-		check("base cockpit uses the original gauge body and layout", meter == null and cluster.flight_deck == null and game.throttle_gaiters.is_empty()
+	if Sim.PilotCraft.phaethon_based(id):      # (the Talon sits in the Phaethon's own cockpit)
+		check(id + " cockpit uses the original gauge body and layout", meter == null and cluster.flight_deck == null and game.throttle_gaiters.is_empty()
 				and cluster.gauges == cluster.Layout.GAUGES and not game.interior.has_node("SillFittings")
 				and cluster.get_node("binnacle").mesh == cluster.Interior._hd_mesh(cluster.BODY, "Binnacle"))
 		return
@@ -393,6 +393,7 @@ func _run() -> void:
 		check(id + " reaches 1,000 mph and turns under differential thrust", result.x < 10.0 and result.y > 0)
 		print(id, " 1000 mph seconds / split-lever yaw degrees ", result)
 	var stock := trial("phaethon")
+	check("the Talon flies as the Phaethon does (the same tuning)", trial("talon") == stock)
 	var shrike := trial("shrike")
 	print("1000 mph, then degrees after 0.5 s at 350 mph: Phaethon ", stock, ", Shrike ", shrike)
 	check("Shrike launches faster at equal throttle", shrike.x < stock.x * 0.9 and stock.x < 10)
@@ -403,7 +404,7 @@ func _run() -> void:
 	preload("res://vr/vr_cockpit.gd")._startup_loaded = true      # (... whatever the saved choice says)
 	for vr in [false, true]:
 		var scene := "res://release/vr_menu.tscn" if vr else "res://release/menu.tscn"
-		for id in ["shrike", "orrery", "kiln", "vesper", "basilisk", "phaethon"]:
+		for id in ["talon", "shrike", "orrery", "kiln", "vesper", "basilisk", "phaethon"]:
 			change_scene_to_file(scene)
 			await scene_changed
 			var menu = current_scene

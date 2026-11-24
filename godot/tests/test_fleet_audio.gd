@@ -45,7 +45,7 @@ func _engine_check(audio: Engines, manifest: Dictionary, bank_dir: String, id: S
 			var bands: Array = layers[layer].bands
 			var layer_dir := bank_dir if manifest.layers.has(layer) else Engines.DIR
 			var bus := side + "_" + layer if layer in Engines.FILTERED else side
-			if id != Pilot.STANDARD and layer in ["v8", "v12", "second", "turbine", "rotor"]:
+			if not Pilot.phaethon_based(id) and layer in ["v8", "v12", "second", "turbine", "rotor"]:
 				var glide := voice.glides.get(layer) as Glide
 				_check("%s %s %s uses a single continuous voice" % [id, side, layer],
 						glide != null and glide.bus == bus and voice.players.get(layer, []).is_empty())
@@ -264,6 +264,25 @@ func _run() -> void:
 		(player as AudioStreamPlayer).stop()
 	gun_cabin.free()
 	gunship.free()
+	await process_frame
+	# The Talon (2026-11-24) is a Phaethon in another body: its engines and its start-up are the Phaethon's own
+	# (sim/pilot_craft.gd sound_bank), not a res://audio/fleet/ bank, and they load without error.
+	var talon := Engines.new()
+	root.add_child(talon)
+	talon.setup(Sim.new({"track":"range", "vehicle":Pilot.TALON}))
+	_check("talon plays the Phaethon's own engines, unpaired", not talon._paired_fleet and talon.fleet_voice.is_empty())
+	_engine_check(talon, base, Engines.DIR, Pilot.TALON, base.layers)
+	var talon_cabin := Cockpit.new()
+	root.add_child(talon_cabin)
+	talon_cabin.setup({}, Pilot.TALON)
+	_check("talon starts on the Phaethon's own starter, catch and chime", _same_take(talon_cabin.players.starter[0].stream, Cockpit.DIR + "starter_0.wav")
+			and _same_take(talon_cabin.players.starter[1].stream, Cockpit.DIR + "starter_1.wav")
+			and _same_take(talon_cabin.players["catch"][0].stream, Cockpit.DIR + "catch.wav")
+			and _same_take(talon_cabin.players.chime[0].stream, Cockpit.DIR + "chime.wav"))
+	for player in talon.find_children("*", "AudioStreamPlayer", true, false):
+		(player as AudioStreamPlayer).stop()
+	talon_cabin.free()
+	talon.free()
 	await process_frame
 	# Let the audio server retire the last voices before the test closes the tree.
 	await create_timer(1.25).timeout

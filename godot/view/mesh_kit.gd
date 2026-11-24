@@ -3,6 +3,7 @@
 ##   MeshKit.compound([[Mesh, Transform3D, Color], ...]) -> ArrayMesh
 ##   MeshKit.compound(parts, into)                        appends as a new surface of `into`
 ##   [Mesh, Transform3D, Color, true]                     a part that keeps its own vertex colours
+##   MeshKit.add_parts(surface_tool, parts)               the same parts into a SurfaceTool already begun
 ## Parts may be primitives (BoxMesh, CylinderMesh, ...) or ArrayMeshes (rounded_box()).
 ## Godot fronts are CLOCKWISE: for a front face, (p1 - p0).cross(p2 - p0) points INTO the surface.
 extends RefCounted
@@ -11,6 +12,15 @@ extends RefCounted
 static func compound(parts: Array, into: ArrayMesh = null, indexed := false) -> ArrayMesh:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	add_parts(st, parts)
+	if indexed:
+		st.index()
+	return st.commit(into)
+
+
+## compound()'s parts into a SurfaceTool already begun (Codex's, e2675a1: so a builder can add its own faces to
+## the same surface: view/talon_airframe.gd's onto the Talon's engines).
+static func add_parts(st: SurfaceTool, parts: Array) -> void:
 	for p in parts:
 		var mesh: Mesh = p[0]
 		var xf: Transform3D = p[1]
@@ -26,9 +36,6 @@ static func compound(parts: Array, into: ArrayMesh = null, indexed := false) -> 
 			st.set_color(col if own == null else (own as PackedColorArray)[i])
 			st.set_normal((nb * norms[i]).normalized())
 			st.add_vertex(xf * verts[i])
-	if indexed:
-		st.index()
-	return st.commit(into)
 
 
 static func box(size: Vector3) -> BoxMesh:
