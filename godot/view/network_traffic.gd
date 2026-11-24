@@ -41,7 +41,10 @@ const G := 9.81
 const LANES_HWY := [-157.5, -112.5, -67.5, -22.5, 22.5, 67.5, 112.5, 157.5]   # m left of the centreline
 const LANES_RAMP := [-75.0, -25.0, 25.0, 75.0]
 const FLIP_FAR := 5000.0         # m: an oncoming vehicle on the pilot's road this far off turns round (nearer: cleared)
-const R_KEEP := 19000.0          # vehicles kept within this of the craft
+const R_KEEP := 19000.0          # vehicles kept within this of the craft (a hostile car, Raids, is kept wherever it is)
+const HOSTILE_MARK := 9          # the kind marks() gives a hostile car (the maps' and the tactical display's)
+const HOSTILE_LAMP := Color(1.0, 0.05, 0.02)   # a hostile car's lamp, seen from any distance
+const HOSTILE_COL := Color(1.0, 0.12, 0.08)    # its colour on the maps and the tactical display
 const R_SPAWN := Vector2(11000.0, 18000.0)   # spawned this far out (in the haze)
 const TARGET := 220              # the most vehicles round the craft (near a city); mid-country fewer (_target)
 const SCALE := 2.0               # the vehicles' size: big enough to read at these speeds (a car 24 m, a freight car 34 m)
@@ -205,6 +208,7 @@ class Car:
 	var owed := 0.0       # s since it was last driven (a far one is driven every other frame)
 	var chase := ""       # chase mode's craft (view/network_chase.gd): "fugitive" picks its own exits, "pursuer" follows the pilot's
 	var craft := false    # ... drawn there as a pod and its engines, not here as one of the fleet
+	var hostile := false  # a raider (Raids, view/network_raids.gd): never dropped for distance or turned round; marked, lit and listed (hostiles())
 
 
 	var draw_hx := INF
@@ -319,6 +323,8 @@ class Car:
 		var lc := HEAD if coming else lamp_tail_color
 		if chase == "pursuer":      # a patrol's lights, seen from any distance: red, blue, red, blue
 			lc = Color(1.0, 0.1, 0.08) if int(Time.get_ticks_msec() / 200) % 2 == 0 else Color(0.15, 0.35, 1.0)
+		if hostile:
+			lc = HOSTILE_LAMP
 		lamp_position = lp
 		lamp_color = lc
 		if shaft_on:      # round a shaft's bulb the vehicle's own left-to-right is the bulb's, not the map's
@@ -351,6 +357,8 @@ class Car:
 		lamp_color = HEAD if coming else lamp_tail_color
 		if chase == "pursuer":
 			lamp_color = Color(1.0, 0.1, 0.08) if int(Time.get_ticks_msec() / 200) % 2 == 0 else Color(0.15, 0.35, 1.0)
+		if hostile:
+			lamp_color = HOSTILE_LAMP
 
 	## In a constant Hermite span, every axle and the lights share one deck height.
 	## The cached interval allows the entire train plus the grade lookahead.
@@ -370,6 +378,8 @@ class Car:
 		lamp_color = HEAD if coming else lamp_tail_color
 		if chase == "pursuer":
 			lamp_color = Color(1.0, 0.1, 0.08) if int(Time.get_ticks_msec() / 200) % 2 == 0 else Color(0.15, 0.35, 1.0)
+		if hostile:
+			lamp_color = HOSTILE_LAMP
 
 	func place(R: Simulation.TrackPath) -> void:
 		if path_data != R:
@@ -703,7 +713,7 @@ func update(delta: float) -> void:
 	var regroup := cars.size() != _grouped_count
 	for k in range(cars.size() - 1, -1, -1):
 		var c := cars[k]
-		if c != racer and Vector2(c.x - px, c.y - py).length_squared() > R_KEEP * R_KEEP:
+		if c != racer and not c.hostile and Vector2(c.x - px, c.y - py).length_squared() > R_KEEP * R_KEEP:
 			cars.remove_at(k)
 			regroup = true
 		elif c.bucket_order != k or c.bucket != c.road * 2 + int(c.dir > 0):
@@ -757,7 +767,7 @@ func update(delta: float) -> void:
 		for k in range(cars.size() - 1, -1, -1):
 			var c := cars[k]
 			var way: int = oneway.get(c.road, 0)
-			if way == 0 or c.dir == way or c == racer:
+			if way == 0 or c.dir == way or c == racer or c.hostile:
 				continue
 			if Vector2(c.x - px, c.y - py).length_squared() > FLIP_FAR * FLIP_FAR:
 				c.lane = _lanes[c.road].size() - 1 - c.lane   # the same place across, the other way
@@ -1622,10 +1632,19 @@ func shove(id: int, x: float, y: float, speed: float) -> void:
 		return
 
 
-## The vehicles on the map: [[x, y, kind], ...] within r of (x, y).
+## The vehicles on the map: [[x, y, kind], ...] within r of (x, y). A hostile car's kind is HOSTILE_MARK.
 func marks(x: float, y: float, r: float) -> Array:
 	var out := []
 	for c in cars:
 		if absf(c.x - x) < r and absf(c.y - y) < r:
-			out.append([c.x, c.y, c.kind])
+			out.append([c.x, c.y, HOSTILE_MARK if c.hostile else c.kind])
+	return out
+
+
+## The hostile cars kept (Raids): the raiders, wherever they are.
+func hostiles() -> Array:
+	var out := []
+	for c in cars:
+		if c.hostile:
+			out.append(c)
 	return out
