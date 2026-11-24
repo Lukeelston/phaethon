@@ -8,6 +8,7 @@ from network_service import courier, tender
 from cryo_wagon import cryotank
 from range_freight import tanker, hopper
 from range_models import truck, locomotive, boxcar, airliner, sedan
+from road_raider import raider
 
 DEST = Path(__file__).resolve().parents[2] / "godot" / "art" / "traffic"
 ASSETS = {
@@ -27,6 +28,7 @@ ASSETS = {
     "cryotank": cryotank,
     "tanker": tanker,
     "hopper": hopper,
+    "raider": raider,
 }
 if __name__ == "__main__":
     DEST.mkdir(parents=True, exist_ok=True)
