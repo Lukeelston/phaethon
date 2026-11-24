@@ -10,6 +10,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
+from art_pilot_fleet_finish import REGIONS
 from art_shrike_airframe import write_glb
 
 ART = Path(__file__).resolve().parents[1] / "godot/art/pilot_fleet"
@@ -17,9 +18,9 @@ ART = Path(__file__).resolve().parents[1] / "godot/art/pilot_fleet"
 # the two Kiln jaws share their centre plane. Positions in cab metres (+Z aft).
 DOORS = {
     "orrery": {
-        "PortDoor": ((-1.16, -0.08, -0.41), (-0.83, 0.4, -0.055)),
-        "StarboardDoor": ((0.83, -0.08, -0.41), (1.16, 0.4, -0.055)),
-        "AftDoor": ((-0.175, 0.045, 1.585), (0.175, 0.51, 1.935)),
+        "PortDoor": ((-0.83, -0.105, -1.59), (-0.49, 0.30, -1.23)),
+        "StarboardDoor": ((0.49, -0.105, -1.59), (0.83, 0.30, -1.23)),
+        "BowDoor": ((0.35, -0.115, -2.00), (0.69, 0.26, -1.64)),
     },
     "kiln": {
         "PortJaw": ((0.45, -0.31, -2.23), (0.595, -0.067, -2.12)),
@@ -99,6 +100,36 @@ def mesh(polygons):
                            uv=verts[:, 6:8], indices=indices, baked_ao=verts[:, 8])
 
 
+def line_orrery_door(polygons, low, high):
+    """Give the hinged skin its exposed reverse and a return along the cut edge."""
+    low, high = np.array(low), np.array(high)
+    center = (low + high) / 2
+    tile_x, tile_y, tile_w, tile_h = REGIONS["brushed"]
+    lined = list(polygons)
+    for polygon in polygons:
+        front = np.asarray(polygon)
+        back = front.copy()
+        back[:, :3] = center + (back[:, :3] - center) * (0.98, 1.0, 0.98)
+        back[:, 1] -= 0.008
+        back[:, 3:6] *= -1
+        uv = (front[:, [0, 2]] - low[[0, 2]]) / (high - low)[[0, 2]]
+        back[:, 6:8] = ((tile_x + 4, tile_y + 4) + uv * (tile_w - 8, tile_h - 8)) / 1024
+        lined.append(back[::-1])
+        for i in range(len(front)):
+            j = (i + 1) % len(front)
+            a, b = front[i, :3], front[j, :3]
+            if not any((np.isclose(a, plane) & np.isclose(b, plane)).any() for plane in (low, high)):
+                continue
+            rim = np.array([front[j], front[i], back[i], back[j]])
+            normal = np.cross(a - b, back[i, :3] - a)
+            length = np.linalg.norm(normal)
+            if length > 1e-11:
+                rim[:, 3:6] = normal / length
+                rim[:2, 6:8] = back[[j, i], 6:8]
+                lined.append(rim)
+    return lined
+
+
 def bake(craft):
     remaining = list(cab_faces(ART / (craft + ".glb")))
     parts = {}
@@ -109,7 +140,7 @@ def bake(craft):
             if len(cropped) >= 3:
                 cut.append(cropped)
             rest.extend(scraps)
-        parts[name] = mesh(cut)
+        parts[name] = mesh(line_orrery_door(cut, low, high) if craft == "orrery" else cut)
         remaining = rest
     parts["OpenCab"] = mesh(remaining)
     write_glb(parts, ART / (craft + "_bay.glb"), "Phaethon flush fleet bays")

@@ -2,9 +2,12 @@
 ## after deployment. Docks remain on the cab; muzzles follow the actual lenses.
 extends "res://view/arms/fleet_bay.gd"
 
-const SEATS := [Vector3(-0.997, -0.039, -0.233), Vector3(0.997, -0.039, -0.233), Vector3(0, 0.066, 1.76)]
-const UNDOCK := [Vector3(-0.28, 0.40, -0.40), Vector3(0.28, 0.40, -0.40), Vector3(0, 0.46, 0.24)]
-const LEAVES := [&"PortDoor", &"StarboardDoor", &"AftDoor"]
+const SEATS := [Vector3(-.597, -.096, -1.441), Vector3(.597, -.096, -1.441), Vector3(.496, -.093, -1.775)]
+const FORMATION := [Vector3(-.61, .58, -1.80), Vector3(.61, .58, -1.80), Vector3(.08, .905, -2.26)]
+const LEAVES := [&"PortDoor", &"StarboardDoor", &"BowDoor"]
+const HINGES := [Vector3(-.858, -.050, -1.41), Vector3(.858, -.050, -1.41), Vector3(.52, -.038, -2.01)]
+const AXES := [Vector3.BACK, Vector3.FORWARD, Vector3.LEFT]
+const ORB_SCALE := .70
 const MINT := Color(0.23, 0.80, 0.70, 0.0)
 var orbs: Array[MeshInstance3D] = []
 
@@ -30,14 +33,17 @@ func build(hull: Node3D) -> void:
 		[waist, Kit.at(Vector3.ZERO, Vector3(0,0,1.22), Vector3(.97,.55,.97)), STEEL],
 		[bezel, lens_pose, BRASS],
 		[Kit.ball(.040, 10), Kit.at(Vector3(0,0,-.111), Vector3.ZERO, Vector3(1,1,.35)), MINT]]
+	var fit := Transform3D(Basis.from_scale(Vector3.ONE * ORB_SCALE), Vector3.ZERO)
+	for part in pieces:
+		part[1] = fit * part[1]
 	var orb_mesh := Kit.compound(pieces, null, true)
 	for i in SEATS.size():
-		var at: Vector3 = SEATS[i]
-		seat_parts.append([collar, Kit.at(at + Vector3.UP * .053), BRASS])
-		seat_parts.append([Kit.cyl(.143,.113,.058,14), Kit.at(at + Vector3.DOWN * .061), DARK])
+		var socket := Transform3D(fit.basis, SEATS[i])
+		seat_parts.append([collar, socket * Kit.at(Vector3.UP * .053), BRASS])
+		seat_parts.append([Kit.cyl(.143,.113,.058,14), socket * Kit.at(Vector3.DOWN * .061), DARK])
 		for j in 3:
 			var a := TAU * j / 3.0
-			seat_parts.append([Kit.cyl(.018,.023,.036,8), Kit.at(at + Vector3(.102*cos(a),-.026,.102*sin(a))), STEEL])
+			seat_parts.append([Kit.cyl(.018,.023,.036,8), socket * Kit.at(Vector3(.102*cos(a),-.026,.102*sin(a))), STEEL])
 		var orb := mesh_node(self, "Orb%d" % (i+1), orb_mesh)
 		orbs.append(orb)
 	mesh_node(self, "DockCradles", Kit.compound(seat_parts, null, true))
@@ -47,14 +53,18 @@ func set_deploy(t: float) -> void:
 	var at := clampf(t, 0.0, 1.0)
 	if not show_bay(at):
 		return
-	var open := smoothstep(0.0, 0.42, at)
-	var rise := smoothstep(0.37, 0.76, at)
-	var away := smoothstep(0.7, 1.0, at)
+	var open := smoothstep(0.0, .39, at)
+	var rise := smoothstep(.24, .99, at)
 	for i in SEATS.size():
 		var leaf: MeshInstance3D = doors[LEAVES[i]]
-		# Fore shoulder hatches slide aft; the third pocket slides forward.
-		leaf.position = Vector3(0, .018 * open, (.385 if i < 2 else -.385) * open)
-		var direction: Vector3 = UNDOCK[i]
+		# Skin vertices are in hull space. Rotate around the fitted outer hinge line.
+		var bow := i == 2
+		var swing := Basis(AXES[i], deg_to_rad(130.0 if bow else 116.0) * open)
+		var hinge: Vector3 = HINGES[i]
+		leaf.transform = Transform3D(swing, hinge - swing * hinge)
+		# The bow orb rises past its forward-opening lid before crossing the hinge.
+		var away := smoothstep(.59 if bow else .45, 1.0, at)
+		var direction: Vector3 = FORMATION[i] - SEATS[i]
 		orbs[i].basis = Basis.IDENTITY
 		orbs[i].position = SEATS[i] + Vector3(0, direction.y * rise, 0) + Vector3(direction.x, 0, direction.z) * away
 
@@ -67,5 +77,5 @@ func docks() -> Array:
 func muzzles() -> Array:
 	var result := []
 	for orb in orbs:
-		result.append((orb.global_transform * Transform3D(Basis.IDENTITY, Vector3(0,0,-.125))).orthonormalized())
+		result.append((orb.global_transform * Transform3D(Basis.IDENTITY, Vector3(0,0,-.125 * ORB_SCALE))).orthonormalized())
 	return result

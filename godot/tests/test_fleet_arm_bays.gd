@@ -39,6 +39,26 @@ func triangles(mesh: Mesh) -> int:
 		total += (indices if indices > 0 else mesh.surface_get_array_len(s)) / 3
 	return total
 
+func check_orb_launch(fleet, rig) -> void:
+	var canopy: TriangleMesh = fleet.part(&"Roof").generate_triangle_mesh()
+	var cab: TriangleMesh = rig.open_skin.generate_triangle_mesh()
+	var leaves := {}
+	for leaf: MeshInstance3D in rig.doors.values():
+		leaves[leaf] = leaf.mesh.generate_triangle_mesh()
+	for t in [.50, .625, .75, .875, 1.0]:
+		rig.set_deploy(t)
+		for orb: MeshInstance3D in rig.orbs:
+			for offset in [-.032, .032]:
+				var eye := Cockpit.EYE - Vector3.UP * Model.POD_FRAME_UP + Vector3.RIGHT * float(offset)
+				var ray := orb.position - eye
+				var seen := absf(ray.x) < -.6 * ray.z and absf(ray.y) < -.6 * ray.z
+				seen = seen and canopy.intersect_segment(eye, orb.position).is_empty()
+				seen = seen and cab.intersect_segment(eye, orb.position).is_empty()
+				for leaf: MeshInstance3D in rig.doors.values():
+					var xf := leaf.transform.affine_inverse()
+					seen = seen and leaves[leaf].intersect_segment(xf * eye, xf * orb.position).is_empty()
+				check(seen, "%s visible past cab, canopy posts and doors at %.3f, eye %.3f" % [orb.name, t, offset])
+
 func run() -> void:
 	Paint.pinned = true
 	for id: String in ["orrery","kiln"]:
@@ -85,6 +105,8 @@ func run() -> void:
 				if id == "orrery":
 					check(docks[i].is_equal_approx(rig.docks()[i]) and docks[i].origin.distance_to(initial[i].origin) < .13, "Orb stows in its fixed seat")
 			if id == "orrery":
+				if colour == Paint.FACTORY:
+					check_orb_launch(fleet, rig)
 				rig.orbs[1].position += Vector3.RIGHT
 				rig.orbs[1].rotate_y(.62)
 				var flown: Transform3D = rig.muzzles()[1]
