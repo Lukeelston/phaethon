@@ -84,10 +84,16 @@ const HEAD := Color(1.0, 0.95, 0.85)
 const BODY_MIN_ANG := 0.0011     # a car's least half-width on the picture: it and every other body grow together past 3.6 km
 const BODY_HALF_WIDTH := 4.3     # ... a car's, m as drawn
 const TRACTOR := 5 # Render slot for the lead unit of a transport.
+const COURIER := 6
+const TENDER := 7
+const CRYOTANK := 8
+const BODY_VARIANTS := {CAR: COURIER, SLOW: TENDER, TRANSPORT: CRYOTANK}
 const FLEET := [
 	preload("res://art/traffic/commuter.glb"), preload("res://art/traffic/shuttle.glb"),
 	preload("res://art/traffic/demon.glb"), preload("res://art/traffic/cargo.glb"),
 	preload("res://art/traffic/racer.glb"), preload("res://art/traffic/tractor.glb"),
+	preload("res://art/traffic/courier.glb"), preload("res://art/traffic/tender.glb"),
+	preload("res://art/traffic/cryotank.glb"),
 ]
 const NUMBER_BOARDS := {"VEGA": 0.0, "KESTREL": 1.0/3.0, "MARROW": 2.0/3.0, "TALLOW": 1.0}
 # [top mph, lateral grip g, headway s, colour]: a racer's style
@@ -149,6 +155,9 @@ class Car:
 	var bucket := -1
 	var bucket_order := -1
 	var kind := 0
+	var visual := -1:
+		get:
+			return kind if visual < 0 else visual
 	var road := 0
 	var f := 0.0          # fractional sample along its road
 	var dir := 1          # 1 up the samples, -1 down
@@ -890,6 +899,9 @@ func _spawn(px: float, py: float, first: bool) -> void:
 	var slow_cut := car_cut + lerpf(0.22, 0.05, express)
 	var demon_cut := slow_cut + lerpf(0.06, 0.39, express)
 	c.kind = CAR if roll < car_cut else (SLOW if roll < slow_cut else (DEMON if roll < demon_cut else TRANSPORT))
+	# Stable per vehicle, including on replay. Body selection never advances the driving RNG.
+	if posmod(hash(c.id), 3) == 0:
+		c.visual = BODY_VARIANTS.get(c.kind, c.kind)
 	var nl: int = _lanes[r].size()
 	match c.kind:
 		CAR:
@@ -1359,7 +1371,7 @@ func _build_meshes() -> void:
 	for kind in FLEET.size():
 		var batch := Batch.new()
 		batch.name = "traffic_tractor" if kind == TRACTOR else "traffic_%d" % kind
-		var slots := TARGET * (TRAIN - 1) if kind == TRANSPORT else TARGET + 8
+		var slots := TARGET * (TRAIN - 1) if kind in [TRANSPORT, CRYOTANK] else TARGET + 8
 		batch.configure(FLEET[kind], slots, 500.0, bounds, true, kind == RACER)
 		add_child(batch)
 		_mm[kind] = batch
@@ -1417,7 +1429,7 @@ func _render() -> void:
 	_drawing.eye_y = _drawing.oy - _drawing.eye.z
 	_drawing.pod_v = Vector2(sim.pod.vx, sim.pod.vy)
 	for c in cars:
-		c.draw(_drawing, _drawing.writers[c.kind])
+		c.draw(_drawing, _drawing.writers[c.visual])
 	var dark: float = Outlook.darkness()
 	if dark != _lamp_dark:      # (the hour changes with the menu, or not at all)
 		_lamp_dark = dark

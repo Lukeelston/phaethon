@@ -4,6 +4,9 @@ from pathlib import Path
 from finishes import build_atlas
 from mesh import Model, write_glb
 from network import commuter, shuttle, sports, cargo, tractor
+from network_service import courier, tender
+from cryo_wagon import cryotank
+from range_freight import tanker, hopper
 from range_models import truck, locomotive, boxcar, airliner, sedan
 
 DEST = Path(__file__).resolve().parents[2] / "godot" / "art" / "traffic"
@@ -19,6 +22,11 @@ ASSETS = {
     "boxcar": boxcar,
     "airliner": airliner,
     "sedan": sedan,
+    "courier": courier,
+    "tender": tender,
+    "cryotank": cryotank,
+    "tanker": tanker,
+    "hopper": hopper,
 }
 if __name__ == "__main__":
     DEST.mkdir(parents=True, exist_ok=True)
@@ -32,6 +40,6 @@ if __name__ == "__main__":
         write_glb(
             DEST / (name + ".glb"),
             models,
-            name in ("truck", "locomotive", "boxcar", "airliner"),
+            name in ("truck", "locomotive", "boxcar", "airliner", "tanker", "hopper"),
         )
         print(name, *(len(model.indices) // 3 for _, model in models))

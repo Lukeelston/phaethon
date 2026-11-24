@@ -4,6 +4,7 @@ extends SceneTree
 
 const Network := preload("res://view/network_traffic.gd")
 const RangeTraffic := preload("res://view/traffic.gd")
+const Batch := preload("res://view/traffic_batch.gd")
 
 class RangeView:
 	var org_x := 24000.0
@@ -23,30 +24,102 @@ func check(ok: bool, label: String) -> void:
 		failures += 1
 		push_error(label)
 
+func _visible(model: Batch) -> int:
+	return model.multimesh.visible_instance_count + model.distant.visible_instance_count
+
+func _check_network_spawn(network: Network) -> void:
+	var roles := {Network.COURIER: Network.CAR, Network.TENDER: Network.SLOW, Network.CRYOTANK: Network.TRANSPORT}
+	var first_choices: Array = []
+	var seed_state := network._rng.state
+	for take in 2:
+		network.cars.clear()
+		network._rng.state = seed_state
+		network._next_id = 1
+		network.spawned = 0
+		# The Basalt interchange includes both ordinary and express traffic.
+		for attempt in 2400:
+			if network.cars.size() >= 150:
+				break
+			network._spawn(100000.0, 100000.0, true)
+		var choices: Array = []
+		var expected := PackedInt32Array()
+		expected.resize(Network.FLEET.size())
+		var traits := {}
+		var correct_roles := true
+		var shared_handling := true
+		for car in network.cars:
+			var body := car.visual
+			choices.append([car.id, car.kind, car.road, car.lane, car.dir, body])
+			if body < 0 or body >= expected.size() or roles.get(body, body) != car.kind:
+				correct_roles = false
+				continue
+			var handling := [car.a_up, car.a_lat, car.headway, car.train_tail]
+			if traits.has(car.kind):
+				shared_handling = shared_handling and traits[car.kind] == handling
+			traits[car.kind] = handling
+			if car.kind == Network.TRANSPORT:
+				expected[Network.TRACTOR] += 1
+				expected[body] += Network.TRAIN - 1
+			else:
+				expected[body] += 1
+		if take == 0:
+			check(choices.size() == 150 and correct_roles and shared_handling,
+					"Seeded Network traffic fills its population and each body keeps its driving class")
+			for body: int in roles:
+				check(expected[body] > 0 and expected[roles[body]] > 0, "Spawner mixes body %d with its original" % body)
+			# Skip off-screen shader warmup instances when counting actual traffic.
+			network._warm = 0
+			network._render()
+			for slot in expected.size():
+				check(_visible(network._mm[slot]) == expected[slot],
+						"Network batch %d draws its spawned vehicles and freight units" % slot)
+			check(network._beams.multimesh.visible_instance_count == choices.size(), "One lamp pair per traffic vehicle or train")
+			first_choices = choices
+		else:
+			check(first_choices == choices, "Replaying the traffic seed reproduces the same bodies, roads and lanes")
+
 func run() -> void:
 	var camera := Camera3D.new()
 	root.add_child(camera)
 	camera.current = true
 	var network := Network.new()
 	root.add_child(network)
-	network._build_meshes()
+	var sim := Network.Simulation.new({"track": "network"})
+	var world := Network.RoadWorld.new()
+	root.add_child(world)
+	world.build(sim, null)
+	network.build(sim, {"org_x": 100000.0, "org_y": 100000.0}, world)
 	var highway := RangeTraffic.new()
 	root.add_child(highway)
 	highway.build(RangeView.new())
 	var models := network._mm.values()
-	models.append_array([highway.trucks, highway.locos, highway.cars, highway.planes, highway.road_cars])
-	check(models.size() == 11, "All eleven fleet models load")
+	var range_models := [highway.trucks, highway.tankers, highway.locos, highway.cars,
+			highway.hoppers, highway.planes, highway.road_cars]
+	models.append_array(range_models)
+	check(models.size() == 16, "All sixteen fleet models load")
 	for model in models:
 		var near_mesh: Mesh = model.multimesh.mesh
 		var far_mesh: Mesh = model.distant.mesh
 		check(near_mesh.get_surface_count() == 1 and far_mesh.get_surface_count() == 1, "Single surface per tier")
-		check(far_mesh.surface_get_array_index_len(0) < near_mesh.surface_get_array_index_len(0), "Distant mesh is lighter")
+		var far_indices: int = far_mesh.surface_get_array_index_len(0)
+		check(far_indices > 0 and far_indices < near_mesh.surface_get_array_index_len(0), "Distant mesh is present and lighter")
 		model.put(Transform3D.IDENTITY, Vector3.ZERO)
 		model.put(Transform3D(Basis.IDENTITY, Vector3(12000, 0, 0)), Vector3.ZERO)
 		model.finish_frame()
 		check(model.multimesh.visible_instance_count == 1 and model.distant.visible_instance_count == 1, "Each distance gets one vehicle")
 		model.finish_frame()
 		check(model.multimesh.visible_instance_count + model.distant.visible_instance_count == 0, "Vehicles leave both buffers on the next frame")
+	for pair in [[network._mm[Network.COURIER], network._mm[Network.CAR]],
+			[network._mm[Network.TENDER], network._mm[Network.SLOW]],
+			[network._mm[Network.CRYOTANK], network._mm[Network.TRANSPORT]],
+			[highway.tankers, highway.trucks], [highway.hoppers, highway.cars]]:
+		var variant: Batch = pair[0]
+		var original: Batch = pair[1]
+		for tier: String in ["multimesh", "distant"]:
+			var new_mesh: Mesh = variant.get(tier).mesh
+			var old_mesh: Mesh = original.get(tier).mesh
+			check(new_mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX] != old_mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX],
+					"%s uses its own geometry in %s" % [variant.name, tier])
 	var racer = network._mm[Network.RACER]
 	for pilot in Network.RACERS:
 		racer.put(Transform3D.IDENTITY, Vector3.ZERO, Network.RACERS[pilot][3], Network.NUMBER_BOARDS[pilot])
@@ -61,13 +134,18 @@ func run() -> void:
 		for i in racer.multimesh.visible_instance_count:
 			boards[roundi(racer.multimesh.get_instance_custom_data(i).r * 3.0)] = true
 	check(boards.size() == 4 and racer.multimesh.use_custom_data and racer.multimesh.visible_instance_count == Network.RACERS.size(), "Four independent pilot number boards in one draw batch")
+	_check_network_spawn(network)
 	highway.sync(10.0)
 	var counts: Array[int] = []
-	var range_models := [highway.trucks, highway.locos, highway.cars, highway.planes, highway.road_cars]
 	for model in range_models:
-		counts.append(model.multimesh.visible_instance_count + model.distant.visible_instance_count)
-	check(counts[0] > 50 and counts[1] == 1 and counts[2] == 40 and counts[3] > 0 and counts[4] > 0, "Range traffic includes highway, full freight train, overpass and air traffic: %s" % str(counts))
-	check(highway.cars.multimesh.visible_instance_count > 0 and highway.road_cars.multimesh.visible_instance_count > 0, "Nearby train and crossing traffic get detail")
+		counts.append(_visible(model))
+	check(not counts.has(0), "Range draws each road, rail and air traffic body")
+	# At the 24 km crossing at t=10, the original Range has 103 road trucks
+	# in view, and one locomotive with its complete 40-car consist.
+	check(counts[0] + counts[1] == 103 and counts[2] == 1 and counts[3] + counts[4] == RangeTraffic.TRAIN_CARS,
+			"Range road and rail variants preserve the original traffic counts: %s" % str(counts))
+	check(highway.cars.multimesh.visible_instance_count + highway.hoppers.multimesh.visible_instance_count > 0
+			and highway.road_cars.multimesh.visible_instance_count > 0, "Nearby train and crossing traffic get detail")
 	camera.position.y = 50000
 	highway.sync(10.0)
 	for i in range_models.size():

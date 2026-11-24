@@ -11,8 +11,10 @@ var out_dir := ""
 var frames := 0
 var shot := 0
 var pictures: Array[Image] = []
-var names := ["commuter", "shuttle", "hotrod", "freight", "racer", "tractor", "driver_distance"]
-var colors := [Color(0.2, 0.48, 0.72), Color(0.82, 0.75, 0.53), Color(0.85, 0.12, 0.43), Color(0.95, 0.53, 0.12), Color(0.36, 0.8, 0.98), Color(0.92, 0.58, 0.28)]
+var names := ["commuter", "shuttle", "hotrod", "freight", "racer", "tractor", "courier", "tender", "cryotank", "driver_distance"]
+var colors := [Color(0.2, 0.48, 0.72), Color(0.82, 0.75, 0.53), Color(0.85, 0.12, 0.43),
+		Color(0.95, 0.53, 0.12), Color(0.36, 0.8, 0.98), Color(0.92, 0.58, 0.28),
+		Color(0.2, 0.35, 0.8), Color(0.78, 0.48, 0.25), Color(0.33, 0.49, 0.61)]
 
 
 func _initialize() -> void:
@@ -66,7 +68,7 @@ func _place() -> void:
 		var mm: MultiMesh = traffic._mm[kind].multimesh
 		mm.visible_instance_count = 0
 		if shot == kind or shot == names.size() - 1:
-			var p := Vector3.ZERO if shot < names.size() - 1 else Vector3((kind - 2) * 24.0, 0.0, -100.0 - kind * 14.0)
+			var p := Vector3.ZERO if shot < names.size() - 1 else Vector3((kind - (colors.size() - 1) * 0.5) * 24.0, 0.0, -100.0 - kind * 14.0)
 			mm.set_instance_transform(0, Transform3D(Basis().scaled(Vector3.ONE * 2.0), p))
 			mm.set_instance_color(0, colors[kind])
 			mm.visible_instance_count = 1

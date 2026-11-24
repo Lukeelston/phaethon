@@ -32,8 +32,10 @@ const Route := preload("res://view/route_features.gd")
 
 var view
 var trucks: Batch
+var tankers: Batch
 var locos: Batch
 var cars: Batch
+var hoppers: Batch
 var planes: Batch
 var road_cars: Batch   # over the overpasses
 
@@ -41,8 +43,10 @@ var road_cars: Batch   # over the overpasses
 func build(v) -> void:
 	view = v
 	trucks = _pool(preload("res://art/traffic/truck.glb"), 140, 1400.0)
+	tankers = _pool(preload("res://art/traffic/tanker.glb"), 40, 1400.0)
 	locos = _pool(preload("res://art/traffic/locomotive.glb"), 8, 1400.0)
 	cars = _pool(preload("res://art/traffic/boxcar.glb"), 2 * (TRAIN_CARS + 1), 1400.0, true)
+	hoppers = _pool(preload("res://art/traffic/hopper.glb"), TRAIN_CARS, 1400.0, true)
 	road_cars = _pool(preload("res://art/traffic/sedan.glb"), 32, 300.0, true)
 	planes = _pool(preload("res://art/traffic/airliner.glb"), 4, 2400.0)
 
@@ -74,9 +78,11 @@ func sync(t: float) -> void:
 			var x: float = k * TRUCK_GAP + shift + (_hash01(k * 2 + int(dir > 0.0)) - 0.5) * 200.0
 			if x < lo or x > hi or x < 0.0 or x > X_MAX or n >= trucks.capacity:
 				continue
-			trucks.put(Transform3D(Basis(Vector3.UP, 0.0 if dir > 0.0 else PI), view.w3(x, lane)), eye)
+			var body := tankers if posmod(k + int(dir > 0.0), 4) == 0 else trucks
+			body.put(Transform3D(Basis(Vector3.UP, 0.0 if dir > 0.0 else PI), view.w3(x, lane)), eye)
 			n += 1
 	trucks.finish_frame()
+	tankers.finish_frame()
 
 	# freight trains heading down the range, a long one every 24 km
 	var nl := 0
@@ -95,10 +101,13 @@ func sync(t: float) -> void:
 				var paint := _hash01(k * 64 + j)
 				var col := Color(0.55, 0.24, 0.14) if paint < 0.45 else (Color(0.2, 0.36, 0.55) if paint < 0.7 else
 					(Color(0.85, 0.85, 0.82) if paint < 0.85 else Color(0.25, 0.45, 0.28)))
-				cars.put(Transform3D(Basis(), view.w3(x, RangeWorld.RAIL_Y)), eye, col)
+				# Aggregate wagons travel in short groups; their consist follows the train across origin shifts.
+				var wagon := hoppers if posmod(j + 3 * k, 8) < 3 else cars
+				wagon.put(Transform3D(Basis(), view.w3(x, RangeWorld.RAIL_Y)), eye, col)
 				nc += 1
 	locos.finish_frame()
 	cars.finish_frame()
+	hoppers.finish_frame()
 
 	# airliners cruising down the range, 450 m up (seen further: they rise out of the haze)
 	var np := 0
