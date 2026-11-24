@@ -32,6 +32,7 @@
 ## Logs OpenXR session events and a frame-timing summary every 10 s; writes a CSV on exit.
 extends "res://view/craft_view.gd"
 
+const Garage := preload("res://release/garage_route.gd")
 const SEAT := Vector3(0.0, 0.72, 0.6)  # eye point in pod space (pod forward = -Z): a little above the
                                         # cockpit rim (Luke: "sit a bit lower", then "view higher by default")
 # The cockpit's furniture is laid out round SEAT (the map's pod, the instruments' sight lines). The pilot
@@ -1516,7 +1517,8 @@ func _menu_items() -> Array:
 		# (RACING PILOTS is here too, on the Eridanus track: it was built as an eleventh line of the first page)
 		# It is more than a panel holds on the Eridanus track (ten lines; an eleventh ran off it): laid out as panels
 		# (MainMenu.lay), each ending in BACK. The first is the page as it was; what has come since begins the next.
-		return menu.lay([[{"key": "consumables", "label": "HEAT AND ENERGY", "value": "ON" if consumables else "OFF"},
+		var parking := [{"key": "garage", "label": "PILOT GARAGE"}] if can_visit_garage() else []
+		return menu.lay([parking + [{"key": "consumables", "label": "HEAT AND ENERGY", "value": "ON" if consumables else "OFF"},
 			{"key": "powerups", "label": "POWER-UPS", "value": "ON" if power_ups_on else "OFF"},
 			{"key": "field", "label": "AVOIDANCE FIELD", "value": "ON" if avoid_on else "OFF"}] + _race_menu_items() + [
 			{"key": "autopilot", "label": "AUTOPILOT", "value": "ON" if autopilot.on else "OFF"},
@@ -1551,6 +1553,12 @@ func _race_suffix() -> String:
 
 func menu_choose() -> bool:
 	match menu.key():
+		"garage":
+			if can_visit_garage():
+				menu_open(false)
+				_save_prefs()
+				Garage.enter_parked(get_tree(), self, true)
+			return true
 		"scheme":
 			quest.next_scheme()
 			_save_prefs()

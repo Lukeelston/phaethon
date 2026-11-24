@@ -1,6 +1,7 @@
 extends CanvasLayer
 
 const View := preload("res://view/craft_view.gd")
+const Garage := preload("res://release/garage_route.gd")
 const UI := preload("res://release/release_config.gd")
 
 var is_paused := false
@@ -8,6 +9,7 @@ var _was_muted := false
 var _mouse_mode := Input.MOUSE_MODE_VISIBLE
 var _screen: Control
 var _resume: Button
+var _garage: Button
 var partner_checkbox: CheckBox
 var _flight_options: GridContainer
 
@@ -47,7 +49,13 @@ func _ready() -> void:
 	_flight_options = GridContainer.new()
 	_flight_options.columns = 2
 	actions.add_child(_flight_options)
-	actions.add_child(UI.button("Restart this course", restart_game))
+	var destinations := HBoxContainer.new()
+	actions.add_child(destinations)
+	_garage = UI.button("Pilot garage", _open_garage)
+	_garage.name = "Garage"
+	for button: Button in [UI.button("Restart this course", restart_game), _garage]:
+		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		destinations.add_child(button)
 	actions.add_child(UI.button("Return to course menu", return_to_menu))
 	actions.add_child(UI.button("Quit to desktop", quit_game))
 	columns.add_child(UI.controls_panel())
@@ -73,6 +81,8 @@ func set_paused(value: bool) -> void:
 		return
 	is_paused = value
 	if value:
+		_garage.disabled = not get_tree().current_scene.can_visit_garage()
+		_garage.tooltip_text = "Park at your launch point to enter" if _garage.disabled else ""
 		_refresh_flight_options()
 		_was_muted = AudioServer.is_bus_mute(0)
 		_mouse_mode = Input.mouse_mode
@@ -128,6 +138,14 @@ func restart_game() -> void:
 	View.pad_start = get_tree().current_scene.pad != null
 	resume_game()
 	get_tree().reload_current_scene()
+
+func _open_garage() -> void:
+	var flight := get_tree().current_scene as View
+	if not is_paused or not flight or not flight.can_visit_garage():
+		return
+	resume_game()
+	Garage.enter_parked(get_tree(), flight, false)
+
 
 func return_to_menu() -> void:
 	if not _desktop_gameplay():

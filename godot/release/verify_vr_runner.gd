@@ -72,6 +72,32 @@ func shot(name: String) -> void:
 	var image := get_viewport().get_texture().get_image()
 	check(name + " VR scene screenshot saved", image.save_png(evidence.path_join("pcvr-" + name + ".png")) == OK)
 
+## Exercise the shipped garage from its menu row before continuing the flight tour.
+func _visit_garage() -> bool:
+	var menu = get_tree().current_scene
+	var course: String = menu.selected_course
+	var row := menu.find_child("Garage", true, false) as Button
+	if not check("VR menu offers Pilot garage", row != null and menu.buttons.has(row) and not row.disabled):
+		return false
+	menu.set_process(false)
+	menu.focus_row(menu.buttons.find(row))
+	menu.consume_controller(0.0, false, true)
+	menu.consume_controller(0.0, true, true)
+	await get_tree().scene_changed
+	var garage = get_tree().current_scene
+	if not check("controller confirm opens the garage on foot", garage.scene_file_path == "res://garage/garage.tscn" and garage.get("walker") != null and not garage.walker.seated):
+		return false
+	garage.walker.set_seated(false, garage.environment.boarding_transform("vesper"))
+	garage.walker.interact_requested.emit()
+	if not check("the packaged Vesper cockpit can be boarded", garage.walker.seated and garage.seated_craft == "vesper"):
+		return false
+	garage.walker.interact_requested.emit()
+	check("dismount returns to Vesper's boarding point", not garage.walker.seated and garage.environment.nearest_bay(garage.walker.global_position) == "vesper")
+	garage.walker.back_requested.emit()
+	await get_tree().scene_changed
+	var returned = get_tree().current_scene
+	return check("leaving the garage restores the VR menu and course", returned.scene_file_path == "res://release/vr_menu.tscn" and returned.selected_course == course)
+
 func _run() -> void:
 	DirAccess.make_dir_recursive_absolute(evidence.path_join("profile"))
 	View.best_dir = evidence.path_join("profile/")
@@ -121,6 +147,9 @@ func _run() -> void:
 	if DisplayServer.get_name() != "headless":
 		var menu = get_tree().current_scene
 		check("VR menu panel screenshot saved", menu.panel_view.get_texture().get_image().save_png(evidence.path_join("pcvr-menu-panel.png")) == OK)
+	if not await _visit_garage():
+		_finish()
+		return
 	var overlay = get_tree().root.get_node("ReleasePause")
 	for index in Stops.size():
 		var stop: String = Stops[index]

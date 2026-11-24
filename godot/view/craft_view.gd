@@ -179,6 +179,7 @@ var partner: Node3D          # the driving partner (view/driving_partner.gd), nu
 var partner_on := false      # common release preference, overridden by launch flags
 var race: Node3D             # Eridanus: the racing pilots (view/race_pilots.gd), null when there are none
 var chase: Node3D            # chase mode on the Network (view/network_chase.gd), null when it's off
+var _garage_spawn := Vector3.ZERO
 var pad: Node3D              # the starting pad (view/start_pad.gd), when the flight began on one
 const StartPadScript := preload("res://view/start_pad.gd")
 var light_bars: Array = []   # the pilot's own, in the patrol craft (one on each model of the pod that is built)
@@ -203,6 +204,20 @@ var power_ups: Node3D
 var surge := 0.0                  # s left of a gate's surge (the sims' inp.surge while it lasts)
 var menu_label: Label             # the flat view's panel
 var _menu_was_muted := false
+
+
+## Opening the garage ends this flight. Offer it at the launch site while the pod
+## and both towed engines are settled; pausing alone never makes a moving craft eligible.
+func can_visit_garage() -> bool:
+	if not sim or sim.run_active or benchmark_flight:
+		return false
+	var position_here := Vector3(sim.pod.x, sim.pod.y, sim.pod.z)
+	if position_here.distance_squared_to(_garage_spawn) > 9.0:
+		return false
+	for body in sim.bodies:
+		if Vector3(body.vx, body.vy, body.vz).length_squared() > 0.25:
+			return false
+	return true
 
 
 func _ready() -> void:
@@ -296,6 +311,7 @@ func _ready() -> void:
 		sim.respawn(-1, start_at)
 	if branch_at >= 0 and not sim.branches.is_empty():
 		_place_on_branch(branch_at)
+	_garage_spawn = Vector3(sim.pod.x, sim.pod.y, sim.pod.z)
 	if sim.kind != "circuit" and not benchmark_flight:
 		replay = []
 	levers = LeverInputScript.new()
@@ -1950,6 +1966,13 @@ func _gun_controls() -> void:
 
 ## Overridable: the flat view's chase camera and 2D HUD.
 func _make_view() -> void:
+	# Only this view owns the desktop player's pod. Showroom models and XR build their own views.
+	var pilot := preload("res://garage/pilot_model.gd").new()
+	pilot.name = "ChasePilot"
+	pilot.set_seat_vehicle(sim.P.vehicle)
+	pilot.set_seated(true)
+	pilot.position = preload("res://garage/garage_seat.gd").EYE - Vector3.UP * CraftModelScript.POD_FRAME_UP - pilot.SEATED_EYE
+	pod_mesh.add_child(pilot)
 	flat_camera = GameSettings.choice("flat_camera", ["far", "near"])
 	CraftModelScript.set_nose_closed(GameSettings.choice("flat_nose", ["open", "closed"]) == "closed", self)
 	if sim.kind == "network":
