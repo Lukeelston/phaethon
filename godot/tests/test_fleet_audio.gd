@@ -36,14 +36,16 @@ func _unique_take(seen: Dictionary, path: String) -> void:
 	_check("%s is distinct from %s" % [path, seen.get(hash_key, "")], not seen.has(hash_key))
 	seen[hash_key] = path
 
-func _engine_check(audio: Engines, manifest: Dictionary, bank_dir: String, id: String) -> void:
+func _engine_check(audio: Engines, manifest: Dictionary, bank_dir: String, id: String, base_layers: Dictionary) -> void:
+	var layers := base_layers.merged(manifest.layers, true)
 	for k in 2:
 		var side := "EngineL" if k == 0 else "EngineR"
 		var voice: Dictionary = audio.voices[k]
-		for layer: String in manifest.layers:
-			var bands: Array = manifest.layers[layer].bands
+		for layer: String in layers:
+			var bands: Array = layers[layer].bands
+			var layer_dir := bank_dir if manifest.layers.has(layer) else Engines.DIR
 			var bus := side + "_" + layer if layer in Engines.FILTERED else side
-			if id != Pilot.STANDARD and layer in ["v8", "turbine"]:
+			if id != Pilot.STANDARD and layer in ["v8", "v12", "second", "turbine", "rotor"]:
 				var glide := voice.glides.get(layer) as Glide
 				_check("%s %s %s uses a single continuous voice" % [id, side, layer],
 						glide != null and glide.bus == bus and voice.players.get(layer, []).is_empty())
@@ -52,7 +54,7 @@ func _engine_check(audio: Engines, manifest: Dictionary, bank_dir: String, id: S
 				_check("%s %s %s decoded band count" % [id, side, layer], glide.sources.size() == bands.size())
 				for i in mini(glide.sources.size(), bands.size()):
 					_check("%s %s %s band %d matches PCM" % [id, side, layer, i],
-							_same_take(glide.sources[i], bank_dir + bands[i].file))
+							_same_take(glide.sources[i], layer_dir + bands[i].file))
 				continue
 			var players: Array = voice.players[layer]
 			_check("%s %s %s band count" % [id, side, layer], players.size() == bands.size())
@@ -60,7 +62,7 @@ func _engine_check(audio: Engines, manifest: Dictionary, bank_dir: String, id: S
 				var player: AudioStreamPlayer = players[i]
 				var tone := player.stream as AudioStreamWAV
 				_check("%s %s %s band %d" % [id, side, layer, i],
-						_same_take(tone, bank_dir + bands[i].file) and player.bus == bus
+						_same_take(tone, layer_dir + bands[i].file) and player.bus == bus
 						and tone.loop_mode == AudioStreamWAV.LOOP_FORWARD
 						and tone.loop_begin == 0 and tone.loop_end == tone.data.size() / 2)
 		_check("%s %s catch bang" % [id, side],
@@ -119,13 +121,96 @@ func _check_glide_waveform() -> void:
 		var expected := 3000.0 if rising else 1000.0
 		_check("rendered note glides to %.0f Hz through intermediate periods across the mip seam" % expected,
 				continuous and intermediate >= 4 and absf(last_hz/expected-1) < .015)
+	# Lift while pitch is still rising. Count real periods on both sides of
+	# the input change: a new straight ramp would reverse the slope instantly.
+	player.drive(3, 1, high)
+	player._render(roundi(Glide.RATE * .010))
+	var crest := player._block.duplicate()
+	var pivot := crest.size()
+	player.drive(1, 1, low)
+	player._render(roundi(Glide.RATE * .015))
+	crest.append_array(player._block)
+	var last_cross := -1.0
+	var first_hz_after_lift := 0.0
+	var last_hz_after_lift := 0.0
+	for i in range(1, crest.size()):
+		var prev := crest[i - 1].x
+		var next := crest[i].x
+		if prev < 0 and next >= 0:
+			var cross := i - 1 - prev / (next - prev)
+			if last_cross >= pivot and cross <= pivot + Glide.RATE * .004:
+				var hz := Glide.RATE / (cross - last_cross)
+				if first_hz_after_lift == 0:
+					first_hz_after_lift = hz
+				last_hz_after_lift = hz
+			last_cross = cross
+	_check("a lift rounds off the rising pitch before it falls",
+			first_hz_after_lift > 1100 and last_hz_after_lift > first_hz_after_lift * 1.015)
 	player.stop()
 	player.free()
 
+func _check_twin_rejoin() -> void:
+	# A 100 Hz loop makes each shaft's RPM measurable directly from its output.
+	var wav := AudioStreamWAV.new()
+	wav.mix_rate = Glide.RATE
+	wav.format = AudioStreamWAV.FORMAT_16_BITS
+	var frames := Glide.RATE / 100
+	var pcm := PackedByteArray()
+	pcm.resize(frames * 2)
+	for i in frames:
+		pcm.encode_s16(i * 2, roundi(20000 * sin(TAU * i / frames)))
+	wav.data = pcm
+	var left := Glide.new()
+	var right := Glide.new()
+	root.add_child(left)
+	root.add_child(right)
+	var weights := PackedFloat64Array([1.0])
+	var configured := left.configure([wav], 0.0) and right.configure([wav], 0.0, left)
+	_check("paired tone probe loads", configured)
+	if configured:
+		for player: Glide in [left, right]:
+			player.drive(2.0, 1.0, weights)
+			player.stream_paused = true
+			# Discard the device-specific prefill. Both offline queues start at sample zero.
+			player._phase = 0.0
+		for stage: String in ["matched", "split", "rejoined"]:
+			right.drive(3.17 if stage == "split" else 2.0, 1.0, weights)
+			var left_cycles := 0
+			var right_cycles := 0
+			var last_left := 0.0
+			var last_right := 0.0
+			var difference := 0.0
+			var power := 0.0
+			for block in 37:
+				# Both read heads are at the same output time, independent of device latency.
+				right._align_pair_if_ready(0)
+				left._render(frames)
+				right._render(frames)
+				if block < 27:
+					continue
+				for i in frames:
+					var l := left._block[i].x
+					var r := right._block[i].x
+					left_cycles += int(last_left < 0 and l >= 0)
+					right_cycles += int(last_right < 0 and r >= 0)
+					difference += (l - r) * (l - r)
+					power += l*l + r*r
+					last_left = l
+					last_right = r
+			var split := stage == "split"
+			_check(stage + " twin pitches match their independent inputs",
+					absi(left_cycles - 20) <= 1 and absi(right_cycles - (32 if split else 20)) <= 1)
+			var residual := difference / maxf(power, .00001)
+			_check(stage + " twin output phase", power > 1.0 and (residual > .4 if split else residual < .001))
+	left.free()
+	right.free()
+
 func _run() -> void:
 	_check_glide_waveform()
+	_check_twin_rejoin()
 	# Build Phaethon last so any accidental contamination of the shared startup bank is visible.
 	var seen := {}
+	var base: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(Engines.DIR + "manifest.json"))
 	for id: String in [Pilot.SHRIKE, Pilot.ORRERY, Pilot.KILN, Pilot.VESPER, Pilot.STANDARD]:
 		var fleet := id != Pilot.STANDARD
 		var dir := "res://audio/fleet/%s/" % id if fleet else Engines.DIR
@@ -133,7 +218,7 @@ func _run() -> void:
 		var engine := Engines.new()
 		root.add_child(engine)
 		engine.setup(Sim.new({"track":"range", "vehicle":id}))
-		_engine_check(engine, manifest, dir, id)
+		_engine_check(engine, manifest, dir, id, base.layers)
 		if fleet:
 			for layer in ["v8", "turbine", "ramtear"]:
 				_check("%s has its own %s performance" % [id, layer], manifest.layers.has(layer))
