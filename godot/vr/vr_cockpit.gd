@@ -341,7 +341,7 @@ func _ready() -> void:
 	if engine_audio:
 		startup_audio = StartupAudioScript.new()
 		add_child(startup_audio)
-		startup_audio.setup(overhead.pods if overhead != null else {})   # a switch's sound comes from its pod
+		startup_audio.setup(overhead.pods if overhead != null else {}, sim.P.vehicle)   # a switch's sound comes from its pod
 	if not _school_loaded and prefs.has("school"):
 		school = prefs.school != "done"
 	_school_loaded = true

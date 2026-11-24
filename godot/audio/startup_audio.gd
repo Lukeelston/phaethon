@@ -2,11 +2,13 @@
 ## coming up behind its contactor, the self-test's chime, the fuel pumps priming and the binder
 ## striking, each engine's starter and the moment it catches, the parking brake's clamp and its air,
 ## and the knock of a refused control.
-## Every one is cut from a field recording (Luke, after the eleventh flight: the synthesised ones
+## The original Phaethon bank is cut from field recordings (Luke, after the eleventh flight: the synthesised ones
 ## "sound like an 80's racing arcade box. Use real free assets if you must"): a metal switch, a
 ## hinged lid, a sprung button, a large relay, a server's fans, a motorcycle's fuel pump, a Tesla
 ## coil, a breaker and an air valve. tools/startup_audio_bake.py trims, layers and levels them into
 ## res://audio/startup; its CREDITS.md lists each source (all CC0).
+## The fleet combines those field recordings with original DSP for a distinct starter, catch and cockpit call
+## for each of its four other craft (tools/fleet_startup_bake.py).
 ## An engine's start is staged (Luke, after the seventeenth flight: "Replace the two V8 startup sounds
 ## with a staged supercar style start - Brief pre-starter whine, then starter engage"). "starter" is
 ## the whole of it up to the catch, on the sequence's own clock: 0.8 s of electrics (an ignition's
@@ -25,6 +27,8 @@
 class_name StartupAudio
 extends Node
 
+const Craft := preload("res://sim/pilot_craft.gd")
+const FLEET := [Craft.SHRIKE, Craft.ORRERY, Craft.KILN, Craft.VESPER]
 const DIR := "res://audio/startup/"
 const RATE := 48000
 const NAMES := ["toggle_on", "toggle_off", "paddle_on", "paddle_off", "guard_up", "guard_down", "button", "power", "down",
@@ -46,8 +50,16 @@ var hum_gain := 0.0         # the fans' loop, 0..1 (the tests read it)
 var _hum: AudioStreamPlayer
 
 
-func setup(pods := {}) -> void:
-	bank()
+func setup(pods := {}, vehicle := Craft.STANDARD) -> void:
+	var sounds := bank()
+	if vehicle in FLEET:
+		# Override this cockpit's three roles; station and Phaethon callers read
+		# the base dictionary. Godot shares immutable samples through its cache.
+		sounds = sounds.duplicate()
+		var path := "res://audio/fleet/%s/" % vehicle
+		sounds["starter"] = [load(path + "starter_0.wav"), load(path + "starter_1.wav")]
+		sounds["catch"] = [load(path + "catch.wav")]
+		sounds["chime"] = [load(path + "chime.wav")]
 	var bus := "Cockpit"
 	if AudioServer.get_bus_index(bus) < 0:
 		var i := AudioServer.bus_count
@@ -55,7 +67,7 @@ func setup(pods := {}) -> void:
 		AudioServer.set_bus_name(i, bus)
 		AudioServer.set_bus_send(i, "Master")
 	for sound: String in NAMES:
-		var takes: Array = _bank[sound]
+		var takes: Array = sounds[sound]
 		if sound == LOOP:
 			_hum = AudioStreamPlayer.new()
 			_hum.stream = takes[0]

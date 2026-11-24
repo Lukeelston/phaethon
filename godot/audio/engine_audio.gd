@@ -60,6 +60,10 @@
 class_name EngineAudio
 extends Node
 
+const PilotCraft := preload("res://sim/pilot_craft.gd")
+const FleetPitchGlide := preload("res://audio/fleet_pitch_glide.gd")
+const FLEET_GLIDE_LAYERS := ["v8", "turbine"]
+const FLEET_DIR := "res://audio/fleet/%s/"
 const DIR := "res://audio/engines/"
 const RAM_DIR := "res://audio/ramjet/"   # the ramjet's voice has its own bank and manifest (tools/ramjet_bake.py)
 const LAYERS := ["v8", "v12", "turbine", "roar", "burner", "second", "rotor", "ramjet", "ramtear"]
@@ -256,6 +260,7 @@ func setup(craft_sim) -> void:
 		safety.ceiling_db = -0.3
 		AudioServer.add_bus_effect(0, safety)
 	var engines_bus := _bus("Engines", "Master")
+	var use_fleet_glide := PilotCraft.known(sim.P.get("vehicle", PilotCraft.STANDARD)) != PilotCraft.STANDARD
 	if AudioServer.get_bus_effect_count(engines_bus) == 0:
 		var lim := AudioEffectHardLimiter.new()
 		lim.ceiling_db = -1.0
@@ -319,7 +324,7 @@ func setup(craft_sim) -> void:
 		ram_shots.bus = "%s_pops" % name
 		add_child(ram_shots)
 		var v := {"bus": bus, "subs": subs, "spool": 0.0, "comb": 1.0, "fire": 1.0, "load": 0.5, "burn": 0.0,
-			"was_out": false, "cough_t": 0.0, "cough_k": 1.0, "cough_next": 0.0, "players": {}, "at": {},
+			"was_out": false, "cough_t": 0.0, "cough_k": 1.0, "cough_next": 0.0, "players": {}, "glides": {}, "at": {},
 			"crank_t": 0.0, "was_held": false, "flare_t": 0.0,      # the start-up: seconds on the starter's button, and its catch's flare
 			"bang": bang, "sec": {"state": "off", "t": 0.0, "spool": -0.33, "vel": 0.0, "fire": 0.0, "cough_k": 0.0, "cough_next": 0.0},
 			"rotor_mph": 0.0, "rotor_p": 1.0, "sec_run": 0.0,
@@ -333,11 +338,22 @@ func setup(craft_sim) -> void:
 		for layer in LAYERS:
 			var ps: Array[AudioStreamPlayer] = []
 			var start := randf()   # per engine, so the two engines never phase against each other
+			var layer_bus := "%s_%s" % [name, layer] if layer in FILTERED else name
+			if use_fleet_glide and layer in FLEET_GLIDE_LAYERS and _rate_at[layer] > 0.0:
+				var glide := FleetPitchGlide.new()
+				glide.bus = layer_bus
+				add_child(glide)
+				var left: FleetPitchGlide = voices[0].glides.get(layer) if k == 1 else null
+				if glide.configure(_streams[layer], start, left):
+					v.glides[layer] = glide
+					continue
+				glide.free()
+				push_warning("Fleet pitch glide could not load %s, using native loop players" % layer)
 			for i in _streams[layer].size():
 				var s: AudioStreamWAV = _streams[layer][i]
 				var p := AudioStreamPlayer.new()
 				p.stream = s
-				p.bus = "%s_%s" % [name, layer] if layer in FILTERED else name
+				p.bus = layer_bus
 				p.volume_db = -80.0
 				add_child(p)
 				# anti-alias levels: all from the same spot, in the same frame, so in lockstep
@@ -357,12 +373,27 @@ func setup(craft_sim) -> void:
 func _load_streams() -> void:
 	var manifest: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(DIR + "manifest.json"))
 	var ram_manifest: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(RAM_DIR + "manifest.json"))
+	# Load only the selected craft's performances. All banks share the same
+	# players, spool control, stereo routing and engine-failure behaviour.
+	var craft_id := PilotCraft.known(sim.P.get("vehicle", PilotCraft.STANDARD))
+	var fleet_dir := FLEET_DIR % craft_id
+	var fleet_layers := {}
+	var shots_dir := DIR
+	var shots: Dictionary = manifest.oneshots
+	if craft_id != PilotCraft.STANDARD:
+		var bank: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(fleet_dir + "engine.json"))
+		fleet_layers = bank.layers
+		shots = bank.oneshots
+		shots_dir = fleet_dir
 	for layer in LAYERS:
 		var ats := PackedFloat64Array()
 		var list: Array[AudioStreamWAV] = []
 		var rhos := PackedFloat64Array()
 		var dir: String = RAM_DIR if layer in RAM_LAYERS else DIR
 		var spec: Dictionary = (ram_manifest if layer in RAM_LAYERS else manifest).layers[layer]
+		if fleet_layers.has(layer):
+			dir = fleet_dir
+			spec = fleet_layers[layer]
 		for b: Dictionary in spec.bands:
 			var w := (ResourceLoader.load(dir + b.file) as AudioStreamWAV).duplicate() as AudioStreamWAV
 			w.loop_mode = AudioStreamWAV.LOOP_FORWARD
@@ -375,14 +406,14 @@ func _load_streams() -> void:
 		_bands[layer] = ats
 		_rho[layer] = rhos
 		_rate_at[layer] = float(spec.get("rate_at", 0.0)) if spec.get("sync", false) else 0.0
-	_bang = (ResourceLoader.load(DIR + manifest.oneshots.bang) as AudioStreamWAV).duplicate() as AudioStreamWAV
+	_bang = (ResourceLoader.load(shots_dir + shots.bang) as AudioStreamWAV).duplicate() as AudioStreamWAV
 	_bang.loop_mode = AudioStreamWAV.LOOP_DISABLED
 	_pops = AudioStreamRandomizer.new()
 	_pops.playback_mode = AudioStreamRandomizer.PLAYBACK_RANDOM_NO_REPEATS
 	_pops.random_pitch = 1.15            # each pop up to 15% up or down
 	_pops.random_volume_offset_db = 8.0  # and up to 8 dB quieter
-	for f: String in manifest.oneshots.pops:
-		var w := (ResourceLoader.load(DIR + f) as AudioStreamWAV).duplicate() as AudioStreamWAV
+	for f: String in shots.pops:
+		var w := (ResourceLoader.load(shots_dir + f) as AudioStreamWAV).duplicate() as AudioStreamWAV
 		w.loop_mode = AudioStreamWAV.LOOP_DISABLED
 		_pops.add_stream(-1, w)
 	for pair: Array in [[ram_manifest.oneshots.light, _ram_light], [ram_manifest.oneshots.out, _ram_out]]:
@@ -645,6 +676,11 @@ func update(inp: Dictionary, delta: float) -> void:
 				g *= trim.x
 				at *= trim.y
 			v.at[layer] = at
+			if v.glides.has(layer):
+				var glide: FleetPitchGlide = v.glides[layer]
+				var pitch := maxf(0.01, at / float(_rate_at[layer]))
+				glide.drive(pitch if overdrive else minf(pitch, 16.0), g, crossfade(_bands[layer], _rho[layer], at))
+				continue
 			if layer in RAM_LAYERS:
 				# unlit and died away, the ramjet's loops are paused: nothing of them is mixed, and nothing is sent them
 				var quiet: bool = g <= 1e-4
