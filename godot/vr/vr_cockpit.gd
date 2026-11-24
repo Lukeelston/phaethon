@@ -64,6 +64,9 @@ const MENU_HOLD := 1.5   # hold the left menu button this long to return to map 
 const DashboardScript := preload("res://vr/dashboard.gd")
 const GaugeClusterScript := preload("res://vr/gauge_cluster.gd")
 const WagMeterScript := preload("res://vr/wag_meter.gd")
+const FleetThrottle := preload("res://vr/fleet_throttle.gd")
+const FleetDeck := preload("res://vr/fleet_flight_deck.gd")
+const AuxMeter := preload("res://vr/fleet_aux_meter.gd")
 const CockpitInteriorScript := preload("res://vr/cockpit_interior.gd")
 const ModeSwitchScript := preload("res://vr/mode_switch.gd")
 const CanopyScript := preload("res://view/canopy.gd")
@@ -84,6 +87,7 @@ var _await_neutral_controls := false
 
 var xr: XRInterface
 var rig: Node3D
+var aux_meter: AuxMeter
 var shell: Node3D   # the cockpit's fittings (hull, seat, levers, panel): shudders, your head doesn't
 var interior   # vr/cockpit_interior.gd
 var mode_switch   # vr/mode_switch.gd: the SPEEDCRAFT / STARFIGHTER toggle on the right console
@@ -229,6 +233,7 @@ var screen_reflection      # the cockpit, faintly, in the windscreen (view/scree
 var chase_hud: Label3D      # outside, the gauges are out of reading distance: the speed, the Mach line and the guidance, low and left
 var hands := {}
 var lever_pivots: Array[Node3D] = []
+var throttle_gaiters: Array[Skeleton3D] = []
 var lever_tips: Array[StandardMaterial3D] = []
 var brake_paddles: Array[Node3D] = []
 var tow_meter: ShaderMaterial
@@ -769,6 +774,7 @@ func _build_cockpit() -> void:
 	hull.name = "PodHull"
 	var shrike: bool = sim != null and sim.P.vehicle == CraftModelScript.PilotCraft.SHRIKE
 	var fleet = craft.fleet if craft else null
+	var bespoke_controls := sim != null and FleetDeck.STATIONS.has(sim.P.vehicle)
 	if fleet:
 		fleet.dress_cab(hull, CraftModelScript.nose_closed)
 	else:
@@ -802,8 +808,16 @@ func _build_cockpit() -> void:
 		pivot.position = Vector3(0.46 * s, 0.1, 0.2)   # beside the seat, clear of the instrument panel
 		shell.add_child(pivot)
 		var shaft := MeshInstance3D.new()
-		if shrike:
-			shaft.mesh = CraftModelScript.Shrike.part(&"ThrottleLink")
+		if bespoke_controls:
+			var finishes: Array = FleetDeck.FINISHES[sim.P.vehicle]
+			var gaiter := FleetThrottle.new()
+			gaiter.name = "ThrottleBootL" if s < 0 else "ThrottleBootR"
+			gaiter.position = pivot.position
+			shell.add_child(gaiter)
+			gaiter.fit(Color("#373738").lerp(finishes[2],.18))
+			throttle_gaiters.append(gaiter)
+			shaft.mesh = FleetThrottle.shaft(finishes[1])
+			shaft.material_override = SeatFinish.satin()
 		else:
 			shaft.mesh = Kit.cyl(0.016, 0.016, 0.32, 12)
 			if SeatFinish.hd:   # realism spike: a round satin shaft with a ferrule under the grip
@@ -836,8 +850,17 @@ func _build_cockpit() -> void:
 			brake_paddles.append(paddle)
 		var indicator := MeshInstance3D.new()
 		indicator.name = "GateIndicator"
-		indicator.mesh = Kit.rounded_box(Vector3(0.036, 0.012, 0.045), 4.0, 6)
-		indicator.position = Vector3(-s * 0.009, 0.054, 0.004)
+		if fleet:
+			# The fleet crowns have a centered pocket and a support land at y=.052.
+			indicator.mesh = FleetThrottle.lens(.036, .012, .045)
+			indicator.position = Vector3(0, .058, 0)
+		elif shrike:
+			# Span the aperture inside the teal crown with the skirt seated on its shoulder.
+			indicator.mesh = FleetThrottle.lens(.030, .006, .036)
+			indicator.position = Vector3(0, .054, -.003)
+		else:
+			indicator.mesh = Kit.rounded_box(Vector3(0.036, 0.012, 0.045), 4.0, 6)
+			indicator.position = Vector3(-s * 0.009, 0.054, 0.004)
 		var km := StandardMaterial3D.new()
 		km.albedo_color = Color(0.16, 0.17, 0.19)
 		km.roughness = 0.35
@@ -851,17 +874,27 @@ func _build_cockpit() -> void:
 	CockpitInteriorScript.instrument_rails = not GaugeClusterScript.available()
 	interior = CockpitInteriorScript.new()   # floor, frames, consoles, harness, rim light
 	shell.add_child(interior)
-	interior.build()
+	interior.build(bespoke_controls)
+	var deck: FleetDeck
+	if sim != null and FleetDeck.STATIONS.has(sim.P.vehicle):
+		deck = FleetDeck.new(sim.P.vehicle)
+		deck.fit_cabin(interior)
+		aux_meter = AuxMeter.new()
+		aux_meter.name = "AuxiliaryMeter"
+		shell.add_child(aux_meter)
+		aux_meter.build(deck,EYE)
 	if fleet:
 		var rim: MeshInstance3D = interior.get_node("SegmentedCoaming")
 		rim.mesh = fleet.part(&"Coaming")
 		rim.set_surface_override_material(0, null)
 	if sim != null and sim.P.vehicle == CraftModelScript.PilotCraft.SHRIKE:
 		tow_meter = CraftModelScript.Shrike.dress_coaming(interior.get_node("SegmentedCoaming"), CockpitInteriorScript.hd_parts and ResourceLoader.exists(CockpitInteriorScript.HD_PARTS.Coaming))
+	if deck:
+		deck.fit_stitched_rim(interior.get_node("SegmentedCoaming"))
 	mode_switch = ModeSwitchScript.new()   # SPEEDCRAFT / STARFIGHTER, on the front of the right console
 	shell.add_child(mode_switch)
 	mode_switch.transform = ModeSwitchScript.mount()
-	mode_switch.build()
+	mode_switch.build(bespoke_controls)
 	# The slide's own switch (Luke: "can you make the slide a physical thing in the cockpit?"): the same
 	# guarded toggle, on the front of the left console (a little aft of the handling switch's place on the
 	# right, clear of the map's pod: ModeSwitch.PORT_AFT). Up is SLIDE, down is GRIP (no slide).
@@ -872,7 +905,7 @@ func _build_cockpit() -> void:
 	slide_switch.throws = ["slide", "grip"]
 	shell.add_child(slide_switch)
 	slide_switch.transform = ModeSwitchScript.mount(-1.0)
-	slide_switch.build()
+	slide_switch.build(bespoke_controls)
 	# ... and how far it steps out: the drift slider, a fader in a rail on the same console's inboard
 	# shoulder, behind the switch and out of the box where a hand throws it (vr/drift_slider.gd).
 	drift_slider = DriftSliderScript.new()
@@ -893,6 +926,7 @@ func _build_cockpit() -> void:
 		overhead.build()
 	dashboard = GaugeClusterScript.new() if GaugeClusterScript.available() else DashboardScript.new()
 	if dashboard is GaugeClusterScript:
+		dashboard.flight_deck = deck
 		dashboard.ivory_thrust_dials = tow_meter != null
 	shell.add_child(dashboard)
 	dashboard.transform = DashboardScript.mount()
@@ -900,7 +934,7 @@ func _build_cockpit() -> void:
 	minimap_panel = MinimapPanelScript.new()   # the path ahead, up and left of the instrument panel
 	shell.add_child(minimap_panel)
 	minimap_panel.transform = MinimapPanelScript.mount(SEAT)
-	minimap_panel.build()
+	minimap_panel.build(deck != null)
 	minimap_panel.set_scheme(map_scheme, false)
 	minimap_panel.set_live(sim.kind == "circuit" or sim.kind == "network")
 	if not fleet:      # (the map in the windscreen is laid on the Phaethon's and the Shrike's glass, as the reflection below is)
@@ -2116,6 +2150,8 @@ func _place_camera(_k: float) -> void:
 	var thr := [inp.thrL, inp.thrR]
 	for k in 2:
 		lever_pivots[k].rotation.x = deg_to_rad(lerpf(30.0, -30.0, thr[k]))
+		if not throttle_gaiters.is_empty():
+			throttle_gaiters[k].set_bone_pose_rotation(1, lever_pivots[k].quaternion)
 		if not brake_paddles.is_empty():
 			var brake: float = inp.brkL if k == 0 else inp.brkR
 			brake_paddles[k].rotation.x = deg_to_rad(-18.0) * clampf(brake, 0.0, 1.0)
@@ -2294,12 +2330,16 @@ func _update_hud() -> void:
 	if tow_meter:
 		tow_meter.set_shader_parameter("loads", Vector2(craft.cable_strain[0], craft.cable_strain[1]))
 	_read_g()
+	var brakes := _shown_brakes()
+	var panel_level := lerpf(1.0, 0.5, maxf(1.0 if light_preset == "twilight" else 0.0, Outlook.darkness()))
+	if aux_meter:
+		aux_meter.sync(sim.pod.th, brakes, craft.cable_strain, g_turn, startup.power, panel_level)
 	dashboard.show_state({
-		"mph": kmh / 1.609344, "kmh": kmh, "mach": cues.mach, "backlight": lerpf(1.0, 0.5, maxf(1.0 if light_preset == "twilight" else 0.0, Outlook.darkness())), "mach_line": cues.readout() + boost_text() + autopilot.suffix(), "progress": progress,
+		"mph": kmh / 1.609344, "kmh": kmh, "mach": cues.mach, "backlight": panel_level, "mach_line": cues.readout() + boost_text() + autopilot.suffix(), "progress": progress,
 		"footer": "%s   /   %s" % [handling_text(), ctl],
 		"points": int(_skill_shown.get("points", 0)) if _skill_on else 0, "feat": String(_skill_shown.get("award", "")) if _skill_on else "", "feat_age": float(_skill_shown.get("age", 1e9)),
 		"thr": [inp.thrL * startup.engine_k(0), inp.thrR * startup.engine_k(1)],
-		"brk": _shown_brakes(), "heat": [sim.eL.heat, sim.eR.heat],
+		"brk": brakes, "heat": [sim.eL.heat, sim.eR.heat],
 		"health": [sim.eL.health, sim.eR.health],
 		"flameout": [sim.eL.flameout, sim.eR.flameout], "battery": sim.battery,
 		"burner": sim.mode == "burner", "armed": arm_lamp(), "ramjet": sim.mode == "ramjet", "turbines": _turbines or _turbine_lamp,

@@ -22,6 +22,7 @@ extends Node3D
 
 const CM := preload("res://view/craft_model.gd")
 const Kit := preload("res://view/mesh_kit.gd")
+const FleetThrottle := preload("res://vr/fleet_throttle.gd")
 const Finish := preload("res://view/craft_materials.gd")
 const Accent := preload("res://view/accent.gd")      # the livery's accent on the authored fittings' enamel and thread
 static var _flight_deck_meshes: Dictionary = {}
@@ -88,7 +89,7 @@ static func _hd_mesh(path: String, node := "*") -> Mesh:
 	return mesh
 
 
-func build() -> void:
+func build(fleet_controls := false) -> void:
 	var coaming := MeshInstance3D.new()
 	coaming.name = "SegmentedCoaming"
 	coaming.mesh = deck_mesh("Coaming")
@@ -197,6 +198,15 @@ func build() -> void:
 	# throttle quadrant: a gate plate round each lever, slot and burner gate
 	for s in [-1.0, 1.0]:
 		var q := Vector3(0.46 * s, 0.125, 0.2)   # just above the lever pivots (the floor curves up out here)
+		if fleet_controls:
+			solid.append([FleetThrottle.quadrant(), Kit.at(q), Color("#3b3e42")])
+			var screw := Finish.socket_screw(.004, Color("#a1a4a9"), true)
+			for dx in [-.034,.034]:
+				var marker := FleetThrottle.lens(.012,.002,.012)
+				paint.append([marker, Kit.at(q+Vector3(dx,.019,-.105)),Color(1.0,.50,.1)])
+				for z in [-.155,.155]:
+					metal.append([screw, Kit.at(q+Vector3(dx,.015,z)), Color.WHITE,true])
+			continue
 		# Four rails surround an actual opening. A dark rectangle over a solid
 		# plate looked like a slot until the lever visibly passed through it.
 		for dx in [-0.031,0.031]:

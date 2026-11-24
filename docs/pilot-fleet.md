@@ -16,6 +16,19 @@ The range comparison uses equal 82% lever demand from a standing start at 480 si
 
 The preview uses the assembled game geometry in studio lighting. Physical headset tracking, comfort and standalone Quest frame time still require headset testing.
 
+## Cockpits
+
+![Four production cockpits viewed from the pilot's seat](Phaethon-Cockpit-Interiors.jpg)
+
+| Craft | Flight deck | Starboard instrument |
+| --- | --- | --- |
+| Shrike RS | Exposed red truss, separate instrument pods and drilled heel plates | Brake bias shows which side is braking harder. |
+| Orrery IX | Scalloped teal enamel, brass instrument bezels, ivory dials and slatted footboards | A compass shares the whole map's north reference. |
+| Kiln Six | Bolted orange gauge cassettes, yellow handholds and bar grating | Two independent pointers show left and right drawbar load. |
+| Vesper | Swept pearl panels, a port-side Mach dial and violet foot rails | A ball runs across a curved scale with lateral acceleration, up to 20 g each way. |
+
+The cockpit renderer accepts `--interiors` for a seated view and instrument close-up of all four. `python tools/art_cockpit_meters.py` rebuilds the printed instrument cards.
+
 ## Reproduce
 
 From the worktree, run `python tools/art_pilot_fleet.py` to rebuild the original meshes and finish maps. NumPy and Pillow are required. Import the project before testing.

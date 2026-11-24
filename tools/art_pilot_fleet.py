@@ -7,7 +7,6 @@ to that pivot. The three drives mate to the game's standard vectoring nozzle.
 
 import math
 import sys
-from itertools import pairwise
 
 import numpy as np
 from art_pilot_fleet_finish import ART, FLEET, REGIONS, make_maps
@@ -25,6 +24,20 @@ class Surface(Mesh):
 def loft(m, rows, mat, exp=0.78, sides=32, closed=True):
     """Rows are z, centre x/y, radii x/y; rolled edges keep their highlights."""
     rows = np.asarray(rows, dtype=float)
+    if closed:
+        # Press a narrow radius into each cut end. Keep the end plane and the
+        # full-size body inside their authored envelope, including grip and brake pivots.
+        rounded = []
+        for end, neighbour in ((rows[0], rows[1]), (rows[-1], rows[-2])):
+            run = abs(neighbour[0] - end[0])
+            radius = min(min(end[3:]) * 0.16, run * 0.19, 0.018)
+            lip = []
+            for a in (0, math.pi / 2):
+                sample = end + (neighbour - end) * (radius * (1 - math.cos(a)) / max(run, 1e-8))
+                sample[3:] -= radius * (1 - math.sin(a))
+                lip.append(sample)
+            rounded.append(lip)
+        rows = np.array([*rounded[0], *rows[1:-1], *reversed(rounded[1])])
 
     def ring(row, a):
         z, x, y, w, h = row
@@ -38,26 +51,46 @@ def loft(m, rows, mat, exp=0.78, sides=32, closed=True):
     m.grid(len(rows) - 1, sides, at, mat, True)
     if closed:
         for i, n in [(0, (0, 0, -1)), (-1, (0, 0, 1))]:
-            m.poly([ring(rows[i], TAU * k / sides) for k in range(sides)], n, mat)
+            m.poly([ring(rows[i], TAU * k / sides - math.pi / 2) for k in range(sides)], n, mat)
 
 
 def skin_patch(m, rows, start, end, angles, exp, mat, lift=0.012):
     """Stamp a curved plate onto a specified run of skin. Its edges follow the host loft."""
     table = np.asarray(rows)
 
-    def at(u, v):
-        f = start + (end - start) * u
+    def at(f, v, height):
         i = min(int(f), len(rows) - 2)
         z, x, y, w, h = table[i] + (table[i + 1] - table[i]) * (f - i)
         a = math.radians(angles[0] + (angles[1] - angles[0]) * v)
-        return vec(
-            x + (w + lift) * signed(math.cos(a), exp), y + (h + lift) * signed(math.sin(a), exp), z
-        )
+        return vec(x + (w + height) * signed(math.cos(a), exp), y + (h + height) * signed(math.sin(a), exp), z)
 
-    m.grid(max(3, math.ceil((end - start) * 4)), 7, at, mat, True)
+    # Include each host loft station so a cover cannot bridge across a chine.
+    # The outer rows turn down through the skin and close the old floating edge.
+    segments = max(6, math.ceil(abs(angles[1] - angles[0]) / 9))
+    stations = [start - 0.012, start, *range(math.floor(start) + 1, math.ceil(end)), end, end + 0.012]
+    azimuths = [-0.012, *np.linspace(0, 1, segments + 1), 1.012]
+
+    def sample(u, v):
+        f = np.interp(u * (len(stations) - 1), range(len(stations)), stations)
+        az = np.interp(v * (len(azimuths) - 1), range(len(azimuths)), azimuths)
+        edge = max(start - f, f - end, -az, az - 1, 0) / 0.012
+        return at(f, az, lift - (lift + 0.003) * edge**2)
+
+    base, first_index = len(m.pos), len(m.indices)
+    m.grid(len(stations) - 1, len(azimuths) - 1, sample, mat, True)
+    # A narrow stamped return turns twice between adjacent samples. Use the
+    # exported facets at those corners instead of the derivative of a crease.
+    corners = np.asarray(m.indices[first_index:]).reshape(-1, 3) - base
+    triangles = np.asarray(m.pos[base:])[corners]
+    faces = np.cross(triangles[:, 1] - triangles[:, 0], triangles[:, 2] - triangles[:, 0])
+    faces /= np.linalg.norm(faces, axis=1)[:, None]
+    normals = np.zeros((len(m.pos) - base, 3))
+    for column in corners.T:
+        np.add.at(normals, column, faces)
+    m.norm[base:] = normals / np.linalg.norm(normals, axis=1)[:, None]
 
 
-def hoop(m, z, x, y, w, h, t, depth, mat, exp=0.94):
+def hoop(m, z, x, y, w, h, t, depth, mat, exp=0.94, bonded=False):
     rows = [
         (z + dz, x, y, w * scale, h * scale)
         for dz, scale in [
@@ -72,12 +105,15 @@ def hoop(m, z, x, y, w, h, t, depth, mat, exp=0.94):
             (-depth * 0.46, 1 - t),
         ]
     ]
-    loft(m, rows, mat, exp, 40, False)
+    if depth <= 0.20:
+        # A slender trim ring needs one bevel at each lip. Drop the secondary
+        # face-support bands and the wall concealed beneath the bonded collar.
+        rows = [rows[i] for i in (0, 2, 3, 4, 5, 7)] + ([] if bonded else [rows[-1]])
+    loft(m, rows, mat, exp, 48 if max(w, h) > 1.15 else 40, False)
 
 
 def tube(m, pts, r, mat, n=10):
-    for a, b in pairwise(pts):
-        m.pipe(a, b, r, mat, n)
+    m.sweep(pts, r, mat, max(n, 10))
 
 
 def badge(m, z, x, y, side, width, height):
@@ -203,7 +239,7 @@ def orrery_engine(m, side):
     for z, w, h in [(-3.52, 1.36, 1.19), (-1.23, 1.49, 1.30), (1.04, 1.32, 1.14)]:
         hoop(m, z, 0, 0.19, w, h, 0.22, 0.47, "enamel")
         for dz in (-0.19, 0.19):
-            hoop(m, z + dz, 0, 0.19, w * 1.012, h * 1.012, 0.07, 0.063, "gold")
+            hoop(m, z + dz, 0, 0.19, w * 1.012, h * 1.012, 0.07, 0.063, "gold", bonded=True)
         hoop(m, z, 0, 0.19, w * 0.794, h * 0.794, 0.047, 0.19, "accent")
         for i in range(8):
             a = i * TAU / 8
@@ -309,11 +345,13 @@ def kiln_engine(m, side):
             z = -2.11 + j * 1.10
             a = vec(s * 0.51, 0.09, z)
             b = vec(s * 0.99, 0.80, z + 0.20)
-            m.pipe(a, b, 0.34, "dark", 12, 0.31)
+            m.pipe(a, b, 0.34, "dark", 24, 0.31)
             for t in (0.23, 0.40, 0.57, 0.74):
                 p = a + (b - a) * t
-                m.pipe(p, p + (b - a) * 0.066, 0.39, "brushed", 12)
-            m.pipe(b - (b - a) * 0.12, b + (b - a) * 0.08, 0.36, "enamel", 8, 0.32)
+                # Turn the narrow fin to a crowned edge in a single cut on
+                # either side. The centre of the lower face sits in the block.
+                m.pipe(p, p + (b - a) * 0.066, 0.39, "brushed", 18, lip=0.007, crowned=True)
+            m.pipe(b - (b - a) * 0.12, b + (b - a) * 0.08, 0.36, "enamel", 16, 0.32, lip=0.012)
             # Individual bronze hot headers fold down to the common collector.
             tube(
                 m,
@@ -455,19 +493,15 @@ def rotor(craft):
         def p(v, t, z, angle=a):
             return (r * v * math.cos(angle + t), r * v * math.sin(angle + t), z)
 
-        blade(
-            m,
-            [
-                p(0.18, 0, -0.06),
-                p(0.92, 0.24, -0.045),
-                p(0.98, 0.51, 0.04),
-                p(0.47, 0.33, 0.055),
-                p(0.17, 0.30, 0.015),
-            ],
-            0.021,
-            "gold" if i == 0 or craft == "orrery" else "alloy",
-            (0, 0, -1),
+        # Pitch each pressed blade about its radial axis. Extruding the former
+        # twisted outline along the shaft folded the bevel at the inner corner.
+        blade_points = np.array(
+            [p(v, t, 0) for v, t in ((0.18, 0), (0.92, 0.24), (0.98, 0.51), (0.47, 0.33), (0.17, 0.30))]
         )
+        tangent = vec(-math.sin(a), math.cos(a), 0)
+        blade_points[:, 2] = -0.057 + blade_points @ tangent * 0.42
+        normal = unit(vec(tangent[0] * 0.42, tangent[1] * 0.42, -1))
+        blade(m, blade_points, 0.021, "gold" if i == 0 or craft == "orrery" else "alloy", normal)
     m.pipe((0, 0, 0.092), (0, 0, -0.087), r * 0.23, "brushed", 20, r * 0.15)
     return m
 
@@ -609,8 +643,11 @@ def cab(craft):
         [
             (-2.18, 0, -0.20, 0.25, 0.11),
             (-1.87, 0, -0.30, 0.43, 0.12),
-            (-0.84, 0, -0.42, 0.78, 0.13),
-            (0.60, 0, -0.45, 0.86, 0.13),
+            # Under the cabin, keep the keel depth but bring the upper skin below
+            # the walking deck (cab y=-.46). The old rounded top covered the LCDs.
+            (-0.84, 0, -0.530, 0.78, 0.020),
+            (0.60, 0, -0.547, 0.86, 0.033),
+            (1.05, 0, -0.499, 0.813, 0.018),
             (1.46, 0, -0.32, 0.77, 0.14),
             (1.66, 0, -0.24, 0.53, 0.11),
         ],
@@ -995,39 +1032,130 @@ def coaming(craft):
         angle = v * TAU
         return vec(x, 0.558 + 0.014 * abs(s) + 0.039 * math.sin(angle), z + 0.048 * math.cos(angle))
 
-    m.grid(38, 20, rim, "cloth" if craft == "orrery" else "dark", False)
-    for s in (-1, 1):
-        edge = [rim(0.5 + s * u * 0.5, 0.052) + vec(0, 0.002, 0.003) for u in np.linspace(0.06, 0.99, 20)]
-        tube(m, edge, 0.006, "gold" if craft == "orrery" else "accent", 6)
+    m.grid(56, 28, rim, "cloth" if craft == "orrery" else "dark", False)
     hw = {"orrery": 0.132, "kiln": 0.14, "vesper": 0.124}[craft]
-    p = [(-hw, 0.583, -0.466), (hw, 0.583, -0.466), (hw, 0.526, -0.472), (-hw, 0.526, -0.472)]
-    m.poly(p, (0, -0.10, 1), "badge", [(0, 0), (1, 0), (1, 1), (0, 1)])
+
+    def surface(x, turn):
+        u = 0.5 + x / (2 * width)
+        tangent = rim(u + 0.0001, turn) - rim(u - 0.0001, turn)
+        across = rim(u, turn + 0.0001) - rim(u, turn - 0.0001)
+        return rim(u, turn), unit(np.cross(tangent, across))
+
+    for s in (-1, 1):
+        edge = []
+        for x in np.linspace(hw + 0.009, width * 0.99, 32):
+            point, normal = surface(s * x, 0.052)
+            edge.append(point + normal * 0.0015)
+        tube(m, edge, 0.006, "gold" if craft == "orrery" else "accent", 18)
+
+    # Embossed badge follows the shield in both directions. The folded rim
+    # closes directly into the shield around the entire printed rectangle.
+    def plaque(u, v, margin=0, height=0.0018):
+        x = (u * 2 - 1) * (hw + margin)
+        turn = -0.108 + v * 0.197 + (v * 2 - 1) * margin / 0.26
+        point, normal = surface(x, turn)
+        return point + normal * height
+
+    m.grid(18, 8, plaque, "badge", uv=lambda u, v: (u, 1 - v))
+    for samples, edge_uv in (
+        (18, lambda t: (t, 0)),
+        (8, lambda t: (1, t)),
+        (18, lambda t: (1 - t, 1)),
+        (8, lambda t: (0, 1 - t)),
+    ):
+
+        def return_lip(u, v):
+            return plaque(*edge_uv(u), 0.0025 * (1 - v), -0.002 + 0.0038 * math.sin(v * math.pi / 2))
+
+        m.grid(samples, 2, return_lip, "brushed")
     for s in (-1, 1):
         for j in range(3):
-            x = s * (0.21 + 0.026 * j)
-            z = -0.475 + sweep * (abs(x) / width) ** 2
-            m.pipe((x, 0.552, z), (x, 0.565, z + 0.002), 0.0045, "gold", 8)
+            point, normal = surface(s * (0.21 + 0.026 * j), -0.035)
+            m.pipe(point - normal * 0.002, point + normal * 0.0015, 0.0045, "gold", 18, 0.0038, lip=0.0006)
     return m
 
 
 def grip(craft):
     m = Surface()
     w = {"orrery": 0.034, "kiln": 0.050, "vesper": 0.041}[craft]
-    tube(m, [(0, -0.055, 0.011), (0, 0.018, 0), (0, 0.054, -0.019)], w, "rubber", 12)
+    # A continuous molded skin. Each row names the finish up to the next row.
+    # Rounded rectangles retain long flats across the thumb pad; the six angular
+    # samples per corner coincide with the GateIndicator's molded perimeter.
+    sections = []
+
+    def row(y, width, depth, corner, centre, finish):
+        points = []
+        for q, (sx, sz) in enumerate(((1, 1), (-1, 1), (-1, -1), (1, -1))):
+            for k in range(6):
+                angle = (q + k / 5) * math.pi / 2
+                points.append(
+                    vec(
+                        sx * (width - corner) + corner * math.cos(angle),
+                        y,
+                        centre + sz * (depth - corner) + corner * math.sin(angle),
+                    )
+                )
+        sections.append((np.array(points), finish))
+
+    def palm(y, scale, finish):
+        radius = w * scale
+        row(y, radius, radius, radius * 0.92, 0.011 - (y + 0.055) * 0.011 / 0.073, finish)
+
+    palm(-0.055, 0.83, "rubber")
+    palm(-0.052, 0.95, "rubber")
+    palm(-0.046, 1, "rubber")
     for y in (-0.03, -0.016, 0):
-        m.pipe((0, y, 0.005), (0, y + 0.005, 0.004), w * 1.055, "gold", 14)
-    loft(
-        m,
-        [
-            (-0.046, 0, 0.045, w * 0.72, 0.021),
-            (-0.035, 0, 0.045, w, 0.022),
-            (0.010, 0, 0.048, w, 0.019),
-            (0.024, 0, 0.045, w * 0.78, 0.015),
-        ],
-        "accent",
-        0.48,
-        18,
-    )
+        for dy, scale, finish in (
+            (-0.0026, 1, "gold"),
+            (-0.0016, 1.033, "gold"),
+            (0.0016, 1.033, "gold"),
+            (0.0026, 1, "rubber"),
+        ):
+            palm(y + dy, scale, finish)
+    palm(0.015, 1, "rubber")
+    row(0.029, w * 0.98, w * 0.91, w * 0.71, -0.003, "rubber")
+    row(0.032, w * 0.955, w * 0.89, w * 0.67, -0.003, "dark")
+    row(0.033, w * 0.945, w * 0.88, w * 0.65, -0.003, "dark")
+    row(0.034, w * 0.955, w * 0.89, w * 0.64, -0.003, "accent")
+    row(0.038, w * 0.99, w * 0.91, w * 0.62, -0.003, "accent")
+    row(0.050, w * 1.01, 0.036, w * 0.40, -0.002, "accent")
+    row(0.056, w * 0.98, 0.034, 0.014, 0, "accent")
+    row(0.059, w * 0.93, 0.032, 0.012, 0, "accent")
+    row(0.060, w * 0.88, 0.0305, 0.010, 0, "accent")
+    # 0.3 mm assembly clearance, a rolled entrance and a 1.3 mm shelf
+    # supporting the unlit back edge of the molded lens at y=.052.
+    row(0.060, 0.0193, 0.0238, 0.00994, 0, "dark")
+    row(0.0593, 0.0183, 0.0228, 0.00894, 0, "dark")
+    row(0.052, 0.0183, 0.0228, 0.00894, 0, "dark")
+    row(0.052, 0.0167, 0.0212, 0.00734, 0, "dark")
+
+    rings = [points for points, _ in sections]
+    normals = []
+    for j, ring in enumerate(rings):
+        incoming = ring - rings[j - 1] if j else rings[1] - ring
+        outgoing = rings[j + 1] - ring if j + 1 < len(rings) else incoming
+        along = (
+            incoming / np.linalg.norm(incoming, axis=1)[:, None]
+            + outgoing / np.linalg.norm(outgoing, axis=1)[:, None]
+        )
+        tangent = np.roll(ring, -1, axis=0) - np.roll(ring, 1, axis=0)
+        normal = np.cross(along, tangent)
+        normals.append(normal / np.linalg.norm(normal, axis=1)[:, None])
+    for j, (lower, finish) in enumerate(sections[:-1]):
+        base = len(m.pos)
+        count = len(lower)
+        for k in range(count + 1):
+            for level in (j, j + 1):
+                m.vertex(
+                    rings[level][k % count],
+                    normals[level][k % count],
+                    (k / count, np.clip((rings[level][k % count][1] + 0.055) / 0.115, 0, 1)),
+                    finish,
+                )
+            if k:
+                a = base + 2 * (k - 1)
+                m.indices.extend((a, a + 1, a + 3, a, a + 3, a + 2))
+    m.poly(rings[0], (0, -1, 0), "rubber")
     return m
 
 

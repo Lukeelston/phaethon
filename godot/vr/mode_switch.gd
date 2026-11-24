@@ -14,6 +14,7 @@
 class_name ModeSwitch
 extends Node3D
 
+const FleetThrottle := preload("res://vr/fleet_throttle.gd")
 const Kit := preload("res://view/mesh_kit.gd")
 const Finish := preload("res://view/craft_materials.gd")
 const SPEED_COL := Color(0.25, 0.65, 1.0)     # SPEEDCRAFT: the cables' energized blue
@@ -55,7 +56,7 @@ static func mount(side := 1.0) -> Transform3D:
 	return Transform3D(Basis(Vector3.RIGHT, -0.75), Vector3(0.5825 * side, 0.43, 0.08 + (PORT_AFT if side < 0.0 else 0.0)))
 
 
-func build() -> void:
+func build(fleet := false) -> void:
 	var turn := Vector3(PI / 2.0, 0, 0)
 	var panels := [
 		[Finish.beveled_plate(Vector3(0.12, 0.035, 0.15), 0.004), Kit.at(Vector3(0, 0, -0.0175), turn), Color(0.105, 0.12, 0.14)],
@@ -79,6 +80,19 @@ func build() -> void:
 	if authored:
 		mi.mesh = CockpitInterior._hd_mesh(HD_SWITCH, "Panel")
 		add_child(mi)
+		if fleet:
+			# The reference panel bakes its four screws into the face texture.
+			# Set the three-dimensional crowns on exactly that face.
+			var pieces := []
+			var screw := Finish.socket_screw(.0032,Color("#a0a4a6"),true)
+			for x in [-.046,.046]:
+				for y in [-.057,.057]:
+					pieces.append([screw, Kit.at(Vector3(x,y,.0015),turn),Color.WHITE,true])
+			var heads := MeshInstance3D.new()
+			heads.name = "PanelFasteners"
+			heads.mesh = Kit.compound(pieces, null, true)
+			heads.material_override = Finish.machined()
+			add_child(heads)
 	else:
 		mi.mesh = Kit.compound(panels)
 		mi.material_override = Finish.powder_coat()
@@ -102,16 +116,20 @@ func build() -> void:
 		bat.mesh = CockpitInterior._hd_mesh(HD_SWITCH, "Bat")
 		bat.material_override = null
 	lever.add_child(bat)
-	lamp_sp = _lamp(Vector3(0, 0.05, 0.004), str(legends[0]))
-	lamp_sf = _lamp(Vector3(0, -0.05, 0.004), str(legends[1]))
+	lamp_sp = _lamp(Vector3(0, 0.05, 0.004), str(legends[0]), fleet)
+	lamp_sf = _lamp(Vector3(0, -0.05, 0.004), str(legends[1]), fleet)
 	show_state(false, 0.0, false)
 
 
-func _lamp(at: Vector3, text: String) -> StandardMaterial3D:
+func _lamp(at: Vector3, text: String, fleet: bool) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	var bar := MeshInstance3D.new()
-	bar.mesh = Kit.box(Vector3(0.034, 0.005, 0.002))
+	if fleet:
+		bar.mesh = FleetThrottle.lens(.034,.002,.005)
+		bar.rotation.x = PI*.5
+	else:
+		bar.mesh = Kit.box(Vector3(0.034, 0.005, 0.002))
 	bar.material_override = m
 	bar.position = at + Vector3(0, 0, 0.003)
 	add_child(bar)

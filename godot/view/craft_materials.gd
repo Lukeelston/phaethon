@@ -29,6 +29,17 @@ static func webbing() -> StandardMaterial3D:
 	return _finish("webbing", 0.0, 0.85, 0.12)
 
 
+## The longitudinal walnut cut repeats along the boards. The finer finishes use a
+## square tile so the weave and casting marks retain their scale around corners.
+static func deck_finish(key: String) -> StandardMaterial3D:
+	match key:
+		"carbon": return _finish(key, 0.15, 0.40, 0.10)
+		"walnut": return _finish(key, 0.0, 0.42, 0.12)
+		"casting": return _finish(key, 0.08, 0.56, 0.14)
+		"porcelain": return _finish(key, 0.0, 0.25, 0.02)
+	return painted_metal()
+
+
 ## A finish in one flat colour, for parts that carry no vertex colours of their own.
 static func tinted(key: String, colour: Color) -> StandardMaterial3D:
 	var id := "%s:%s" % [key, colour.to_html()]
@@ -37,6 +48,7 @@ static func tinted(key: String, colour: Color) -> StandardMaterial3D:
 		match key:
 			"powder": base = powder_coat()
 			"leather": base = leather()
+			"carbon", "walnut", "casting", "porcelain": base = deck_finish(key)
 			"webbing": base = webbing()
 			"satin": base = satin()
 			"machined": base = machined()
@@ -85,6 +97,14 @@ static func _finish(key: String, metal: float, rough: float, contrast: float) ->
 		mat.uv1_triplanar = true
 		mat.uv1_triplanar_sharpness = 4.0
 		mat.uv1_scale = Vector3.ONE / 0.128
+		match key:
+			"walnut":
+				mat.uv1_scale = Vector3(4, 3, 1.3)
+				mat.normal_scale = .25
+			"carbon": mat.uv1_scale = Vector3.ONE * 11.0
+			"casting":
+				mat.uv1_scale = Vector3.ONE * 6.0
+				mat.normal_scale = .45
 		mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
 		_finishes[key] = mat
 		return mat
@@ -182,6 +202,88 @@ static func _knurl_point(i: int, row: int, radius: float, height: float) -> Vect
 	var angle := TAU * i / 32.0
 	var r := radius - (0.0012 if (i + row) % 2 == 0 or row == 0 or row == 4 else 0.0)
 	return Vector3(cos(angle) * r, -height * 0.5 + height * row / 4.0, sin(angle) * r)
+
+
+## Turned button head with a broached hex socket. Profile normals follow the crown
+## around the whole head; each of the six tool flats keeps its own normal.
+static func socket_screw(radius: float, finish: Color, compact := false) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var sides := 18 if compact else 24
+	# Radius and height in units of the head radius. The socket coordinates use
+	# its apothem, so its walls stay flat between the six internal corners.
+	var crown := PackedVector2Array([Vector2(.97, -.035), Vector2(1, .02), Vector2(1, .11),
+		Vector2(.985, .16), Vector2(.935, .235), Vector2(.84, .305),
+		Vector2(.72, .354), Vector2(.61, .37), Vector2(.515, .37)])
+	var socket := PackedVector2Array([Vector2(.398, .37), Vector2(.383, .363),
+		Vector2(.361, .331), Vector2(.352, .305), Vector2(.352, .04)])
+	if compact:
+		# At the scale of an MFD screw the missing intermediate bands are under 0.1 mm.
+		crown = PackedVector2Array([Vector2(1, -.035), Vector2(1, .12), Vector2(.92, .245),
+			Vector2(.74, .345), Vector2(.515, .37)])
+		socket = PackedVector2Array([Vector2(.398, .37), Vector2(.36, .325),
+			Vector2(.352, .285), Vector2(.352, .04)])
+	var circle := PackedVector3Array()
+	for i in sides:
+		var angle := TAU * i / sides
+		circle.append(Vector3(cos(angle), 0, sin(angle)))
+	var crown_normals := PackedVector2Array()
+	for i in crown.size():
+		var tangent := Vector2.ZERO
+		if i > 0:
+			tangent += crown[i - 1].direction_to(crown[i])
+		if i + 1 < crown.size():
+			tangent += crown[i].direction_to(crown[i + 1])
+		crown_normals.append(Vector2(tangent.y, -tangent.x).normalized())
+	crown_normals[-1] = Vector2(0,1)
+	st.set_color(finish)
+	for j in crown.size() - 1:
+		for i in sides:
+			for corner: Vector2i in [Vector2i(0,0), Vector2i(0,1), Vector2i(1,0),
+					Vector2i(0,1), Vector2i(1,1), Vector2i(1,0)]:
+				var row := j + corner.x
+				var ray := circle[(i + corner.y) % sides]
+				st.set_normal(ray * crown_normals[row].x + Vector3.UP * crown_normals[row].y)
+				st.add_vertex((ray * crown[row].x + Vector3.UP * crown[row].y) * radius)
+	# Use one quad per tool flat at each depth. A triangular fan joins its two
+	# corners to the adjacent sector of the turned crown.
+	var arc := sides / 6
+	for side in 6:
+		var first := side * arc
+		var left := circle[first]
+		var right := circle[(first + arc) % sides]
+		var flat := (left + right).normalized()
+		var hex_scale := 1.0 / left.dot(flat)
+		var land := PackedVector3Array()
+		for k in arc + 1:
+			land.append((circle[(first + k) % sides] * crown[-1].x + Vector3.UP * crown[-1].y) * radius)
+		for ray: Vector3 in [left, right]:
+			land.append((ray * socket[0].x * hex_scale + Vector3.UP * socket[0].y) * radius)
+		st.set_color(finish)
+		st.set_normal(Vector3.UP)
+		var triangles := [0,1,4, 1,5,4, 1,2,5, 2,3,5] if compact else [0,1,5, 1,2,5, 2,6,5, 2,3,6, 3,4,6]
+		for k: int in triangles:
+			st.add_vertex(land[k])
+		for j in socket.size() - 1:
+			var tangent := socket[j].direction_to(socket[j + 1])
+			var before := Vector2.LEFT if j == 0 else socket[j - 1].direction_to(socket[j])
+			var after := tangent if j + 2 == socket.size() else socket[j + 1].direction_to(socket[j + 2])
+			var start := (tangent + before).normalized()
+			var end := (tangent + after).normalized()
+			st.set_color(finish.darkened(.52) if j == socket.size() - 2 else finish)
+			for corner: Vector2i in [Vector2i(0,0), Vector2i(0,1), Vector2i(1,0),
+					Vector2i(0,1), Vector2i(1,1), Vector2i(1,0)]:
+				var p := socket[j + corner.x]
+				var n := start if corner.x == 0 else end
+				var ray := left if corner.y == 0 else right
+				st.set_normal(flat * n.y - Vector3.UP * n.x)
+				st.add_vertex((ray * p.x * hex_scale + Vector3.UP * p.y) * radius)
+		st.set_color(finish.darkened(.78))
+		var bottom := Vector3.UP * radius * socket[-1].y
+		_triangle(st, bottom, bottom + left * socket[-1].x * hex_scale * radius,
+			bottom + right * socket[-1].x * hex_scale * radius, Vector3.UP)
+	st.index()
+	return st.commit()
 
 
 ## Two head halves leave an actual recessed screwdriver slot. The tapered outer edge seats

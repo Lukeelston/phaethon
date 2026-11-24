@@ -101,8 +101,6 @@ func check_fleet(game, id: String, vr: bool) -> void:
 	check(id + " shows its own cab, seat and roof", hull.is_visible_in_tree() and hull.mesh == art.part(&"Cab")
 			and hull.get_node("FleetSeat").mesh == art.part(&"Seat")
 			and (game.canopy if vr else model.canopy).get_node("roof").mesh == art.part(&"Roof"))
-	if vr:
-		check_sight_lines(game, hull)
 	var closed: bool = model.nose_closed
 	model.set_nose_closed(not closed, game)
 	check(id + " service bonnet follows the nose switch", hull.get_node("ServiceBonnet").visible != closed)
@@ -143,25 +141,229 @@ func check_fleet(game, id: String, vr: bool) -> void:
 	game.inp = previous
 
 
-func check_sight_lines(game, hull: MeshInstance3D) -> void:
-	# Both eyes at seated height and a slightly lower head must see all five dials
-	# through the full authored cab, including the optional service cover.
+## Measure the cast lip on the installed binnacle, relative to each LCD's glass.
+func check_lcd_trays(cluster, id: String) -> void:
+	var frame_mesh: Mesh = cluster.get_node("binnacle").mesh
+	var surface := frame_mesh.generate_triangle_mesh()
+	var seated := true
+	for w in cluster.Layout.WINDOWS:
+		var frame: Transform3D = cluster.Kit.on_arc(w[1], w[2], 0, cluster.R)
+		var glass_z: float = w[5] + .0006
+		for side in [-1.0, 1.0]:
+			var ray := Vector3(side * (w[3] + .004), 0, glass_z + .015)
+			var hit := surface.intersect_ray(frame * ray, -frame.basis.z)
+			if hit.is_empty():
+				seated = false
+				continue
+			var height: float = (frame.affine_inverse() * Vector3(hit.position)).z - glass_z
+			seated = seated and height > .002 and height < .003
+	check(id + " both LCDs sit inside their rolled metal edges", seated)
+
+
+## The covers may be hollow. Trace under the middle of each skirt edge, where
+## the lens seats, and check that its illuminated crown stands clear of the grip.
+func check_grip_lenses(game, id: String) -> void:
+	var fitted := true
+	for lever: Node3D in game.lever_pivots:
+		var grip: MeshInstance3D = lever.get_node("PilotGrip")
+		var lens: MeshInstance3D = grip.get_node("GateIndicator")
+		# Probe in lens-space millimetres so the ray epsilon cannot skip its seat.
+		var faces := grip.mesh.get_faces()
+		var into_lens := lens.transform.affine_inverse()
+		for i in faces.size():
+			faces[i] = (into_lens * faces[i]) * 1000
+		var support := TriangleMesh.new()
+		support.create_from_faces(faces)
+		var bounds := lens.mesh.get_aabb()
+		for offset in [Vector2(.475, 0), Vector2(-.475, 0), Vector2(0, .475), Vector2(0, -.475)]:
+			var ray := bounds.get_center() + Vector3(offset.x * bounds.size.x, .045, offset.y * bounds.size.z)
+			var hit := support.intersect_ray(ray * 1000, Vector3.DOWN)
+			if hit.is_empty():
+				fitted = false
+				continue
+			var contact_y: float = hit.position.y
+			fitted = fitted and contact_y >= bounds.position.y * 1000 - .3 \
+					and contact_y < bounds.end.y * 1000 - .5
+	check(id + " both illuminated grip caps are seated and exposed", fitted)
+
+
+func check_throttle_boots(game, id: String) -> void:
+	var previous: Dictionary = game.inp.duplicate()
+	var seated: bool = game.throttle_gaiters.size() == 2
+	for demand in [Vector2(0, 1), Vector2(.5, .5), Vector2(1, 0)]:
+		game.inp.thrL = demand.x
+		game.inp.thrR = demand.y
+		game._place_camera(1.0)
+		for k in game.throttle_gaiters.size():
+			var boot: Skeleton3D = game.throttle_gaiters[k]
+			var fixed_joint := boot.find_bone("Gate")
+			var shaft_joint := boot.find_bone("Shaft")
+			seated = seated and fixed_joint >= 0 and shaft_joint >= 0
+			if fixed_joint < 0 or shaft_joint < 0:
+				continue
+			var lever: Node3D = game.lever_pivots[k]
+			var expected := Quaternion(Vector3.RIGHT, deg_to_rad(lerpf(30, -30, demand[k])))
+			seated = seated and boot.position.is_equal_approx(lever.position) \
+					and boot.get_bone_pose(fixed_joint).is_equal_approx(Transform3D.IDENTITY) \
+					and boot.get_bone_pose_rotation(shaft_joint).is_equal_approx(expected)
+			var cover := boot.get_node("Bellows") as MeshInstance3D
+			seated = seated and cover.skin != null and cover.get_node(cover.skeleton) == boot
+	game.inp = previous
+	game._place_camera(1.0)
+	check(id + " boot skirts stay on the gate and both necks follow independent lever travel", seated)
+
+
+func check_flight_deck(game, id: String) -> void:
+	var cluster = game.dashboard
+	var meter = game.aux_meter
+	if id == Sim.PilotCraft.STANDARD:
+		check("base cockpit uses the original gauge body and layout", meter == null and cluster.flight_deck == null and game.throttle_gaiters.is_empty()
+				and cluster.gauges == cluster.Layout.GAUGES and not game.interior.has_node("SillFittings")
+				and cluster.get_node("binnacle").mesh == cluster.Interior._hd_mesh(cluster.BODY, "Binnacle"))
+		return
+	check(id + " has its own dial layout, side fittings and auxiliary instrument",
+			cluster.flight_deck.id == id and cluster.gauges != cluster.Layout.GAUGES
+			and game.interior.has_node("SillFittings") and meter.id == id)
+	check_lcd_trays(cluster, id)
+	check_throttle_boots(game, id)
+	check_grip_lenses(game, id)
+	if id != Sim.PilotCraft.ORRERY:
+		var housing: MeshInstance3D = meter.get_node("Case")
+		var surface := housing.mesh.generate_triangle_mesh()
+		var supported := true
+		for side in [-1, 1]:
+			for end in [-1, 1]:
+				var corner := Vector3(side * meter.card_size.x * .5, end * meter.card_size.y * .5, .01)
+				var hit := surface.intersect_ray(housing.transform.affine_inverse() * corner, Vector3.DOWN)
+				supported = supported and not hit.is_empty() and hit.normal.y > .99
+		check(id + " supports all four corners of the meter card on its flat face", supported)
+	var welt := game.interior.get_node_or_null("SegmentedCoaming/StitchedWelt") as MeshInstance3D
+	var left := 0
+	var right := 0
+	if welt and welt.mesh.get_surface_count() == 2:
+		var thread_vertices := welt.mesh.surface_get_arrays(1)[Mesh.ARRAY_VERTEX] as PackedVector3Array
+		for point in thread_vertices:
+			if point.x < -.28:
+				left += 1
+			if point.x > .28:
+				right += 1
+	check(id + " has raised thread along both padded cheeks", left > 100 and right > 100)
+	# Probe the assembled screw, since a high backing plate can hide a perfectly good socket.
+	var radial := .0022 if id == Sim.PilotCraft.ORRERY else .003
+	var screw_centre := Vector3(0,.073,.003) if id == Sim.PilotCraft.ORRERY else Vector3(.086,.0543,-.0015)
+	var hardware: MeshInstance3D = meter.get_node("RimHardware")
+	# TriangleMesh's intersection tolerance can skip sub-millimetre facets at game scale.
+	var millimetres := hardware.mesh.get_faces()
+	for i in millimetres.size():
+		millimetres[i] *= 1000
+	var surface := TriangleMesh.new()
+	surface.create_from_faces(millimetres)
+	var origin := (screw_centre + Vector3.BACK * .01 + Vector3.UP * .00011) * 1000
+	var bottom := surface.intersect_ray(origin,Vector3.FORWARD)
+	var crown := surface.intersect_ray(origin + Vector3.RIGHT * radial * 1000 * .57,Vector3.FORWARD)
+	check(id + " meter screws have a recessed drive below the crown", not bottom.is_empty() and not crown.is_empty()
+			and crown.position.z - bottom.position.z > radial * 1000 * .25)
+	var before: Array = []
+	meter.sync(0, [0,1], [0,1], -20, 0)
+	for cursor in meter.cursors:
+		before.append(cursor.transform)
+	check(id + " instrument lighting follows the battery", is_zero_approx(meter.card_material.emission_energy_multiplier))
+	# Drive the opposite readings through the same HUD update used in flight.
+	game._read_g()
+	game.sim.pod.th = PI / 2
+	game.inp.brkL = 1.0
+	game.inp.brkR = 0.0
+	game.craft.cable_strain.assign([1.0, 0.0])
+	game.g_turn = 20.0
+	game.startup.park = false
+	game.startup.power = 1.0
+	game._update_hud()
+	for i in meter.cursors.size():
+		check(id + " live indicator responds " + str(i), not meter.cursors[i].transform.is_equal_approx(before[i]))
+	check(id + " restores its instrument lighting", meter.card_material.emission_energy_multiplier > .1)
+	var previous_light: String = game.light_preset
+	for preset in ["afternoon", "twilight"]:
+		game.light_preset = preset
+		game._update_hud()
+		check("%s auxiliary illumination matches the main panel at %s" % [id, preset],
+				is_equal_approx(meter.card_material.emission_energy_multiplier, cluster.lamps.backlight.a))
+	game.light_preset = previous_light
+	game._update_hud()
+	check(id + " lights the printed graduations separately from the card stock",
+			meter.card_material.emission_texture != null and meter.card_material.emission_texture != meter.card_material.albedo_texture)
+	if id == Sim.PilotCraft.KILN:
+		meter.sync(0,[0,0],[1,1],0,1)
+		check("load pointers can respond independently", meter.cursors[0].position.x > .05
+				and meter.cursors[1].position.x > .05 and is_equal_approx(meter.cursors[1].position.x,before[1].origin.x))
+	if id == Sim.PilotCraft.ORRERY:
+		check("compass reads north with the north-up map", is_zero_approx(meter.cursors[0].rotation.z))
+	check_sight_lines(game)
+	# A long status and a two-line checklist share the strip with the repair hint or step rail.
+	for key in ["progress", "mach", "footer", "feat"]:
+		var label: Label3D = cluster.labels[key]
+		var saved := label.text
+		for message in ["CHECK THE STARBOARD TURBINE AND RESET THE IGNITION BEFORE RESTARTING", "ENGINE START CHECKLIST\nSTARBOARD TURBINE READY", "READY"]:
+			cluster._strip_text(label, message)
+			var font := label.font if label.font else ThemeDB.fallback_font
+			var bounds := font.get_multiline_string_size(message, HORIZONTAL_ALIGNMENT_CENTER, -1, label.font_size) * label.pixel_size
+			check("%s %s fits its LCD row" % [id, key], bounds.x <= .3661 and bounds.y <= (.0311 if key == "progress" else .0251))
+		check("%s %s restores full type size" % [id, key], is_equal_approx(label.pixel_size, cluster.PX))
+		cluster._strip_text(label, saved)
+
+
+func check_sight_lines(game) -> void:
+	var cluster = game.dashboard
+	var hull: MeshInstance3D = game.shell.get_node("PodHull")
+	var obstacles := [hull, game.canopy.get_node("roof"), game.interior.get_node("SegmentedCoaming"),
+			game.interior.get_node("Dashboard"), game.interior.get_node("SillFittings"), game.interior.get_node("SegmentedCoaming/StitchedWelt"), cluster.get_node("binnacle")]
+	for name in ["FleetSeat","ServiceBonnet"]:
+		if hull.has_node(name):
+			obstacles.append(hull.get_node(name))
+	obstacles.append_array(game.aux_meter.find_children("*","MeshInstance3D",true,false))
+	var targets: Array[Vector3] = []
+	var card_targets: Array[Vector3] = []
+	var meter = game.aux_meter
+	for x in [-.46, -.25, 0.0, .25, .46]:
+		for y in [-.45, -.25, 0.0, .25, .45]:
+			if meter.id == Sim.PilotCraft.ORRERY and Vector2(x,y).length() > .47:
+				continue
+			card_targets.append(meter.to_global(Vector3(x * meter.card_size.x, y * meter.card_size.y, .001)))
+	for window in cluster.Layout.WINDOWS:
+		var xf: Transform3D = cluster.Kit.on_arc(window[1],window[2],0,cluster.R)
+		for x in [-.96, 0.0, .96]:
+			for y in [-.82, 0.0, .82]:
+				targets.append(cluster.to_global(xf * Vector3(x * window[3],y * window[4],window[5] + .0014)))
+	for g: Dictionary in cluster.gauges:
+		var frame: Transform3D = cluster.Kit.on_arc(g.x,g.y,0,cluster.R)
+		for offset: Vector2 in [Vector2(-.55,.20),Vector2(.55,.20),Vector2(0,.65),Vector2(0,-.55)]:
+			targets.append(cluster.to_global(frame * Vector3(offset.x*g.rf,offset.y*g.rf,g.face+.003)))
+	# Also trace to the lower status strips, points counter and two heel trays.
+	# A high undertray can hide these even when every gauge above it is visible.
+	for x in [-.32,-.17,0.0,.17,.32]:
+		var at: Transform3D = cluster.Kit.on_arc(x,-.125,.02,cluster.R)
+		targets.append(cluster.to_global(at.origin))
+	for x in [-.20,.20]:
+		targets.append(game.shell.to_global(Vector3(x,.16,-.16)))
+	for group in [game.interior,game.slide_switch,game.mode_switch]:
+		for label: Label3D in group.find_children("*","Label3D",true,false):
+			if label.is_visible_in_tree() and not label.text.is_empty():
+				targets.append(label.global_position)
 	var seen := true
-	var obstacles := [hull, hull.get_node("FleetSeat"), hull.get_node("ServiceBonnet"),
-			game.canopy.get_node("roof"), game.interior.get_node("SegmentedCoaming")]
 	for fitting: MeshInstance3D in obstacles:
 		var surface := fitting.mesh.generate_triangle_mesh()
-		for eye_x in [-0.033, 0.033]:
-			for drop in [0.0, 0.04]:
-				var eye := fitting.to_local(game.shell.to_global(game.EYE + Vector3(eye_x, -drop, 0)))
-				for dial_x in [-0.212, -0.116, 0.0, 0.116, 0.212]:
-					for dial_y in [0.0, 0.046]:
-						var dial := fitting.to_local(game.dashboard.to_global(Vector3(dial_x, dial_y, 0.01)))
-						var hit := surface.intersect_ray(eye, eye.direction_to(dial))
-						if hit and eye.distance_to(hit.position) < eye.distance_to(dial) - 0.002:
-							seen = false
-							print("Sight line blocked ", game.sim.P.vehicle, " ", fitting.name, " dial ", dial_x, " ", dial_y)
-	check(game.sim.P.vehicle + " left and right eye can see all five dials", seen)
+		for eye_x in [-.033,.033]:
+			for drop in [0.0,.04]:
+				var eye := fitting.to_local(game.shell.to_global(game.EYE+Vector3(eye_x,-drop,0)))
+				var samples := targets.duplicate()
+				if not meter.cursors.has(fitting.get_parent()):
+					samples.append_array(card_targets)
+				for target in samples:
+					var dial := fitting.to_local(target)
+					var hit := surface.intersect_ray(eye,eye.direction_to(dial))
+					if hit and eye.distance_to(hit.position) < eye.distance_to(dial)-.002:
+						seen = false
+						print("Sight line blocked ",game.sim.P.vehicle," ",fitting.name," to ",cluster.to_local(target))
+	check(game.sim.P.vehicle + " both eyes see the meters, displays, console legends and footwells at both heights",seen)
 
 
 func _run() -> void:
@@ -216,6 +418,7 @@ func _run() -> void:
 			if game.craft.Fleet.supports(id):
 				check_fleet(game, id, vr)
 			if vr:
+				check_flight_deck(game, id)
 				check("the pilot sees the selected cabin", (game.shell.find_child("ShrikePlate", true, false) != null) == is_shrike)
 				check("tow instrument matches the selection", (game.tow_meter != null) == is_shrike)
 				if is_shrike:
