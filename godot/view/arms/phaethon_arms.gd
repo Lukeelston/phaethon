@@ -1,4 +1,4 @@
-## A pair of retracting arc projectors in the webs between the Phaethon's intake bells.
+## Twin arc projectors on folding elevators in the Phaethon's engine noses.
 ## craft.phaethon_arms() supplies this rig on first arm in both the flat and the VR view.
 ## The two engines move independently; all poses, including the mouths, are engine-local.
 extends RefCounted
@@ -6,10 +6,15 @@ extends RefCounted
 const Livery := preload("res://view/livery.gd")
 const Finishes := preload("res://view/craft_materials.gd")
 const Metal := preload("res://view/arms/phaethon_barrel.gdshader")
-const FACE := Vector3(0, 0.255, -4.008)
-const DOOR_RADIUS := 0.145
+const Kit := preload("res://view/mesh_kit.gd")
+const PIVOT := Vector3(0, 0.21, -3.29)
+const LINK_LENGTH := 1.65
+const HINGE_SPREAD := 0.37
+const STOW_LIFT := 0.13
+const FULL_LIFT := 1.57
 const MOUTH_Z := -0.96
-const STOW_Z := 1.035
+const STOW_Z := 0.42
+const FULL_Z := -0.91
 const RIM_STEPS := 16
 const IRON := Color(0.16, 0.19, 0.22)
 const STEEL := Color(0.47, 0.53, 0.56)
@@ -17,7 +22,8 @@ const BRONZE := Color(0.47, 0.27, 0.12)
 const WELL := Color(0.025, 0.032, 0.038)
 const CERAMIC := Color(0.30, 0.34, 0.37)
 
-var _doors: Array[MeshInstance3D] = []
+var _links: Array[MeshInstance3D] = []
+var _carriages: Array[MeshInstance3D] = []
 var _barrels: Array[MeshInstance3D] = []
 var _ports: Array[Marker3D] = []
 var _metal: ShaderMaterial
@@ -37,18 +43,20 @@ func build(engines: Array[Node3D]) -> void:
 	_metal = ShaderMaterial.new()
 	_metal.shader = Metal
 	_metal.set_shader_parameter("heat", heat)
-	var socket := _socket()
-	var leaf := _shutter()
+	var bed := _cassette()
+	var link := _link()
+	var receiver := _receiver()
 	var barrel := _projector()
 	for engine in engines:
-		var bay := _mount(engine, "PhaethonNoseBay", socket, Finishes.machined())
-		bay.position = FACE
-		for sign_y: float in [1.0, -1.0]:
-			var door := _mount(bay, "UpperIris" if sign_y > 0 else "LowerIris", leaf, Finishes.painted_metal())
-			door.position.y = sign_y * DOOR_RADIUS
-			door.rotation.z = 0.0 if sign_y > 0 else PI
-			_doors.append(door)
-		var tube := _mount(bay, "ArcProjector", barrel, _metal)
+		var bay := _mount(engine, "PhaethonNoseBay", bed, Finishes.machined())
+		bay.position = PIVOT
+		for z: float in [-HINGE_SPREAD, HINGE_SPREAD]:
+			var support := _mount(bay, "ForwardLink" if z < 0 else "AftLink", link, Finishes.machined())
+			support.position.z = z
+			_links.append(support)
+		var carriage := _mount(bay, "Breech", receiver, Finishes.painted_metal())
+		_carriages.append(carriage)
+		var tube := _mount(carriage, "ArcProjector", barrel, _metal)
 		_barrels.append(tube)
 		var mouth := Marker3D.new()
 		mouth.name = "Mouth"
@@ -63,16 +71,19 @@ func set_deploy(t: float) -> void:
 	if _ports.is_empty() or at == _deploy:
 		return
 	_deploy = at
-	# The enamel leaves fold aft into the cheeks first. The tube only crosses their
-	# plane once the doors are open. Reversing t gives precisely the same path back.
-	var angle := -0.5 * PI * smoothstep(0.0, 0.35, at)
-	var extension := smoothstep(0.30, 1.0, at)
-	for i in _doors.size():
-		var base := Basis.IDENTITY if i % 2 == 0 else Basis(Vector3.BACK, PI)
-		_doors[i].basis = base * Basis(Vector3.RIGHT, angle)
+	# Equal-length front and rear links keep the carriage level. Drive its rise directly
+	# so the last part of the motion still changes the silhouette from the tow pod.
+	var travel := at + 0.55 * at * (1.0 - at) * exp(-4.0 * at)
+	var rise := lerpf(STOW_LIFT, FULL_LIFT, travel)
+	var angle := asin(rise / LINK_LENGTH)
+	var carriage_position := Vector3(0.0, rise, LINK_LENGTH * cos(angle))
+	for link in _links:
+		link.rotation.x = -angle
+	for carriage in _carriages:
+		carriage.position = carriage_position
 	for tube in _barrels:
-		tube.position.z = lerpf(STOW_Z, 0.0, extension)
-		tube.visible = extension > 0.0
+		tube.position.z = lerpf(STOW_Z, FULL_Z, smoothstep(0.04, 0.98, at))
+		tube.visible = at > 0.0
 
 
 ## Global frames ordered port, starboard. -Z always points along that engine's heading.
@@ -113,15 +124,60 @@ static func _turn(st: SurfaceTool, rear: Vector2, front: Vector2, tint: Color, c
 			st.add_vertex(radial * point.x + Vector3.BACK * point.y)
 
 
-static func _socket() -> ArrayMesh:
-	var st := SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	_turn(st, Vector2(0.152, 0.145), Vector2(0.165, 0.024), IRON)
-	_turn(st, Vector2(0.165, 0.024), Vector2(0.159, 0), STEEL)
-	_turn(st, Vector2(0.159, 0), Vector2(0.147, 0), STEEL)
-	_turn(st, Vector2(0.147, 0), Vector2(0.139, 0.12), WELL)
-	st.index()
-	return st.commit()
+# The low seam stays on the engine. The painted roof above it is part of the moving
+# receiver, so the pilot sees the same physical assembly that carries the muzzle.
+static func _cassette() -> ArrayMesh:
+	# Guides straddle the two lift slots. Keep the front of the cassette behind
+	# the intake lip and leave the twin fans and their dividing web clear.
+	var parts := [
+		[Finishes.beveled_plate(Vector3(0.19, 0.045, 2.53), 0.018), Kit.at(Vector3(0, 0.292, 1.06)), WELL],
+	]
+	var lip := Finishes.beveled_plate(Vector3(0.083, 0.056, 2.53), 0.020)
+	for side: float in [-1.0, 1.0]:
+		parts.append([lip, Kit.at(Vector3(side * 0.272, 0.29, 1.06)), IRON])
+	return Kit.compound(parts, null, true)
+
+
+static func _link() -> ArrayMesh:
+	var parts := []
+	var cheek := Finishes.beveled_plate(Vector3(0.095, 0.18, LINK_LENGTH), 0.052)
+	var stiffener := Finishes.beveled_plate(Vector3(0.047, 0.070, LINK_LENGTH * 0.78), 0.023)
+	var bridge := Finishes.beveled_plate(Vector3(0.35, 0.15, LINK_LENGTH * 0.58), 0.050)
+	parts.append([bridge, Kit.at(Vector3(0, 0, LINK_LENGTH * 0.40)), IRON])
+	var pin := Kit.cyl(0.10, 0.10, 0.44, 12)
+	var cap := Kit.cyl(0.058, 0.058, 0.027, 12)
+	for side: float in [-1.0, 1.0]:
+		parts.append([cheek, Kit.at(Vector3(side * 0.17, 0, LINK_LENGTH * 0.5)), CERAMIC])
+		parts.append([stiffener, Kit.at(Vector3(side * 0.215, 0.013, LINK_LENGTH * 0.5)), STEEL])
+		for z: float in [0.0, LINK_LENGTH]:
+			parts.append([cap, Kit.at(Vector3(side * 0.223, 0, z), Vector3(0, 0, PI * 0.5)), BRONZE])
+	for z: float in [0.0, LINK_LENGTH]:
+		parts.append([pin, Kit.at(Vector3(0, 0, z), Vector3(0, 0, PI * 0.5)), IRON])
+	return Kit.compound(parts, null, true)
+
+
+static func _receiver() -> ArrayMesh:
+	var parts := [
+		[Finishes.beveled_plate(Vector3(0.54, 0.31, 1.70), 0.075), Kit.at(Vector3(0, 0.045, 0)), IRON],
+		[Finishes.beveled_plate(Vector3(0.59, 0.084, 1.82), 0.035), Kit.at(Vector3(0, 0.202, 0)), Livery.coat("engine")],
+		[Finishes.beveled_plate(Vector3(0.45, 0.175, 0.12), 0.036), Kit.at(Vector3(0, 0.05, 0.852)), STEEL],
+	]
+	# Recessed rear vent and two side wear strips catch light even when the coil is cold.
+	parts.append([Finishes.beveled_plate(Vector3(0.31, 0.10, 0.026), 0.010), Kit.at(Vector3(0, 0.06, 0.916)), WELL])
+	var vent := Finishes.beveled_plate(Vector3(0.045, 0.096, 0.040), 0.012)
+	for x: float in [-0.096, 0.0, 0.096]:
+		parts.append([vent, Kit.at(Vector3(x, 0.06, 0.923)), BRONZE])
+	# The aft casting flares over the shoulders of the intake. Its two enamel
+	# cheeks rise with the breech, presenting a broad rear face to the tow pod.
+	var cheek := Finishes.beveled_plate(Vector3(0.44, 0.11, 1.30), 0.047)
+	var end_cap := Finishes.beveled_plate(Vector3(0.37, 0.090, 0.10), 0.032)
+	var rail := Finishes.beveled_plate(Vector3(0.050, 0.058, 1.28), 0.017)
+	for side: float in [-1.0, 1.0]:
+		var tilt := Vector3(0, 0, side * 0.36)
+		parts.append([cheek, Kit.at(Vector3(side * 0.434, 0.285, 0.07), tilt), Livery.coat("engine")])
+		parts.append([end_cap, Kit.at(Vector3(side * 0.434, 0.278, 0.729), tilt), STEEL])
+		parts.append([rail, Kit.at(Vector3(side * 0.263, 0.094, -0.05)), STEEL])
+	return Kit.compound(parts, null, true)
 
 
 static func _projector() -> ArrayMesh:
@@ -151,41 +207,3 @@ static func _projector() -> ArrayMesh:
 		section = next
 	st.index()
 	return st.commit()
-
-
-## The upper cover, modelled about its top hinge. The opposite cover reuses it
-## turned 180 degrees. A small inset at the straight edge leaves a split line.
-static func _shutter() -> ArrayMesh:
-	var st := SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var coat := Livery.coat("engine")
-	var centre := Vector3(0, -DOOR_RADIUS + 0.002, 0.001)
-	for i in RIM_STEPS / 2:
-		var a := PI * i / (RIM_STEPS / 2)
-		var b := PI * (i + 1) / (RIM_STEPS / 2)
-		var va := Vector3(cos(a), sin(a), 0)
-		var vb := Vector3(cos(b), sin(b), 0)
-		var inner_a := centre + 0.137 * va
-		var inner_b := centre + 0.137 * vb
-		var outer_a := centre + 0.143 * va + Vector3.BACK * 0.004
-		var outer_b := centre + 0.143 * vb + Vector3.BACK * 0.004
-		_facet(st, centre, inner_a, inner_b, coat)
-		_facet(st, inner_a, outer_a, outer_b, coat)
-		_facet(st, inner_a, outer_b, inner_b, coat)
-		_facet(st, outer_a, outer_a + Vector3.BACK * 0.009, outer_b, IRON)
-		_facet(st, outer_b, outer_a + Vector3.BACK * 0.009, outer_b + Vector3.BACK * 0.009, IRON)
-		_facet(st, centre + Vector3.BACK * 0.013, outer_b + Vector3.BACK * 0.009, outer_a + Vector3.BACK * 0.009, IRON)
-	var left := centre + Vector3.LEFT * 0.137
-	var right := centre + Vector3.RIGHT * 0.137
-	_facet(st, left, right + Vector3.BACK * 0.013, right, IRON)
-	_facet(st, left, left + Vector3.BACK * 0.013, right + Vector3.BACK * 0.013, IRON)
-	st.index()
-	return st.commit()
-
-
-static func _facet(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, color: Color) -> void:
-	var normal := (c - a).cross(b - a).normalized()
-	for vertex in [a, b, c]:
-		st.set_normal(normal)
-		st.set_color(color)
-		st.add_vertex(vertex)
