@@ -2,10 +2,11 @@
 ## director's tunables shortened:
 ##   waits      no alarm before first_after at speed on a public road; and none while another holds traffic's
 ##              floor (a chase's craft in the racer's slot)
-##   alarm      after it: called, on the ground city nearest in a straight line that the pilot is not in; traffic's
-##              floor held ("raid"), so a chase is not ready to begin
+##   alarm      after it: called, on the ground city ahead (within 90 degrees of the way the craft goes) nearest in a
+##              straight line that the pilot is not in; traffic's floor held ("raid"), so a chase is not ready to begin
 ##   pick       an orbit entry nearer than any city is never picked; nor is the last raid's city, nor the city the
-##              pilot is in
+##              pilot is in; turned away from the nearest, one ahead is picked; with none ahead, the nearest; slow, the
+##              way it points decides
 ##   ticks      called and out of range, a commuter is lost every tick_every s; the floor still held
 ##   not reached  ... and at tick_cap, with the pilot not there, it is lost ("not reached"), the floor free; no more lost
 ##   arrive     an alarm with the pilot already in range: on the next frame, none lost, the pack (4, then one
@@ -36,6 +37,7 @@ func _initialize() -> void:
 	View.job_override = "none"
 	View.spot_override = "E3@9000"       # open highway, well clear of a crossing, 170 km and more from every city
 	View.best_dir = OS.get_user_data_dir().path_join("test_raids_")
+	DirAccess.remove_absolute(View.best_dir + "network.json")      # (the start city is not the last run's: net.from is the start's)
 	Outlook.pinned = true
 	Outlook.time = "afternoon"
 	Outlook.weather = "fair"
@@ -131,11 +133,26 @@ func _dist(v, k: int) -> float:
 	return Vector2(v.sim.pod.x, v.sim.pod.y).distance_to(Vector2(float(c.cx), float(c.cy)))
 
 
-## The ground city nearest the pilot in a straight line that the director may pick: not `last` (the last raid's
-## city), nor the one it is in (net.from, within arrive_r of its town). With exclude false, the nearest of all.
-func _nearest(v, last: int, exclude := true) -> int:
+## The way the craft goes, for the pick: its velocity; the way it points when slower than HEADING_BELOW.
+func _way(v) -> Vector2:
+	var P = v.sim.pod
+	var w := Vector2(P.vx, P.vy)
+	return w if w.length() >= v.raids.HEADING_BELOW else Vector2(cos(P.th), sin(P.th))
+
+
+## Is city k ahead: its centre within 90 degrees of the way the craft goes?
+func _ahead(v, k: int) -> bool:
+	var c: Dictionary = v.sim.cities[k]
+	return (Vector2(float(c.cx), float(c.cy)) - Vector2(v.sim.pod.x, v.sim.pod.y)).dot(_way(v)) > 0.0
+
+
+## The ground city the director may pick: not `last` (the last raid's city), nor the one the pilot is in (net.from,
+## within arrive_r of its town); of those ahead, the nearest in a straight line; none ahead, the nearest. With
+## exclude false, none is passed over; with ahead false, the nearest whichever way it lies.
+func _nearest(v, last: int, exclude := true, ahead := true) -> int:
 	var sim = v.sim
 	var best := -1
+	var best_ahead := -1
 	for k in sim.cities.size():
 		if String(sim.cities[k].get("kind", "")) == "orbit":
 			continue
@@ -143,7 +160,9 @@ func _nearest(v, last: int, exclude := true) -> int:
 			continue
 		if best < 0 or _dist(v, k) < _dist(v, best):
 			best = k
-	return best
+		if _ahead(v, k) and (best_ahead < 0 or _dist(v, k) < _dist(v, best_ahead)):
+			best_ahead = k
+	return best_ahead if ahead and best_ahead >= 0 else best
 
 
 ## The director's last raid's city (-1 before the first; and on a director that does not keep one).
@@ -198,7 +217,7 @@ func _run() -> void:
 	var pc = T._pod_as_car()
 	var ground: bool = R.city >= 0 and R.city < sim.cities.size() and String(sim.cities[R.city].get("kind", "")) != "orbit"
 	var not_in: bool = R.city != int(sim.net.from) or R._gap(R.city) > R.arrive_r
-	_check("%.2f s later the alarm: called (\"%s\") on %s (city %d; the nearest in a straight line %d), a ground city (%s) the pilot is not in (%s; it is %.0f km from its town); the floor \"%s\"; a chase was ready to begin (%s) and is not now (%s)" % [
+	_check("%.2f s later the alarm: called (\"%s\") on %s (city %d; the nearest ahead in a straight line %d), a ground city (%s) the pilot is not in (%s; it is %.0f km from its town); the floor \"%s\"; a chase was ready to begin (%s) and is not now (%s)" % [
 			took, R.state, sim.cities[R.city].name if ground else "?", R.city, nearest, ground, not_in, R._gap(R.city) / 1000.0 if ground else -1.0, T.race_state, chase_before, chase._ready_for_one()],
 		R.state == "called" and ground and not_in and R.city == nearest and T.race_state == "raid" and chase_before and not chase._ready_for_one())
 
@@ -211,7 +230,7 @@ func _run() -> void:
 	var Rr = sim.roads[road0]
 	var at := clampi(hint0 + dir0 * 80, 1, Rr.N - 2)
 	var last_city := _last(R)
-	var last_nearest: bool = last_city == R.city and R.city == _nearest(v, -1, false)
+	var last_nearest: bool = last_city == R.city and R.city == _nearest(v, -1)      # (the pick, were it not the last raid's)
 	sim.cities.append({"name": "PORT", "kind": "orbit", "biome": "space", "cx": Rr.px[at], "cy": Rr.py[at], "road": road0, "i": at})
 	var port: int = sim.cities.size() - 1
 	var port_nearest := true
@@ -225,14 +244,55 @@ func _run() -> void:
 	var want_far := _nearest(v, last_city)
 	var home := int(sim.net.from)
 	sim.respawn(home)                       # at its terminal: in it
-	var home_nearest: bool = _nearest(v, -1, false) == home
+	var home_nearest: bool = _nearest(v, -1, false, false) == home
 	var want_home := _nearest(v, last_city)
 	var past_home: int = R._pick()
 	_put_pilot(v, road0, hint0, dir0)       # (back where it was: the raid called is untouched)
-	_check("an orbit entry nearer than any city (%s, %.1f km) is passed over, and so is the last raid's city %s (%d; the nearest city %s): picked %d (want %d, in %.3f ms); in %s (%d), nearest of all (%s), it is passed over too: picked %d (want %d)" % [
+	_check("an orbit entry nearer than any city (%s, %.1f km) is passed over, and so is the last raid's city %s (%d; else the pick %s): picked %d (want %d, in %.3f ms); in %s (%d), nearest of all (%s), it is passed over too: picked %d (want %d)" % [
 			port_nearest, port_km, sim.cities[R.city].name, last_city, last_nearest, past_port, want_far, pick_ms, sim.cities[home].name, home, home_nearest, past_home, want_home],
 		port_nearest and last_nearest and past_port >= 0 and past_port < port and past_port != last_city and past_port == want_far
 			and home_nearest and past_home >= 0 and past_home != home and past_home != last_city and past_home == want_home and R.state == "called")
+	# turned away from the nearest city it may pick: the nearer one behind is not picked while one lies ahead
+	var near_k := _nearest(v, last_city, true, false)
+	var near_c: Dictionary = sim.cities[near_k]
+	var away := (Vector2(sim.pod.x, sim.pod.y) - Vector2(float(near_c.cx), float(near_c.cy))).normalized()
+	sim.pod.vx = away.x * SPEED
+	sim.pod.vy = away.y * SPEED
+	var near_behind: bool = not _ahead(v, near_k)
+	var want_ahead := _nearest(v, last_city)
+	var past_behind: int = R._pick()
+	var picked_ahead: bool = past_behind >= 0 and _ahead(v, past_behind)
+	# with none ahead, the nearest; and slow, the way it points decides (cities of the test's own: the real ones as orbit entries)
+	var real: Array = sim.cities
+	var here := Vector2(sim.pod.x, sim.pod.y)
+	var fwd := away
+	var side := Vector2(-fwd.y, fwd.x)
+	var made := []
+	for c in real:
+		var o: Dictionary = c.duplicate()
+		o["kind"] = "orbit"
+		made.append(o)
+	var a_at := here - fwd * 5000.0
+	var b_at := here - fwd * 9000.0 + side * 2000.0
+	var c_at := here + fwd * 40000.0
+	made.append({"name": "A", "biome": "test", "cx": a_at.x, "cy": a_at.y, "road": 0, "i": 0})       # 5 km behind
+	made.append({"name": "B", "biome": "test", "cx": b_at.x, "cy": b_at.y, "road": 0, "i": 0})       # 9 km behind
+	var ka: int = real.size()
+	sim.cities = made
+	var none_ahead: int = R._pick()
+	made[ka + 1] = {"name": "C", "biome": "test", "cx": c_at.x, "cy": c_at.y, "road": 0, "i": 0}      # 40 km ahead
+	var one_ahead: int = R._pick()
+	sim.pod.vx = 0.0
+	sim.pod.vy = 0.0
+	var th0: float = sim.pod.th
+	sim.pod.th = atan2(-fwd.y, -fwd.x)       # stopped, pointing back: A is ahead of it
+	var slow_back: int = R._pick()
+	sim.pod.th = th0
+	sim.cities = real
+	_put_pilot(v, road0, hint0, dir0)       # (back as it was)
+	_check("turned away from %s (city %d, the nearest it may pick, behind: %s): picked %d (want %d, the nearest ahead: %s); none ahead, the nearest (%d, want %d); one 40 km ahead and one 5 km behind, the one ahead (%d, want %d); stopped, pointing back, the one it points at (%d, want %d)" % [
+			near_c.name, near_k, near_behind, past_behind, want_ahead, picked_ahead, none_ahead, ka, one_ahead, ka + 1, slow_back, ka],
+		near_behind and past_behind != near_k and picked_ahead and past_behind == want_ahead and none_ahead == ka and one_ahead == ka + 1 and slow_back == ka and R.state == "called")
 
 	# ticks: off-screen, a commuter lost a second, up to the cap
 	var lost0: int = R.lost

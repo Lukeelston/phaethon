@@ -2,9 +2,9 @@
 ## docs/superpowers/specs/2026-11-24-network-raids-design.md). The director, after chase mode (view/network_chase.gd):
 ##   waiting   ""      a clock runs while one may start (a public road, not a shaft, at speed, and traffic's floor
 ##                     free: no street race or chase holding traffic.race_state): first_after s the first time
-##   called    an alarm: the ground city nearest in a straight line that is neither the one the pilot is in (net.from,
-##             while within arrive_r of its town) nor the last raid's; traffic's floor held ("raid"), so no racer or
-##             chase begins. Until the pilot is within arrive_r of its town zone it is not simulated: a commuter is
+##   called    an alarm: of the ground cities that are neither the one the pilot is in (net.from, while within
+##             arrive_r of its town) nor the last raid's, the nearest ahead in a straight line (within 90 degrees of the
+##             way the craft goes; none ahead, the nearest); traffic's floor held ("raid"), so no racer or chase begins. Until the pilot is within arrive_r of its town zone it is not simulated: a commuter is
 ##             lost every tick_every s; at tick_cap, not reached, it is lost
 ##   on        arrived: the pack is placed in the town zone (R.mode == 0) on the city's road, over its lanes, as
 ##             traffic's own cars (hostile: kept wherever they are, never turned round). It ends when no raider is
@@ -30,6 +30,7 @@ const RAIDER_VISUAL := Traffic.DEMON     # the raiders' model (a demon's, until 
 const READY_V := 900.0 / MPH             # m/s: "at speed", chase's figure
 const ZONE_STEP := 20                    # samples (480 m) between the town zone's points its distance is read from
 const CLEAR_OF_PILOT := 1500.0           # m: no raider is put down nearer the pilot than this (unless the zone has no room)
+const HEADING_BELOW := 30.0              # m/s: slower, the pick looks the way the craft points, not the way it goes
 
 static var enabled := false      # raids
 static var pinned := false       # a test or a render chose it: the saved choice does not replace it
@@ -167,23 +168,38 @@ func _alarm() -> bool:
 	return true
 
 
-## The raid's city: the ground city nearest the pilot in a straight line (to its centre; an orbit entry is never
-## one), not the city the pilot is in (net.from, while within arrive_r of its town), and not the last raid's.
-## -1 for none. Sets called_m. (Five distances: nothing to see in a frame.)
+## The raid's city, of the ground cities (an orbit entry is never one) that are not the one the pilot is in
+## (net.from, while within arrive_r of its town) nor the last raid's: the nearest in a straight line (to its centre)
+## of those ahead, its bearing within 90 degrees of the way the craft goes (its velocity; the way it points when
+## slower than HEADING_BELOW), so it is not sent to one behind it; none ahead, the nearest. -1 for none. Sets
+## called_m. (Five distances: nothing to see in a frame.)
 func _pick() -> int:
-	var at := Vector2(sim.pod.x, sim.pod.y)
+	var P = sim.pod
+	var at := Vector2(P.x, P.y)
+	var way := Vector2(P.vx, P.vy)
+	if way.length() < HEADING_BELOW:
+		way = Vector2(cos(P.th), sin(P.th))
 	var best := -1
 	var bd := INF
+	var ahead := -1
+	var ad := INF
 	for k in sim.cities.size():
 		var c: Dictionary = sim.cities[k]
 		if String(c.get("kind", "")) == "orbit" or k == _last_city:
 			continue
 		if k == int(sim.net.from) and _gap(k) <= arrive_r:
 			continue
-		var d := at.distance_to(Vector2(float(c.cx), float(c.cy)))
+		var to := Vector2(float(c.cx), float(c.cy)) - at
+		var d := to.length()
 		if d < bd:
 			bd = d
 			best = k
+		if to.dot(way) > 0.0 and d < ad:
+			ad = d
+			ahead = k
+	if ahead >= 0:
+		called_m = ad
+		return ahead
 	called_m = bd
 	return best
 
