@@ -10,12 +10,23 @@
 ##   "vr"    the headset's menu: the pilot stands on a starter's stand in the middle of the road, the
 ##           menu board in front of him, the word over it and a craft on either hand, nose in
 ##   "flat"  the desktop menu: one fixed camera between the two craft, composed as the cover is
+## And a turntable (Luke, 2026-11-23: "when you choose a vehicle, it rotates in front of the player"): a
+## round deck on the apron carrying the pilot craft the menus have chosen, in the paint the next flight
+## will wear, turning a full turn in half a minute, its name on a sign behind it. While a craft is being
+## chosen (a row or button that changes it has the highlight a moment) it rises out of the road and the
+## craft comes down onto it, swung round fast, then settling to the slow turn; a craft chosen then comes
+## down the same way. The rest of the time it is put away under the road and the title is as it was. In
+## the headset it stands straight ahead, behind the menu board, which swings aside for it
+## (release/vr_menu.gd); on the desktop it stands beside the cover's picture and the camera turns to it
+## (release/menu.gd).
 ## The menu board and camera are ready immediately. The stage assembles behind them over several frames.
 ## Leaving the menu frees the stage, including an unfinished build.
 ##   var stage := TitleStage.make("vr"); add_child(stage)      null with `enabled` off (timings, tests), or the game
 ##                                    started with -- --no-title: the menus are then exactly as they were
 ##   stage.place(eye, forward)        VR: stand it under the pilot's eye, facing the way he faces
 ##   stage.frame(art, window)         flat: aim the camera so the picture's middle is that part of the window's
+##   stage.show_craft(id)             put that pilot craft on the turntable (built over the next frames)
+##   stage.attend(on)                 a craft is being chosen: bring the turntable up (flat: and turn the camera to it), or put it away
 extends Node3D
 
 const Letters := preload("res://release/title_letters.gd")
@@ -27,6 +38,10 @@ const Accent := preload("res://view/accent.gd")
 const Shrike := preload("res://view/shrike_airframe.gd")
 const Outlook := preload("res://view/outlook.gd")
 const Shaft := preload("res://view/network_shaft.gd")
+const Pilot := preload("res://sim/pilot_craft.gd")
+const Fleet := preload("res://view/fleet_airframe.gd")
+const Settings := preload("res://release/game_settings.gd")
+const Chase := preload("res://view/network_chase.gd")
 
 const EYE := 1.6                 # the pilot's eye over the stand's deck, m: what the scene is laid out round
 const STAND_H := 2.0             # the stand's deck over the road (from it the craft's painted tops show, as on the cover)
@@ -57,9 +72,28 @@ const FLAT_BERTHS := [Vector3(-4.9, 0.0, -8.0), Vector3(5.5, 0.0, -9.6)]      # 
 const IDLE := 0.34               # the craft's levers: enough to spin the fans, light the links and stand a flame in each pipe
 const BOB := 0.035               # m: how far a hovering craft rides up and down
 const BOARD_FIRST_USEC := 50000  # Give the first menu frame and immediate input priority over any preview file reads.
+# the turntable
+const SHOW_AT := {"vr": Vector3(0.0, 0.0, -26.5), "flat": Vector3(40.0, 0.0, 8.0)}      # its middle: the headset's straight ahead, behind the board; the desktop's beside the cover's picture, out of it
+const SHOW_R := 16.2             # the deck's radius, m: the longest craft (the Orrery's 17 m tow) reaches 15.5 m from its middle
+const SHOW_H := 0.32             # the deck's top over the road
+const SHOW_SINK := 0.5           # put away, it lies this far down: under the road, out of sight (the title is then as it was)
+const SHOW_UP_S := 0.9           # s to bring it up (the deck rises, then the craft comes down onto it) ...
+const SHOW_DOWN_S := 0.6         # ... and to put it away
+const SHOW_SPIN := 12.0          # degrees a second: a turn in half a minute
+const SHOW_WHIP := 240.0         # ... a craft just chosen comes round this much faster than that ...
+const SHOW_WHIP_S := 1.2         # ... settling to the slow turn over this long, s
+const SHOW_DROP := 2.6           # m: ... and comes down onto the deck from this high ...
+const SHOW_DROP_S := 0.7         # ... over this long
+const SHOW_KEEP := 4             # craft already built kept (hidden) for going back to: each is its own meshes
+const SHOW_EYE := Vector3(6.7, 11.0, 1.3)      # the desktop's camera when it has turned to the turntable (34 m off it, 11 up) ...
+const SHOW_LOOK := 2.0           # ... looking at this height over its middle ...
+const SHOW_ACROSS := 60.0        # ... through this wide a lens across the picture: the longest craft's reach is at most 27 degrees off its middle from there, however it is turned
+const SHOW_TURN_S := 0.8         # ... turning there (and back) over this long
+const PLATE_SIZE := {"vr": 2.4, "flat": 1.7}      # the name sign behind the turntable: read from 48 m in the headset, 47 m on the desktop
 
 static var enabled := true       # (timings and tests: off, the menus are as they were before the title)
 static var _display_bodies := {} # port and starboard Phaethon fairings in the box-cover paint
+static var _show_bodies := {}    # ... and the turntable's, in each paint it has shown ("ember/-1", ...): built once, not on every menu entry
 const CLOUD_COVER := "res://art/sky/cloud_cover.png"
 
 var layout := "vr"
@@ -74,6 +108,15 @@ var word: Node3D                 # the letters' place: scaled to their cap heigh
 var craft: Array = []            # each {holder, model, sim, berth, inp, phase, rest, owed (s since its parts were last posed)}
 var stand: MeshInstance3D        # (the headset's layout only)
 var camera: Camera3D             # (the desktop's layout only)
+var turntable_base: Node3D       # the turntable: its fixed ring, the deck and the name sign (sunk out of sight when put away)
+var turntable: Node3D            # ... its deck, which turns and carries the craft on show
+var plate: Node3D                # ... its name sign, behind it, facing whoever looks at it
+var reveal := 0.0                # 0 put away, 1 up with the craft on it (and between, coming or going)
+var showcase := {}               # the craft on show: an entry as `craft`'s are, with its "key" (vehicle/livery)
+var show_vehicle := ""           # what the turntable is to hold (the menus' pilot craft) ...
+var show_livery := ""            # ... in this paint
+var attention := 0.0             # the desktop: 0 the cover's view, 1 the camera turned to the turntable
+var attend_wanted := false
 signal build_frame
 
 var build_ms := 0                # wall time from menu entry to the full, animated scene
@@ -91,6 +134,14 @@ var _frame := 0
 var _shrike_was_loaded := false
 var _accents_before := {}
 var _globals_at := Basis.IDENTITY
+var _show_cache := {}            # key -> a built entry (hidden unless on show)
+var _show_order := []            # ... the keys, the longest unused first
+var _show_job := ""              # the key being built ("" when none)
+var _whip := 0.0                 # 1 when a craft has just come on show, falling to 0
+var _drop := 0.0                 # ... the same, for its coming down onto the deck
+var _frame_art := Rect2()        # the desktop: the window's part the picture is composed in ...
+var _frame_window := Vector2.ZERO
+var _frame_across := 100.0       # ... and its lens there
 
 
 ## What the craft model asks of the view it is built in: a material, and where a place in its sim is.
@@ -183,6 +234,12 @@ func _assemble() -> void:
 		var nose: Vector3 = _radial(VR_BERTHS[i][0], VR_BERTHS[i][1]) if layout == "vr" else FLAT_BERTHS[i]
 		await _add_craft("phaethon" if i == 0 else "shrike", "boxcover" if i == 0 else "ember", "speed" if i == 0 else "starfighter", nose, az)
 	_sync_craft(0.0)
+	await build_frame
+	_slice_name = "turntable"
+	_build_turntable()
+	if show_vehicle.is_empty():
+		show_craft(Settings.selected_craft())
+	await _build_showcase(false)
 	build_ms = ceili((Time.get_ticks_usec() - _entry_usec) / 1000.0)
 	art_ready = true
 
@@ -761,6 +818,23 @@ static func strap_3d(wide: float) -> Node3D:
 ## (view/livery.gd), flown by nobody: a sim that is never stepped holds it where the range would
 ## spawn it, and the game's own model is posed from that each frame, as a flight's is.
 func _add_craft(vehicle: String, livery: String, handling: String, nose: Vector3, az: float) -> void:
+	# the holder's +x is the craft's nose (the range runs along +x): turn it to face the pilot, and stand its
+	# pod so far back that the engines' noses come to `nose`
+	var heading := Basis(Vector3.UP, -az) * Vector3(0.0, 0.0, 1.0)
+	var place := func(holder: Node3D, reach: float) -> void:
+		holder.basis = Basis(heading, Vector3.UP, heading.cross(Vector3.UP))
+		holder.position = nose - heading * reach
+	var c := await _build_craft(vehicle, livery, handling, world, "craft_" + vehicle, place, _display_body)
+	c.phase = float(craft.size()) * 2.1
+	(c.holder as Node3D).show()
+	craft.append(c)
+
+
+## A craft standing at idle under `parent`, in a holder named `holder_name` that `place` stands (it is
+## given the holder and how far the engines' intake lips are ahead of the pod's middle, along the holder's
+## +x), built over the frames that follow and left hidden. `reuse_body`: the Phaethon's engine fairings
+## to use (title_stage._display_body: the cover's, in its own paint), or none to build its own.
+func _build_craft(vehicle: String, livery: String, handling: String, parent: Node3D, holder_name: String, place: Callable, reuse_body := Callable()) -> Dictionary:
 	_building_vehicle = vehicle
 	_slice_name = vehicle + " bodywork and engine parts"
 	var sim = SimScript.new({"track": "range", "vehicle": vehicle, "handling": handling})
@@ -777,22 +851,18 @@ func _add_craft(vehicle: String, livery: String, handling: String, nose: Vector3
 	for e in [sim.eL, sim.eR]:
 		e.thrust = IDLE
 		e.heat = 0.36
-	# the holder's +x is the craft's nose (the range runs along +x): turn it to face the pilot, and stand its
-	# pod so far back that the engines' noses come to `nose`
-	var heading := Basis(Vector3.UP, -az) * Vector3(0.0, 0.0, 1.0)
 	var reach: float = sim.eL.x - sim.pod.x + 3.85      # the pod's middle to the intake lips
 	var holder := Node3D.new()
-	holder.name = "craft_" + vehicle
-	holder.basis = Basis(heading, Vector3.UP, heading.cross(Vector3.UP))
-	holder.position = nose - heading * reach
-	world.add_child(holder)
+	holder.name = holder_name
+	place.call(holder, reach)
+	parent.add_child(holder)
 	holder.hide()
 	_flight_livery = Livery.current
 	Livery.current = livery      # (a craft's colours are in its meshes: built in its livery, then back)
 	var model = ModelScript.new()
 	model.name = "model"
 	holder.add_child(model)
-	await model.build(berth, _pause_craft.bind(livery), _display_body)
+	await model.build(berth, _pause_craft.bind(livery), reuse_body)
 	Livery.current = _flight_livery
 	# a pilot in the seat: helmet, visor, shoulders (the cover's; in a flight the pilot is you)
 	var pilot := MeshInstance3D.new()
@@ -806,15 +876,22 @@ func _add_craft(vehicle: String, livery: String, handling: String, nose: Vector3
 	pilot.material_override = Kit.polished(0.15, 0.32)
 	pilot.position = Vector3(0.0, 0.09, 0.62)      # the head where VRCockpit.EYE is in the pod
 	model.pod.add_child(pilot)
-	holder.show()
-	craft.append({"holder": holder, "model": model, "sim": sim, "berth": berth, "inp": {"brkL": 0.0, "brkR": 0.0, "park": false},
-		"phase": float(craft.size()) * 2.1, "rest": holder.position, "owed": 0.0})
+	return {"holder": holder, "model": model, "sim": sim, "berth": berth, "inp": {"brkL": 0.0, "brkR": 0.0, "park": false},
+		"phase": 0.0, "rest": holder.position, "owed": 0.0, "reach": reach}
 
 
 static func _display_body(out: float) -> ArrayMesh:
 	if not _display_bodies.has(out):
 		_display_bodies[out] = ModelScript._engine_body(out, false)      # (as the model's own: its rudder and stabiliser are parts that turn)
 	return _display_bodies[out]
+
+
+## The turntable Phaethon's fairing in the paint it is being built in (Livery.current while it builds).
+static func _show_body(out: float) -> ArrayMesh:
+	var key := "%s/%d" % [Livery.current, int(out)]
+	if not _show_bodies.has(key):
+		_show_bodies[key] = ModelScript._engine_body(out, false)
+	return _show_bodies[key]
 
 
 func _pause_craft(part: String, paint: String) -> void:
@@ -828,12 +905,19 @@ func _pause_craft(part: String, paint: String) -> void:
 
 func _sync_craft(delta: float) -> void:
 	_frame += 1
-	for i in craft.size():
-		var c: Dictionary = craft[i]
+	var all := craft.duplicate()
+	if not showcase.is_empty() and reveal > 0.0:      # (put away, it is not posed: the two either side keep their own rhythm)
+		all.append(showcase)
+	for i in all.size():
+		var c: Dictionary = all[i]
 		# idling: the craft rides its repulsors (every frame: the whole of it moves as one) ...
-		(c.holder as Node3D).position = (c.rest as Vector3) + Vector3(0.0, BOB * sin(_clock * 1.1 + float(c.phase)), 0.0)
+		var lift := 0.0
+		if is_same(c, showcase):      # (... and the one on the turntable comes down onto it as it is brought up, or as it is chosen, slowing as it lands)
+			var coming := 1.0 - smoothstep(0.4, 1.0, reveal)
+			lift = SHOW_DROP * maxf(_drop * _drop, coming * coming)
+		(c.holder as Node3D).position = (c.rest as Vector3) + Vector3(0.0, BOB * sin(_clock * 1.1 + float(c.phase)) + lift, 0.0)
 		c.owed = float(c.owed) + delta
-		if delta > 0.0 and (i + _frame) % craft.size() != 0:
+		if delta > 0.0 and (i + _frame) % all.size() != 0:
 			continue      # ... and its moving parts are posed a craft a frame, turn about: fans and arcs ten metres off do not show it, and it is half the work
 		var sim = c.sim
 		var lever := IDLE + 0.035 * sin(_clock * 0.8 + float(c.phase))      # the levers breathe a little
@@ -860,8 +944,27 @@ func _process(delta: float) -> void:
 		if elapsed > float(build_split.max_slice_ms):
 			build_split.max_slice_ms = elapsed
 			build_split.slowest = _slice_name
+	elif not _show_job.is_empty():
+		build_frame.emit()      # (a craft being built for the turntable, a slice a frame)
 	_clock += delta
+	if turntable != null:
+		var was_up := reveal
+		reveal = move_toward(reveal, 1.0 if attend_wanted else 0.0, delta / (SHOW_UP_S if attend_wanted else SHOW_DOWN_S))
+		if was_up < 0.4 and reveal >= 0.4:
+			_whip = 1.0      # (the craft comes down onto the deck from here: swing it round as it lands)
+		if reveal != was_up:
+			_pose_turntable()
+		turntable.rotation.y = wrapf(turntable.rotation.y + deg_to_rad(SHOW_SPIN + SHOW_WHIP * _whip * _whip) * delta, -PI, PI)
+		_whip = move_toward(_whip, 0.0, delta / SHOW_WHIP_S)
+		_drop = move_toward(_drop, 0.0, delta / SHOW_DROP_S)
 	_sync_craft(delta)
+	if art_ready and _show_job.is_empty() and not show_vehicle.is_empty() and showcase.get("key", "") != _show_key():
+		_build_showcase()
+	if camera != null:
+		var was := attention
+		attention = move_toward(attention, 1.0 if attend_wanted else 0.0, delta / SHOW_TURN_S)
+		if attention != was:
+			_aim_camera()
 	if clouds != null:
 		var at := Vector2(41000.0, 9000.0) + CLOUD_DRIFT * _clock
 		(clouds.material_override as ShaderMaterial).set_shader_parameter("world_offset", at)
@@ -886,11 +989,272 @@ func place(eye: Vector3, forward: Vector3) -> void:
 func frame(art: Rect2, window: Vector2, across := FLAT_ACROSS) -> void:
 	if camera == null or art.size.x <= 0.0 or window.y <= 0.0:
 		return
+	_frame_art = art
+	_frame_window = window
+	_frame_across = across
+	_aim_camera()
+
+
+## The desktop's camera where `attention` has it: the cover's view at 0, the turntable at 1, and turning
+## between them (eased at both ends), its lens narrowing as it goes.
+func _aim_camera() -> void:
+	if camera == null:
+		return
+	var e := smoothstep(0.0, 1.0, attention)
+	var home := Transform3D(Basis.from_euler(Vector3(-deg_to_rad(FLAT_PITCH), 0.0, 0.0)), FLAT_EYE)
+	var look: Vector3 = SHOW_AT["flat"] + Vector3(0.0, SHOW_LOOK, 0.0)
+	var there := Transform3D(Basis.looking_at(look - SHOW_EYE, Vector3.UP), SHOW_EYE)
+	camera.transform = home.interpolate_with(there, e)
+	if _frame_art.size.x <= 0.0 or _frame_window.y <= 0.0:
+		return
+	var across := lerpf(_frame_across, SHOW_ACROSS, e)
 	var near := camera.near
-	var per_unit := 2.0 * near * tan(deg_to_rad(across) / 2.0) / art.size.x      # m on the near plane per unit of window
-	var middle := art.get_center() - window / 2.0
+	var per_unit := 2.0 * near * tan(deg_to_rad(across) / 2.0) / _frame_art.size.x      # m on the near plane per unit of window
+	var middle := _frame_art.get_center() - _frame_window / 2.0
 	camera.keep_aspect = Camera3D.KEEP_HEIGHT
-	camera.set_frustum(window.y * per_unit, Vector2(-middle.x, middle.y) * per_unit, near, camera.far)
+	camera.set_frustum(_frame_window.y * per_unit, Vector2(-middle.x, middle.y) * per_unit, near, camera.far)
+
+
+## A craft is being chosen (on) or not: bring the turntable up out of the road with the craft on it, or
+## put it away; on the desktop, turn the camera to it, or back to the cover's view.
+func attend(on: bool) -> void:
+	attend_wanted = on and turntable != null
+
+
+## The turntable where `reveal` has it: put away it lies SHOW_SINK down, under the road and hidden; it
+## rises in the first part of coming up, and the craft comes down onto it in the rest (_sync_craft).
+func _pose_turntable() -> void:
+	if turntable_base == null:
+		return
+	turntable_base.position.y = -SHOW_SINK * (1.0 - smoothstep(0.0, 0.4, reveal))
+	turntable_base.visible = reveal > 0.0
+
+
+# ---- the turntable ----
+
+## The menus: put this pilot craft on the turntable, in `livery` (by default the paint the next flight will
+## wear). It is built over the frames that follow, the craft on show staying until it is ready; one built
+## before comes straight back.
+func show_craft(vehicle: String, livery := "") -> void:
+	show_vehicle = Pilot.known(vehicle)
+	show_livery = livery if Livery.TABLE.has(livery) else flight_livery()
+
+
+## The paint the next flight will be built in (view/craft_view.gd: the menus' paint, or the patrol's own).
+static func flight_livery() -> String:
+	if Settings.choice("craft", Chase.ids(Chase.CRAFTS)) == "patrol":
+		return "police"
+	return Settings.choice("paint", Livery.ids())
+
+
+func _show_key() -> String:
+	return show_vehicle + "/" + show_livery
+
+
+## The deck, which turns, on a fixed ring of the kerb's blocks with an amber lamp line under its lip, and
+## the name board at its edge.
+func _build_turntable() -> void:
+	var at: Vector3 = SHOW_AT[layout]
+	var base := Node3D.new()
+	base.name = "turntable_base"
+	base.position = at
+	world.add_child(base)
+	turntable_base = base
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var n := 80
+	for i in n:
+		var a := TAU * (float(i) + 0.5) / float(n)
+		var ring_r := SHOW_R + 0.55
+		_slab(st, Vector3(sin(a), 0.0, cos(a)) * ring_r + Vector3(0.0, (SHOW_H + 0.06) / 2.0, 0.0), Vector3(TAU * ring_r / float(n) + 0.02, SHOW_H + 0.06, 1.0),
+			KERB_RED if i % 2 == 0 else KERB_WHITE, Basis(Vector3.UP, a))
+	var ring := MeshInstance3D.new()
+	ring.name = "ring"
+	ring.mesh = st.commit()
+	var rm := Kit.vertex_colors()
+	rm.roughness = 0.8
+	ring.material_override = rm
+	ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	base.add_child(ring)
+	# the lamp line: a band of amber under the deck's lip, all the way round
+	var lamp := SurfaceTool.new()
+	lamp.begin(Mesh.PRIMITIVE_TRIANGLES)
+	n = 120
+	for i in n:
+		var a0 := TAU * float(i) / float(n)
+		var a1 := TAU * float(i + 1) / float(n)
+		var o0 := Vector3(sin(a0), 0.0, cos(a0))
+		var o1 := Vector3(sin(a1), 0.0, cos(a1))
+		var r := SHOW_R + 0.02
+		_quad(lamp, o0 * r + Vector3.UP * (SHOW_H - 0.12), o1 * r + Vector3.UP * (SHOW_H - 0.12), o1 * r + Vector3.UP * (SHOW_H - 0.05), o0 * r + Vector3.UP * (SHOW_H - 0.05), (o0 + o1).normalized(), AMBER)
+	var lamps := MeshInstance3D.new()
+	lamps.name = "lamps"
+	lamps.mesh = lamp.commit()
+	lamps.material_override = Kit.vertex_colors(true)
+	lamps.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	base.add_child(lamps)
+	# a showroom's lamp high over it, a little toward whoever looks: a pool of light on the deck, and the
+	# craft's shadow straight under it (the low sun lays its shadow a dozen metres off, and a hovering craft
+	# seen from the stand then reads as standing beyond the deck)
+	var viewer := Vector3.ZERO if layout == "vr" else SHOW_EYE
+	var toward := Vector3(viewer.x - at.x, 0.0, viewer.z - at.z).normalized()
+	var spot := SpotLight3D.new()
+	spot.name = "spot"
+	var from := Vector3.UP * 30.0 + toward * 8.0
+	spot.transform = Transform3D(Basis.looking_at(Vector3.UP * 1.0 - from, Vector3.UP), from)
+	spot.spot_range = 48.0
+	spot.spot_angle = 33.0
+	spot.spot_angle_attenuation = 0.6
+	spot.spot_attenuation = 0.0
+	spot.light_color = Color(1.0, 0.94, 0.86)
+	spot.light_energy = 3.2
+	spot.light_specular = 0.6
+	spot.shadow_enabled = true
+	spot.shadow_blur = 1.5
+	base.add_child(spot)
+	# the deck: concrete-grey plates, a seam every 22.5 degrees and a ring of them halfway out, a pad's
+	# yellow border near its edge (it turns: the seams are how the eye sees it turn)
+	turntable = Node3D.new()
+	turntable.name = "turntable"
+	base.add_child(turntable)
+	st = SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	n = 96
+	var top := Vector3.UP * SHOW_H
+	for i in n:
+		var o0 := Vector3(sin(TAU * float(i) / float(n)), 0.0, cos(TAU * float(i) / float(n)))
+		var o1 := Vector3(sin(TAU * float(i + 1) / float(n)), 0.0, cos(TAU * float(i + 1) / float(n)))
+		_tri(st, top, top + o0 * SHOW_R, top + o1 * SHOW_R, Vector3.UP, Color(0.34, 0.345, 0.35))
+		_quad(st, o0 * SHOW_R, o1 * SHOW_R, top + o1 * SHOW_R, top + o0 * SHOW_R, (o0 + o1).normalized(), Color(0.30, 0.31, 0.32))
+	var seam := Color(0.07, 0.07, 0.075)
+	for i in 16:
+		var a := TAU * float(i) / 16.0
+		var along := Vector3(sin(a), 0.0, cos(a))
+		_slab(st, top + along * (1.6 + SHOW_R - 1.4) / 2.0 + Vector3.UP * 0.002, Vector3(0.06, 0.004, SHOW_R - 3.0), seam, Basis(Vector3.UP, a))
+	for k in 2:
+		var ring_at := SHOW_R * 0.5 if k == 0 else SHOW_R - 0.7
+		var m := 64 if k == 0 else 96
+		for i in m:
+			var a := TAU * (float(i) + 0.5) / float(m)
+			_slab(st, top + Vector3(sin(a), 0.0, cos(a)) * ring_at + Vector3.UP * 0.003, Vector3(TAU * ring_at / float(m) + 0.01, 0.005, 0.06 if k == 0 else 0.22),
+				seam if k == 0 else Color(0.92, 0.72, 0.10), Basis(Vector3.UP, a))
+	_slab(st, top + Vector3.UP * 0.05, Vector3(1.6, 0.1, 1.6), Color(0.12, 0.12, 0.13))      # the hub
+	var deck := MeshInstance3D.new()
+	deck.name = "deck"
+	deck.mesh = st.commit()
+	var dm := Kit.vertex_colors()
+	dm.roughness = 0.7
+	dm.metallic = 0.35
+	deck.material_override = dm
+	turntable.add_child(deck)
+	_build_plate(at)
+	_pose_turntable()
+
+
+## The name sign: on two posts behind the turntable, facing whoever looks at it (the pilot on his stand;
+## the desktop's camera when it has turned there), its foot over the far end of the craft as they see it,
+## with the craft's name and a line on it. It comes and goes with the turntable.
+func _build_plate(at: Vector3) -> void:
+	var viewer := Vector3.ZERO if layout == "vr" else SHOW_EYE
+	var to_viewer := Vector3(viewer.x - at.x, 0.0, viewer.z - at.z).normalized()
+	var size: float = PLATE_SIZE[layout]
+	var high: float = {"vr": 5.6, "flat": 6.8}[layout]
+	plate = Node3D.new()
+	plate.name = "plate"
+	plate.position = -to_viewer * (SHOW_R + 5.0)
+	plate.basis = Basis.looking_at(-to_viewer, Vector3.UP)      # (its +z toward the viewer)
+	turntable_base.add_child(plate)
+	var board := Node3D.new()
+	board.name = "board"
+	board.position.y = high
+	plate.add_child(board)
+	var st := SurfaceTool.new()      # the board itself, in its own space
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var held := SurfaceTool.new()    # what holds it up, in the plate's
+	held.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for side in [-1.0, 1.0]:      # two posts to the ground
+		_slab(held, Vector3(side * 3.4 * size, high / 2.0, -0.25), Vector3(0.35, high, 0.35), CONCRETE)
+	var stand_mesh := MeshInstance3D.new()
+	stand_mesh.name = "held"
+	stand_mesh.mesh = held.commit()
+	stand_mesh.material_override = Kit.vertex_colors()
+	plate.add_child(stand_mesh)
+	_slab(st, Vector3.ZERO, Vector3(8.2, 1.5, 0.12) * size, Color(0.035, 0.045, 0.07))
+	_slab(st, Vector3(0.0, 0.69 * size, 0.065 * size), Vector3(8.2 * size, 0.06 * size, 0.01), Letters.STROKE)
+	var face := MeshInstance3D.new()
+	face.name = "face"
+	face.mesh = st.commit()
+	var fm := Kit.vertex_colors()
+	fm.roughness = 0.6
+	face.material_override = fm
+	face.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	board.add_child(face)
+	for line in [["name", 96, 0.17, Letters.CREAM, 6], ["detail", 44, -0.36, Color(0.78, 0.80, 0.82), 2]]:
+		var label := Label3D.new()
+		label.name = line[0]
+		label.font = strap_font(int(line[4]))
+		label.font_size = int(line[1])
+		label.outline_size = 0
+		label.modulate = line[3]
+		label.shaded = false
+		label.double_sided = false
+		label.pixel_size = 0.0068 * size
+		label.position = Vector3(0.0, float(line[2]) * size, 0.07 * size)
+		board.add_child(label)
+	_name_plate(show_vehicle)
+
+
+## What the name board says: the craft's name, and its line from the menus.
+func _name_plate(vehicle: String) -> void:
+	if plate == null or not Pilot.NAMES.has(vehicle):
+		return
+	(plate.get_node("board/name") as Label3D).text = String(Pilot.NAMES[vehicle]).to_upper()
+	(plate.get_node("board/detail") as Label3D).text = Pilot.DETAILS[vehicle]
+
+
+## Build the craft the menus want for the turntable over the frames that follow (or take it from those
+## built already), and put it on show: with `arrive`, coming down onto the deck and swung round.
+func _build_showcase(arrive := true) -> void:
+	var key := _show_key()
+	var vehicle := show_vehicle
+	var livery := show_livery
+	if not _show_cache.has(key):
+		_show_job = key
+		if Fleet.supports(vehicle):      # (read on another thread, not in the slice that builds it)
+			await _retain_source(Fleet.ASSET_DIR + vehicle + ".glb")
+			await _retain_source(Fleet.ASSET_DIR + vehicle + ".tres")
+		elif vehicle == Pilot.SHRIKE:
+			await _retain_source("res://art/shrike/bodywork.glb")
+			await _retain_source("res://art/shrike/enamel.tres")
+		else:
+			await _retain_source("res://art/engine/nacelle.glb")
+		# stood on the deck with its middle (half way from the pod's tail to the intake lips) over the hub
+		var place := func(holder: Node3D, reach: float) -> void:
+			holder.position = Vector3(-(reach - 2.0) / 2.0, SHOW_H, 0.0)
+		var c := await _build_craft(vehicle, livery, "speed", turntable, "showcase_%s_%s" % [vehicle, livery], place, _show_body)
+		c.key = key
+		c.phase = 4.2
+		_show_cache[key] = c
+		_show_order.append(key)
+		_show_job = ""
+		if not showcase.is_empty() and key != _show_key():
+			return      # (chosen past while it was built: kept for later, and the one now wanted is built next)
+	var entry: Dictionary = _show_cache[key]
+	if not showcase.is_empty() and showcase.key != key:
+		(showcase.holder as Node3D).hide()
+	showcase = entry
+	(entry.holder as Node3D).show()
+	_show_order.erase(key)
+	_show_order.append(key)
+	if arrive and reveal >= 0.4:      # (put away, it comes down as the turntable is brought up)
+		_whip = 1.0
+		_drop = 1.0
+	_name_plate(vehicle)
+	_sync_craft(0.0)
+	while _show_order.size() > SHOW_KEEP:      # let the longest unused go
+		var old: String = _show_order.pop_front()
+		(_show_cache[old].holder as Node3D).queue_free()
+		_show_cache.erase(old)
 
 
 # ---- when a flight starts ----
@@ -899,6 +1263,7 @@ func _exit_tree() -> void:
 	# Finish the one outstanding file read, if any, before the next scene enters flight.
 	_finish_source()
 	_sources.clear()
+	_show_cache.clear()
 	# the afternoon's globals back (a flight sets its own hour over them: view/outlook.gd)
 	Outlook._globals(Outlook.GLOBALS)
 	# what this loaded that a flight may not want: the Shrike's bodywork and maps (unless the flight now

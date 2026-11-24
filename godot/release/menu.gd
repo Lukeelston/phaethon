@@ -6,12 +6,15 @@ const CraftSelector := preload("res://release/craft_selector.gd")
 const Title := preload("res://release/title_stage.gd")
 const SPINE := 500.0          # in the title, the menu's column down the left edge is this wide (of the window's 1280) ...
 const STRIP := 150.0          # ... and the controls' strip along the bottom of the rest this high: the picture has what is left
+const LOOK_DWELL := 0.2       # s a button that changes the turntable's craft has the pointer or the keyboard before the camera turns to it
 
 var collision_checkbox: CheckBox
 var partner_checkbox: CheckBox
 var craft_selector: CraftSelector
 var stage: Node3D             # the title: the scene the menu lies over (release/title_stage.gd; null with Title.enabled off)
 var art := Rect2()            # ... and the part of the window its picture is composed in
+var look_buttons: Array[Button] = []     # the buttons that change the craft on the title's turntable: pilot craft, paint, role
+var _look_for := 0.0
 
 func _ready() -> void:
 	if "--benchmark" in OS.get_cmdline_user_args():
@@ -172,7 +175,13 @@ func _over_title() -> void:
 	craft_selector.visible = false
 	craft_selector.button.add_theme_font_size_override("font_size", 14)
 	craft_selector.button.clip_text = true
-	for row: Array in [[UI.insertion_button(14), UI.paint_button(14)], [UI.time_button(14), UI.weather_button(14)], [UI.chase_button(14), UI.craft_button(14)], [craft_selector.button]]:
+	var paint := UI.paint_button(14)
+	var role := UI.craft_button(14)
+	look_buttons = [craft_selector.button, paint, role]
+	for look in look_buttons:
+		look.pressed.connect(_showcase_changed)      # (after the button's own handler: the choice is saved by then)
+	_showcase_changed()
+	for row: Array in [[UI.insertion_button(14), paint], [UI.time_button(14), UI.weather_button(14)], [UI.chase_button(14), role], [craft_selector.button]]:
 		var options := HBoxContainer.new()
 		options.add_theme_constant_override("separation", 8)
 		left.add_child(options)
@@ -239,6 +248,24 @@ func _frame_title() -> void:
 		return
 	art = Rect2(SPINE, 0.0, size.x - SPINE, size.y - STRIP - 20.0)
 	stage.frame(art, size)
+
+
+## Put the chosen pilot craft on the title's turntable, in the paint its flight will wear.
+func _showcase_changed() -> void:
+	if stage != null:
+		stage.show_craft(craft_selector.selected)
+
+
+## The title's camera turns to the turntable while a button that changes its craft has the pointer or the
+## keyboard (a moment, so the pointer passing over one does not swing it), and back to the cover's view after.
+func _process(delta: float) -> void:
+	if stage == null:
+		return
+	var on := false
+	for look in look_buttons:
+		on = on or look.is_hovered() or look.has_focus()
+	_look_for = _look_for + delta if on else 0.0
+	stage.attend(_look_for >= LOOK_DWELL)
 
 func start_course(course: String) -> void:
 	if UI.course_index(course) < 0:

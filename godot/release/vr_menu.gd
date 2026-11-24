@@ -1,11 +1,21 @@
 ## Stationary, headset-visible course menu. No flight and no flight audio is loaded: the title's two
-## craft (release/title_stage.gd) stand round it, silent, and go when a flight starts.
+## craft (release/title_stage.gd) stand round it, silent, and go when a flight starts. The chosen pilot
+## craft turns on a turntable behind the board, which swings aside while its rows have the highlight.
 extends Node3D
 
 const UI := preload("res://release/release_config.gd")
 const View := preload("res://view/craft_view.gd")
 const Title := preload("res://release/title_stage.gd")
 const BOARD_DROP := 0.40      # in the title, the board's middle is this far under the eye and leaned back to face it: the word stands over its top edge
+# In the title the turntable stands straight ahead behind the board (release/title_stage.gd). While a row
+# that changes what is on it (the pilot craft, its paint, its role) has had the highlight a moment, it is
+# brought up and the board swings this far to the left about the pilot, and shrinks, clear of the longest
+# craft's sweep (36 degrees either side of ahead, the turntable 26.5 m out); it swings back, and the
+# turntable is put away, when the highlight leaves.
+const BOARD_SWING := 57.0
+const BOARD_SWING_SCALE := 0.62
+const SWING_DWELL := 0.25     # s on such a row before it goes (the stick passing over one does not move it)
+const SWING_S := 0.5          # s to swing either way
 static var remembered_course := "range"
 
 var selected_course := "range"
@@ -26,7 +36,12 @@ var collision_checkbox: CheckBox
 var partner_checkbox: CheckBox
 var option_buttons: Array[Button] = []   # the rows that step through choices: where the Network begins, ...
 var craft_selector := preload("res://release/craft_selector.gd").new()
+var look_buttons: Array[Button] = []     # the rows that change the craft on the turntable: pilot craft, paint, role
+var swing := 0.0              # 0 the board in front of the pilot, 1 swung aside to show the turntable
 var start_index := 0
+var _dwell := 0.0
+var _home_eye := Vector3.ZERO
+var _home_forward := Vector3.FORWARD
 var _confirm_down := true
 var _stick_down := true
 var _armed := false
@@ -82,8 +97,15 @@ func _ready() -> void:
 		board.add_child(strap)
 	choose_course(remembered_course if UI.course_index(remembered_course) >= 0 else "range")
 	focus_row(maxi(0, UI.course_index(selected_course)))
+	_showcase_changed()
 	recenter_panel()
 	print("VR MENU: ready; select a map, then Start flight")
+
+
+## Put the chosen pilot craft on the title's turntable, in the paint its flight will wear.
+func _showcase_changed() -> void:
+	if stage != null:
+		stage.show_craft(craft_selector.selected)
 
 func _build_screen() -> void:
 	screen = Control.new()
@@ -153,7 +175,12 @@ func _build_screen() -> void:
 	craft_selector.visible = false
 	craft_selector.button.add_theme_font_size_override("font_size", 22)
 	craft_selector.button.clip_text = true
-	var rows: Array = [[UI.insertion_button(22), UI.paint_button(22)], [UI.time_button(22), UI.weather_button(22), UI.chase_button(22)], [craft_selector.button, UI.craft_button(22)]]     # A or the trigger takes the next choice
+	var paint := UI.paint_button(22)
+	var role := UI.craft_button(22)
+	look_buttons = [craft_selector.button, paint, role]
+	for look in look_buttons:
+		look.pressed.connect(_showcase_changed)      # (after the row's own handler: the choice is saved by then)
+	var rows: Array = [[UI.insertion_button(22), paint], [UI.time_button(22), UI.weather_button(22), UI.chase_button(22)], [craft_selector.button, role]]     # A or the trigger takes the next choice
 	for row: Array in rows:
 		var line := HBoxContainer.new()
 		line.add_theme_constant_override("separation", 12)
@@ -245,7 +272,7 @@ func consume_controller(axis: float, confirm: bool, focused: bool) -> void:
 		activate()
 	_confirm_down = confirm
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	var xr := XRServer.find_interface("OpenXR") as OpenXRInterface
 	var focused := xr != null and xr.is_initialized() and xr.get_session_state() == OpenXRInterface.SESSION_STATE_FOCUSED
 	if focused and not _focused:
@@ -266,6 +293,20 @@ func _process(_delta: float) -> void:
 		recenter_panel()
 	_recenter_down = center
 	consume_controller(axis, confirm, focused)
+	update_swing(delta)
+
+## In the title: swing the board aside while a row that changes the turntable's craft has had the
+## highlight SWING_DWELL, and back when the highlight leaves it.
+func update_swing(delta: float) -> void:
+	if stage == null:
+		return
+	var on_look := focus_index < buttons.size() and look_buttons.has(buttons[focus_index]) and not launching
+	_dwell = _dwell + delta if on_look else 0.0
+	stage.attend(_dwell >= SWING_DWELL)
+	var was := swing
+	swing = move_toward(swing, 1.0 if _dwell >= SWING_DWELL else 0.0, delta / SWING_S)
+	if swing != was:
+		_place_board()
 
 func recenter_panel() -> void:
 	var forward := -camera.global_basis.z
@@ -279,9 +320,17 @@ func recenter_panel() -> void:
 		return
 	# In the title the board stands a little under the eye, leaned back to face it, and the scene is stood
 	# round the pilot the same way: both move only here (the session's start, a recentre), never the camera.
-	board.global_position = camera.global_position + forward * 3.0 + Vector3.DOWN * BOARD_DROP
-	board.global_basis = Basis.looking_at(forward, Vector3.UP) * Basis(Vector3.RIGHT, -atan2(BOARD_DROP, 3.0))
+	_home_eye = camera.global_position
+	_home_forward = forward
+	_place_board()
 	stage.place(camera.global_position, forward)
+
+## The board where the last recentre stood it, swung aside as far as `swing` says (eased at both ends).
+func _place_board() -> void:
+	var e := smoothstep(0.0, 1.0, swing)
+	var forward := _home_forward.rotated(Vector3.UP, deg_to_rad(BOARD_SWING) * e)      # (+ about up: to the pilot's left)
+	board.global_position = _home_eye + forward * 3.0 + Vector3.DOWN * BOARD_DROP
+	board.global_basis = Basis.looking_at(forward, Vector3.UP) * Basis(Vector3.RIGHT, -atan2(BOARD_DROP, 3.0)) * Basis.from_scale(Vector3.ONE * lerpf(1.0, BOARD_SWING_SCALE, e))
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
