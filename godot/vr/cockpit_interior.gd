@@ -197,7 +197,7 @@ func build(fleet_controls := false) -> void:
 				_knob(Vector3(cx, face_y, z), metal, rubber, paint)
 			_top_legend(Vector3(cx, face_y + 0.001, z - 0.042), ConsoleSwitchesScript.knob_legend(s, k))
 		# (the port console's placard under its POWER button and switch, 2026-11-24: they stand where it stood)
-		_placard(Vector3(cx - 0.066 * s, UP - 0.31 if s > 0.0 else UP - 0.39, 0.48 if s > 0.0 else 0.42), ConsoleSwitchesScript.PLACARDS[int(s)], s)
+		_placard(Vector3(cx - 0.066 * s, UP - 0.31 if s > 0.0 else UP - 0.39, 0.48 if s > 0.0 else 0.385), ConsoleSwitchesScript.PLACARDS[int(s)], s)
 
 	# throttle quadrant: a gate plate round each lever, slot and burner gate
 	for s in [-1.0, 1.0]:

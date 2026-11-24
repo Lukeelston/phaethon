@@ -1902,7 +1902,7 @@ func power_up(kind: String) -> void:
 	print("POWER-UP: %s at %.0f mph" % [kind, _kmh() / 1.609344])
 
 
-## The autopilot taken (true) or given back (view/autopilot.gd): P at a desk, the left stick flicked
+## The autopilot taken (true) or given back (view/autopilot.gd): O at a desk (P until the craft's power took it), the left stick flicked
 ## across in the cockpit, the quick menu's OPTIONS page. -> whether it now has the craft. It flies
 ## to the city the dash points at.
 func set_autopilot(want: bool, why := "") -> bool:

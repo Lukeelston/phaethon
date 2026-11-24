@@ -5,7 +5,8 @@
 ##   power-close  the same, nearer: the legends, the guards, the ring
 ##   power-wide   further aft and wider: the whole port console with them on it
 ## --state=ready|active|charging|safe stands the power there first (the ring steady, pulsing, dark; the switch at SAFE).
-## --vehicle=<id> for a craft's own cockpit.
+## --vehicle=<id> for a craft's own cockpit. --levers=0.87 stands the throttle levers there (else at idle, where the left
+## one's grip stands nearest the button).
 ## Run windowed: --xr-mode off --resolution 1600x900 --fixed-fps 120 --audio-driver Dummy
 ## -s res://tests/render_power_controls.gd -- --mute --out=DIR [--views=power,power-close] [--state=ready] [--vehicle=kiln]
 extends SceneTree
@@ -54,6 +55,7 @@ func _frame() -> void:
 func _run() -> void:
 	var only := PackedStringArray()
 	var state := "ready"
+	var levers := 0.0
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--out="):
 			out_dir = arg.trim_prefix("--out=")
@@ -61,6 +63,8 @@ func _run() -> void:
 			only = arg.trim_prefix("--views=").split(",")
 		if arg.begins_with("--state="):
 			state = arg.trim_prefix("--state=")
+		if arg.begins_with("--levers="):
+			levers = float(arg.trim_prefix("--levers="))
 	if out_dir.is_empty() or DirAccess.make_dir_recursive_absolute(out_dir) != OK:
 		push_error("Pass --out= and a writable directory.")
 		quit(1)
@@ -99,6 +103,8 @@ func _run() -> void:
 		await process_frame
 	seat.set_process(false)
 	seat.cruise = 0.0
+	seat.inp.thrL = levers
+	seat.inp.thrR = levers
 	var sim = seat.sim
 	match state:      # the power where it is asked to be
 		"active":

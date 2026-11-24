@@ -235,6 +235,30 @@ func _run() -> void:
 	flat.free()
 	await process_frame
 
+	# ---- Slipstream's eyes (view/network_traffic.gd draft_gap): a craft at the origin going +x at 1,000 mph
+	var Traffic := preload("res://view/network_traffic.gd")
+	var tr = Traffic.new()
+	var gaps := {}
+	for case: Array in [["80 m ahead in its lane", 80.0, 5.0, 1.0, 0], ["80 m ahead, a lane over", 80.0, 30.0, 1.0, 0],
+			["150 m ahead", 150.0, 0.0, 1.0, 0], ["80 m ahead, coming the other way", 80.0, 0.0, -1.0, 0],
+			["a transport's tractor 300 m ahead, its last car 34 m", 300.0, 0.0, 1.0, Traffic.TRANSPORT]]:
+		var c = Traffic.Car.new()
+		c.x = float(case[1])
+		c.y = float(case[2])
+		c.hx = float(case[3])
+		c.hy = 0.0
+		c.v = 300.0
+		c.kind = int(case[4])
+		tr.cars.clear()
+		tr.cars.append(c)
+		gaps[case[0]] = tr.draft_gap(0.0, 0.0, 447.0, 0.0, 120.0, 22.0)
+	_check("Slipstream drafts a vehicle in its lane within 120 m (%s), and none a lane over, further, or coming the other way (%s, %s, %s); a train by its last car (%s m)" % [
+		gaps["80 m ahead in its lane"], gaps["80 m ahead, a lane over"], gaps["150 m ahead"], gaps["80 m ahead, coming the other way"],
+		gaps["a transport's tractor 300 m ahead, its last car 34 m"]],
+		is_equal_approx(gaps["80 m ahead in its lane"], 80.0) and gaps["80 m ahead, a lane over"] == INF and gaps["150 m ahead"] == INF
+		and gaps["80 m ahead, coming the other way"] == INF and is_equal_approx(gaps["a transport's tractor 300 m ahead, its last car 34 m"], 300.0 - 7 * 38.0))
+	tr.free()
+
 	# ---- the Basilisk's: its gun's heat (view/gunnery.gd) and the raised turret's drag
 	View.vehicle_override = "basilisk"
 	var gun_view = View.new()

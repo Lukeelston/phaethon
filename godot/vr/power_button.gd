@@ -1,8 +1,8 @@
 ## The craft's power's button (Luke, 2026-11-24: "build the attributes and powers into the game"; sim/pilot_craft.gd
 ## TRAITS): a fingertip push-button on the left console's inboard face, beside the POWER switch (ARM / SAFE: a guarded
 ## toggle, vr_cockpit.gd power_switch_mount), forward of it and turned up at the seat as it is. Pressed with a
-## controller's tip, as the map's colour
-## button is (a tip coming in to its face, near its axis), it fires the power (vr_cockpit.gd fire_power). Its lamp
+## controller's tip as the map's colour button is (a tip coming in to its face, near its axis), it fires the power
+## (CraftView.fire_power). Its lamp
 ## ring says where the power is: dark while it charges, steady when it is ready, pulsing while it runs; dark at SAFE,
 ## and dark for a craft whose power is not the button's (automatic, or the Basilisk's gun).
 ## Its legend is the power's own name (the LCD's: SLIPSTREAM, GYRO LOCK, ...).
