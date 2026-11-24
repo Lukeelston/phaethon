@@ -2,19 +2,21 @@
 ## docs/superpowers/specs/2026-11-24-network-raids-design.md). The director, after chase mode (view/network_chase.gd):
 ##   waiting   ""      a clock runs while one may start (a public road, not a shaft, at speed, and traffic's floor
 ##                     free: no street race or chase holding traffic.race_state): first_after s the first time
-##   called    an alarm: the ground city nearest by road (network_world.gd _dists, the pilot's way) that the pilot
-##             is not in; traffic's floor held ("raid"), so no racer or chase begins. Until the pilot is within
-##             arrive_r of its town zone it is not simulated: a commuter is lost every tick_every s, up to tick_cap
+##   called    an alarm: the ground city nearest in a straight line that is neither the one the pilot is in (net.from,
+##             while within arrive_r of its town) nor the last raid's; traffic's floor held ("raid"), so no racer or
+##             chase begins. Until the pilot is within arrive_r of its town zone it is not simulated: a commuter is
+##             lost every tick_every s; at tick_cap, not reached, it is lost
 ##   on        arrived: the pack is placed in the town zone (R.mode == 0) on the city's road, over its lanes, as
 ##             traffic's own cars (hostile: kept wherever they are, never turned round). It ends when no raider is
 ##             left (cleared if any was killed, else lost), or lost: the pilot away_t s beyond R_KEEP of the town,
 ##             or time_limit s gone. Surviving raiders flee: taken out of traffic. The floor is released
 ##   over      the lull after one, lull s (the same clock as the first wait) until the next is called
-## A restart (reset) sets a raid aside: no award, the pack gone, the floor free.
+## A restart (reset), or a crash and the sim's respawn after it, sets a raid aside: no award, the pack gone, the
+## floor free.
 ##   var raids := Raids.new(); view.add_child(raids); raids.traffic = view.traffic_net; raids.build(view)
 ##   raids.update(delta)            every frame, after traffic's own update and chase's
 ##   raids.on_kill(car)             a raider shot (the gun's, before traffic.knock_out)
-##   raids.reset()                  on a restart
+##   raids.reset()                  on a restart (a crash's respawn it sees for itself: sim.crash_t)
 ##   raids.text()                   the dash's line while a raid is on ("" otherwise)
 ##   raids.result                   "cleared" | "lost", once, for the view to take
 ## Log lines (the flight log): RAID: alarm <CITY> <km> | arrived | kill | cleared | lost (<why>)
@@ -43,7 +45,7 @@ var lost := 0                    # commuters lost: off-screen ticks (and, task 4
 var kills := 0                   # raiders shot
 var fled := 0                    # raiders gone without being shot (task 4)
 var pack: Array = []             # this raid's raiders still in traffic
-var called_m := 0.0              # m by road to the city when the alarm went
+var called_m := 0.0              # m to the city (a straight line to its centre) when the alarm went
 # tunables (tests shorten them)
 var first_after := 60.0          # s of waiting before a flight's first
 var lull := Vector2(60.0, 90.0)  # s of waiting after one, drawn between these
@@ -61,7 +63,9 @@ var _made := 0                   # raiders made this flight (their ids)
 var _tick_t := 0.0               # s toward the next commuter lost off-screen
 var _t := 0.0                    # s since arriving
 var _away := 0.0                 # s beyond R_KEEP of the town zone
-var _why := ""                   # why the last was lost: "away" | "time" | "fled"
+var _why := ""                   # why the last was lost: "away" | "time" | "fled" | "not reached"
+var _last_city := -1             # the last raid's city: not picked for the next
+var _wrecked := false            # the craft is down (sim.crash_t): the sim respawns it when that runs out
 var _killed := {}                # Car -> true: this raid's raiders shot (on_kill), before traffic loses them
 var _zones := {}                 # city -> {"road", "z": Vector2i(first, last sample of its town zone), "pts"}
 var _rng := RandomNumberGenerator.new()
@@ -102,6 +106,15 @@ func _due() -> float:
 func update(delta: float) -> void:
 	if traffic == null:
 		return
+	# A crash (any of the sim's: smash, binder, wreck) sets crash_t, and the sim respawns the craft when it runs out
+	# (craft_sim.gd step): a raid then is set aside as a restart sets it aside.
+	if sim.crash_t > 0.0:
+		_wrecked = true
+	elif _wrecked:
+		_wrecked = false
+		if state == "called" or state == "on":
+			reset("crash")
+			return
 	match state:
 		"", "over":
 			_clock = _clock + delta if _ready_for_one() else maxf(_clock - delta, 0.0)
@@ -112,10 +125,10 @@ func update(delta: float) -> void:
 			while _tick_t >= tick_every and lost < tick_cap:
 				_tick_t -= tick_every
 				lost += 1
-			if lost >= tick_cap:
-				_tick_t = minf(_tick_t, tick_every)
 			if _gap(city) <= arrive_r:
 				_arrive()
+			elif lost >= tick_cap:      # it is over before the pilot got there
+				_end("lost", "not reached")
 		"on":
 			_t += delta
 			for k in range(pack.size() - 1, -1, -1):
@@ -137,6 +150,7 @@ func _alarm() -> bool:
 	if k < 0:
 		return false
 	city = k
+	_last_city = k
 	state = "called"
 	traffic.race_state = "raid"     # (not one of the racer's own states: its machine stands by while this runs)
 	traffic.race_t = 0.0
@@ -153,28 +167,24 @@ func _alarm() -> bool:
 	return true
 
 
-## The raid's city: the ground city nearest by road from where the pilot is, going its way (an orbit entry is
-## never one), and not the city the pilot is in (net.from, while within arrive_r of its town). Cities no road
-## reaches the pilot's way come after every one that does, nearest first. -1 for none. Sets called_m.
+## The raid's city: the ground city nearest the pilot in a straight line (to its centre; an orbit entry is never
+## one), not the city the pilot is in (net.from, while within arrive_r of its town), and not the last raid's.
+## -1 for none. Sets called_m. (Five distances: nothing to see in a frame.)
 func _pick() -> int:
-	var P = sim.pod
-	var R = sim.roads[P.path]
-	var dir: int = traffic._pod_as_car().dir
-	var by_road: Array = view.network_world._dists(P.path, clampi(P.hint, 0, R.N - 1), dir) if view.get("network_world") else []
+	var at := Vector2(sim.pod.x, sim.pod.y)
 	var best := -1
-	var best_key := INF
+	var bd := INF
 	for k in sim.cities.size():
 		var c: Dictionary = sim.cities[k]
-		if String(c.get("kind", "")) == "orbit":
+		if String(c.get("kind", "")) == "orbit" or k == _last_city:
 			continue
 		if k == int(sim.net.from) and _gap(k) <= arrive_r:
 			continue
-		var d: float = float(by_road[k]) if k < by_road.size() else INF
-		var key := d if d < INF else 1.0e12 + Vector2(float(c.cx) - P.x, float(c.cy) - P.y).length()
-		if key < best_key:
-			best_key = key
+		var d := at.distance_to(Vector2(float(c.cx), float(c.cy)))
+		if d < bd:
+			bd = d
 			best = k
-	called_m = best_key if best_key < 1.0e12 else best_key - 1.0e12
+	called_m = bd
 	return best
 
 
@@ -311,10 +321,10 @@ func _disband() -> void:
 		traffic.race_state = ""
 
 
-func reset() -> void:
+func reset(why := "restart") -> void:
 	if traffic != null:
 		if state == "called" or state == "on":
-			print("RAID: set aside (restart)")
+			print("RAID: set aside (%s)" % why)
 		_disband()
 	result = ""
 	state = ""

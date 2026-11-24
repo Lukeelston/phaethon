@@ -2,16 +2,19 @@
 ## director's tunables shortened:
 ##   waits      no alarm before first_after at speed on a public road; and none while another holds traffic's
 ##              floor (a chase's craft in the racer's slot)
-##   alarm      after it: called, on the ground city nearest by road that the pilot is not in; traffic's floor
-##              held ("raid"), so a chase is not ready to begin
-##   pick       an orbit entry nearer than any city is never picked; nor is the city the pilot is in
-##   ticks      called and out of range, a commuter is lost every tick_every s, up to tick_cap; the floor still held
+##   alarm      after it: called, on the ground city nearest in a straight line that the pilot is not in; traffic's
+##              floor held ("raid"), so a chase is not ready to begin
+##   pick       an orbit entry nearer than any city is never picked; nor is the last raid's city, nor the city the
+##              pilot is in
+##   ticks      called and out of range, a commuter is lost every tick_every s; the floor still held
+##   not reached  ... and at tick_cap, with the pilot not there, it is lost ("not reached"), the floor free; no more lost
 ##   arrive     an alarm with the pilot already in range: on the next frame, none lost, the pack (4, then one
 ##              more a raid, up to 6) hostile on the city's road in its town zone, spread over its lanes
 ##   cleared    every raider killed: cleared, tallied, the floor released; then the lull
 ##   away       out of R_KEEP of the city for away_t: lost, the pack taken out of traffic
 ##   time       time_limit after arriving: lost, the pack taken out of traffic
 ##   respawn    a restart mid-raid: no hostiles left, the floor free, no result
+##   crash      a wreck mid-raid (the sim's own: its "wreck", then its respawn when crash_t runs out): the same
 ##   pause      the cockpit's FLIGHT HOLD menu (in the headset) and the desktop pause (the tree paused,
 ##              release/pause_overlay.gd) hold the raid's clocks; resumed, they run on
 ## Run with --fixed-fps 120 (see _fly). Prints RAIDS PASS.
@@ -122,20 +125,31 @@ func _cockpit():
 	return v
 
 
-## The ground city nearest by road from where the pilot is, going its way, that the director may pick.
-func _nearest(v) -> int:
+## m in a straight line from the pilot to city k's centre.
+func _dist(v, k: int) -> float:
+	var c: Dictionary = v.sim.cities[k]
+	return Vector2(v.sim.pod.x, v.sim.pod.y).distance_to(Vector2(float(c.cx), float(c.cy)))
+
+
+## The ground city nearest the pilot in a straight line that the director may pick: not `last` (the last raid's
+## city), nor the one it is in (net.from, within arrive_r of its town). With exclude false, the nearest of all.
+func _nearest(v, last: int, exclude := true) -> int:
 	var sim = v.sim
-	var P = sim.pod
-	var d: Array = v.network_world._dists(P.path, P.hint, v.traffic_net._pod_as_car().dir)
 	var best := -1
 	for k in sim.cities.size():
 		if String(sim.cities[k].get("kind", "")) == "orbit":
 			continue
-		if k == int(sim.net.from) and v.raids._gap(k) <= v.raids.arrive_r:
+		if exclude and (k == last or (k == int(sim.net.from) and v.raids._gap(k) <= v.raids.arrive_r)):
 			continue
-		if best < 0 or float(d[k]) < float(d[best]):
+		if best < 0 or _dist(v, k) < _dist(v, best):
 			best = k
 	return best
+
+
+## The director's last raid's city (-1 before the first; and on a director that does not keep one).
+func _last(R) -> int:
+	var l = R.get("_last_city")
+	return -1 if l == null else int(l)
 
 
 func _run() -> void:
@@ -178,43 +192,47 @@ func _run() -> void:
 	chase.traffic = T
 	chase.sim = sim
 	var chase_before: bool = chase._ready_for_one()
+	var last_before := _last(R)
 	var took: float = await _fly_until(v, "called", 4.0)
-	var nearest := _nearest(v)
+	var nearest := _nearest(v, last_before)
 	var pc = T._pod_as_car()
 	var ground: bool = R.city >= 0 and R.city < sim.cities.size() and String(sim.cities[R.city].get("kind", "")) != "orbit"
 	var not_in: bool = R.city != int(sim.net.from) or R._gap(R.city) > R.arrive_r
-	_check("%.2f s later the alarm: called (\"%s\") on %s (city %d; the nearest by road %d), a ground city (%s) the pilot is not in (%s; it is %.0f km from its town); the floor \"%s\"; a chase was ready to begin (%s) and is not now (%s)" % [
+	_check("%.2f s later the alarm: called (\"%s\") on %s (city %d; the nearest in a straight line %d), a ground city (%s) the pilot is not in (%s; it is %.0f km from its town); the floor \"%s\"; a chase was ready to begin (%s) and is not now (%s)" % [
 			took, R.state, sim.cities[R.city].name if ground else "?", R.city, nearest, ground, not_in, R._gap(R.city) / 1000.0 if ground else -1.0, T.race_state, chase_before, chase._ready_for_one()],
 		R.state == "called" and ground and not_in and R.city == nearest and T.race_state == "raid" and chase_before and not chase._ready_for_one())
 
-	# pick: an orbit entry nearer than any city; the city the pilot is in (both asked without a frame flown)
+	# pick (each asked without a frame flown): an orbit entry nearer than any city; the last raid's city (this raid's,
+	# the nearest city); the city the pilot is in
 	var P = sim.pod
 	var road0: int = P.path
 	var hint0: int = P.hint
 	var dir0: int = pc.dir
 	var Rr = sim.roads[road0]
 	var at := clampi(hint0 + dir0 * 80, 1, Rr.N - 2)
+	var last_city := _last(R)
+	var last_nearest: bool = last_city == R.city and R.city == _nearest(v, -1, false)
 	sim.cities.append({"name": "PORT", "kind": "orbit", "biome": "space", "cx": Rr.px[at], "cy": Rr.py[at], "road": road0, "i": at})
 	var port: int = sim.cities.size() - 1
-	var dd: Array = v.network_world._dists(road0, hint0, dir0)
 	var port_nearest := true
 	for k in port:
-		port_nearest = port_nearest and float(dd[port]) < float(dd[k])
+		port_nearest = port_nearest and _dist(v, port) < _dist(v, k)
+	var port_km := _dist(v, port) / 1000.0
 	var t0 := Time.get_ticks_usec()
 	var past_port: int = R._pick()
 	var pick_ms := (Time.get_ticks_usec() - t0) / 1000.0
 	sim.cities.pop_back()
+	var want_far := _nearest(v, last_city)
 	var home := int(sim.net.from)
 	sim.respawn(home)                       # at its terminal: in it
-	var dh: Array = v.network_world._dists(sim.pod.path, sim.pod.hint, 1)
-	var home_nearest := true
-	for k in dh.size():
-		home_nearest = home_nearest and (k == home or float(dh[home]) < float(dh[k]))
+	var home_nearest: bool = _nearest(v, -1, false) == home
+	var want_home := _nearest(v, last_city)
 	var past_home: int = R._pick()
 	_put_pilot(v, road0, hint0, dir0)       # (back where it was: the raid called is untouched)
-	_check("an orbit entry nearer by road than any city (%s, %.1f km) is passed over (picked %d, in %.1f ms); in %s (%d), nearest of all (%s), it is passed over too (picked %d)" % [
-			port_nearest, float(dd[port]) / 1000.0, past_port, pick_ms, sim.cities[home].name, home, home_nearest, past_home],
-		port_nearest and past_port >= 0 and past_port < port and past_port != port and home_nearest and past_home >= 0 and past_home != home and R.state == "called")
+	_check("an orbit entry nearer than any city (%s, %.1f km) is passed over, and so is the last raid's city %s (%d; the nearest city %s): picked %d (want %d, in %.3f ms); in %s (%d), nearest of all (%s), it is passed over too: picked %d (want %d)" % [
+			port_nearest, port_km, sim.cities[R.city].name, last_city, last_nearest, past_port, want_far, pick_ms, sim.cities[home].name, home, home_nearest, past_home, want_home],
+		port_nearest and last_nearest and past_port >= 0 and past_port < port and past_port != last_city and past_port == want_far
+			and home_nearest and past_home >= 0 and past_home != home and past_home != last_city and past_home == want_home and R.state == "called")
 
 	# ticks: off-screen, a commuter lost a second, up to the cap
 	var lost0: int = R.lost
@@ -222,19 +240,26 @@ func _run() -> void:
 	var l1: int = R.lost
 	await _fly(v, 1.0)
 	var l2: int = R.lost
-	await _fly(v, 3.0)
-	var l3: int = R.lost
-	_check("called and %.0f km from its town: lost %d, then %d at 1.5 s, %d at 2.5 s, %d at 5.5 s (the cap %d); still called (\"%s\"), the floor still held (\"%s\")" % [
-			R._gap(R.city) / 1000.0, lost0, l1, l2, l3, R.tick_cap, R.state, T.race_state],
-		R._gap(R.city) > R.arrive_r and lost0 == 0 and l1 == 1 and l2 == 2 and l3 == R.tick_cap and R.state == "called" and T.race_state == "raid")
+	_check("called and %.0f km from its town: lost %d, then %d at 1.5 s, %d at 2.5 s; still called (\"%s\"), the floor still held (\"%s\")" % [
+			R._gap(R.city) / 1000.0, lost0, l1, l2, R.state, T.race_state],
+		R._gap(R.city) > R.arrive_r and lost0 == 0 and l1 == 1 and l2 == 2 and R.state == "called" and T.race_state == "raid")
 
-	# arrive at once: set this raid aside; the next is called with the pilot already near its city
+	# not reached: at the cap, with the pilot nowhere near, it is lost
+	await _fly(v, 1.0)
+	var l3: int = R.lost
+	var expired: bool = R.result == "lost" and R._why == "not reached" and int(R.tally.lost) == 1 and T.race_state == "" and R.state == "over"
+	await _fly(v, 1.0)
+	_check("at 3.5 s, %d lost (the cap %d) and not reached: \"%s\" (%s; tally %s), the floor free (\"%s\"), the lull (\"%s\"); a second on, still %d lost" % [
+			l3, R.tick_cap, R.result, R._why, R.tally, T.race_state, R.state, R.lost],
+		expired and l3 == R.tick_cap and R.lost == R.tick_cap and R.state == "over" and T.hostiles().is_empty())
+
+	# arrive at once: the next is called with the pilot already near its city
 	R.lull = Vector2(0.5, 0.5)
 	R.reset()
 	var aside: bool = R.state == "" and T.race_state == "" and T.hostiles().is_empty()
 	var X := -1
 	for k in sim.cities.size():
-		if k != int(sim.net.from) and X < 0:
+		if k != int(sim.net.from) and k != _last(R) and X < 0:
 			X = k
 	_near_city(v, X)
 	var calls: int = R._count
@@ -263,12 +288,13 @@ func _run() -> void:
 		T.knock_out(c)
 	await _fly(v, STEP)
 	_check("every raider killed (%d of %d): \"%s\" (tally %s), the floor free (\"%s\"), no hostiles left (%d), the lull (\"%s\")" % [R.kills, raiders.size(), R.result, R.tally, T.race_state, T.hostiles().size(), R.state],
-		R.result == "cleared" and int(R.tally.cleared) == 1 and int(R.tally.lost) == 0 and R.kills == raiders.size() and T.race_state == "" and T.hostiles().is_empty() and R.state == "over")
+		R.result == "cleared" and int(R.tally.cleared) == 1 and int(R.tally.lost) == 1 and R.kills == raiders.size() and T.race_state == "" and T.hostiles().is_empty() and R.state == "over")
 	await _fly(v, 3.5)
 	var quiet: bool = R.state == "over"
 	var more: float = await _fly_until(v, "called", 3.0)
-	_check("the lull: quiet 3.5 s at speed (%s), the next alarm %.2f s after that (\"%s\", %s): %.1f s in all, within %s" % [quiet, more, R.state, sim.cities[R.city].name if R.city >= 0 else "?", 3.5 + more, R.lull],
-		quiet and R.state == "called" and 3.5 + more >= R.lull.x - 0.05 and 3.5 + more <= R.lull.y + 0.05)
+	_check("the lull: quiet 3.5 s at speed (%s), the next alarm %.2f s after that (\"%s\", %s): %.1f s in all, within %s; not on %s, the last raid's, though the pilot is %.1f km from its town (city %d, picked %d)" % [
+			quiet, more, R.state, sim.cities[R.city].name if R.city >= 0 else "?", 3.5 + more, R.lull, sim.cities[X].name, R._gap(X) / 1000.0, X, R.city],
+		quiet and R.state == "called" and 3.5 + more >= R.lull.x - 0.05 and 3.5 + more <= R.lull.y + 0.05 and R.city != X)
 
 	# away: in, then out of R_KEEP of it for away_t
 	R.lull = Vector2(0.5, 0.5)
@@ -283,7 +309,7 @@ func _run() -> void:
 		left += int(T.cars.has(c))
 	_check("arrived (%s, %d raiders), then %.0f km out for %.2f s: \"%s\" (%s; tally %s), the pack out of traffic (%d left, %d hostiles), the floor free (\"%s\")" % [
 			in_on, pack.size(), R._gap(R.city) / 1000.0, R.away_t + 0.25, R.result, R._why, R.tally, left, T.hostiles().size(), T.race_state],
-		in_on and pack.size() > 0 and R.result == "lost" and R._why == "away" and int(R.tally.lost) == 1 and left == 0 and T.hostiles().is_empty() and T.race_state == "" and R.state == "over")
+		in_on and pack.size() > 0 and R.result == "lost" and R._why == "away" and int(R.tally.lost) == 2 and left == 0 and T.hostiles().is_empty() and T.race_state == "" and R.state == "over")
 
 	# time: in range, the time limit runs out
 	R.lull = Vector2(1.5, 1.5)           # (longer than the second flown past the limit: the next is not called within it)
@@ -300,7 +326,7 @@ func _run() -> void:
 		left += int(T.cars.has(c))
 	_check("arrived (%s), on still %.1f s later (%s, %.1f km from its town), then the time limit: \"%s\" (%s; tally %s), the pack out of traffic (%d left, %d hostiles), the floor free (\"%s\")" % [
 			in_on, R.time_limit - 0.5, still, R._gap(R.city) / 1000.0, R.result, R._why, R.tally, left, T.hostiles().size(), T.race_state],
-		in_on and still and R.result == "lost" and R._why == "time" and int(R.tally.lost) == 2 and left == 0 and T.hostiles().is_empty() and T.race_state == "")
+		in_on and still and R.result == "lost" and R._why == "time" and int(R.tally.lost) == 3 and left == 0 and T.hostiles().is_empty() and T.race_state == "")
 
 	# respawn mid-raid
 	await _fly_until(v, "called", 2.0)
@@ -313,6 +339,26 @@ func _run() -> void:
 	_check("arrived (%s, %d hostiles), then a restart: none left (%d), the floor free (\"%s\"), no result (\"%s\") and nothing tallied (%s), waiting again (\"%s\")" % [
 			in_on, had, T.hostiles().size(), T.race_state, R.result, R.tally, R.state],
 		in_on and had > 0 and T.hostiles().is_empty() and T.race_state == "" and R.result == "" and R.tally == tally_before and R.state == "")
+
+	# crash mid-raid: the pod's health gone, the sim's own wreck ("wreck", crash_t), and its respawn when that runs out
+	_put_pilot(v, e3[0], e3[1], e3[2])
+	await _fly_until(v, "called", 2.0)
+	_near_city(v, R.city)
+	await _fly(v, STEP)
+	in_on = R.state == "on"
+	had = T.hostiles().size()
+	tally_before = R.tally.duplicate()
+	var crash_at := Vector2(sim.pod.x, sim.pod.y)
+	sim.pod.health = 0.0
+	await _fly(v, 0.25)
+	var down: bool = sim.crash_t > 0.0
+	var stood: bool = R.state == "on"      # (the raid stands while the craft is down)
+	await _fly(v, 1.6)
+	var moved: float = Vector2(sim.pod.x, sim.pod.y).distance_to(crash_at)
+	var back: bool = sim.crash_t <= 0.0 and sim.pod.health > 0.0 and moved > 2000.0
+	_check("arrived (%s, %d hostiles), then wrecked (%s, the raid on meanwhile %s) and respawned by the sim %.1f km off (%s): none left (%d), the floor free (\"%s\"), no result (\"%s\") and nothing tallied (%s), waiting again (\"%s\")" % [
+			in_on, had, down, stood, moved / 1000.0, back, T.hostiles().size(), T.race_state, R.result, R.tally, R.state],
+		in_on and had > 0 and down and stood and back and T.hostiles().is_empty() and T.race_state == "" and R.result == "" and R.tally == tally_before and R.state == "")
 
 	# pause: the cockpit's FLIGHT HOLD menu; the desktop pause
 	_put_pilot(v, e3[0], e3[1], e3[2])
