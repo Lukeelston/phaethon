@@ -22,9 +22,10 @@
 ##   raids.reset()                  on a restart (a crash's respawn it sees for itself: sim.crash_t)
 ##   raids.text()                   the dash's line while one is called or on ("" otherwise): traffic's race_text() gives it
 ##   raids.result                   "cleared" | "lost", once, for the view to take
-## Hunting: each frame a raider takes its prey's lane and the speed of it plus HUNT_DV (headway 0.05), and on contact
-## (CONTACT_ALONG, CONTACT_LAT) the commuter is knocked out and lost; with no prey it cruises at the town limit. A raider
-## gone from traffic without on_kill is fled: no award, kills unchanged.
+## Hunting: each frame a raider takes its prey's lane and the speed of it plus HUNT_DV (no headway: it comes onto its
+## prey's tail, and traffic lets a hostile car pass a zone's cap by HUNT_DV, so it closes on one at the cap too), and on
+## contact (CONTACT_ALONG, CONTACT_LAT) the commuter is knocked out and lost; with no prey it cruises at the town limit.
+## A raider gone from traffic without on_kill is fled: no award, kills unchanged.
 ## Contact: a raider within CONTACT_CRAFT of the pod or either engine is one hit taken a GRACE s (signal hit_taken: the
 ## view jolts, and the score takes its points; never health).
 ## Log lines (the flight log): RAID: alarm <CITY> <km> | arrived | kill | commuter lost | hit taken | raider fled | cleared | lost (<why>)
@@ -51,8 +52,8 @@ const RAIDER_VISUAL := Traffic.DEMON     # the raiders' model (a demon's, until 
 const READY_V := 900.0 / MPH             # m/s: "at speed", chase's figure
 const ZONE_STEP := 20                    # samples (480 m) between the town zone's points its distance is read from
 const CLEAR_OF_PILOT := 1500.0           # m: no raider is put down nearer the pilot than this (unless the zone has no room)
-const HUNT_DV := 140.0 / MPH             # m/s: a hunting raider's closing speed over its prey
-const CONTACT_ALONG := 30.0              # m along the road, and ...
+const HUNT_DV := Traffic.HUNT_DV         # m/s: a hunting raider's closing speed over its prey (140 mph; past a zone's cap too)
+const CONTACT_ALONG := 48.0              # m along the road (traffic's own 40 m bumper allowance between centres, and a margin), and ...
 const CONTACT_LAT := 12.0                # ... across it: contact with its prey, which is lost
 const RAIDER_HEADWAY := 0.45              # s: a raider's headway with no prey
 const PREY_REACH := 3000.0               # m: the farthest ahead a commuter is its prey
@@ -483,8 +484,9 @@ func prey_of(c) -> Variant:
 	return best
 
 
-## One raider's driving: after its prey's lane, at its speed plus HUNT_DV, close behind (headway 0.05); with no prey,
-## the town's limit. Contact runs the commuter down.
+## One raider's driving: after its prey's lane, at its speed plus HUNT_DV, with no headway (traffic's follower then
+## sees its prey only inside its 40 m bumper allowance, within CONTACT_ALONG); with no prey, the town's limit. Contact
+## runs the commuter down.
 func _hunt(c, delta: float) -> void:
 	var p = prey_of(c)
 	if p == null:
@@ -493,7 +495,7 @@ func _hunt(c, delta: float) -> void:
 		return
 	c.lane = p.lane
 	c.vdes = p.v + HUNT_DV
-	c.headway = 0.05
+	c.headway = 0.0
 	var R = sim.roads[c.road]
 	var along: float = (p.f - c.f) * c.dir * float(R.len[clampi(int(c.f), 0, R.N - 1)])
 	if absf(along) <= CONTACT_ALONG and absf(p.lat - c.lat) <= CONTACT_LAT:

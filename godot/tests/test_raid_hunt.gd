@@ -8,6 +8,8 @@
 ##               turned against the pilot's way; each stays within the zone +-1 km (held at its far end)
 ##   away        the safety net: the pilot beyond R_KEEP of the zone but beside a raider is not away; with that one
 ##               gone, the clock runs and the raid is lost ("away")
+##   run down    in the zone, a commuter 600 m ahead in the raider's lane at SF_V - 100 mph, and one at SF_V (the
+##               zone's cap, which a hunting raider may pass by HUNT_DV): each is run down
 ## Run with --fixed-fps 120 (traffic and the director run on the engine's frame time; a frame is let pass for every
 ## step). Prints RAID HUNT PASS.
 extends SceneTree
@@ -149,7 +151,8 @@ func _run() -> void:
 		await _bounce(v)
 		await _hold_far_end(v)
 		await _away_net(v)
-	_check("every section ran to its end (%d of 3)" % sections, sections == 3)
+		await _run_downs(v)
+	_check("every section ran to its end (%d of 4)" % sections, sections == 4)
 	v.queue_free()
 	await process_frame
 	Raids.pinned = false
@@ -301,6 +304,52 @@ func _away_net(v) -> void:
 	_check("away: the pilot %.0f km from the zone beside a raider for 4 s: still on (%s, its away clock %.2f s of %.1f); that raider gone, %.2f s later: \"%s\" (%s)" % [
 			far_km, stayed, clock_near, R.away_t, t, R.result, R._why],
 		far_km * 1000.0 > T.R_KEEP and stayed and clock_near == 0.0 and R.result == "lost" and R._why == "away" and t <= R.away_t + 0.25)
+	R.reset()
+	T.cars.clear()
+
+
+## Run down at the Network's speeds: a commuter 600 m ahead in its lane, at SF_V - 100 mph and at SF_V.
+func _run_downs(v) -> void:
+	var R = v.raids
+	var T = v.traffic_net
+	var sim = v.sim
+	var k := _city(v)
+	var zone: Dictionary = R._zone(k)
+	var road: int = zone.road
+	var z: Vector2i = zone.z
+	sim.respawn_on(road, (z.x + z.y) / 2, 1)
+	var said := []
+	var all_ok := true
+	for prey_mph in [1050.0, 1150.0]:
+		R.reset()
+		T.cars.clear()
+		R.state = "on"
+		R.city = k
+		T.race_state = "raid"
+		R.time_limit = 1.0e9
+		R.away_t = 1.0e9
+		var sf: float = T.SF_V
+		var raider = _car(T, road, float(z.x + 40), 1, 0, sf, true)
+		var prey = _car(T, road, float(z.x + 40) + 600.0 / 24.0, 1, 0, prey_mph / MPH, false)
+		R.pack = [raider]
+		var lost0: int = R.lost
+		var t := 0.0
+		var top := 0.0
+		var gap_min := INF
+		while t < 25.0 and T.cars.has(prey):
+			await _frame(v)
+			t += STEP
+			for c in T.cars.duplicate():
+				if c != raider and c != prey:
+					T.cars.erase(c)
+			top = maxf(top, raider.v)
+			if T.cars.has(prey):
+				gap_min = minf(gap_min, (prey.f - raider.f) * 24.0)
+		var down: bool = not T.cars.has(prey) and R.lost == lost0 + 1
+		all_ok = all_ok and down
+		said.append("at %.0f mph: %s after %.1f s (the raider's top %.0f mph, nearest %.0f m)" % [prey_mph, "run down" if down else "NOT run down", t, top * MPH, gap_min])
+	sections += 1
+	_check("run down in %s's zone, a commuter 600 m ahead in the raider's lane: %s" % [sim.cities[k].name, "; ".join(said)], all_ok)
 	R.reset()
 	T.cars.clear()
 

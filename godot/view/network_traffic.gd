@@ -59,6 +59,7 @@ const FEED_CLOSING := 200.0      # m/s: a vehicle's own speed, coming the other 
 const TRAIN := 8                 # cars in a transport pod's train
 const TRAIN_GAP := 38.0          # m between their centres
 const SF_V := 1150.0 / MPH       # through a city's STARFIGHTER zone
+const HUNT_DV := 140.0 / MPH     # a hunting raider's closing speed over its prey (Raids): a hostile car may pass a zone's cap by this
 const BRAKE := 4.0 * 9.81        # m/s^2: how hard they plan to brake for what's ahead (6 g at most when they must)
 const PLAN_AHEAD := 40000.0      # m: a vehicle decides on a junction this far before it (and slows for the road beyond)
 const CAP_EVERY := 3            # frames between a car's readings of its road ahead (staggered: a third of them a frame)
@@ -1027,6 +1028,7 @@ func _brake_for(c: Car, margin := 0.0) -> float:
 	var starts := _limit_start[c.road]
 	var ends := _limit_end[c.road]
 	var grip := sqrt(c.a_lat / G)
+	var over := HUNT_DV if c.hostile else 0.0      # (a raider after its prey may pass a STARFIGHTER zone's cap by this)
 	var lo := -INF
 	var hi := INF
 	var here := INF
@@ -1040,7 +1042,7 @@ func _brake_for(c: Car, margin := 0.0) -> float:
 		if ends[i] < vl.size():
 			hi = minf(hi, ends[i] - offset)
 		var raw := vl[i]
-		var limit := -raw if raw < 0.0 else raw * grip
+		var limit := -raw + over if raw < 0.0 else raw * grip
 		if k <= 0:
 			here = minf(here, limit)
 		else:
