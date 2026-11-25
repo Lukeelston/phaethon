@@ -273,6 +273,8 @@ func _headset() -> void:
 	menu.choose_course("network")
 	changes = 0
 	scene_changed.connect(_counted)
+	Cockpit.cold_on_entry = false      # (so that only Fly can have set them)
+	Cockpit.require_neutral_on_entry = false
 	menu.start_selected()
 	var flown: String = View.vehicle_override
 	var entry: Dictionary = View.garage_on_entry
