@@ -18,8 +18,11 @@
 ##                            frames after it, through the arms' deploy (--arm=split: view/gunnery.gd frame's four
 ##                            steps, new, add_child, build and the first step, made here by hand and timed one by one)
 ##                first fire  the frames of the first shots (the bolts', flashes' and smoke's batches first drawn)
-##                firing      the fire control swapped for a timed one (a thin subclass), the six put back 0.7-1.8 km
-##                            ahead (the craft held at the nearest one's speed), 120 frames to settle, then
+##                firing      the fire control swapped for a timed one (a thin subclass), the six kept 0.7-1.8 km out
+##                            along the bore, PIN_DEG off it, on the road beneath (put back each frame, outside the
+##                            timing: where the run has brought the craft the road may bend, and its lanes alone left
+##                            the assist's cone empty, the aim on a raider 0 frames in 1,200), the craft held at their
+##                            speed, 120 frames to settle, then
 ##                            --frames (1200 by default) of fire on the pack: the director's update (its prey search
 ##                            timed inside it only), the fire control's step and the
 ##                            view's raid hooks (_raid_sync, _raid_result, _raid_target, _jolt_tick, _gun_controls),
@@ -32,7 +35,8 @@
 ##                            shown and hidden turn about: the gun's bolts, flashes, smoke and sights; the arms out or
 ##                            stowed; the burst; the jolt's vignette at full; the six raiders in traffic. The viewport's
 ##                            GPU time (medians, and each part's median difference from all hidden, round by round)
-##                kills       then the damage is let stand: the frames the raiders are shot down
+##                kills       then the damage is let stand (the six still kept along the bore): the frames the raiders
+##                            are shot down
 ##   --mode=whole The whole frame, Raids on against Raids off at the same seat and place (--raids=on|off; the head
 ##                only, for both): the plain game, no timed subclass. Both rail the craft at 1,150 mph (a city's cap)
 ##                from 100 samples into DUNES's town zone; on, a full raid there and the GUN armed and firing on it:
@@ -541,7 +545,8 @@ func _raid() -> bool:
 	var on_raider := 0
 	var bolts := []
 	for i in 120 + frames:
-		g._damage.clear()                  # (the six kept whole: outside the timing)
+		g._damage.clear()                  # (the six kept whole, and along the bore: outside the timing)
+		_pin_on_bore(R, T, g)
 		g.hold_fire = (i % 360) != 359     # (a pilot's bursts: let go one frame in 360)
 		await _frame("firing" if i >= 120 else "settle fire", _pack_speed(R))
 		if i >= 120:
@@ -577,6 +582,7 @@ func _raid() -> bool:
 	g.killed.connect(func(_c): kill_at.append(_rows.size()))
 	g.hold_fire = true
 	for i in 360:
+		_pin_on_bore(R, T, g)
 		await _frame("kills", _pack_speed(R))
 	print("RAID COST kills: %d raiders shot down in 360 frames, the raid %s %s; ram hits taken in all %d (at frames %s)" % [g.kills - kills0, R.state, R.tally, _hits.size(), str(_hits.slice(0, 8))])
 	# the report
