@@ -1202,7 +1202,9 @@ def write_glb(parts, destination=ART / "bodywork.glb", generator="Phaethon Shrik
         if occlusion:
             # Baked ambient occlusion in the vertex colour's alpha (tools/art_bake_ao.py); the colour
             # itself stays white. Alpha because Godot's glTF import leaves it linear.
-            seen = bake_ao(m.pos, m.norm, m.indices, getattr(m, "ao_reach", None))
+            seen = getattr(m, "baked_ao", None)
+            if seen is None:
+                seen = bake_ao(m.pos, m.norm, m.indices, getattr(m, "ao_reach", None))
             rgba = np.full((len(m.pos), 4), 255, dtype=np.uint8)
             rgba[:, 3] = np.round(seen * 255).astype(np.uint8)
             attr["COLOR_0"] = accessor(rgba, "VEC4", 5121, "u1", 34962)

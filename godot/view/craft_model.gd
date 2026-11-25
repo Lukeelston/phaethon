@@ -1208,6 +1208,9 @@ static func set_nose_closed(closed: bool, under: Node = null) -> void:
 	nose_closed = closed
 	if under:
 		for part: MeshInstance3D in under.find_children("*", "MeshInstance3D", true, false):
+			if part.mesh and part.mesh.get_meta(&"shrike_hull",false) and part.has_node("Arms"):
+				part.get_node("Arms").fit_pod(pod_hull_in(String(part.mesh.get_meta(&"livery",Livery.current)),true))
+				continue
 			if part.has_meta(&"service_bonnet"):
 				part.visible = closed
 			elif part.mesh and part.mesh.has_meta(&"shrike_hull"):
