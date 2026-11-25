@@ -111,6 +111,7 @@ var handling_ask := ""             # the live handling switch: "speed" / "starfi
                                    # toggle or Y-hold; keyboard: M), sent with every step
 static var vehicle_override := ""
 static var garage_on_entry: Dictionary = {}
+var entry_setup: Dictionary = {}   # the set-up this flight began with (garage_on_entry's, used up in _ready): its restart is handed it again
 static var track_override := ""    # an in-game track switch (VR: hold the menu button) wins over --track;
                                    # static, so it survives the scene reload that does the switch
 static var job_override := ""      # the job to fly ("emergency": the emergency run; "none": no job), wins over --job; static too
@@ -265,6 +266,7 @@ func _ready() -> void:
 	opts["vehicle"] = CraftSimScript.PilotCraft.resolve(OS.get_cmdline_user_args(), vehicle_override)
 	var workshop := garage_on_entry if vehicle_override == opts.vehicle else {}   # (Codex's garage: the bay's switches this flight leaves with)
 	garage_on_entry = {}
+	entry_setup = workshop
 	if workshop.has("handling"):
 		opts.handling = workshop.handling
 	if not Livery.pinned:    # ... and the paint they chose for this pilot craft (a test or a render that has chosen one keeps it)

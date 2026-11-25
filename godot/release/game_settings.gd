@@ -84,8 +84,11 @@ static func craft_setup(id: String) -> Dictionary:
 		return {}
 	return _valid_setup(config.get_value("garage", Craft.known(id), {}))
 
-## Merges the valid keys of `moved` over the craft's saved set-up. Nothing valid, nothing saved.
+## Merges the valid keys of `moved` over the craft's saved set-up. Nothing valid, nothing saved; nor for an id that is not
+## a craft's (Craft.known would make it the default craft's).
 static func set_craft_setup(id: String, moved: Dictionary) -> void:
+	if id not in Craft.ORDER:
+		return
 	var valid := _valid_setup(moved)
 	if valid.is_empty():
 		return

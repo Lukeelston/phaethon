@@ -137,7 +137,9 @@ func resume_game() -> void:
 func restart_game() -> void:
 	if not _desktop_gameplay():
 		return
-	View.pad_start = get_tree().current_scene.pad != null
+	var flight := get_tree().current_scene as View
+	View.pad_start = flight.pad != null
+	View.garage_on_entry = flight.entry_setup      # (the set-up it began with: a Fly in a saved Starfighter restarts in one)
 	resume_game()
 	get_tree().reload_current_scene()
 

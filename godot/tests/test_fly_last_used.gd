@@ -1,14 +1,16 @@
 ## The per-craft switch set-up store (release/game_settings.gd's craft_setup) and Garage.fly, the menus' Fly button:
 ## it starts at once in the craft last used, with that craft's saved switches and paint. Nothing saved is the Phaethon
 ## in its Factory paint; a hand-edited value is dropped; the engine state is never saved; a launch in one craft leaves
-## another's set-up as it was. A course with its own start handling (the sim's rule: a Grand Prix circuit Starfighter,
-## Carving Speedcraft) keeps it: Fly leaves out the saved handling there, not the slide; the Range and the Network
-## take the saved handling.
+## another's set-up as it was; a half-valid stored set-up keeps its valid part; a set-up for a craft that is not one is
+## not saved. A course with its own start handling (the sim's rule: a Grand Prix circuit Starfighter, Carving
+## Speedcraft) keeps it: Fly leaves out the saved handling there, not the slide; the Range and the Network take the
+## saved handling. The Talon with nothing saved flies with no set-up.
 ## The rule, as sequences through the menus, the flights, the pause menu and the garage (the controller's ruling of
 ## 2026-11-25: the set-up is what the pilot last set for a craft, and nothing else):
 ##   desktop   Fly to the Grand Prix, Esc, Pilot garage (saves nothing), walk back, Fly to the Sprint: Speedcraft; M there
 ##             is saved, M on the Grand Prix is the course's and is not. A bay's MODE moved and launched is saved, and the
-##             next visit's untouched launch and Fly both start in it; a bay launch onto the Grand Prix with "speed"
+##             next visit's untouched launch and Fly both start in it, and the pause menu's restart of that Fly too; a
+##             bay launch onto the Grand Prix with "speed"
 ##             saved starts in the course's Starfighter, and that flight's live handling, handed back to its bay and
 ##             launched with untouched, is not saved
 ##   headset   Fly, OPTIONS, PILOT GARAGE (saves nothing), walk back, Fly, MODE thrown to Starfighter, hold Menu, Fly:
@@ -188,6 +190,11 @@ func _run() -> void:
 	Settings.set_craft_setup("kiln", {"slide": true})
 	check(Settings.craft_setup("kiln") == {"handling": "starfighter", "slide": true}, "A later save merges over the saved set-up")
 	check(Settings.craft_setup(Pilot.STANDARD).is_empty(), "One craft's set-up is not another's")
+	Settings.set_craft_setup("no-such-craft", {"handling": "starfighter"})
+	var stored := ConfigFile.new()
+	stored.load(Settings.prefs_path)
+	check(Settings.craft_setup(Pilot.STANDARD).is_empty() and not stored.has_section_key("garage", "no-such-craft"),
+		"A set-up for a craft that is not one is not saved (not as the Phaethon's either): %s" % Settings.craft_setup(Pilot.STANDARD))
 
 	var config := ConfigFile.new()
 	config.load(Settings.prefs_path)
@@ -198,6 +205,9 @@ func _run() -> void:
 	check(Settings.craft_setup("kiln").is_empty(), "An invalid handling saves nothing")
 	config.load(Settings.prefs_path)
 	check(config.get_value("garage", "kiln") == {"handling": "banana", "slide": "yes"}, "... and leaves the stored value alone")
+	config.set_value("garage", "kiln", {"handling": "starfighter", "slide": "yes"})
+	config.save(Settings.prefs_path)
+	check(Settings.craft_setup("kiln") == {"handling": "starfighter"}, "A half-valid stored set-up keeps its valid handling only: %s" % Settings.craft_setup("kiln"))
 	Settings.set_craft_setup("kiln", {"handling": "starfighter", "slide": true})
 
 	Garage.launch_flight(self, "vesper", {"vesper": {"handling": "starfighter"}, "kiln": {"slide": false}})
@@ -243,6 +253,7 @@ func _run() -> void:
 	Garage.fly(self, false, "range")
 	check(View.vehicle_override == "talon" and not coat.is_empty() and Livery.built("talon") == coat,
 		"Fly flies the Talon (it has no garage bay) in its saved paint (%s)" % coat)
+	check(Settings.craft_setup("talon").is_empty() and View.garage_on_entry == {}, "... with nothing saved for it, it is handed no set-up: %s" % View.garage_on_entry)
 	await _settle()
 
 	View.vehicle_override = "marker"
@@ -377,6 +388,13 @@ func _desktop_bay_launches() -> void:
 	if flight == null:
 		return
 	check(flight.sim.P.handling == "starfighter", "desktop: ... and Fly starts it in Starfighter (%s)" % flight.sim.P.handling)
+	var overlay = root.get_node("ReleasePause")
+	overlay.set_paused(true)
+	overlay.restart_game()
+	flight = await _next(UI.GAME_SCENE)
+	if flight == null:
+		return
+	check(flight.sim.P.vehicle == "kiln" and flight.sim.P.handling == "starfighter", "desktop: ... and the pause menu's Restart this course restarts it in Starfighter (%s)" % flight.sim.P.handling)
 	# the Grand Prix
 	menu = await _desktop_to_menu()
 	if menu == null:
