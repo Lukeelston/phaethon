@@ -53,6 +53,7 @@ const ENGINE_SHOES := {
 
 var _bays := {}
 var _standing := {}      # bay -> the craft standing in it: its own, or in the Phaethon's the Phaethon or the Talon
+var _sign_faces := {}    # bay -> its aisle sign's two lettered faces (Label3D), which name the craft standing there
 var _gates := {}
 var _marker_guides: Dictionary[String, Array] = {}
 var _finishes := {}
@@ -133,6 +134,8 @@ func build() -> void:
 	var back_wall: Transform3D = $ServiceEntry.transform.translated_local(Vector3(0, 0, ServiceEntry.BACK))
 	inspection = Inspection.new()
 	inspection.install(self, back_wall)
+	for id: String in Pilot.GARAGE_BAYS:
+		_name_bay(id)
 
 
 ## A bay by its id, or by a craft's: the Talon's is the Phaethon's (sim/pilot_craft.gd bay_of).
@@ -157,6 +160,25 @@ func rebuild_bay(id: String, craft: String, finish: String) -> void:
 		return
 	bay.rebuild(craft, finish)
 	_standing[id] = craft
+	_name_bay(id)
+
+
+## A bay's aisle sign and its row on the fleet board name the craft standing there (Luke, 2026-11-25, of the Talon in
+## the Phaethon's bay: "Yes, name it"), by its placard name (sim/pilot_craft.gd placard_name). The board is engraved
+## with the six the hall was built for (tools/art_inspection_station.py): another craft's name is printed over its row's.
+func _name_bay(id: String) -> void:
+	var index := Pilot.GARAGE_BAYS.find(id)
+	var craft := bay_craft(id)
+	if index < 0 or craft.is_empty():
+		return
+	for face: Label3D in _sign_faces.get(id, []):
+		face.text = _sign_words(index, craft)
+	if inspection:
+		inspection.name_row(index, "" if craft == id else Pilot.placard_name(craft))
+
+
+func _sign_words(index: int, craft: String) -> String:
+	return "%02d   %s" % [index + 1, Pilot.placard_name(craft).to_upper()]
 
 
 func seat_transform(id: String) -> Transform3D:
@@ -528,7 +550,8 @@ func _bay_sign(id: String, index: int, side: float, row: float) -> void:
 	var gate: Transform3D = _gates[id]
 	var wing_z := clampf((sign_z - gate.origin.z - 1.0) / width, 0.0, .80)
 	var wing_x := sqrt(1.0 - wing_z*wing_z)
-	var words := "%02d   %s" % [index+1, Pilot.NAMES[id].to_upper()]
+	var words := _sign_words(index, _standing[id])
+	_sign_faces[id] = []
 	var base := Vector3(post.x,0,post.z)
 	_instances["MarkerPost"].append(Transform3D(Basis.IDENTITY,base))
 	_block(base+Vector3.UP*MARKER_HEIGHT*.5,Vector3(.14,MARKER_HEIGHT,.13))
@@ -556,7 +579,9 @@ func _bay_sign(id: String, index: int, side: float, row: float) -> void:
 			var at := wing.affine_inverse() * clip
 			var rivet := wing * Vector3(clampf(at.x,-.79,.79),-.142,-.012)
 			_strut("Steel",rivet,clip,.026)
-		_label(words,panel+face*Vector3(.020,.005,.0275),face,.0038,48,BayLettering)
+		var lettering := _label(words,panel+face*Vector3(.020,.005,.0275),face,.0038,48,BayLettering)
+		lettering.name = "BaySign%02d%s" % [index + 1, "A" if toward < 0.0 else "B"]
+		_sign_faces[id].append(lettering)
 		_block(panel,Vector3(1.65,.333,.061),face)
 	_service_indicators(post, side, index)
 	_bays[id].engine_stage_changed.connect(_set_service_indicator.bind(index))
@@ -663,7 +688,7 @@ func _thread_detail(threads: Array[Transform3D]) -> void:
 	add_child(hardware,true)
 
 
-func _label(words: String, at: Vector3, frame: Basis, pixel: float, size: int, typeface: Font = null) -> void:
+func _label(words: String, at: Vector3, frame: Basis, pixel: float, size: int, typeface: Font = null) -> Label3D:
 	var label := Label3D.new()
 	if typeface:
 		label.font = typeface
@@ -677,6 +702,7 @@ func _label(words: String, at: Vector3, frame: Basis, pixel: float, size: int, t
 	label.shaded = true
 	label.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
 	add_child(label)
+	return label
 
 
 func _material(id: String, hex: String, metal: float, roughness: float, energy := 0.0) -> void:

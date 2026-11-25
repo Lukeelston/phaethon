@@ -5,6 +5,8 @@
 ##   bay-talon-port-high, bay-talon-starboard-high ... from higher, the whole craft
 ##   bay-phaethon-port, bay-phaethon-starboard     the same two low views with the Phaethon (swapped back)
 ##   bay-sign                                      the sign at the Phaethon's bay: board, menu, paint and body lines
+##   aisle-sign-talon, aisle-sign-phaethon         the bay's enamel aisle sign, one face square on, with each body there
+##   fleet-board-talon, fleet-board-phaethon       the fleet board, whole, with each body in bay 01 (-close: its top rows)
 ## Prints each body's pod bounds and the bay's gate (BODIES ...). Its own settings file; the pilot's is left alone.
 ## Needs a window: --xr-mode off --resolution 1600x900 --audio-driver Dummy
 ##   -s res://tests/render_garage_bodies.gd -- --mute --out=ABSOLUTE_DIRECTORY
@@ -68,6 +70,7 @@ func _pictures(garage) -> void:
 		await _look(bay, Vector3(side[1] * 2.1, -0.42, 0.05), Vector3(0.0, -0.10, 0.05), "bay-talon-" + side[0])
 		await _look(bay, Vector3(side[1] * 4.6, 1.30, 2.6), Vector3(0.0, 0.0, -1.0), "bay-talon-" + side[0] + "-high")
 	await _sign(garage, hall)
+	await _named(hall, "talon")
 	# from the bay's gate, at a standing pilot's eye: toward the seat, and aft along the near wing
 	var gate: Vector3 = bay.to_local(hall.boarding_transform("phaethon").origin)
 	await _look(bay, gate + Vector3.UP * 1.62, Vector3(0.0, 0.0, 0.54), "bay-talon-gate")
@@ -79,6 +82,24 @@ func _pictures(garage) -> void:
 	walker.set_seated(false, hall.spawn_transform())
 	for side in [["port", -1.0], ["starboard", 1.0]]:
 		await _look(bay, Vector3(side[1] * 2.1, -0.42, 0.05), Vector3(0.0, -0.10, 0.05), "bay-phaethon-" + side[0])
+	await _named(hall, "phaethon")
+
+
+## What names the craft in the Phaethon's bay, with `body` standing there: its aisle sign, one face square on, and the
+## fleet board (whole, and its top rows from close: the name printed over row 01's engraving).
+func _named(hall, body: String) -> void:
+	var face := hall.get_node("BaySign01A") as Label3D
+	_camera.global_position = face.global_transform * Vector3(0.0, 0.05, 2.0)
+	_camera.look_at(face.global_position, Vector3.UP)
+	await _wait(0.6)
+	await _save("aisle-sign-" + body)
+	var board: Node3D = hall.inspection
+	for view in [["", Vector2(1.2, 0.58), 2.1], ["-close", Vector2(0.75, 0.45), 0.62]]:
+		var at: Vector3 = board.FACE + Vector3(view[1].x, -view[1].y, 0.0)
+		_camera.global_position = board.to_global(at + Vector3(0.0, 0.0, view[2]))
+		_camera.look_at(board.to_global(at), Vector3.UP)
+		await _wait(0.6)
+		await _save("fleet-board-" + body + view[0])
 
 
 func _pod(bay: Node3D) -> String:

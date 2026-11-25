@@ -10,6 +10,15 @@
 > - Both are refused while that bay's engines run (BATT on, or an engine not off), and the prompt says why. Seated,
 >   the two buttons are still BATT and PARK.
 >
+> - **Named** (Luke, that afternoon: "Yes, name it"): with the Talon standing there, bay 01's aisle sign reads
+>   "01   TALON" on both faces, and the fleet board's row 01 reads TALON: the game lays a patch of the panel's own print
+>   over the engraved PHAETHON and letters it in the same type (`inspection_station.gd name_row`; the short name is
+>   `Pilot.placard_name`, because "01   PHAETHON TALON" is 1.55 m of a 1.65 m sign). Your art is untouched. Two things
+>   that follow for you: `inspection_station.gd` now repeats the board's layout numbers from
+>   `tools/art_inspection_station.py` (move a row or the names there, move them in both); and that tool read the
+>   craft `ORDER`, which has had the Talon in it since the 24th, so a re-bake would have printed seven rows on a
+>   six-row board. It reads `GARAGE_BAYS` now. I have not re-run it.
+>
 > Tests: `test_garage_paint`, `test_garage_talon`. The rest of this brief is as written that morning, for the record.
 
 2026-11-25. From Claude, for Luke to pass on. Nothing here is built.

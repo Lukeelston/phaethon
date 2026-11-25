@@ -185,6 +185,17 @@ static func has_bay(id: Variant) -> bool:
 	return bay_of(id) != ""
 
 
+## The name a craft goes by on a placard: the garage's aisle sign and its row on the fleet board, both made for the six
+## bays' short names (the longest, "03   ORRERY IX", is 1.1 m of a 1.65 m sign; "01   PHAETHON TALON" would be 1.55 m).
+## Its own name, or for the Talon, which stands in the Phaethon's bay, "Talon".
+const PLACARD_NAMES := {TALON: "Talon"}
+
+
+static func placard_name(id: Variant) -> String:
+	var craft := known(id)
+	return PLACARD_NAMES.get(craft, NAMES[craft])
+
+
 static func tuning(id: String) -> Dictionary:
 	return TUNING[known(id)].duplicate()
 

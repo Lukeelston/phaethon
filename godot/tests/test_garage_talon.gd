@@ -16,6 +16,10 @@
 ##                so a pilot at the gate stands clear of it; those bounds are read off the hull once and kept (a
 ##                Talon paint press or a second swap to it reads no mesh back), and equal ones read fresh
 ##   cost         the body's rebuild on the main thread (printed: BODY REBUILD)
+##   named        (Luke, 2026-11-25: "Yes, name it") the bay's aisle sign, both faces, and its row on the fleet board name
+##                the body standing there by its placard name ("01   TALON"; on the board, printed over the engraved
+##                PHAETHON, inside the cover and clear of the PORT window); the Phaethon back, the engraving stands;
+##                the other bays' never change; the Talon's sign is no wider than the six's
 ## Its own settings file for the run: the default one is left as it was.
 ## Run headless with --xr-mode off -s res://tests/test_garage_talon.gd -- --mute
 extends SceneTree
@@ -154,6 +158,9 @@ func _talon(garage) -> void:
 		"The Talon's bay is the Phaethon's; each other craft's its own; the hall keeps its six")
 	check(hall.bay_craft(Pilot.STANDARD) == Pilot.STANDARD and bay.sim.P.vehicle == Pilot.STANDARD and Settings.phaethon_body() == Pilot.STANDARD,
 		"Nothing saved, the Phaethon stands in its bay")
+	var kiln_named := _named(hall, Pilot.KILN)
+	check(_named(hall, Pilot.STANDARD) == ["01   PHAETHON", "01   PHAETHON", ""] and kiln_named == ["04   KILN SIX", "04   KILN SIX", ""],
+		"Its aisle sign names the Phaethon and the fleet board's engraving stands (%s)" % [_named(hall, Pilot.STANDARD)])
 	# ---- elsewhere the body control does nothing
 	await _stand_at(garage, "kiln")
 	var kiln_model: Node3D = hall.bay_node("kiln").model
@@ -187,6 +194,30 @@ func _talon(garage) -> void:
 	check(Parked.hull_reads == reads + 1, "Standing the Talon there read its hull's bounds once (%d reads)" % (Parked.hull_reads - reads))
 	check(garage._prompts._title.text == "E  Board Phaethon Talon" and garage._prompts._hint.text.contains("P  Body: Phaethon Talon"),
 		"... and the prompt names the Talon (\"%s\")" % garage._prompts._title.text)
+	check(_named(hall, Pilot.STANDARD) == ["01   TALON", "01   TALON", "TALON"] and _named(hall, Pilot.KILN) == kiln_named,
+		"The bay's aisle sign, both faces, and its row on the fleet board name the Talon; the Kiln's are as they were (%s)" % [_named(hall, Pilot.STANDARD)])
+	var widths := {}
+	for n in Pilot.GARAGE_BAYS.size():
+		var face := hall.get_node("BaySign%02dA" % [n + 1]) as Label3D
+		widths[n] = face.font.get_string_size(face.text, HORIZONTAL_ALIGNMENT_LEFT, -1, face.font_size).x * face.pixel_size
+	check(widths[0] > 0.5 and widths[0] <= widths.values().slice(1).max(),
+		"The Talon's sign is no wider than the widest of the other five (%.2f m of %.2f m)" % [widths[0], widths.values().slice(1).max()])
+	var board = hall.inspection
+	var cover := board.get_node_or_null("NameCover01") as MeshInstance3D
+	var printed: Label3D = cover.get_node("Name") if cover != null else null
+	var fits := false
+	if printed != null:
+		var ink: Vector2 = printed.font.get_string_size(printed.text, HORIZONTAL_ALIGNMENT_LEFT, -1, printed.font_size) * printed.pixel_size
+		var plate: AABB = cover.mesh.get_aabb()
+		var from := printed.position.x
+		# (the engraved PHAETHON runs 0.344 m from the same left edge: the plate must hide all of it, and the new
+		# name must lie on the plate, which must stop short of the PORT window's gasket, 0.24 m left of its middle)
+		fits = (plate.position.x < from and plate.end.x > from + maxf(ink.x, 0.36) and plate.end.x < -0.055 - 0.24
+			and absf(printed.position.y - plate.get_center().y) < 0.005 and plate.size.y > ink.y * 0.7 and plate.size.y < 0.13
+			and printed.position.z > plate.end.z and plate.position.z > board.FACE.z
+			and is_equal_approx(printed.font_size * printed.pixel_size, board.NAME_EM)
+			and cover.mesh.surface_get_material(0) != null)
+	check(fits, "On the board the name is printed in the engraving's size on a patch of the panel's own print that hides PHAETHON and stops short of the PORT window")
 	var bounds: AABB = bay.model.pod.transform * bay.model.pod.mesh.get_aabb()
 	var span := maxf(absf(bounds.position.x), absf(bounds.end.x))
 	var gate := absf(bay.to_local(hall.boarding_transform(Pilot.STANDARD).origin).x)
@@ -220,6 +251,7 @@ func _talon(garage) -> void:
 	_key(KEY_P)      # (the keyboard's P, unguarded: the Phaethon, then the Talon again)
 	await _frames(1)
 	var keyed: String = hall.bay_craft(Pilot.STANDARD)
+	var keyed_named := _named(hall, Pilot.STANDARD)
 	_key(KEY_P)
 	await _frames(1)
 	check(standing[-0.8] == [Pilot.TALON, Pilot.TALON] and standing[-0.3] == [Pilot.STANDARD, Pilot.STANDARD]
@@ -228,6 +260,8 @@ func _talon(garage) -> void:
 	check(Parked.hull_reads == reads + 1 and bay.model.pod.mesh == _talon_hull(next)
 		and Parked.talon_hull_bounds(bay.model.pod.mesh) == Parked.hull_bounds_of(bay.model.pod.mesh),
 		"The Talon's paint press and its second swap read no hull back: its kept bounds, which equal ones read fresh")
+	check(keyed_named == ["01   PHAETHON", "01   PHAETHON", ""] and _named(hall, Pilot.STANDARD) == ["01   TALON", "01   TALON", "TALON"],
+		"The Phaethon back, its sign names it and the board's engraving stands again; the Talon back, both name the Talon (%s)" % [keyed_named])
 	# ---- boarded and launched
 	garage.interact()
 	var cab: Node3D = bay.get_node_or_null("OccupiedCockpit")
@@ -296,6 +330,8 @@ func _talon(garage) -> void:
 	if garage == null:
 		return
 	check(garage.environment.bay_craft(Pilot.STANDARD) == Pilot.TALON, "The next visit from the menu finds the Talon in the Phaethon's bay")
+	check(_named(garage.environment, Pilot.STANDARD) == ["01   TALON", "01   TALON", "TALON"],
+		"... named on its sign and the fleet board as the hall is built (%s)" % [_named(garage.environment, Pilot.STANDARD)])
 	garage.return_to_menu()
 	menu = await _next(UI.MENU_SCENE)
 	if menu == null:
@@ -314,6 +350,20 @@ func _talon(garage) -> void:
 	check(garage.environment.bay_craft(Pilot.STANDARD) == Pilot.STANDARD and Settings.phaethon_body() == Pilot.STANDARD
 		and garage.environment.nearest_bay(garage.walker.global_position) == Pilot.STANDARD,
 		"A parked Phaethon arrives at its bay with the Phaethon standing there again")
+	check(_named(garage.environment, Pilot.STANDARD) == ["01   PHAETHON", "01   PHAETHON", ""],
+		"... and named there again (%s)" % [_named(garage.environment, Pilot.STANDARD)])
+
+
+## What the hall names the craft in a bay: its aisle sign's two faces, and the name printed over its row of the fleet
+## board ("" where the board's engraving stands).
+func _named(hall, bay: String) -> Array:
+	var n := Pilot.GARAGE_BAYS.find(bay) + 1
+	var cover := hall.inspection.get_node_or_null("NameCover%02d" % n) as Node3D
+	var faces := []
+	for face: String in ["A", "B"]:
+		var lettering := hall.get_node_or_null("BaySign%02d%s" % [n, face]) as Label3D
+		faces.append(lettering.text if lettering != null else "(no sign)")
+	return faces + [(cover.get_node("Name") as Label3D).text if cover != null and cover.visible else ""]
 
 
 ## The Talon's plated hull in a paint, as the garage builds it (its palette, Talon.paint, and the livery both that paint).

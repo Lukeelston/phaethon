@@ -32,9 +32,14 @@ def panel_type(size, heavy=False):
 
 
 def craft_names():
-    """Build the printed bay list from the same roster used to park the craft."""
+    """Build the printed bay list from the same roster used to park the craft.
+
+    The garage's bays (GARAGE_BAYS), not every craft (ORDER): the Talon is in ORDER but stands in the Phaethon's bay,
+    and the game prints its name over row 01 when it does (godot/garage/inspection_station.gd name_row, which
+    repeats this file's BOARD, FACE_W/H, ROW_TOP/STEP and the names' place and size: change them in both).
+    """
     roster = (GODOT / "sim/pilot_craft.gd").read_text(encoding="utf8")
-    order = re.search(r"^const ORDER := \[(.+?)\]", roster, re.M)[1].split(",")
+    order = re.search(r"^const GARAGE_BAYS := \[(.+?)\]", roster, re.M)[1].split(",")
     mapping = re.search(r"^const NAMES := \{(.+?)\}", roster, re.M)[1]
     names = dict(re.findall(r'(\w+):\s*"([^"]+)"', mapping))
     return [names[key.strip()] for key in order]
