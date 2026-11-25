@@ -34,14 +34,21 @@ var _refused_bay := ""      # ... and at which bay
 
 
 func _ready() -> void:
+	# A parked Phaethon or Talon arrives at the Phaethon's bay standing as it flew.
+	if Fleet.bay_of(Route.arrival_craft) == Fleet.STANDARD:
+		Settings.set_phaethon_body(Route.arrival_craft)
 	environment = Workshop.new()
 	environment.name = "Workshop"
 	add_child(environment)
 	var returning := Route.take_parked_bays()
 	for id: String in returning:
 		var bay: Dictionary = returning[id]
-		if Fleet.GARAGE_BAYS.has(id) and (bay.has("startup") or bay.has("handling") or bay.has("slide")):
-			_runup_for(id, bay.get("startup")).apply_switches(bay)
+		var at := Fleet.bay_of(id)
+		# (keyed by the craft that stood in each bay: the Phaethon's bay's switches only if that body stands there now)
+		if at.is_empty() or environment.bay_craft(at) != id:
+			continue
+		if bay.has("startup") or bay.has("handling") or bay.has("slide"):
+			_runup_for(at, bay.get("startup")).apply_switches(bay)
 	walker = Walker.new()
 	walker.name = "Walker"
 	walker.allow_xr = Route.is_xr
@@ -50,8 +57,8 @@ func _ready() -> void:
 	pilot.name = "Pilot"
 	walker.set_pilot(pilot)
 	var arrival := environment.spawn_transform()
-	if Fleet.GARAGE_BAYS.has(Route.arrival_craft):
-		arrival = environment.boarding_transform(Route.arrival_craft)
+	if Fleet.has_bay(Route.arrival_craft):
+		arrival = environment.boarding_transform(Fleet.bay_of(Route.arrival_craft))
 	walker.set_seated(false, arrival)
 	if not OS.get_cmdline_user_args().has("--mute"):
 		var sound := ShopAudio.new()
@@ -121,12 +128,14 @@ func _runup_for(id: String, power: StartupSequence = null) -> Runup:
 
 func _work_control(control: String) -> void:
 	if not _departing and not seated_craft.is_empty():
-		_runups[seated_craft].work(control)
+		_runups[Fleet.bay_of(seated_craft)].work(control)
 
 
 ## On foot at a bay (garage_walker.gd bay_control_requested): "paint" takes the next paint on the row for the craft
 ## standing there (view/livery.gd choices_for, wrapping), saved at once under its key (the one the flight and the menus
-## read), and the bay's craft is built again in it. Refused, and the prompt says why, while that bay's engines run.
+## read), and the bay's craft is built again in it; "body", at the Phaethon's bay only, stands the other body there
+## (the Phaethon or the Talon, saved: Settings.phaethon_body), in its own saved paint. Either is refused, and the
+## prompt says why, while that bay's engines run.
 func _work_bay(control: String) -> void:
 	if _departing or _boarding or not seated_craft.is_empty() or _at_rotor():
 		return
@@ -134,16 +143,21 @@ func _work_bay(control: String) -> void:
 	if not Fleet.GARAGE_BAYS.has(bay):
 		return
 	var craft := environment.bay_craft(bay)
-	if control != "paint":
+	if control not in ["paint", "body"] or (control == "body" and bay != Fleet.STANDARD):
 		return
 	if not _bay_cold(bay):
 		_refused = REFUSED_RUNNING
 		_refused_bay = bay
 		_update_prompt()
 		return
-	var ids := Livery.ids_for(craft)
-	Settings.set_choice(Livery.key_for(craft), ids[(ids.find(Livery.saved_for(craft)) + 1) % ids.size()])
-	_rebuild_bay(bay, craft)
+	if control == "paint":
+		var ids := Livery.ids_for(craft)
+		Settings.set_choice(Livery.key_for(craft), ids[(ids.find(Livery.saved_for(craft)) + 1) % ids.size()])
+		_rebuild_bay(bay, craft)
+	else:
+		var body := Fleet.TALON if craft == Fleet.STANDARD else Fleet.STANDARD
+		Settings.set_phaethon_body(body)
+		_rebuild_bay(bay, body, false)      # (another craft: its bay's switches start at their defaults)
 	_refused = ""
 	_update_prompt()
 
@@ -181,7 +195,7 @@ func _paint_name(craft: String) -> String:
 
 
 func _operate_cockpit(delta: float) -> void:
-	var runup := _runups[seated_craft]
+	var runup := _runups[Fleet.bay_of(seated_craft)]
 	var hands := walker.cockpit_hands()
 	for hand in _touching_hands:
 		if not hands.has(hand):
@@ -204,10 +218,11 @@ func interact() -> void:
 	if _at_rotor():
 		environment.inspection.spin_rotor()
 		return
-	var craft := environment.nearest_bay(walker.global_position)
-	if not Fleet.GARAGE_BAYS.has(craft):
+	var at := environment.nearest_bay(walker.global_position)
+	if not Fleet.GARAGE_BAYS.has(at):
 		return
-	var bay := environment.bay_node(craft) as Workshop.Parked
+	var craft := environment.bay_craft(at)      # (in the Phaethon's bay, the Phaethon or the Talon)
+	var bay := environment.bay_node(at) as Workshop.Parked
 	if _cockpit == null or _cockpit.get_parent() != bay:
 		if _cockpit != null:
 			_cockpit.queue_free()
@@ -222,17 +237,17 @@ func interact() -> void:
 			_boarding = false
 			if _departing or not is_inside_tree():
 				return
-			if environment.nearest_bay(walker.global_position) != craft:
+			if environment.nearest_bay(walker.global_position) != at:
 				_update_prompt()
 				return
 		else:
 			_cockpit.build(craft, Callable(), bay.paint)
 	_cockpit.show()
-	environment.set_cockpit_visible(craft, false)
+	environment.set_cockpit_visible(at, false)
 	seated_craft = craft
 	pilot.set_seat_vehicle(craft)
-	walker.set_seated(true, environment.seat_transform(craft))
-	var runup := _runup_for(craft)
+	walker.set_seated(true, environment.seat_transform(at))
+	var runup := _runup_for(at)
 	runup.set_seated(true, _cockpit.overhead.pods if _cockpit.overhead else {})
 	walker.set_cockpit_grips(_cockpit.throttle_grips())
 	_operate_cockpit(0.0)
@@ -242,13 +257,13 @@ func interact() -> void:
 func leave_seat() -> void:
 	if _departing or seated_craft.is_empty():
 		return
-	var craft := seated_craft
-	_runups[craft].set_seated(false)
+	var at := Fleet.bay_of(seated_craft)
+	_runups[at].set_seated(false)
 	_cockpit.reset_overhead_hands()
 	_touching_hands.clear()
 	seated_craft = ""
-	walker.set_seated(false, environment.boarding_transform(craft))
-	environment.set_cockpit_visible(craft, true)
+	walker.set_seated(false, environment.boarding_transform(at))
+	environment.set_cockpit_visible(at, true)
 	# Keep one cab warm so the pilot can check a detail from inside and outside.
 	_cockpit.hide()
 	_update_prompt()
@@ -260,13 +275,13 @@ func launch_flight() -> void:
 	_departing = true
 	var bays := {}
 	for id: String in Fleet.GARAGE_BAYS:
-		var data := {}      # (its paint is the menus' for it: view/livery.gd, read again by the flight)
+		var data := {}      # (its paint is its own saved choice: view/livery.gd, read again by the flight)
 		if _runups.has(id):
 			var runup := _runups[id]
 			data.merge(runup.switch_settings)
 			if runup.operated:
 				data.startup = runup.startup
-		bays[id] = data
+		bays[environment.bay_craft(id)] = data      # (under the craft standing there: the Phaethon's bay's may be the Talon's)
 	Route.launch_flight(get_tree(), seated_craft, bays)
 
 
@@ -298,4 +313,5 @@ func _update_prompt() -> void:
 	if _refused_bay != _nearby or not seated_craft.is_empty():
 		_refused = ""
 	var paint := _paint_name(craft) if seated_craft.is_empty() and not craft.is_empty() else ""
-	_prompts.show_controls(craft_name, not seated_craft.is_empty(), Route.destination_label(), _using_pad, anchor, paint, _refused)
+	var body := craft_name if seated_craft.is_empty() and _nearby == Fleet.STANDARD else ""
+	_prompts.show_controls(craft_name, not seated_craft.is_empty(), Route.destination_label(), _using_pad, anchor, paint, _refused, body)

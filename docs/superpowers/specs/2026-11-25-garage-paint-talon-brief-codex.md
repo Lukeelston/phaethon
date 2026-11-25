@@ -1,5 +1,17 @@
 # Brief for Codex: paint and the Talon in the pilot garage
 
+> **Note, 2026-11-25 (later the same day):** this was built here, on Luke's word ("Codex is done until tomorrow. Will you
+> fix her garage and talon paint then merge?"), on the `claude/menu-garage-split` line. The controls, on foot at a bay:
+> - **Paint:** the walker's power button when not seated (key I, pad X, left X in the headset) takes the next paint on
+>   that craft's row, saved at once under its own key. The bay's craft is rebuilt in place (`Parked.rebuild`).
+> - **Body:** at the Phaethon's bay only, the park button when not seated (key P, pad L3, the left stick's click in the
+>   headset) stands the other body there, the Phaethon or the Talon (`Pilot.bay_of`, `has_bay`; saved as
+>   `Settings.phaethon_body()`), in its own saved paint. A parked Phaethon or Talon arriving stands as it flew.
+> - Both are refused while that bay's engines run (BATT on, or an engine not off), and the prompt says why. Seated,
+>   the two buttons are still BATT and PARK.
+>
+> Tests: `test_garage_paint`, `test_garage_talon`. The rest of this brief is as written that morning, for the record.
+
 2026-11-25. From Claude, for Luke to pass on. Nothing here is built.
 
 ## Why

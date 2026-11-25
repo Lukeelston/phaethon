@@ -162,9 +162,10 @@ func _sign_type(on_marker: bool) -> void:
 
 
 ## `paint`: on foot at a bay, the name of the paint the craft there wears (its control is offered); `refused`: why the
-## last change at that bay was refused ("" none).
+## last change at that bay was refused ("" none); `body`: at the Phaethon's bay, the body standing there (its control,
+## the other body, is offered).
 func show_controls(craft: String, seated: bool, destination: String, pad: bool, anchor: Transform3D, paint := "",
-		refused := "") -> void:
+		refused := "", body := "") -> void:
 	_seated = seated
 	_show_status()
 	var at_bay := not seated and not craft.is_empty() and not paint.is_empty()
@@ -189,7 +190,8 @@ func show_controls(craft: String, seated: bool, destination: String, pad: bool, 
 	elif not craft.is_empty():
 		action = "%s  Board %s" % [board, craft]
 		if at_bay:
-			hint = "%s  Paint: %s\n%s" % ["X" if pad else "I", paint, hint]
+			var swap := "     %s  Body: %s" % ["L3" if pad else "P", body] if not body.is_empty() else ""
+			hint = "%s  Paint: %s%s\n%s" % ["X" if pad else "I", paint, swap, hint]
 	if _placard:
 		_sign_type(not seated)
 		if not seated:
@@ -212,6 +214,8 @@ func show_controls(craft: String, seated: bool, destination: String, pad: bool, 
 		_vr_bay.visible = at_bay
 		_vr_bay.modulate = UI.AMBER if not refused.is_empty() else UI.INK
 		_vr_bay.text = refused.to_upper() if not refused.is_empty() else "X   PAINT  " + paint.to_upper()
+		if refused.is_empty() and not body.is_empty():
+			_vr_bay.text += "\nL STICK CLICK   BODY  " + body.to_upper()
 		if at_bay:
 			_face.size = Vector2(.99, .30)
 		_backing.position.y = -.055 if at_bay else 0.0

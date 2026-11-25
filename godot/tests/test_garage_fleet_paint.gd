@@ -1,5 +1,6 @@
-## Codex's pilot garage on the spike line (merged onto Raids stage 1 and push 45): its six bays, with the Talon kept out
-## of them and still flown from the menus, and each parked craft in its own saved paint (view/livery.gd's per-craft
+## Codex's pilot garage on the spike line (merged onto Raids stage 1 and push 45): its six bays, the Talon's the
+## Phaethon's (it stands there when chosen there: tests/test_garage_talon.gd) and still flown from the menus, a parked
+## Talon offered the garage as a parked Phaethon is, and each parked craft in its own saved paint (view/livery.gd's per-craft
 ## keys: "paint" for the Phaethon, "paint_<id>" for the others), outside and in its occupied cab, the Vesper's Star
 ## Command among them; building the bays leaves the flight's paint (Livery.current) as it was; nothing parked carries a
 ## raid or a live gun, with Raids on.
@@ -87,8 +88,9 @@ func _scripted(top: Node, path: String) -> Array:
 func _garage(garage) -> void:
 	var hall = garage.environment
 	var built: Array = hall._bays.keys()
-	check(built == Pilot.GARAGE_BAYS and Pilot.GARAGE_BAYS.size() == 6 and hall.bay_node(Pilot.TALON) == null,
-		"The hall builds its six bays in their order and none for the Talon")
+	check(built == Pilot.GARAGE_BAYS and Pilot.GARAGE_BAYS.size() == 6 and hall.bay_node(Pilot.TALON) == hall.bay_node(Pilot.STANDARD)
+		and hall.bay_craft(Pilot.STANDARD) == Pilot.STANDARD,
+		"The hall builds its six bays in their order; the Talon's is the Phaethon's, the Phaethon standing in it (none chosen there)")
 	check(not garage.walker.seated and garage.walker.global_position.distance_to(hall.spawn_transform().origin) < .2,
 		"With the Talon selected a visit starts on foot at the entrance")
 	check(Livery.current == SENTINEL, "Building the six bays leaves the flight's paint as it was")
@@ -138,11 +140,11 @@ func _talon_flight() -> void:
 		await process_frame
 	check(not _scripted(root, "res://view/network_raids.gd").is_empty(),
 		"With Raids on, the flight builds its raid director (the garage's check would have found one)")
-	check(not flight.can_visit_garage(), "A parked Talon is not offered the garage, which has no bay for it")
+	check(flight.can_visit_garage(), "A parked Talon is offered the garage: it stands in the Phaethon's bay")
 	var pause_menu = root.get_node("ReleasePause")
 	pause_menu.set_paused(true)
 	var button := pause_menu.find_child("Garage", true, false) as Button
-	check(button != null and button.disabled and button.tooltip_text.contains("no bay"), "The pause menu's Pilot garage is off for a Talon, and says why")
+	check(button != null and not button.disabled and button.tooltip_text.is_empty(), "The pause menu's Pilot garage is on for a parked Talon")
 	pause_menu.set_paused(false)
 	# The same flight in the Phaethon is offered it (the rule is the bay, not the place or the time).
 	Flat.vehicle_override = Pilot.STANDARD

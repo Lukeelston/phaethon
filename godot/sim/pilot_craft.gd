@@ -10,10 +10,8 @@ const VESPER := "vesper"
 const BASILISK := "basilisk"   # the gunship: a turret slaved to the pilot's gaze (view/turret.gd, view/gunnery.gd)
 const ORDER := [STANDARD, TALON, SHRIKE, ORRERY, KILN, VESPER, BASILISK]
 # The pilot garage's bays (Codex's, garage/garage_environment.gd), in their order: its hall, stands, shutter numbers
-# and fleet board were built for these six. The Talon came in after and has no bay: the menus' Fly flies it when it
-# is the craft last used (the menus have no craft row; the garage is asked for a way to it: docs/superpowers/specs/
-# 2026-11-25-garage-paint-talon-brief-codex.md), and a Talon's flight does not offer the garage (view/craft_view.gd
-# can_visit_garage).
+# and fleet board were built for these six. The Talon came in after: a Phaethon in another body, it stands in the
+# Phaethon's bay, which holds either body (the garage swaps them there: bay_of, has_bay).
 const GARAGE_BAYS := [STANDARD, SHRIKE, ORRERY, KILN, VESPER, BASILISK]
 const NAMES := {STANDARD: "Phaethon", TALON: "Phaethon Talon", SHRIKE: "Shrike RS", ORRERY: "Orrery IX", KILN: "Kiln Six", VESPER: "Vesper", BASILISK: "Basilisk"}
 const DETAILS := {
@@ -172,6 +170,19 @@ static func phaethon_based(id: Variant) -> bool:
 ## Whose fleet flight deck (dial stations, fittings, auxiliary meter) an airframe's cockpit is built with.
 static func deck_of(id: Variant) -> String:
 	return drawn_from(id)
+
+
+## The garage bay a craft stands in: its own, or for the Talon (a Phaethon in another body) the Phaethon's; "" for a
+## craft with none.
+static func bay_of(id: Variant) -> String:
+	if id is String and id == TALON:
+		return STANDARD
+	return id if id is String and GARAGE_BAYS.has(id) else ""
+
+
+## Has a craft a bay in the garage (bay_of)? Its parked flight is then offered the garage (view/craft_view.gd).
+static func has_bay(id: Variant) -> bool:
+	return bay_of(id) != ""
 
 
 static func tuning(id: String) -> Dictionary:

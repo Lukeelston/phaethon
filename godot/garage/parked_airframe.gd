@@ -14,6 +14,7 @@ const Finish := preload("res://view/craft_materials.gd")
 const Tow := preload("res://view/tow_link.gd")
 const SHELL_HEIGHT := .72
 const ENGINE_HEIGHT := 1.56
+const HULL_REACH := 1.30      # m out to either side: the Talon's hull proper (its wings reach 2.92; the Phaethon's hull 1.19)
 
 var sim: Dictionary
 var model: Model
@@ -44,7 +45,12 @@ func build(id: String, finish := Livery.FACTORY) -> void:
 	model.name = "ParkedModel"
 	model.process_mode = Node.PROCESS_MODE_DISABLED
 	add_child(model)
+	# (the Talon's plating is built in its own palette, Model.Talon.paint, as its flight sets it: put back after)
+	var talon_paint: String = Model.Talon.paint
+	if id == Pilot.TALON:
+		Model.Talon.paint = paint
 	Livery.build_in(paint, model.build.bind(self))
+	Model.Talon.paint = talon_paint
 	model.pod.name = "DisplayCockpit"
 	model.pod.transform = Seat.pod_pose() * Transform3D(Basis.IDENTITY, Vector3.UP * Model.POD_FRAME_UP)
 	model.canopy.get_node("field").hide()
@@ -54,7 +60,7 @@ func build(id: String, finish := Livery.FACTORY) -> void:
 	if model.fleet:
 		var coaming: MeshInstance3D = model.fleet.mount(model.pod, &"Coaming", &"CockpitRim")
 		coaming.position.y = -Model.POD_FRAME_UP
-	elif id == Pilot.STANDARD:
+	elif Pilot.phaethon_based(id):      # (the Phaethon's seat, in the Talon too)
 		var leather := Finish.tinted("leather", Color("#624534"))
 		var back := _mesh(model.pod, Kit.rounded_box(Vector3(.62,.78,.15),4,9), leather)
 		back.position = Vector3(0, .54 - Model.POD_FRAME_UP, 1.10)
@@ -86,7 +92,7 @@ func build(id: String, finish := Livery.FACTORY) -> void:
 		var fairing := engine.get_child(0) as MeshInstance3D
 		_bounds_collider("Engine", fairing.mesh.get_aabb(), engine.transform)
 	model._place_fin_batches()
-	_bounds_collider("Cockpit", model.pod.mesh.get_aabb(), model.pod.transform)
+	_bounds_collider("Cockpit", _hull_bounds(model.pod.mesh) if id == Pilot.TALON else model.pod.mesh.get_aabb(), model.pod.transform)
 	# All six silhouettes remain in the hall. Fin screws, cold nozzle vanes, brake
 	# leaves and thin trim only draw at distances where a pilot can discern them.
 	for piece: MeshInstance3D in model.find_children("*","MeshInstance3D",true,false):
@@ -94,6 +100,23 @@ func build(id: String, finish := Livery.FACTORY) -> void:
 			piece.visibility_range_end = 19.0
 			piece.visibility_range_end_margin = 1.5
 	model.view = null
+
+
+## The Talon's pod's bounds for its collider: its hull proper. Its wings reach 2.9 m out, past the Phaethon's bay's
+## gate (2.45 m: the bay holds either body), so they are left out of it; a pilot at that gate is not put inside them.
+func _hull_bounds(mesh: Mesh) -> AABB:
+	var hull := AABB()
+	var first := true
+	for s in mesh.get_surface_count():
+		for p: Vector3 in mesh.surface_get_arrays(s)[Mesh.ARRAY_VERTEX]:
+			if absf(p.x) > HULL_REACH:
+				continue
+			if first:
+				hull = AABB(p, Vector3.ZERO)
+				first = false
+			else:
+				hull = hull.expand(p)
+	return hull
 
 
 func _mat(colour: Color, unshaded := false) -> StandardMaterial3D:

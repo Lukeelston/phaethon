@@ -101,6 +101,25 @@ static func set_craft_setup(id: String, moved: Dictionary) -> void:
 	if error != OK:
 		push_warning("Could not save the %s set-up: %s" % [id, error_string(error)])
 
+## Which body stands in the Phaethon's garage bay ("garage" section, "phaethon_body"): the Phaethon or the Talon, the
+## Phaethon until one is saved (a hand-edited value is the Phaethon too).
+static func phaethon_body() -> String:
+	var config := ConfigFile.new()
+	if config.load(prefs_path) != OK:
+		return Craft.STANDARD
+	var saved = config.get_value("garage", "phaethon_body", Craft.STANDARD)
+	return saved if saved is String and saved in [Craft.STANDARD, Craft.TALON] else Craft.STANDARD
+
+static func set_phaethon_body(id: String) -> void:
+	if id not in [Craft.STANDARD, Craft.TALON]:
+		return
+	var config := ConfigFile.new()
+	config.load(prefs_path)
+	config.set_value("garage", "phaethon_body", id)
+	var error := config.save(prefs_path)
+	if error != OK:
+		push_warning("Could not save the Phaethon's bay's body: %s" % error_string(error))
+
 static func _valid_setup(raw: Variant) -> Dictionary:
 	var valid := {}
 	if not raw is Dictionary:

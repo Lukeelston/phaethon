@@ -240,7 +240,7 @@ var _menu_was_muted := false
 func can_visit_garage() -> bool:
 	if not sim or sim.run_active or benchmark_flight:
 		return false
-	if not CraftSimScript.PilotCraft.GARAGE_BAYS.has(sim.P.vehicle):      # (the Talon has no bay: sim/pilot_craft.gd)
+	if not CraftSimScript.PilotCraft.has_bay(sim.P.vehicle):      # (the Talon stands in the Phaethon's bay: sim/pilot_craft.gd bay_of)
 		return false
 	var position_here := Vector3(sim.pod.x, sim.pod.y, sim.pod.z)
 	if position_here.distance_squared_to(_garage_spawn) > 9.0:

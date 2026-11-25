@@ -75,10 +75,13 @@ func _garage_visit() -> bool:
 	var garage = get_tree().current_scene
 	if not check("packed garage opens", garage != null and garage.scene_file_path == "res://garage/garage.tscn"):
 		return false
-	var craft := Settings.selected_craft()
-	if not Settings.Craft.GARAGE_BAYS.has(craft):      # (the Talon has no bay: board the Phaethon, which the launch then selects)
-		craft = Settings.Craft.STANDARD
-	var alternate := "kiln" if craft == "vesper" else "vesper"
+	# The selected craft's bay, and the craft standing in it: the Phaethon's bay holds the Phaethon or the Talon, whichever
+	# was last chosen there (the launch then selects it).
+	var at := Settings.Craft.bay_of(Settings.selected_craft())
+	if at.is_empty():
+		at = Settings.Craft.STANDARD
+	var craft: String = garage.environment.bay_craft(at)
+	var alternate := "kiln" if at == "vesper" else "vesper"
 	garage.walker.global_transform = garage.environment.boarding_transform(alternate)
 	garage.walker.interact_requested.emit()
 	var bay: Node3D = garage.environment.bay_node(alternate)
@@ -92,9 +95,9 @@ func _garage_visit() -> bool:
 	garage.walker.cockpit_control_requested.emit("power")
 	check("alternate bay powers back down", not runup.startup.batt and runup.startup.stage == ["off", "off"])
 	garage.walker.interact_requested.emit()
-	garage.walker.global_transform = garage.environment.boarding_transform(craft)
+	garage.walker.global_transform = garage.environment.boarding_transform(at)
 	garage.interact()
-	if not check("pilot boards the selected craft", garage.seated_craft == craft and garage.walker.seated):
+	if not check("pilot boards the craft in the selected craft's bay", garage.seated_craft == craft and garage.walker.seated):
 		return false
 	garage.launch_flight()
 	await frames(3)
@@ -111,7 +114,8 @@ func _garage_visit() -> bool:
 	park.pressed.emit()
 	await frames(3)
 	garage = get_tree().current_scene
-	if not check("parked pilot returns on foot beside the same craft", garage != null and garage.scene_file_path == "res://garage/garage.tscn" and not garage.walker.seated and garage.environment.nearest_bay(garage.walker.global_position) == craft):
+	if not check("parked pilot returns on foot beside the same craft", garage != null and garage.scene_file_path == "res://garage/garage.tscn" and not garage.walker.seated
+			and garage.environment.nearest_bay(garage.walker.global_position) == at and garage.environment.bay_craft(at) == craft):
 		return false
 	garage.return_to_menu()
 	await frames(3)

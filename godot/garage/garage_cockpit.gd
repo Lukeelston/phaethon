@@ -112,7 +112,12 @@ func _fit_body() -> Fleet:
 			turret.build(fleet)
 	else:
 		var shrike := vehicle == Pilot.SHRIKE
-		hull.mesh = Model.pod_hull(shrike)
+		var talon := vehicle == Pilot.TALON      # (the Phaethon's cab in Codex's plated hull, in the Talon's own paint)
+		var talon_paint: String = Model.Talon.paint
+		if talon:
+			Model.Talon.paint = paint
+		hull.mesh = Model.pod_hull(shrike, talon)
+		Model.Talon.paint = talon_paint
 		if shrike:
 			Shrike.dress_pod(hull)
 			Shrike.fit_seat(shell)

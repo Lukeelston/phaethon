@@ -4,6 +4,7 @@ extends Node3D
 
 const Pilot := preload("res://sim/pilot_craft.gd")
 const Livery := preload("res://view/livery.gd")
+const Settings := preload("res://release/game_settings.gd")
 const Parked := preload("res://garage/parked_airframe.gd")
 const Seat := preload("res://garage/garage_seat.gd")
 const ServiceEntry := preload("res://garage/workshop_annex.gd")
@@ -51,7 +52,7 @@ const ENGINE_SHOES := {
 }
 
 var _bays := {}
-var _standing := {}      # bay -> the craft standing in it (its own)
+var _standing := {}      # bay -> the craft standing in it: its own, or in the Phaethon's the Phaethon or the Talon
 var _gates := {}
 var _marker_guides: Dictionary[String, Array] = {}
 var _finishes := {}
@@ -121,7 +122,9 @@ func build() -> void:
 		var id: String = Pilot.GARAGE_BAYS[i]
 		# Each craft in the paint the menus chose for it, as its flight wears it (view/livery.gd: the Phaethon's
 		# "paint", each other craft's "paint_<id>"; Factory is each as designed, the Vesper's Star Command its own).
-		_berth(id, i, Livery.built(id))
+		# The Phaethon's bay holds the body last chosen there (the Phaethon, or the Talon: Settings.phaethon_body).
+		var craft: String = Settings.phaethon_body() if id == Pilot.STANDARD else id
+		_berth(id, i, Livery.built(craft), craft)
 		var gate: Vector3 = _gates[id].origin
 		gate_centers.append(Vector2(gate.x, gate.z))
 	var floor_finish: ShaderMaterial = $SealedConcrete.material_override
@@ -132,8 +135,13 @@ func build() -> void:
 	inspection.install(self, back_wall)
 
 
+## A bay by its id, or by a craft's: the Talon's is the Phaethon's (sim/pilot_craft.gd bay_of).
 func bay_node(id: String) -> Node3D:
-	return _bays.get(id)
+	return _bays.get(_bay_key(id))
+
+
+func _bay_key(id: String) -> String:
+	return id if _bays.has(id) else Pilot.bay_of(id)
 
 
 ## The craft standing in a bay.
@@ -157,7 +165,8 @@ func seat_transform(id: String) -> Transform3D:
 
 
 func boarding_transform(id: String) -> Transform3D:
-	return global_transform * _gates[id] if _gates.has(id) else spawn_transform()
+	var key := _bay_key(id)
+	return global_transform * _gates[key] if _gates.has(key) else spawn_transform()
 
 
 func spawn_transform() -> Transform3D:
@@ -465,7 +474,10 @@ func _workshop_fixture(id: String, at: Vector3, face: Basis) -> void:
 	add_child(piece,true)
 
 
-func _berth(id: String, index: int, paint: String) -> void:
+## A bay (`id`, the hall's own) with `craft` standing in it (its own; at the Phaethon's, the Phaethon or the Talon).
+func _berth(id: String, index: int, paint: String, craft := "") -> void:
+	if craft.is_empty():
+		craft = id
 	var side := -1.0 if index % 2 == 0 else 1.0
 	var row := ROW_SPACING * (1.0 - floori(index/2.0))
 	var bay := Parked.new()
@@ -473,12 +485,14 @@ func _berth(id: String, index: int, paint: String) -> void:
 	bay.position = Vector3(side*BAY_X, Parked.SHELL_HEIGHT, row)
 	bay.rotation.y = -side*PI/2
 	add_child(bay)
-	bay.build(id, paint)
+	bay.build(craft, paint)
 	_bays[id] = bay
-	_standing[id] = id
+	_standing[id] = craft
 	# Keep the entire painted opening clear of a broad coaming like Vesper's.
 	var shell_bounds: AABB = bay.model.pod.transform * bay.model.pod.mesh.get_aabb()
 	var shell_edge := side * shell_bounds.get_center().x + shell_bounds.size.x * .5
+	if craft == Pilot.TALON:      # (the bay's gate is the Phaethon's whichever body stands there: 2.45 m out, Codex's)
+		shell_edge = 0.0
 	var approach_offset := maxf(2.45, shell_edge + .85)
 	var approach := bay.transform * Vector3(side*approach_offset,-Parked.SHELL_HEIGHT,.54)
 	var seat := bay.transform * Vector3(0,-Parked.SHELL_HEIGHT,.54)
