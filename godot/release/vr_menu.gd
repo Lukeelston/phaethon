@@ -36,6 +36,7 @@ var buttons: Array[Button] = []
 var title: Label
 var description: Label
 var start_button: Button      # Fly, named for the chosen map
+var fly_craft: Label          # ... and the craft it will use, named over the hint above it (_showcase_changed)
 var collision_checkbox: CheckBox
 var partner_checkbox: CheckBox
 var option_buttons: Array[Button] = []   # the rows that step through choices: where the Network begins, ...
@@ -105,10 +106,13 @@ func _ready() -> void:
 	print("VR MENU: ready; select a map, then Fly or Pilot garage")
 
 
-## Put the craft Fly will use on the title's turntable, in the paint its flight will wear.
+## Name the craft Fly will use on the board, and put it on the title's turntable in the paint its flight will wear.
 func _showcase_changed() -> void:
+	var craft := UI.Settings.selected_craft()
+	if fly_craft != null:
+		fly_craft.text = UI.fly_craft_text(craft)
 	if stage != null:
-		stage.show_craft(UI.Settings.selected_craft())
+		stage.show_craft(craft)
 
 func _build_screen() -> void:
 	screen = Control.new()
@@ -191,6 +195,11 @@ func _build_screen() -> void:
 	var spacer := Control.new()
 	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	details.add_child(spacer)
+	# the craft Fly will use, in words (the turntable shows it only while Role has the highlight), in the band the
+	# craft and paint rows left over the hint
+	fly_craft = UI.label("", 22, UI.MUTED)
+	fly_craft.name = "FlyCraft"
+	details.add_child(fly_craft)
 	details.add_child(UI.label("Release controls after Fly.  In flight, tap Menu: options.\nHold Menu: back to this board; ends the run.", 20, UI.MUTED))
 	start_button = UI.button("Fly", start_selected, 72)
 	start_button.name = "Fly"
@@ -217,9 +226,9 @@ func choose_course(course: String) -> void:
 	remembered_course = course
 	title.text = UI.COURSES[index].name
 	description.text = UI.COURSES[index].detail
-	start_button.text = "Fly — " + UI.COURSES[index].name
+	start_button.text = UI.fly_text(UI.COURSES[index].name)
 	for i in UI.COURSES.size():
-		buttons[i].text = ("●  " if i == index else "    ") + UI.COURSES[i].name
+		buttons[i].text = UI.course_text(UI.COURSES[i].name, i == index)
 
 func focus_row(index: int) -> void:
 	focus_index = posmod(index, buttons.size())

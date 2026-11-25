@@ -7,14 +7,16 @@
 ##             button chooses (no flight), marks it, names it on Fly and gives Fly the keyboard; Pilot garage bound for
 ##             the chosen course, and back at the menu that course chosen again; Fly flies the saved craft with its
 ##             saved switches on the chosen course, once, and Pilot garage after it does nothing; over the title, the
-##             turntable shows the saved craft and only Role turns the camera to it
+##             turntable shows the saved craft and only Role turns the camera to it; the craft Fly will use named in
+##             words directly over Fly, on entry and back from the garage, the Talon too
 ##   headset   the board (release/vr_menu.gd): no Pilot craft or Paint row and no craft selector; the stick's order is
 ##             the courses, the two switches, the six option rows, Fly, Pilot garage, Quit; the remembered course chosen
 ##             on entry and named on Fly; choose_course names another on Fly; A on a course row chooses it (no flight)
 ##             and moves the highlight to Fly; the turntable shows the saved craft, and Role, the one row that changes
 ##             it, re-dresses it and swings the board aside, every other row bringing the board back; Pilot garage bound
 ##             for the chosen course, and back at the board that course chosen again; Fly flies the saved craft with its
-##             saved switches, cold, once, and Pilot garage after it does nothing
+##             saved switches, cold, once, and Pilot garage after it does nothing; the craft Fly will use named in words
+##             on the board, in the band over the hint, on entry and back from the garage, the Talon too
 ## Uses its own prefs file; puts View's statics, both menus' remembered courses, Title.enabled and vr_prefs.json back.
 ## Run headless with --xr-mode off -s res://tests/test_menu_split.gd -- --mute. Prints MENU SPLIT PASS.
 extends SceneTree
@@ -85,6 +87,25 @@ func _counted() -> void:
 	changes += 1
 
 
+## The words a menu names the craft Fly will use in (release/release_config.gd fly_craft_text), spelled out here: they are
+## what pins the wording.
+func _craft_words(craft_name: String) -> String:
+	return "Craft: " + craft_name + "  ·  change it in the Pilot garage"
+
+
+## What the menu's label naming the craft says (for a failure's message).
+func _craft_label_text(menu: Node) -> String:
+	var label := menu.find_child("FlyCraft", true, false) as Label
+	return label.text if label != null else "no label"
+
+
+## Does the menu name `craft_name` as the craft Fly will use, in its muted label?
+func _names_craft(menu: Node, craft_name: String) -> bool:
+	var label := menu.find_child("FlyCraft", true, false) as Label
+	return label != null and label.text == _craft_words(craft_name) and label.is_visible_in_tree() \
+		and label.get_theme_color("font_color") == UI.MUTED
+
+
 ## Is `course` the chosen one on the headset's board: its row marked, the others not, Fly naming it?
 func _board_chosen(menu: Node, course: String) -> bool:
 	if menu.selected_course != course or menu.start_button.text != "Fly — " + _name(course):
@@ -134,6 +155,9 @@ func _layout(titled: bool) -> void:
 		return
 	# on entry the remembered course is the chosen one
 	check(_chosen(menu, "eridanus"), "%s: on entry the remembered course is chosen, marked and named on Fly (\"%s\", \"%s\")" % [layout, fly.text, _course(menu, "eridanus").text])
+	var craft_label := menu.find_child("FlyCraft", true, false) as Label
+	check(_names_craft(menu, "Kiln Six") and craft_label.get_parent() == fly.get_parent() and craft_label.get_index() == fly.get_index() - 1,
+		"%s: on entry the saved craft is named in words directly over Fly (\"%s\")" % [layout, craft_label.text if craft_label else "no label"])
 	if titled:
 		check(menu.stage.show_vehicle == "kiln", "%s: the turntable shows the saved craft (%s)" % [layout, menu.stage.show_vehicle])
 		check(menu.look_buttons.size() == 1 and menu.look_buttons[0].text.begins_with("Role:"), "%s: only Role turns the camera to the turntable (%s)" % [layout, menu.look_buttons.map(func(b): return b.text)])
@@ -155,6 +179,7 @@ func _layout(titled: bool) -> void:
 		return
 	menu = current_scene
 	check(_chosen(menu, "range"), "%s: back from the garage the course chosen before the visit is chosen (%s)" % [layout, menu.selected_course])
+	check(_names_craft(menu, "Kiln Six"), "%s: ... and the saved craft named over Fly" % layout)
 	# Fly: the saved craft with its saved switches, on the chosen course, once; Pilot garage after it does nothing
 	fly = menu.find_child("Fly", true, false) as Button
 	_course(menu, "network").pressed.emit()      # (a map with no start handling of its own: the saved one is flown)
@@ -174,6 +199,12 @@ func _layout(titled: bool) -> void:
 	scene_changed.disconnect(_counted)
 	check(changes == 1 and current_scene is View and current_scene.sim.kind == "network",
 		"%s: one scene change, to the chosen course's flight (%d changes, %s)" % [layout, changes, current_scene.scene_file_path if current_scene else "none"])
+	# the Talon (no garage bay): named as any other
+	Settings.set_selected_craft("talon")
+	change_scene_to_file(UI.MENU_SCENE)
+	if not await _scene(UI.MENU_SCENE):
+		return
+	check(_names_craft(current_scene, "Phaethon Talon"), "%s: the Talon saved, the menu names it over Fly (\"%s\")" % [layout, _craft_label_text(current_scene)])
 
 
 ## The headset's board (release/vr_menu.gd), as the desktop's: choose a map, then Fly or Pilot garage.
@@ -215,6 +246,13 @@ func _headset() -> void:
 	# on entry the remembered course is chosen; choose_course names another on Fly; A on a course row chooses it and
 	# moves the highlight to Fly (Enter, Enter flies it, as on the desktop)
 	check(_board_chosen(menu, "eridanus"), "headset: on entry the remembered course is chosen, marked and named on Fly (\"%s\")" % fly.text)
+	var craft_label := menu.find_child("FlyCraft", true, false) as Label
+	var hint: Label = null
+	for l: Label in menu.find_children("*", "Label", true, false):
+		if l.text.begins_with("Release controls"):
+			hint = l
+	check(_names_craft(menu, "Vesper") and hint != null and craft_label.get_parent() == hint.get_parent() and craft_label.get_index() == hint.get_index() - 1,
+		"headset: on entry the saved craft is named in words on the board, in the band over the hint (\"%s\")" % [craft_label.text if craft_label else "no label"])
 	menu.choose_course("network")
 	check(_board_chosen(menu, "network") and VrMenu.remembered_course == "network", "headset: choose_course marks another course, names it on Fly and is remembered (\"%s\")" % fly.text)
 	menu.focus_row(UI.course_index("carving"))
@@ -269,6 +307,7 @@ func _headset() -> void:
 	menu = current_scene
 	menu.set_process(false)
 	check(_board_chosen(menu, "range"), "headset: back from the garage the course chosen before the visit is chosen (%s)" % menu.selected_course)
+	check(_names_craft(menu, "Vesper"), "headset: ... and the saved craft named on the board")
 	# Fly: the saved craft with its saved switches, on the chosen course, cold, once; Pilot garage after it does nothing
 	menu.choose_course("network")
 	changes = 0
@@ -290,6 +329,12 @@ func _headset() -> void:
 	scene_changed.disconnect(_counted)
 	check(changes == 1 and current_scene is Cockpit and current_scene.sim.kind == "network",
 		"headset: one scene change, to the chosen course's flight in the headset's cockpit (%d changes, %s)" % [changes, current_scene.scene_file_path if current_scene else "none"])
+	Settings.set_selected_craft("talon")
+	change_scene_to_file(UI.VR_MENU_SCENE)
+	if not await _scene(UI.VR_MENU_SCENE):
+		return
+	current_scene.set_process(false)
+	check(_names_craft(current_scene, "Phaethon Talon"), "headset: the Talon saved, the board names it (\"%s\")" % _craft_label_text(current_scene))
 
 
 func _run() -> void:

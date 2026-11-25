@@ -17,6 +17,7 @@ var selected_course := "range"
 var launching := false        # Fly or Pilot garage pressed: the scene is changing, and nothing else starts
 var course_buttons: Array[Button] = []   # in UI.COURSES' order
 var fly_button: Button
+var fly_craft: Label          # the craft Fly will use, named over it (_showcase_changed)
 var collision_checkbox: CheckBox
 var partner_checkbox: CheckBox
 var stage: Node3D             # the title: the scene the menu lies over (release/title_stage.gd; null with Title.enabled off)
@@ -37,6 +38,7 @@ func _ready() -> void:
 		_over_title()
 	else:
 		_plain()
+	_showcase_changed()
 	choose_course(remembered_course if UI.course_index(remembered_course) >= 0 else "range")
 	course_buttons[UI.course_index(selected_course)].grab_focus()      # (the keyboard starts on the chosen map, as the headset's highlight does: Enter, Enter flies it)
 
@@ -62,15 +64,14 @@ func _plain() -> void:
 	columns.add_theme_constant_override("separation", 52)
 	margin.add_child(columns)
 	var left := VBoxContainer.new()
-	left.add_theme_constant_override("separation", 5)      # (6 until Fly came: with it the column ran 13 px past the window's foot margin)
+	# (6 until Fly came: with it the column ran 13 px past the window's foot margin; 5 until the label naming the craft
+	# came over Fly, which took the 6 px of breathing room under the tagline as well)
+	left.add_theme_constant_override("separation", 4)
 	left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	columns.add_child(left)
 	left.add_child(UI.label("EXPERIMENTAL DESKTOP BUILD", 15, UI.AMBER))
 	left.add_child(UI.label("PHAETHON", 50))
 	left.add_child(UI.label("Two engines. One cockpit.\nWe know it’s a little fucky.", 25))
-	var breathing_room := Control.new()
-	breathing_room.custom_minimum_size.y = 6
-	left.add_child(breathing_room)
 	left.add_child(UI.label("CHOOSE YOUR BAD IDEA", 14, UI.MUTED))
 	var course_list: Container = left
 	if UI.COURSES.size() > 6:   # eight and more: two abreast, or the list runs off the window
@@ -106,6 +107,7 @@ func _plain() -> void:
 	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	left.add_child(spacer)
 	left.add_child(UI.label("A rough, playable physics experiment.\nExpect odd handling, rough edges and spectacular mistakes.", 16, UI.MUTED))
+	left.add_child(_fly_craft_label(15))
 	left.add_child(_fly_button(48, 22))
 	var exits := HBoxContainer.new()
 	left.add_child(exits)
@@ -138,14 +140,14 @@ func _over_title() -> void:
 	backing.border_width_right = 2
 	backing.content_margin_left = 28
 	backing.content_margin_right = 26
-	backing.content_margin_top = 16
+	backing.content_margin_top = 12      # (16, and the column's gaps 5, until the label naming the craft came over Fly: Quit was pushed off the window)
 	backing.content_margin_bottom = 14
 	spine.add_theme_stylebox_override("panel", backing)
 	spine.set_anchors_and_offsets_preset(Control.PRESET_LEFT_WIDE)
 	spine.offset_right = SPINE
 	add_child(spine)
 	var left := VBoxContainer.new()
-	left.add_theme_constant_override("separation", 5)
+	left.add_theme_constant_override("separation", 4)
 	spine.add_child(left)
 	left.add_child(UI.label("EXPERIMENTAL DESKTOP BUILD", 14, UI.AMBER))
 	left.add_child(UI.label("PHAETHON", 36))
@@ -154,7 +156,7 @@ func _over_title() -> void:
 	var course_list := GridContainer.new()
 	course_list.columns = 2
 	course_list.add_theme_constant_override("h_separation", 8)
-	course_list.add_theme_constant_override("v_separation", 5)
+	course_list.add_theme_constant_override("v_separation", 4)
 	left.add_child(course_list)
 	for course in UI.COURSES:
 		var button := _course_button(course, 36)
@@ -175,7 +177,6 @@ func _over_title() -> void:
 	var role := UI.craft_button(14)
 	look_buttons = [role]
 	role.pressed.connect(_showcase_changed)      # (after the button's own handler: the choice is saved by then)
-	_showcase_changed()
 	var start := UI.insertion_button(14)
 	for row: Array in [[start, UI.raids_button(14)], [UI.time_button(14), UI.weather_button(14)], [UI.chase_button(14), role]]:
 		var options := HBoxContainer.new()
@@ -190,6 +191,7 @@ func _over_title() -> void:
 	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	left.add_child(spacer)
 	left.add_child(UI.label("A rough, playable physics experiment. Expect odd\nhandling, rough edges and spectacular mistakes.", 14, UI.MUTED))
+	left.add_child(_fly_craft_label(14))
 	left.add_child(_fly_button(48, 22))
 	# Codex's Pilot garage beside Quit, as on the plain menu and the headset's
 	var exits := HBoxContainer.new()
@@ -253,10 +255,13 @@ func _frame_title() -> void:
 	stage.frame(art, size)
 
 
-## Put the craft Fly will use on the title's turntable, in the paint its flight will wear.
+## Name the craft Fly will use over Fly, and put it on the title's turntable in the paint its flight will wear.
 func _showcase_changed() -> void:
+	var craft := UI.Settings.selected_craft()
+	if fly_craft != null:
+		fly_craft.text = UI.fly_craft_text(craft)
 	if stage != null:
-		stage.show_craft(UI.Settings.selected_craft())
+		stage.show_craft(craft)
 
 
 ## The title's camera turns to the turntable while a button that changes its craft has the pointer or the
@@ -278,6 +283,14 @@ func _course_button(course: Dictionary, height: int) -> Button:
 	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	course_buttons.append(button)
 	return button
+
+
+## The craft Fly will use, in words directly over Fly (the turntable shows it only while Role has the pointer, and the
+## plain menu has none): muted, and where to change it.
+func _fly_craft_label(font_size: int) -> Label:
+	fly_craft = UI.label("", font_size, UI.MUTED)
+	fly_craft.name = "FlyCraft"
+	return fly_craft
 
 
 ## Fly: the widest and tallest button on the menu, named for the chosen map (choose_course).
@@ -303,9 +316,9 @@ func choose_course(course: String) -> void:
 		return
 	selected_course = course
 	remembered_course = course
-	fly_button.text = "Fly — " + UI.COURSES[index].name
+	fly_button.text = UI.fly_text(UI.COURSES[index].name)
 	for i in UI.COURSES.size():
-		course_buttons[i].text = ("●  " if i == index else "    ") + UI.COURSES[i].name
+		course_buttons[i].text = UI.course_text(UI.COURSES[i].name, i == index)
 	fly_button.grab_focus()
 
 

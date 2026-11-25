@@ -66,7 +66,10 @@ func _garage_visit() -> bool:
 	var enter := title.find_child("Garage", true, false) as Button
 	if not check("desktop title offers the pilot garage", enter != null and enter.is_visible_in_tree()):
 		return false
-	(title.find_child("Course_network", true, false) as Button).pressed.emit()      # (the garage is bound for the map chosen on the menu)
+	var network := title.find_child("Course_network", true, false) as Button      # (the garage is bound for the map chosen on the menu)
+	if not check("desktop title offers the Network to bind the garage to", network != null):
+		return false
+	network.pressed.emit()
 	enter.pressed.emit()
 	await frames(3)
 	var garage = get_tree().current_scene
@@ -175,7 +178,7 @@ func _run() -> void:
 			_finish()
 			return
 		button.pressed.emit()
-		check(course + " is chosen and named on Fly", menu.selected_course == course and fly.text == "Fly — " + UI.COURSES[UI.course_index(course)].name)
+		check(course + " is chosen and named on Fly", menu.selected_course == course and fly.text == UI.fly_text(UI.COURSES[UI.course_index(course)].name))
 		capture.clear_buffer()
 		fly.pressed.emit()
 		await get_tree().scene_changed

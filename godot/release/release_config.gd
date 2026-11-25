@@ -50,6 +50,16 @@ const INSERTIONS := [
 	["crest", "Caucasus crest", "SCaucasus@4534"],   # 3,260 m up, on the level top of the Crest (its height key's own sample): the land gone on both sides, the ridge road ahead
 ]
 
+## Fly, named for a map: both menus' Fly and the release checks' reading of it.
+static func fly_text(course_name: String) -> String:
+	return "Fly — " + course_name
+
+
+## A map's button or row: the chosen one marked, the others indented as far.
+static func course_text(course_name: String, chosen: bool) -> String:
+	return ("●  " if chosen else "    ") + course_name
+
+
 static func course_index(id: String) -> int:
 	for i in COURSES.size():
 		if COURSES[i].id == id:
@@ -180,6 +190,11 @@ static func _option_row(font_size: int) -> Button:
 
 static func insertion_button(font_size: int = 18) -> Button:
 	return option_button("Start", "network_start", INSERTIONS, font_size)
+
+
+## The craft Fly will use, in words over Fly on both menus: its name, and where it is changed.
+static func fly_craft_text(craft_id: String) -> String:
+	return "Craft: " + Settings.Craft.NAMES[Settings.Craft.known(craft_id)] + "  ·  change it in the Pilot garage"
 
 
 ## The paint row (Luke: "Will you make it so that all vehicles can have a color option?"): the chosen pilot

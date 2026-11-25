@@ -216,7 +216,7 @@ func _run() -> void:
 			await RenderingServer.frame_post_draw
 			check("six-course VR panel captured", menu.panel_view.get_texture().get_image().save_png(evidence.path_join("carving-menu-panel.png")) == OK)
 		check(stop + " selection keeps menu open", get_tree().current_scene == menu and menu.selected_course == stop)
-		check(stop + " is chosen and named on Fly", menu.start_button.name == &"Fly" and menu.start_button.text == "Fly — " + UI.COURSES[UI.course_index(stop)].name)
+		check(stop + " is chosen and named on Fly", menu.start_button.name == &"Fly" and menu.start_button.text == UI.fly_text(UI.COURSES[UI.course_index(stop)].name))
 		menu.focus_row(menu.start_index)
 		menu.consume_controller(0.0, true, true)
 		check(stop + " held entry trigger cannot launch", not menu.launching)

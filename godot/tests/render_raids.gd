@@ -23,7 +23,8 @@
 ##                 the pilot's standing eye, 96 degrees), menu-vr-board (its board close). Runs on the base too. Each
 ##                 menu's buttons are measured against every label they can show (_measure): the courses (marked and
 ##                 not), the option rows, Fly for every course, Pilot garage and Quit; and the room left in its column;
-##                 and the headset board's two hint lines (under its option rows, and at its foot) against the board.
+##                 the label naming the craft Fly will use (FlyCraft), with every craft's name, against its column; and
+##                 the headset board's two hint lines (under its option rows, and at its foot) against the board.
 ## Needs a window: --xr-mode off --resolution 1600x900 --fixed-fps 120 --audio-driver Dummy
 ##   -s res://tests/render_raids.gd -- --mute --out=ABSOLUTE_DIRECTORY --set=raid|struck|off|menus [--vehicle=phaethon]
 extends SceneTree
@@ -601,6 +602,25 @@ func _measure(view: String, menu: Node) -> void:
 		var column := fly.get_parent() as Control
 		print("RAIDS RENDER %s: the column Fly stands in is %d px tall and needs %d: %d px to spare" % [view, roundi(column.size.y), roundi(column.get_combined_minimum_size().y),
 			roundi(column.size.y - column.get_combined_minimum_size().y)])
+	var craft_label := menu.find_child("FlyCraft", true, false) as Label
+	if craft_label == null:
+		print("RAIDS RENDER %s: no FlyCraft label" % view)
+	else:
+		var font := craft_label.get_theme_font("font")
+		var fs := craft_label.get_theme_font_size("font_size")
+		var room := (craft_label.get_parent() as Control).size.x
+		var shown: String = crafts.get(UI.Settings.selected_craft(), "")
+		var said := []
+		var cut := 0
+		for id: String in crafts:      # (each craft's name in the words shown: the same words, whichever craft is saved)
+			var w := font.get_string_size(craft_label.text.replace(shown, crafts[id]), HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+			cut += int(w > room)
+			said.append("%s %s (%d)" % ["fits" if w <= room else "CUT", crafts[id], roundi(w)])
+		var r := craft_label.get_global_rect()
+		var seen := craft_label.get_viewport().get_visible_rect().size
+		print("RAIDS RENDER %s: FlyCraft label %d x %d px, font %d, at x %d..%d, y %d..%d of the %d x %d it is drawn in: %s; in a column %d wide%s; showing \"%s\": %s" % [view,
+			roundi(craft_label.size.x), roundi(craft_label.size.y), fs, roundi(r.position.x), roundi(r.end.x), roundi(r.position.y), roundi(r.end.y), roundi(seen.x), roundi(seen.y),
+			"on screen" if Rect2(Vector2.ZERO, seen).encloses(r) else "OFF SCREEN", roundi(room), ", %d CUT" % cut if cut > 0 else "", craft_label.text, "; ".join(said)])
 	for last in ["Quit to desktop", "Start flight", "Fly"]:
 		var q := _find_text(menu, last)
 		if q != null:
