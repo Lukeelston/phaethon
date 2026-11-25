@@ -3,8 +3,8 @@
 ##   the swap     on foot at the Phaethon's bay the walker's "park" button (P here, L3 on a pad, the left stick's click in
 ##                the headset) stands the other body there, saved (Settings.phaethon_body), in its own saved paint; at
 ##                any other bay it does nothing; a run-up bay refuses it and the prompt says why; the bay starts
-##                fresh (a start-up worked there is not carried to the other body); on a pad, L3 swaps only with its
-##                stick at rest (a push while walking is not a swap)
+##                fresh (a start-up worked there is not carried to the other body); on a pad, L3 swaps unless its
+##                stick is pushed well over (a brisk walk is not a swap; a click that tilts it a little still is)
 ##   its paint    the paint control then acts on the Talon, under its own key; the Phaethon's stays
 ##   flying it    boarded, its cab is the Talon's plated hull; launched, the flight is the Talon's, with the switch moved in
 ##                its bay, saved for it; the menus' craft is the Talon
@@ -209,19 +209,22 @@ func _talon(garage) -> void:
 	check(Livery.saved_for(Pilot.TALON) == next and Livery.saved_for(Pilot.STANDARD) == phaethon_paint and bay.paint == next
 		and bay.model.pod.mesh == _talon_hull(next),
 		"The paint control at that bay paints the Talon (%s, its own key), not the Phaethon (%s), and the hull wears it" % [next, phaethon_paint])
-	# ---- a pad's L3: only with its stick at rest; a second swap to the Talon
-	_pad_axis(JOY_AXIS_LEFT_Y, -0.8)
-	_pad_button(JOY_BUTTON_LEFT_STICK)
-	await _frames(1)
-	var pushed_kept: bool = hall.bay_craft(Pilot.STANDARD) == Pilot.TALON and Settings.phaethon_body() == Pilot.TALON
+	# ---- a pad's L3: refused only with its stick pushed well over; a second swap to the Talon
+	var standing := {}
+	for push: float in [-0.8, -0.3, 0.0]:      # (walking briskly; a click that tilts the stick past the deadzone; centred)
+		_pad_axis(JOY_AXIS_LEFT_Y, push)
+		_pad_button(JOY_BUTTON_LEFT_STICK)
+		await _frames(1)
+		standing[push] = [hall.bay_craft(Pilot.STANDARD), Settings.phaethon_body()]
 	_pad_axis(JOY_AXIS_LEFT_Y, 0.0)
-	_pad_button(JOY_BUTTON_LEFT_STICK)
+	_key(KEY_P)      # (the keyboard's P, unguarded: the Phaethon, then the Talon again)
 	await _frames(1)
-	var at_rest_swapped: bool = hall.bay_craft(Pilot.STANDARD) == Pilot.STANDARD and Settings.phaethon_body() == Pilot.STANDARD
-	_key(KEY_P)      # (the Talon again, from the keyboard)
+	var keyed: String = hall.bay_craft(Pilot.STANDARD)
+	_key(KEY_P)
 	await _frames(1)
-	check(pushed_kept and at_rest_swapped and hall.bay_craft(Pilot.STANDARD) == Pilot.TALON,
-		"On a pad, L3 with the left stick pushed swaps nothing; with it at rest it swaps the body (and P swaps it back)")
+	check(standing[-0.8] == [Pilot.TALON, Pilot.TALON] and standing[-0.3] == [Pilot.STANDARD, Pilot.STANDARD]
+		and standing[0.0] == [Pilot.TALON, Pilot.TALON] and keyed == Pilot.STANDARD and hall.bay_craft(Pilot.STANDARD) == Pilot.TALON,
+		"On a pad, L3 with the left stick pushed well over (0.8) swaps nothing; tilted 0.3 or centred it swaps the body; P swaps it either way (%s)" % [standing])
 	check(Parked.hull_reads == reads + 1 and bay.model.pod.mesh == _talon_hull(next)
 		and Parked.talon_hull_bounds(bay.model.pod.mesh) == Parked.hull_bounds_of(bay.model.pod.mesh),
 		"The Talon's paint press and its second swap read no hull back: its kept bounds, which equal ones read fresh")

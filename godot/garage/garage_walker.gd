@@ -8,7 +8,8 @@ signal back_requested
 signal cockpit_control_requested(control: String)
 # On foot, the same two buttons work the bay in front of the pilot (garage.gd _work_bay): "paint" (key I, pad X, left
 # X in the headset) and "body" (key P, pad L3, left stick click in the headset). The stick's click is that stick's
-# own: "body" only while it rests inside DEADZONE, so a hard push while walking past the bay swaps nothing.
+# own: "body" is refused only while it is pushed BODY_CLICK_MAX_STICK or more, so a brisk walk past the bay swaps
+# nothing, and a deliberate click that tilts the stick a little (a real Touch thumbstick does) still counts.
 signal bay_control_requested(control: String)
 signal boot_planted(side: int, at: Vector3, speed: float)
 
@@ -19,6 +20,7 @@ const STANDING_EYE_HEIGHT := Pilot.STANDING_EYE.y
 const WALK_SPEED := 2.35
 const TURN_SPEED := PI / 2.0  # radians per second at full right-stick travel
 const DEADZONE := .19
+const BODY_CLICK_MAX_STICK := .5   # an on-foot stick click at this deflection or more is walking, not the body control
 const LOOK_LIMIT := deg_to_rad(82.0)
 
 var allow_xr := false
@@ -297,7 +299,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			JOY_BUTTON_X: key = KEY_I
 			JOY_BUTTON_LEFT_STICK:
 				key = KEY_P
-				pushed = not _at_rest(Vector2(Input.get_joy_axis(event.device, JOY_AXIS_LEFT_X), Input.get_joy_axis(event.device, JOY_AXIS_LEFT_Y)))
+				pushed = not _body_click(Vector2(Input.get_joy_axis(event.device, JOY_AXIS_LEFT_X), Input.get_joy_axis(event.device, JOY_AXIS_LEFT_Y)))
 			JOY_BUTTON_RIGHT_STICK: key = KEY_V
 	elif not xr_live and event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		if event.relative.length_squared() > .01:
@@ -335,9 +337,10 @@ func _notification(what: int) -> void:
 		_focused = true
 
 
-## A stick resting inside its deadzone (what _stick reads as no walking).
-func _at_rest(v: Vector2) -> bool:
-	return v.length() <= DEADZONE
+## Is a click on a stick deflected `v` the body control (not a brisk walk)? Under BODY_CLICK_MAX_STICK, which is well
+## past DEADZONE: a pressed thumbstick tilts.
+func _body_click(v: Vector2) -> bool:
+	return v.length() < BODY_CLICK_MAX_STICK
 
 
 func _stick(v: Vector2) -> Vector2:
@@ -468,7 +471,7 @@ func _xr_input(delta := 1.0 / 60.0) -> Vector2:
 		else: bay_control_requested.emit("paint")
 	elif pressed.y > 0:
 		if seated: cockpit_control_requested.emit("park")
-		elif _at_rest(stick): bay_control_requested.emit("body")
+		elif _body_click(stick): bay_control_requested.emit("body")
 	return _stick(Vector2(stick.x,-stick.y))
 
 
