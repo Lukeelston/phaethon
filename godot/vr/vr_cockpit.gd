@@ -158,6 +158,10 @@ const SLIDE_SCRUB := 0.22                 # the scrub in your hands while it mov
 var _rim_flashing := false
 static var slide_feel := true             # the SLIDE / GRIP switch on the left console (false: the cockpit keeps the sim's heading exactly)
 static var _slide_loaded := false         # (its saved setting is read once a run, as the camera's)
+# While a flight flies its craft's own saved slide (the garage's set-up for it, lent for that flight alone): the
+# pilot's own choice, the switch as vr_prefs.json has it, which the next craft with none saved starts in; null when
+# slide_feel is the pilot's own.
+static var _own_slide = null
 # How much of it (Luke, 2026-11-23: "add a physical slider or knob in the cockpit to adjust the amount of
 # drift in real time"): the drift slider behind that switch (vr/drift_slider.gd) sets this, from none to
 # DriftSlider.AMOUNT_MAX of SLIDE_MAX. At 1 the cockpit steps out exactly as it did before there was a
@@ -345,9 +349,13 @@ func _ready() -> void:
 	if not _nose_loaded and prefs.get("nose", "open") == "closed":   # (once a run: after that the menu's own choice stands)
 		set_nose_closed(true)
 	_nose_loaded = true
+	if _own_slide != null:      # (the last flight's craft lent it its own: back to the pilot's)
+		slide_feel = _own_slide
+		_own_slide = null
 	if not _slide_loaded and prefs.has("slide"):
 		slide_feel = prefs.slide != "off"
 	if workshop.has("slide"):
+		_own_slide = slide_feel
 		slide_feel = workshop.slide
 	if not _slide_loaded and typeof(prefs.get("slide_amount")) in [TYPE_FLOAT, TYPE_INT]:
 		slide_amount = clampf(float(prefs.slide_amount), 0.0, DriftSliderScript.AMOUNT_MAX)
@@ -468,7 +476,7 @@ func _save_prefs() -> void:
 	var f := FileAccess.open(PREFS, FileAccess.WRITE)
 	if f:
 		f.store_string(JSON.stringify({"scheme": quest.scheme, "handling": handling_ask if handling_ask != "" else sim.P.handling, "camera": camera,
-			"nose": "closed" if CraftModelScript.nose_closed else "open", "slide": "on" if slide_feel else "off",
+			"nose": "closed" if CraftModelScript.nose_closed else "open", "slide": "on" if (slide_feel if _own_slide == null else _own_slide) else "off",
 			"slide_amount": snappedf(slide_amount, 0.001),
 			"startup": "cold" if cold_start else "hot", "school": "on" if school else "done",
 			"consumables": "on" if consumables else "off", "powerups": "on" if power_ups_on else "off",
@@ -1337,6 +1345,7 @@ func _work_controls(l: XRController3D, r: XRController3D, delta: float) -> void:
 				_hand_busy[hand] = ConsoleSwitchesScript.CLAIM_S
 			if flip != "" and ask_handling(flip):   # (refused inside the cooldown: the lever springs back)
 				_save_prefs()
+				save_thrown({"handling": flip})
 				_buzz(hand, 0.9, 0.06)
 				print("HANDLING: switch to ", flip)
 	# the SLIDE switch, the same way
@@ -2351,10 +2360,13 @@ func _gun_controls() -> void:
 		_buzz(l, 0.22, 0.012)
 
 
-## Turn the slide on or off (the SLIDE / GRIP switch), and remember it.
+## Turn the slide on or off (the SLIDE / GRIP switch), and remember it: the pilot's own choice now (vr_prefs.json), and
+## this craft's set-up (save_thrown).
 func set_slide(on: bool) -> void:
 	slide_feel = on
+	_own_slide = null
 	_save_prefs()
+	save_thrown({"slide": on})
 	print("SLIDE: ", "on" if on else "off")
 
 

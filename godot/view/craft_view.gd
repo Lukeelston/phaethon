@@ -711,13 +711,24 @@ func ask_handling(mode: String) -> bool:
 	return true
 
 
-## Flip the live handling switch: SPEEDCRAFT <-> STARFIGHTER (STARFIGHTER waits for 1,250 mph).
+## Flip the live handling switch: SPEEDCRAFT <-> STARFIGHTER (STARFIGHTER waits for 1,250 mph). The pilot's: the M key
+## and the cockpit's Y hold. It is saved for this craft (save_thrown).
 func toggle_handling() -> void:
 	var cur: String = handling_ask if handling_ask != "" else String(sim.hwant)
 	if not ask_handling("speed" if cur == "starfighter" else "starfighter"):
 		return
+	save_thrown({"handling": handling_ask})
 	_flash("%s%s" % ["STARFIGHTER" if handling_ask == "starfighter" else "SPEEDCRAFT",
 		"  (below 1,250 mph)" if handling_ask == "starfighter" and sim.hblend == 0.0 else ""])
+
+
+## A MODE or SLIDE switch the pilot threw in this flight (M, the Y hold, the cockpit's MODE and SLIDE switches): saved
+## as this craft's set-up for the next flight in it (release/garage_route.gd save_thrown: not a handling thrown on a
+## track that sets its own). A benchmark flight saves nothing, as it saves no headset choice.
+func save_thrown(thrown: Dictionary) -> void:
+	if benchmark_flight or sim == null:
+		return
+	load("res://release/garage_route.gd").save_thrown(String(sim.P.vehicle), String(sim.P.track), thrown)
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
