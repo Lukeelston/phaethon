@@ -23,6 +23,7 @@ var telemetry := {
 var sim: Flight
 var seated := false
 var _airframe: Airframe
+var _reported_stages: Array[String] = ["off", "off"]
 var _vehicle := ""
 var _elapsed := 0.0
 var _arc_elapsed := 0.0
@@ -236,6 +237,9 @@ func _apply_hardware(delta: float) -> void:
 	model.energised = startup.charge
 	model.lights_on = startup.power > 0.5
 	for k in 2:
+		if startup.stage[k] != _reported_stages[k]:
+			_reported_stages[k] = startup.stage[k]
+			_airframe.engine_stage_changed.emit(k, _reported_stages[k])
 		var body := sim.eL if k == 0 else sim.eR
 		var lever := float(controls.thrL if k == 0 else controls.thrR)
 		model.held[k] = startup.stage[k] not in ["catch", "run"]

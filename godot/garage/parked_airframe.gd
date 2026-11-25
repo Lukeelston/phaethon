@@ -2,6 +2,8 @@
 ## once on the service stands and leave the flight simulation and exhaust switched off.
 extends Node3D
 
+signal engine_stage_changed(engine: int, stage: String)
+
 const Model := preload("res://view/craft_model.gd")
 const Livery := preload("res://view/livery.gd")
 const Pilot := preload("res://sim/pilot_craft.gd")

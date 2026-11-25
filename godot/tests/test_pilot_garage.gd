@@ -67,7 +67,10 @@ func _enter_menu(xr: bool) -> bool:
 		menu.consume_controller(0.0, true, true)
 	else:
 		button.pressed.emit()
-	return await _scene(GARAGE)
+	if not await _scene(GARAGE):
+		return false
+	return check(current_scene.get("walker") is CharacterBody3D and current_scene.get("environment") is Node3D,
+		"The garage starts with its walking pilot and workshop")
 
 
 func _move(walker, toward: Vector3) -> void:
@@ -102,6 +105,16 @@ func _walk_against(walker, start: Transform3D, direction: Vector3) -> bool:
 	return false
 
 
+func _check_boarding_lane(walker: CharacterBody3D, aisle_x: float, gate: Vector3, id: String) -> void:
+	# Sweep the standing pilot through the middle and both sides of the painted
+	# opening. Lift the feet slightly so the floor doesn't register as an obstacle.
+	for offset: float in [-.50, 0.0, .50]:
+		var at := Vector3(aisle_x, gate.y + .025, gate.z + offset)
+		var across := Vector3(gate.x - aisle_x, 0.0, 0.0)
+		check(not walker.test_move(Transform3D(Basis.IDENTITY,at), across),
+			"Clear marked boarding lane for %s at offset %.2f m" % [id, offset])
+
+
 func _floor_and_bays(garage) -> void:
 	var workshop = garage.environment
 	var walker = garage.walker
@@ -127,6 +140,9 @@ func _floor_and_bays(garage) -> void:
 	var near_wall := Transform3D(Basis.IDENTITY, Vector3(0, 0, 21.5))
 	blocked = await _walk_against(walker, near_wall, Vector3.BACK)
 	check(blocked and walker.global_position.z < 23.5, "The outside wall stops the pilot on its inside")
+	var rear_lane := Transform3D(Basis.IDENTITY, Vector3(0, .025, -workshop.HALF_Z + 2.5))
+	check(not walker.test_move(rear_lane, Vector3.RIGHT * (workshop.HALF_X - 3.0)),
+		"The rear east passage is clear behind the Basilisk's pod and engines")
 	var prior_cabin: WeakRef
 	for id: String in Fleet.ORDER:
 		var bay: Node3D = workshop.bay_node(id)
@@ -134,6 +150,7 @@ func _floor_and_bays(garage) -> void:
 		var seat: Transform3D = workshop.seat_transform(id)
 		if not check(bay != null and workshop.nearest_bay(boarding.origin) == id, "Identifiable boarding point for " + id):
 			continue
+		_check_boarding_lane(walker, lobby.origin.x, boarding.origin, id)
 		walker.set_seated(false, boarding)
 		var exterior := bay.find_child("DisplayCockpit", true, false) as Node3D
 		if not check(exterior != null and exterior.is_visible_in_tree(), "On foot the " + id + " exterior is displayed"):
@@ -170,6 +187,16 @@ func _floor_and_bays(garage) -> void:
 				"Dismount restores the exterior and removes the occupied cockpit from view")
 
 
+func _indicator_pair(workshop, id: String) -> Vector2i:
+	var first := Fleet.ORDER.find(id) * 2
+	# The headless renderer discards MultiMesh instance data.
+	if DisplayServer.get_name() == "headless":
+		return Vector2i(workshop._lamp_states[first], workshop._lamp_states[first + 1])
+	var lenses: MultiMesh = workshop.get_node("BayEngineIndicators").multimesh
+	return Vector2i(roundi(2.0 * lenses.get_instance_custom_data(first).r),
+		roundi(2.0 * lenses.get_instance_custom_data(first + 1).r))
+
+
 func _fly_and_return(garage, xr: bool) -> void:
 	var id := "orrery" if xr else "vesper"
 	garage.walker.set_physics_process(true)
@@ -191,12 +218,23 @@ func _fly_and_return(garage, xr: bool) -> void:
 	for engine: Node3D in bay.model.engines:
 		secondaries.append(engine.global_transform)
 	check(not systems.batt and not systems.all_running(), "Fresh workshop airframe is cold")
+	check(garage.environment._lamp_states.count(0) == 2 * Fleet.ORDER.size(),
+		"Every bay starts with both service windows dark")
 	_key(KEY_I)
 	var deadline := Time.get_ticks_msec() + 16000
 	var staggered := false
+	var signals: Array[Vector2i] = []
 	while not systems.all_running() and Time.get_ticks_msec() < deadline:
 		staggered = staggered or systems.stage[0] != systems.stage[1]
+		var pair := _indicator_pair(garage.environment, id)
+		if signals.is_empty() or signals.back() != pair:
+			signals.append(pair)
 		await process_frame
+	check(signals == [Vector2i(0,0), Vector2i(1,0), Vector2i(1,1), Vector2i(2,1)]
+		and _indicator_pair(garage.environment, id) == Vector2i(2,2),
+		"The sign shows each engine cranking amber and reaching green idle in firing order")
+	check(garage.environment._lamp_states.count(0) == 2 * (Fleet.ORDER.size() - 1),
+		"Only the occupied bay's indicators light")
 	check(systems.all_running() and staggered and garage.walker.seated and current_scene == garage,
 		"Left and right engines start in sequence while the seated pilot stays in the workshop")
 	var grips: Array = bay.get_node("OccupiedCockpit").throttle_grips()
@@ -251,6 +289,15 @@ func _fly_and_return(garage, xr: bool) -> void:
 		var returned = garage.environment.bay_node(id).get_node("Runup")
 		check(returned.startup == systems and returned.startup.all_running() and not returned.telemetry.slide
 			and returned.telemetry.handling == "starfighter", "Headset return restores that flight's engines and switches")
+		check(_indicator_pair(garage.environment, id) == Vector2i(2,2),
+			"Stepping out of a running craft from flight immediately restores its two green windows")
+		_key(KEY_E)
+		_key(KEY_I)
+		await process_frame
+		await process_frame
+		check(_indicator_pair(garage.environment, id) == Vector2i.ZERO,
+			"Shutting down the craft extinguishes both bay indicators")
+		_key(KEY_E)
 		_key(KEY_ESCAPE)
 		if await _scene(UI.VR_MENU_SCENE):
 			check(current_scene.selected_course == "range", "Headset garage returns to its selected course on the title")
