@@ -137,6 +137,27 @@ func _run() -> void:
 		"The bearing grows quieter and slower while coasting")
 	await _walk(Vector2.ZERO, 160)
 	check(not bearing.playing and is_zero_approx(station.rotor_speed), "The wheel stops silently")
+	# A bay door's own drive, at its hood, and its seal on the sill (garage/bay_doors.gd).
+	var doors = garage.environment.doors
+	doors.set_open("kiln", true)
+	await _walk(Vector2.ZERO, 3)
+	var roller: Array = sound._rollers.get("kiln", [])
+	var hood: Vector3 = garage.environment.door_transform("kiln") * Vector3(0, 5.05, .20)
+	check(roller.size() == 2 and roller[0].playing and roller[0].global_position.distance_to(hood) < .01,
+		"A rising bay door runs its own drive, at its hood")
+	check(roller.size() == 2 and roller[0].max_distance > 40.0, "... heard from the seat at the far end of its bay")
+	check(sound._rollers.size() == 1, "... and only that door's")
+	doors.set_open("kiln", false)
+	await _walk(Vector2.ZERO, 30)
+	check(roller.size() == 2 and roller[0].pitch_scale < .8, "Reversed, the same drive runs on, lower")
+	var landed := 0
+	while doors.phase("kiln") != "shut" and landed < 600:
+		await _walk(Vector2.ZERO, 1)
+		landed += 1
+	await _walk(Vector2.ZERO, 1)
+	check(roller.size() == 2 and roller[1].playing, "Landing on the sill sounds the seal (shut after %d frames)" % landed)
+	await _walk(Vector2.ZERO, 20)
+	check(roller.size() == 2 and not roller[0].playing, "... and the drive stops")
 	await _tracked_steps()
 	var handles: Array[WeakRef] = []
 	for child in sound.get_children():

@@ -116,6 +116,7 @@ static var track_override := ""    # an in-game track switch (VR: hold the menu 
                                    # static, so it survives the scene reload that does the switch
 static var job_override := ""      # the job to fly ("emergency": the emergency run; "none": no job), wins over --job; static too
 static var pad_start := false      # set by a menu as it launches a flight: this one begins on its starting pad (used up in _ready; --pads asks too)
+static var skip_pad := false       # set with pad_start by the garage's launch: a new flight, but on no pad, its preflight run in the bay (used up in _ready)
 static var spot_override := ""     # the Network road to start on (a scenic road's menu entry: "SCoast", "SDrop"); static too
 var eye := Vector3.INF            # --eye / --look: a fixed debug camera at sim (x, y, h), aimed at another point
 var look := Vector3.ZERO
@@ -258,8 +259,9 @@ func parked_systems() -> Dictionary:
 
 func _ready() -> void:
 	var opts := {"obstacleCollisions": GameSettings.obstacle_collisions_enabled()}
-	var on_pad := pad_start      # (a menu's word for this flight alone, whatever course it is)
+	var on_pad := pad_start and not skip_pad      # (a menu's word for this flight alone, whatever course it is)
 	pad_start = false
+	skip_pad = false
 	Outlook.load_saved()     # the menus' time of day and weather
 	ChaseScript.load_saved() # ... and the craft, and whether chase mode is on
 	RaidsScript.load_saved() # ... and whether raids are on

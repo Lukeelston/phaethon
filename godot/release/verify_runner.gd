@@ -99,11 +99,24 @@ func _garage_visit() -> bool:
 	garage.interact()
 	if not check("pilot boards the craft in the selected craft's bay", garage.seated_craft == craft and garage.walker.seated):
 		return false
-	garage.launch_flight()
+	# The craft leaves through its bay door, which rises when its engines are started (garage/bay_doors.gd).
+	var doors = garage.environment.doors
+	garage.walker.launch_requested.emit()
+	await frames(2)
+	if not check("a cold craft's launch waits behind its shut bay door", get_tree().current_scene == garage and doors.phase(at) == "shut"):
+		return false
+	garage.walker.cockpit_control_requested.emit("power")
+	var until := Time.get_ticks_msec() + 12000
+	while not doors.is_open(at) and Time.get_ticks_msec() < until:
+		await get_tree().process_frame
+	if not check("starting the engines raises the bay door", doors.is_open(at) and garage._runups[at].startup.all_running()):
+		return false
+	garage.walker.launch_requested.emit()
 	await frames(3)
 	var flight := get_tree().current_scene as View
 	if not check("garage launches the craft standing in the selected craft's bay on the Network", flight != null and flight.sim.P.vehicle == craft and flight.sim.kind == "network"):
 		return false
+	check("garage launch flies straight onto the map, with no starting pad", flight.pad == null)
 	var pilot := flight.pod_mesh.get_node_or_null("ChasePilot")
 	check("desktop flight carries the seated pilot", pilot != null and pilot.get_child_count() > 0)
 	var overlay = get_tree().root.get_node("ReleasePause")

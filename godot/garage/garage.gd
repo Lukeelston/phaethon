@@ -13,6 +13,9 @@ const ShopAudio := preload("res://garage/workshop_audio.gd")
 const Livery := preload("res://view/livery.gd")
 const Settings := preload("res://release/game_settings.gd")
 const REFUSED_RUNNING := "Shut the engines down first"      # (a run-up bay keeps its paint)
+const DOOR_SHUT := "Start the engines to open the bay door"     # (a launch asked for before the door is up ...)
+const DOOR_RISING := "The bay door is still rising"              # (... and while it rises)
+const REFUSAL_SHOWN := 3.0                                       # seconds the refusal stands in place of the status
 
 var environment: Workshop
 var walker: Walker
@@ -32,6 +35,9 @@ var _boarding := false
 var _refused := ""          # why the last change at the bay in front of the pilot was refused ("" none) ...
 var _refused_bay := ""      # ... and at which bay
 var _bay_names := {}        # bay -> {paint, body}: what the prompt names there, read on entry and when the bay is worked (_name_bay)
+var _door_phase := ""       # the seated bay's door as the prompt last showed it (bay_doors.gd phase)
+var _launch_refused := ""   # why the pilot's last launch was refused (the door not yet up), shown for a moment ...
+var _launch_refused_for := 0.0      # ... this much longer
 
 
 func _ready() -> void:
@@ -68,9 +74,9 @@ func _ready() -> void:
 		sound.name = "ShopAudio"
 		add_child(sound)
 		sound.exterior_screening_changed.connect(_screen_parked_engines)
-		sound.setup(walker, environment.get_node("ServiceEntry"), environment.inspection)
+		sound.setup(walker, environment.get_node("ServiceEntry"), environment.inspection, environment.doors, environment.door_transform)
 	walker.interact_requested.connect(interact)
-	walker.launch_requested.connect(launch_flight)
+	walker.launch_requested.connect(request_launch)
 	walker.back_requested.connect(return_to_menu)
 	walker.cockpit_control_requested.connect(_work_control)
 	walker.bay_control_requested.connect(_work_bay)
@@ -210,7 +216,8 @@ func _paint_name(craft: String) -> String:
 
 
 func _operate_cockpit(delta: float) -> void:
-	var runup := _runups[Fleet.bay_of(seated_craft)]
+	var bay := Fleet.bay_of(seated_craft)
+	var runup := _runups[bay]
 	var hands := walker.cockpit_hands()
 	for hand in _touching_hands:
 		if not hands.has(hand):
@@ -221,7 +228,21 @@ func _operate_cockpit(delta: float) -> void:
 			runup.work(hit[0], hit[1])
 	runup.set_controls(walker.cockpit_input())
 	_cockpit.sync_runup(runup.startup, runup.controls, runup.telemetry, delta, pilot)
-	_prompts.set_runup_status(runup.status_text())
+	# The bay door ahead rises from the moment START is pressed (or the one-touch start reaches it) and stands open
+	# while an engine runs; shutting the engines down, or stepping out (leave_seat), brings it down again.
+	environment.doors.set_open(bay, engines_lit(runup.startup))
+	var door := environment.doors.phase(bay)
+	if door != _door_phase:
+		if door == "open":
+			_launch_refused_for = 0.0
+		_update_prompt()
+	_launch_refused_for = maxf(0.0, _launch_refused_for - delta)
+	_prompts.set_runup_status(_launch_refused if _launch_refused_for > 0.0 else runup.status_text())
+
+
+## Has the pilot started a bay's engines: one starting (the START button pressed), or running?
+static func engines_lit(startup: StartupSequence) -> bool:
+	return startup.starting() or startup.running(0) or startup.running(1)
 
 
 func interact() -> void:
@@ -274,6 +295,8 @@ func leave_seat() -> void:
 		return
 	var at := Fleet.bay_of(seated_craft)
 	_runups[at].set_seated(false)
+	environment.doors.set_open(at, false)      # (a craft left running stays in the hall behind its shut door)
+	_launch_refused_for = 0.0
 	_cockpit.reset_overhead_hands()
 	_touching_hands.clear()
 	seated_craft = ""
@@ -284,6 +307,23 @@ func leave_seat() -> void:
 	_update_prompt()
 
 
+## The pilot's launch control (F, Y): the seated craft leaves for the chosen map, but only through its bay's door,
+## and that is up only once its engines have been started (_operate_cockpit). Refused, the reason stands in the
+## status line for a moment.
+func request_launch() -> void:
+	if _departing or seated_craft.is_empty():
+		return
+	var bay := Fleet.bay_of(seated_craft)
+	if environment.doors.is_open(bay):
+		launch_flight()
+		return
+	_launch_refused = DOOR_RISING if environment.doors.phase(bay) == "opening" else DOOR_SHUT
+	_launch_refused_for = REFUSAL_SHOWN
+	_prompts.set_runup_status(_launch_refused)
+
+
+## Leave for the flight in the seated craft, at once and straight onto the map the visit is bound for (no pad: its
+## preflight was run here). The pilot's control comes through request_launch; scripts may call this directly.
 func launch_flight() -> void:
 	if _departing or seated_craft.is_empty():
 		return
@@ -330,4 +370,6 @@ func _update_prompt() -> void:
 	var named: Dictionary = _bay_names.get(_nearby, {}) if seated_craft.is_empty() else {}
 	var paint: String = named.get("paint", "")
 	var body: String = named.get("body", "") if _nearby == Fleet.STANDARD else ""
-	_prompts.show_controls(craft_name, not seated_craft.is_empty(), Route.destination_label(), _using_pad, anchor, paint, _refused, body)
+	_door_phase = environment.doors.phase(Fleet.bay_of(seated_craft)) if not seated_craft.is_empty() else ""
+	_prompts.show_controls(craft_name, not seated_craft.is_empty(), Route.destination_label(), _using_pad, anchor, paint, _refused, body,
+		_door_phase)

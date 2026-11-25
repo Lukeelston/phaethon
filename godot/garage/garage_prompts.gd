@@ -151,6 +151,18 @@ func show_rotor(pad: bool, counter: Transform3D) -> void:
 		_status.hide()
 
 
+## The seated prompt's word on leaving: the launch control once the bay door is up, else what the door is doing.
+static func door_line(door: String, fly: String) -> String:
+	match door:
+		"open":
+			return "%s  Launch flight" % fly
+		"opening":
+			return "Bay door rising"
+		"closing":
+			return "Bay door closing"
+	return "START opens bay door"      # (the button's own word; the headset sign's widest line stays 0.56 of its 0.74 m)
+
+
 func place_on_marker(mount: Transform3D) -> void:
 	if _placard and not _placard.global_transform.is_equal_approx(mount):
 		_placard.global_transform = mount
@@ -167,9 +179,10 @@ func _sign_type(on_marker: bool) -> void:
 
 ## `paint`: on foot at a bay, the name of the paint the craft there wears (its control is offered); `refused`: why the
 ## last change at that bay was refused ("" none); `body`: at the Phaethon's bay, the body standing there (its control,
-## the other body, is offered).
+## the other body, is offered); `door`: seated, the bay door ahead (garage/bay_doors.gd phase): launch is offered only
+## once it is open.
 func show_controls(craft: String, seated: bool, destination: String, pad: bool, anchor: Transform3D, paint := "",
-		refused := "", body := "") -> void:
+		refused := "", body := "", door := "") -> void:
 	_seated = seated
 	_show_status()
 	var at_bay := not seated and not craft.is_empty() and not paint.is_empty()
@@ -190,7 +203,7 @@ func show_controls(craft: String, seated: bool, destination: String, pad: bool, 
 			hint = "X  Start or stop     L3  Parking brake     D-pad  Look\nLeft / right stick forward  Throttles     LT / RT  Airbrakes"
 		else:
 			hint = "I  Start or stop     P  Parking brake\nW/S  Left throttle     ↑/↓  Right throttle     X  Idle\nA  Left airbrake     →  Right airbrake"
-		hint += "\n%s  Launch flight     %s  Step out     %s  Menu" % [fly, board, back]
+		hint += "\n%s     %s  Step out     %s  Menu" % [door_line(door, fly), board, back]
 	elif not craft.is_empty():
 		action = "%s  Board %s" % [board, craft]
 		if at_bay:

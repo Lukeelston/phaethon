@@ -110,7 +110,9 @@ static func launch_flight(tree: SceneTree, craft_id: String, bays: Dictionary = 
 	UI.Settings.set_selected_craft(craft_id)
 	UI.Settings.set_craft_setup(craft_id, _moved(craft_id, bay))
 	_handed = {}
-	start_flight(tree, is_xr, craft_id, route, flying)
+	# Out of the bay door and straight onto the chosen map (Luke, 2026-11-25: "The garage should exit immediately to the
+	# map chosen from the previous screen"): no roadside pad, its preflight was run in the bay.
+	start_flight(tree, is_xr, craft_id, route, flying, false)
 
 
 ## Of a bay's switches, those the pilot moved in this visit: not those a parked flight handed it (enter_parked) and
@@ -127,14 +129,16 @@ static func _moved(craft_id: String, bay: Dictionary) -> Dictionary:
 
 ## Shared with the launch buttons on both title menus. CLI overrides are still resolved
 ## by the flight as usual. A held selection trigger cannot launch a newly entered XR craft.
-static func start_flight(tree: SceneTree, xr: bool, craft_id: String, route: Array, bays: Dictionary = {}) -> void:
+## `pad`: the flight begins on its starting pad (a menu's Fly); the garage's launch begins without one.
+static func start_flight(tree: SceneTree, xr: bool, craft_id: String, route: Array, bays: Dictionary = {}, pad := true) -> void:
 	_bays = bays.duplicate()
 	View.vehicle_override = craft_id
 	View.garage_on_entry = _bays.get(craft_id, {})
 	View.track_override = route[0]
 	View.job_override = route[1]
 	View.spot_override = route[2]
-	View.pad_start = true
+	View.pad_start = true      # (a new flight, launched: vr_cockpit.gd reads it so)
+	View.skip_pad = not pad
 	if xr:
 		var cockpit = load("res://vr/vr_cockpit.gd")
 		cockpit.require_neutral_on_entry = true

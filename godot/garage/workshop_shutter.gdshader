@@ -5,13 +5,22 @@ uniform sampler2D numbers : hint_default_black, repeat_disable, filter_linear_mi
 uniform sampler2D powder : hint_normal, repeat_enable, filter_linear_mipmap_anisotropic;
 varying vec2 sheet;
 varying flat int bay;
+varying float height;
+// The hood's mouth: a slat lifted above it has rolled onto the drum inside the hood (garage/bay_doors.gd).
+const float HOOD = 4.89;
 
 void vertex() {
 	sheet = VERTEX.xy;
 	bay = INSTANCE_ID;
+	// The door's lift in metres (garage/bay_doors.gd): the printed numbers ride up with their slats.
+	VERTEX.y += INSTANCE_CUSTOM.r;
+	height = VERTEX.y;
 }
 
 void fragment() {
+	if (height > HOOD) {
+		discard;
+	}
 	// Print directly on the corrugations. Every facet carries its portion
 	// of the digit and still catches its own highlight as the pilot walks.
 	vec2 uv = (sheet - vec2(0.0, 2.64)) / vec2(2.85, -2.45) + .5;
