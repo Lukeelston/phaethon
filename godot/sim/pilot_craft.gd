@@ -10,8 +10,10 @@ const VESPER := "vesper"
 const BASILISK := "basilisk"   # the gunship: a turret slaved to the pilot's gaze (view/turret.gd, view/gunnery.gd)
 const ORDER := [STANDARD, TALON, SHRIKE, ORRERY, KILN, VESPER, BASILISK]
 # The pilot garage's bays (Codex's, garage/garage_environment.gd), in their order: its hall, stands, shutter numbers
-# and fleet board were built for these six. The Talon came in after and has no bay: a pilot flies it from the
-# menus' Pilot craft row, and a Talon's flight does not offer the garage (view/craft_view.gd can_visit_garage).
+# and fleet board were built for these six. The Talon came in after and has no bay: the menus' Fly flies it when it
+# is the craft last used (the menus have no craft row; the garage is asked for a way to it: docs/superpowers/specs/
+# 2026-11-25-garage-paint-talon-brief-codex.md), and a Talon's flight does not offer the garage (view/craft_view.gd
+# can_visit_garage).
 const GARAGE_BAYS := [STANDARD, SHRIKE, ORRERY, KILN, VESPER, BASILISK]
 const NAMES := {STANDARD: "Phaethon", TALON: "Phaethon Talon", SHRIKE: "Shrike RS", ORRERY: "Orrery IX", KILN: "Kiln Six", VESPER: "Vesper", BASILISK: "Basilisk"}
 const DETAILS := {

@@ -29,7 +29,13 @@ The design is yours. The contract is small:
 ## How the menus use the garage now
 
 - `Garage.enter(tree, xr, course)` opens the garage bound for the map chosen on the menu.
-- `Garage.launch_flight` saves the craft the pilot leaves in, and its handling and slide switches (`Settings.set_craft_setup`). The menus' Fly button (`Garage.fly`) starts that craft, in its saved paint, with those switches.
+- A craft's switch set-up (its handling and its slide) means what the pilot last set for that craft, and nothing else. `Settings.craft_setup(id)` is the read.
+  - It is written when the pilot throws MODE or SLIDE in a flight, and when he launches from a bay whose switches he moved in this visit: `Garage.launch_flight` saves the craft he leaves in, and only the switches moved in the visit.
+  - It is never written from a flight's live state on the way into the garage. A parked flight's switches go to its bay for that visit only: the bay shows them and a launch flies them, but they are not saved unless moved.
+  - On a track that sets its own start handling (`Garage._track_sets_handling`: the sim's `COURSES`, the Grand Prix circuits, Eridanus and the Emergency Run, Carving), handling is the course's both ways: it is not applied there and a MODE throw there is not saved. The slide is always saved and always applied.
+- A launch from a bay and the menus' Fly button (`Garage.fly`) start the same craft the same way: the saved set-up, with any switch moved in this visit on top, in the craft's saved paint.
+- Your bays do not show a craft's saved set-up: they show their defaults (SPEED, SLIDE) until a switch is moved (or, for a craft arriving from a parked flight, the switches it was parked with). A launch still starts in the saved set-up, with what the bay shows on top only where a switch was moved or handed.
+- The menus name the craft Fly will use, in words just above Fly, and show it on the title's turntable.
 - Nothing under `godot/garage/` was changed by the menu split.
 
 ## Tests that should keep passing

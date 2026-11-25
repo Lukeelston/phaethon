@@ -113,7 +113,7 @@ var turntable: Node3D            # ... its deck, which turns and carries the cra
 var plate: Node3D                # ... its name sign, behind it, facing whoever looks at it
 var reveal := 0.0                # 0 put away, 1 up with the craft on it (and between, coming or going)
 var showcase := {}               # the craft on show: an entry as `craft`'s are, with its "key" (vehicle/livery)
-var show_vehicle := ""           # what the turntable is to hold (the menus' pilot craft) ...
+var show_vehicle := ""           # what the turntable is to hold (the craft the menus' Fly will use) ...
 var show_livery := ""            # ... in this paint
 var attention := 0.0             # the desktop: 0 the cover's view, 1 the camera turned to the turntable
 var attend_wanted := false

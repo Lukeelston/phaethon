@@ -11,7 +11,7 @@ static var is_xr := false
 static var arrival_craft := ""
 static var _destination := "network"
 static var _overrides: Array = []
-# Per-craft switch positions and engine state for this workshop visit (each craft's paint is the menus' for it,
+# Per-craft switch positions and engine state for this workshop visit (each craft's paint is its own saved choice,
 # view/livery.gd's per-craft keys, read again wherever it is built).
 # Scene nodes, audio players and held controls stay with the scene that owns them.
 static var _bays: Dictionary = {}
@@ -44,8 +44,8 @@ static func fly(tree: SceneTree, xr: bool, course: String) -> void:
 	start_flight(tree, xr, craft, route, {craft: _for_track(UI.Settings.craft_setup(craft), route[0])})
 
 
-## Does a track start in a handling of its own? The sim's own test (sim/craft_sim.gd:831, CraftSim.new): a track in its
-## COURSES starts in Starfighter, Carving in the default Speedcraft, unless a handling is asked for.
+## Does a track start in a handling of its own? The sim's own test (sim/craft_sim.gd, its _init, from its COURSES): a
+## track in COURSES starts in Starfighter, Carving in the default Speedcraft, unless a handling is asked for.
 static func _track_sets_handling(track: String) -> bool:
 	return Sim.COURSES.has(track)
 

@@ -42,12 +42,19 @@ earned, then fades back to its corner. The partner yields around your full craft
 GET IN
 1. Extract the whole ZIP into a folder.
 2. Keep Phaethon.exe and Phaethon.pck together.
-3. Double-click Phaethon.exe. Choose the 100-mile sprint first.
+3. Double-click Phaethon.exe. Choose the 100-mile sprint first, then Fly.
 No Godot editor, account, headset, or online connection is required to play.
 
+THE MENU AND THE PILOT GARAGE
+Choose a map on the main menu, then one of two:
+- Fly starts at once, in the craft you flew last (the Phaethon at first).
+  The menu names that craft just above Fly.
+- Pilot garage opens the workshop. Walk to a craft, press E to board it and
+  F to launch: you fly it on the map you chose. Esc goes back to the menu.
+
 NEW IN 0.5.0
-- Three more craft: Orrery IX, Kiln Six and Vesper. Choose your craft on the
-  main menu.
+- Three more craft: Orrery IX, Kiln Six and Vesper. Choose your craft in the
+  Pilot garage.
 - The engines' fins turn with the craft.
 - The Network's bends are banked.
 - Hold R (or pad Y) for a boost. A tap still arms the ramjet.

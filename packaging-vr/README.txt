@@ -38,8 +38,8 @@ settlement hardware add character. Road decoration streams more efficiently.
 VR cockpit lean is gentler, with slower rotation and smooth air-brake reversals.
 
 NEW IN 0.5.0
-- Three more craft: Orrery IX, Kiln Six and Vesper. Choose your craft on the
-  main menu.
+- Three more craft: Orrery IX, Kiln Six and Vesper. Choose your craft in the
+  Pilot garage.
 - In a turn the cockpit swings wide behind the engine on the outside of it,
   like a tube towed behind a boat. A slider on the left console, behind the
   SLIDE switch, sets how much: rest a controller's tip on its knob until it
@@ -85,9 +85,12 @@ START HERE
 3. Sit down, put on the headset, and double-click PhaethonVR.exe on the PC.
 4. The main menu appears inside the headset. Release the triggers, then flick
    either stick up/down to highlight a map. Press A or squeeze a trigger to
-   select it, then press again on Start flight. Click either stick to recenter.
+   choose it; the highlight moves to Fly. Press again to fly, in the craft you
+   flew last (the board names it). Or highlight Pilot garage: walk to a craft,
+   board it with right A and launch with left Y, on the map you chose.
+   Click either stick to recenter.
 5. In the cockpit, release triggers/buttons and center the sticks once, then
-   gently squeeze both triggers to begin. The Start press cannot accelerate you.
+   gently squeeze both triggers to begin. The Fly press cannot accelerate you.
 No Godot editor is needed. The game runs locally; it has no online account.
 Skill points reward sustained speed, clean fast turns, close calls and settled
 jump landings. Chain clean maneuvers for up to a 5x multiplier. Impacts break
