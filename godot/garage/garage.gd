@@ -35,7 +35,7 @@ func _ready() -> void:
 	var returning := Route.take_parked_bays()
 	for id: String in returning:
 		var bay: Dictionary = returning[id]
-		if Fleet.ORDER.has(id) and (bay.has("startup") or bay.has("handling") or bay.has("slide")):
+		if Fleet.GARAGE_BAYS.has(id) and (bay.has("startup") or bay.has("handling") or bay.has("slide")):
 			_runup_for(id, bay.get("startup")).apply_switches(bay)
 	walker = Walker.new()
 	walker.name = "Walker"
@@ -45,7 +45,7 @@ func _ready() -> void:
 	pilot.name = "Pilot"
 	walker.set_pilot(pilot)
 	var arrival := environment.spawn_transform()
-	if Fleet.ORDER.has(Route.arrival_craft):
+	if Fleet.GARAGE_BAYS.has(Route.arrival_craft):
 		arrival = environment.boarding_transform(Route.arrival_craft)
 	walker.set_seated(false, arrival)
 	if not OS.get_cmdline_user_args().has("--mute"):
@@ -143,7 +143,7 @@ func interact() -> void:
 		environment.inspection.spin_rotor()
 		return
 	var craft := environment.nearest_bay(walker.global_position)
-	if not Fleet.ORDER.has(craft):
+	if not Fleet.GARAGE_BAYS.has(craft):
 		return
 	var bay := environment.bay_node(craft) as Workshop.Parked
 	if _cockpit == null or _cockpit.get_parent() != bay:
@@ -197,9 +197,8 @@ func launch_flight() -> void:
 		return
 	_departing = true
 	var bays := {}
-	for id: String in Fleet.ORDER:
-		var bay := environment.bay_node(id) as Workshop.Parked
-		var data := {"paint": bay.paint}
+	for id: String in Fleet.GARAGE_BAYS:
+		var data := {}      # (its paint is the menus' for it: view/livery.gd, read again by the flight)
 		if _runups.has(id):
 			var runup := _runups[id]
 			data.merge(runup.switch_settings)

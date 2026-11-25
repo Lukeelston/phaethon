@@ -72,6 +72,8 @@ func _garage_visit() -> bool:
 	if not check("packed garage opens", garage != null and garage.scene_file_path == "res://garage/garage.tscn"):
 		return false
 	var craft := Settings.selected_craft()
+	if not Settings.Craft.GARAGE_BAYS.has(craft):      # (the Talon has no bay: board the Phaethon, which the launch then selects)
+		craft = Settings.Craft.STANDARD
 	var alternate := "kiln" if craft == "vesper" else "vesper"
 	garage.walker.global_transform = garage.environment.boarding_transform(alternate)
 	garage.walker.interact_requested.emit()

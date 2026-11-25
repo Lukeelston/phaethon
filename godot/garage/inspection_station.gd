@@ -55,7 +55,7 @@ func install(garage: Node3D, wall: Transform3D) -> void:
 	_windows.transform_format = MultiMesh.TRANSFORM_3D
 	_windows.use_custom_data = true
 	_windows.mesh = window
-	_windows.instance_count = Fleet.ORDER.size() * 2
+	_windows.instance_count = Fleet.GARAGE_BAYS.size() * 2
 	_stage_indices.resize(_windows.instance_count)
 	var readouts := MultiMeshInstance3D.new()
 	readouts.name = "Readouts"
@@ -63,8 +63,8 @@ func install(garage: Node3D, wall: Transform3D) -> void:
 	readouts.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(readouts)
 
-	for row in Fleet.ORDER.size():
-		var bay: Airframe = garage.bay_node(Fleet.ORDER[row])
+	for row in Fleet.GARAGE_BAYS.size():
+		var bay: Airframe = garage.bay_node(Fleet.GARAGE_BAYS[row])
 		bay.engine_stage_changed.connect(_set_engine_stage.bind(row))
 		var runup := bay.get_node_or_null("Runup") as Runup
 		for engine in 2:

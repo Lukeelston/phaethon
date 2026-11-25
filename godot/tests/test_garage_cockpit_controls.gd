@@ -47,7 +47,7 @@ func _run() -> void:
 	var hand := Node3D.new()
 	hand.name = "LeftHand"
 	root.add_child(hand)
-	for id: String in Catalog.ORDER:
+	for id: String in Catalog.GARAGE_BAYS:
 		cab.build(id)
 		pilot.set_seat_vehicle(id)
 		var start := Startup.new()

@@ -303,7 +303,7 @@ func _boarding_cards(hall: Node3D) -> void:
 	root.add_child(card)
 	card.setup(true)
 	var omit: Array[RID] = [walker.get_rid()]
-	for id: String in hall.Pilot.ORDER:
+	for id: String in hall.Pilot.GARAGE_BAYS:
 		var gate: Transform3D = hall.boarding_transform(id)
 		walker.set_seated(false, gate)
 		await _tick_input()

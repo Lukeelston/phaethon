@@ -106,7 +106,7 @@ func _fit_body() -> Fleet:
 	shell.add_child(hull)
 	if fleet:
 		fleet.dress_cab(hull, Model.nose_closed)
-		if Pilot.armed(vehicle):
+		if Pilot.weapon_of(vehicle) == "turret":      # (the Basilisk's: since Raids every Phaethon is armed too)
 			var turret := Model.TurretScript.new()
 			hull.add_child(turret)
 			turret.build(fleet)
@@ -255,7 +255,10 @@ func _fit_switches(bespoke: bool) -> void:
 		control.transform = ModeSwitch.mount(side)
 		control.build(bespoke)
 		control.show_state(false, 0.0, false)
-	if Pilot.armed(vehicle):
+	# The Basilisk's GUN switch, where its flight cockpit has it (vr_cockpit.gd gun_switch_mount(false)), always SAFE.
+	# The Phaethon is armed too since the Raids, but its switch (by the right lever) is placed by vr_cockpit.gd,
+	# which the desktop build leaves out: its parked cab has none.
+	if Pilot.weapon_of(vehicle) == "turret":
 		var gun := ModeSwitch.new()
 		_gun = gun
 		gun.name = "GunSwitch"

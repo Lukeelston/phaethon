@@ -8,10 +8,10 @@ const GARAGE_SCENE := "res://garage/garage.tscn"
 
 static var is_xr := false
 static var arrival_craft := ""
-static var arrival_paint := ""
 static var _destination := "network"
 static var _overrides: Array = []
-# Per-craft paint, switch positions and engine state for this workshop visit.
+# Per-craft switch positions and engine state for this workshop visit (each craft's paint is the menus' for it,
+# view/livery.gd's per-craft keys, read again wherever it is built).
 # Scene nodes, audio players and held controls stay with the scene that owns them.
 static var _bays: Dictionary = {}
 
@@ -21,7 +21,6 @@ static func enter(tree: SceneTree, xr: bool, course: String) -> void:
 		return
 	is_xr = xr
 	arrival_craft = ""
-	arrival_paint = ""
 	_bays = {}
 	_destination = course
 	_overrides = UI.course_overrides(course)
@@ -36,10 +35,8 @@ static func enter_parked(tree: SceneTree, flight: View, xr: bool) -> void:
 	var job := "emergency" if not sim.job.is_empty() else "none"
 	is_xr = xr
 	arrival_craft = sim.P.vehicle
-	arrival_paint = UI.Livery.current
 	var arrival: Dictionary = _bays.get(arrival_craft, {})
 	arrival.merge(flight.parked_systems(), true)
-	arrival.paint = arrival_paint
 	_bays[arrival_craft] = arrival
 	_destination = "emergency" if job == "emergency" else UI.course_for(track, View.spot_override)
 	_overrides = [track, job, View.spot_override]
@@ -57,15 +54,10 @@ static func take_parked_bays() -> Dictionary:
 	return bays
 
 
-static func bay_paint(id: String, fallback: String) -> String:
-	return _bays.get(id, {}).get("paint", fallback)
-
-
 static func launch_flight(tree: SceneTree, craft_id: String, bays: Dictionary = {}) -> void:
 	if craft_id not in Craft.ORDER:
 		return
 	arrival_craft = ""
-	arrival_paint = ""
 	UI.Settings.set_selected_craft(craft_id)
 	var route := _overrides if not _overrides.is_empty() else UI.course_overrides(_destination)
 	start_flight(tree, is_xr, craft_id, route, bays)
@@ -93,7 +85,6 @@ static func start_flight(tree: SceneTree, xr: bool, craft_id: String, route: Arr
 
 static func return_to_menu(tree: SceneTree) -> void:
 	arrival_craft = ""
-	arrival_paint = ""
 	_bays = {}
 	if is_xr:
 		var menu = load("res://release/vr_menu.gd")

@@ -81,8 +81,10 @@ func set_paused(value: bool) -> void:
 		return
 	is_paused = value
 	if value:
-		_garage.disabled = not get_tree().current_scene.can_visit_garage()
-		_garage.tooltip_text = "Park at your launch point to enter" if _garage.disabled else ""
+		var flight = get_tree().current_scene
+		_garage.disabled = not flight.can_visit_garage()
+		var has_bay: bool = flight.sim != null and Garage.Craft.GARAGE_BAYS.has(flight.sim.P.vehicle)
+		_garage.tooltip_text = ("Park at your launch point to enter" if has_bay else "The garage has no bay for this craft") if _garage.disabled else ""
 		_refresh_flight_options()
 		_was_muted = AudioServer.is_bus_mute(0)
 		_mouse_mode = Input.mouse_mode

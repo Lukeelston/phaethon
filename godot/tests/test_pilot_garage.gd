@@ -198,10 +198,10 @@ func _floor_and_bays(garage) -> void:
 	_key(KEY_F)
 	await process_frame
 	check(current_scene == garage and garage.seated_craft.is_empty(), "The entrance cannot board or launch a distant craft")
-	var first: Transform3D = workshop.boarding_transform(Fleet.ORDER[0])
+	var first: Transform3D = workshop.boarding_transform(Fleet.GARAGE_BAYS[0])
 	var aisle := Vector3(lobby.origin.x, 0, first.origin.z)
 	var reached: bool = await _walk_to(walker, aisle) and await _walk_to(walker, first.origin)
-	check(reached and workshop.nearest_bay(walker.global_position) == Fleet.ORDER[0], "Walk along the floor to the first boarding point")
+	check(reached and workshop.nearest_bay(walker.global_position) == Fleet.GARAGE_BAYS[0], "Walk along the floor to the first boarding point")
 	var blocked: bool = await _walk_against(walker, first, -first.basis.z)
 	check(blocked, "Walking toward the parked pod meets a hull collision")
 	var near_wall := Transform3D(Basis.IDENTITY, Vector3(0, 0, 21.5))
@@ -211,7 +211,7 @@ func _floor_and_bays(garage) -> void:
 	check(not walker.test_move(rear_lane, Vector3.RIGHT * (workshop.HALF_X - 3.0)),
 		"The rear east passage is clear behind the Basilisk's pod and engines")
 	var prior_cabin: WeakRef
-	for id: String in Fleet.ORDER:
+	for id: String in Fleet.GARAGE_BAYS:
 		var bay: Node3D = workshop.bay_node(id)
 		var boarding: Transform3D = workshop.boarding_transform(id)
 		var seat: Transform3D = workshop.seat_transform(id)
@@ -255,7 +255,7 @@ func _floor_and_bays(garage) -> void:
 
 
 func _indicator_pair(workshop, id: String) -> Vector2i:
-	var first := Fleet.ORDER.find(id) * 2
+	var first := Fleet.GARAGE_BAYS.find(id) * 2
 	# The headless renderer discards MultiMesh instance data.
 	if DisplayServer.get_name() == "headless":
 		return Vector2i(workshop._lamp_states[first], workshop._lamp_states[first + 1])
@@ -273,12 +273,12 @@ func _fly_and_return(garage, xr: bool) -> void:
 	garage.walker.set_physics_process(true)
 	var finishes := {}
 	var hull_finishes := {}
-	for craft: String in Fleet.ORDER:
+	for craft: String in Fleet.GARAGE_BAYS:
 		var parked = garage.environment.bay_node(craft)
 		finishes[craft] = parked.paint
 		hull_finishes[craft] = _hull_finishes(parked)
 	check(finishes.vesper == "violet" and finishes.orrery == UI.Livery.FACTORY,
-		"Only the selected Vesper wears the pilot's violet paint")
+		"The Vesper wears its own saved violet and the Orrery its factory finish")
 	var at: Transform3D = garage.environment.boarding_transform(id)
 	garage.walker.set_seated(false, at)
 	_key(KEY_E)
@@ -288,14 +288,14 @@ func _fly_and_return(garage, xr: bool) -> void:
 	var runup = bay.get_node("Runup")
 	var systems: StartupSequence = runup.startup
 	var board = garage.environment.get_node_or_null("FleetInspection")
-	var row := Fleet.ORDER.find(id)
+	var row := Fleet.GARAGE_BAYS.find(id)
 	var board_tracks_startup := _board_matches(board, row, systems.stage)
 	var stands: Transform3D = bay.model.pod.global_transform
 	var secondaries: Array = []
 	for engine: Node3D in bay.model.engines:
 		secondaries.append(engine.global_transform)
 	check(not systems.batt and not systems.all_running(), "Fresh workshop airframe is cold")
-	check(garage.environment._lamp_states.count(0) == 2 * Fleet.ORDER.size(),
+	check(garage.environment._lamp_states.count(0) == 2 * Fleet.GARAGE_BAYS.size(),
 		"Every bay starts with both service windows dark")
 	_key(KEY_I)
 	var deadline := Time.get_ticks_msec() + 16000
@@ -311,7 +311,7 @@ func _fly_and_return(garage, xr: bool) -> void:
 	check(signals == [Vector2i(0,0), Vector2i(1,0), Vector2i(1,1), Vector2i(2,1)]
 		and _indicator_pair(garage.environment, id) == Vector2i(2,2),
 		"The sign shows each engine cranking amber and reaching green idle in firing order")
-	check(garage.environment._lamp_states.count(0) == 2 * (Fleet.ORDER.size() - 1),
+	check(garage.environment._lamp_states.count(0) == 2 * (Fleet.GARAGE_BAYS.size() - 1),
 		"Only the occupied bay's indicators light")
 	check(board_tracks_startup and _board_matches(board, row, systems.stage),
 		"The inspection board follows each side of the real engine startup sequence")
@@ -340,7 +340,7 @@ func _fly_and_return(garage, xr: bool) -> void:
 		await _walk_through_annex(garage, at.origin)
 		var cold_pair: Array[String] = ["off", "off"]
 		var hot_bay_only := true
-		for other_row in Fleet.ORDER.size():
+		for other_row in Fleet.GARAGE_BAYS.size():
 			hot_bay_only = hot_bay_only and _board_matches(board, other_row, systems.stage if other_row == row else cold_pair)
 		check(hot_bay_only, "The live board retains the running craft and five cold neighbours after dismount")
 	_key(KEY_E)
@@ -474,7 +474,7 @@ func _hull_finishes(bay) -> Array:
 
 
 func _check_returned_finishes(garage, expected: Dictionary, hull_finishes: Dictionary) -> void:
-	for craft: String in Fleet.ORDER:
+	for craft: String in Fleet.GARAGE_BAYS:
 		var bay = garage.environment.bay_node(craft)
 		check(bay.paint == expected[craft] and _hull_finishes(bay) == hull_finishes[craft],
 			"Returning to the workshop preserves the actual hull and both nacelle finishes on " + craft)
@@ -486,7 +486,7 @@ func _run() -> void:
 	var vr_prefs := FileAccess.get_file_as_bytes(Cockpit.PREFS) if had_vr_prefs else PackedByteArray()
 	Settings.prefs_path = "user://test-garage-%d.cfg" % OS.get_process_id()
 	Settings.set_selected_craft("vesper")
-	Settings.set_choice("paint", "violet")
+	Settings.set_choice(UI.Livery.key_for("vesper"), "violet")      # (the Vesper's own paint: view/livery.gd key_for)
 	if await _enter_menu(false):
 		await _floor_and_bays(current_scene)
 		await _fly_and_return(current_scene, false)

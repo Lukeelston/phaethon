@@ -4,8 +4,6 @@ extends Node3D
 
 const Pilot := preload("res://sim/pilot_craft.gd")
 const Livery := preload("res://view/livery.gd")
-const Settings := preload("res://release/game_settings.gd")
-const Route := preload("res://release/garage_route.gd")
 const Parked := preload("res://garage/parked_airframe.gd")
 const Seat := preload("res://garage/garage_seat.gd")
 const ServiceEntry := preload("res://garage/workshop_annex.gd")
@@ -83,7 +81,7 @@ func build() -> void:
 		_instances[fixture] = []
 	# Curtain instances are ordered by the bay number printed on their slats.
 	_instances["ShutterCurtain"] = []
-	_instances["ShutterCurtain"].resize(Pilot.ORDER.size())
+	_instances["ShutterCurtain"].resize(Pilot.GARAGE_BAYS.size())
 	var shutter_coating := ShaderMaterial.new()
 	shutter_coating.shader = preload("res://garage/workshop_shutter.gdshader")
 	shutter_coating.set_shader_parameter("numbers", preload("res://garage/workshop_shutter_numbers.png"))
@@ -117,16 +115,12 @@ func build() -> void:
 	_lighting()
 	_hall()
 	_build_service_lenses()
-	var selected := Settings.selected_craft()
-	var paint := Settings.choice("paint", Livery.ids())
-	if Route.arrival_craft in Pilot.ORDER:
-		selected = Route.arrival_craft
-		if Livery.TABLE.has(Route.arrival_paint):
-			paint = Route.arrival_paint
 	var gate_centers := PackedVector2Array()
-	for i in Pilot.ORDER.size():
-		var id: String = Pilot.ORDER[i]
-		_berth(id, i, Route.bay_paint(id, paint if id == selected else Livery.FACTORY))
+	for i in Pilot.GARAGE_BAYS.size():
+		var id: String = Pilot.GARAGE_BAYS[i]
+		# Each craft in the paint the menus chose for it, as its flight wears it (view/livery.gd: the Phaethon's
+		# "paint", each other craft's "paint_<id>"; Factory is each as designed, the Vesper's Star Command its own).
+		_berth(id, i, Livery.built(id))
 		var gate: Vector3 = _gates[id].origin
 		gate_centers.append(Vector2(gate.x, gate.z))
 	var floor_finish: ShaderMaterial = $SealedConcrete.material_override
@@ -552,7 +546,7 @@ func _build_service_lenses() -> void:
 	_service_lenses.transform_format = MultiMesh.TRANSFORM_3D
 	_service_lenses.use_custom_data = true
 	_service_lenses.mesh = glass
-	_service_lenses.instance_count = Pilot.ORDER.size() * 2
+	_service_lenses.instance_count = Pilot.GARAGE_BAYS.size() * 2
 	_lamp_states.resize(_service_lenses.instance_count)
 	var fixture := MultiMeshInstance3D.new()
 	fixture.name = "BayEngineIndicators"

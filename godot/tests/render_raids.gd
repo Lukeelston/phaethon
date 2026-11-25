@@ -556,7 +556,7 @@ func _menus_set() -> bool:
 	return true
 
 
-## Does each option row's label fit its button? For the Raids, Pilot craft, Time, Role and Chase buttons, every label
+## Does each option row's label fit its button? For the Raids, Pilot craft, Time, Role, Chase and Pilot garage buttons, every label
 ## they can show (each craft's name, each hour) against the room inside the button (its width less its style's
 ## margins); and where the menu's last control (Quit, or the headset's Start and Quit) stands against the window. Prints
 ## "fits" or "CUT" with the widths in pixels of the window. (The saved choices differ between checkouts' profiles: this
@@ -570,6 +570,7 @@ func _measure(view: String, menu: Node) -> void:
 		"Time": times.map(func(t): return "Time:  %s" % t[1]),
 		"Role": ["Role:  Racer", "Role:  Patrol"],
 		"Chase": ["Chase:  Off", "Chase:  On"],
+		"Pilot garage": ["Pilot garage"],      # (Codex's garage, beside Quit)
 	}
 	for title in asks:
 		var b := _find_button(menu, title)
@@ -608,7 +609,7 @@ func _find_text(node: Node, text: String) -> Button:
 
 
 func _find_button(node: Node, title: String) -> Button:
-	if node is Button and ((node as Button).text.begins_with(title + ":") or (node as Button).text.begins_with(title + "   ·")):
+	if node is Button and ((node as Button).text == title or (node as Button).text.begins_with(title + ":") or (node as Button).text.begins_with(title + "   ·")):
 		return node
 	for child in node.get_children():
 		var b := _find_button(child, title)

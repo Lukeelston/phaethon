@@ -86,7 +86,7 @@ func _garage_atlas_matches(bay: Node3D, repaint: bool, enamel := Color.WHITE) ->
 		if not material or (material.get_shader_parameter("repaint") == true) != repaint:
 			return false
 		if repaint:
-			var actual: Color = material.get_shader_parameter("enamel")
+			var actual: Color = material.get_shader_parameter("to_r")      # (the enamel's colour: view/fleet_airframe.gd repaint, mask channel R)
 			if not actual.is_equal_approx(enamel):
 				return false
 	return true
@@ -100,10 +100,14 @@ func _visit_garage() -> bool:
 	if not check("VR menu offers Pilot garage", row != null and menu.buttons.has(row) and not row.disabled):
 		return false
 	var saved_craft := Settings.selected_craft()
-	var saved_paint := Settings.choice("paint", Paint.ids())
+	# Each craft keeps its own paint (view/livery.gd key_for: "paint_vesper", "paint_kiln"): the Vesper's cobalt,
+	# the Kiln's Factory, put back after.
+	var paint_keys := [Paint.key_for("vesper"), Paint.key_for("kiln")]
+	var saved_paints := [Paint.saved_for("vesper"), Paint.saved_for("kiln")]
 	var previous_live := Paint.current
 	Settings.set_selected_craft("vesper")
-	Settings.set_choice("paint", "cobalt")
+	Settings.set_choice(paint_keys[0], "cobalt")
+	Settings.set_choice(paint_keys[1], Paint.FACTORY)
 	# Make inadvertent use of the global flight paint visible in both parked cabs.
 	Paint.current = "crimson"
 	menu.set_process(false)
@@ -119,7 +123,7 @@ func _visit_garage() -> bool:
 	if not check("the packaged Vesper cockpit can be boarded", garage.walker.seated and garage.seated_craft == "vesper"):
 		return false
 	var vesper: Node3D = garage.environment.bay_node("vesper")
-	check("selected Vesper carries saved cobalt paint inside and outside",
+	check("Vesper carries its own saved cobalt paint inside and outside",
 		_garage_atlas_matches(vesper, true, Paint.coat("paint", "cobalt")))
 	garage.walker.interact_requested.emit()
 	check("dismount returns to Vesper's boarding point", not garage.walker.seated and garage.environment.nearest_bay(garage.walker.global_position) == "vesper")
@@ -130,7 +134,8 @@ func _visit_garage() -> bool:
 	garage.walker.interact_requested.emit()
 	check("boarding both bays restores incoming global paint", Paint.current == "crimson")
 	Paint.current = previous_live
-	Settings.set_choice("paint", saved_paint)
+	for k in paint_keys.size():
+		Settings.set_choice(paint_keys[k], saved_paints[k])
 	Settings.set_selected_craft(saved_craft)
 	garage.walker.back_requested.emit()
 	await get_tree().scene_changed
