@@ -17,6 +17,9 @@
 ## instead, north up: every road (`lines_w`, built once: panels draw them once), the jumps, the
 ## cities' GPs, the cities and their on-ramps (`marks_w`), the target, and the craft where it is,
 ## pointing its way. whole_layout fits it; layout hands a whole frame to it.
+## A raid called on the target city, or on there (`target_raid`, the view sets it: Raids): the frame's target carries
+## `raid`, a calm rise and fall RAID_HZ times a second (0 .. 1), and target_swell gives both maps the diamond's size
+## and its rim in the hostile red. With none the frame and the diamond are as they ever were.
 ## The Network's local map (the pod's LOCAL) reaches LOCAL_WIDER times as far as a course's map does
 ## at the same speed (Luke, 2026-11-22: "I think the 'local' switch should zoom out a bit"): 2.25 km
 ## from the craft to the map's top edge standing still, 16 km at 2,000 mph, 37.5 km from 4,660 mph up
@@ -35,12 +38,16 @@ const DAWN_HALF := 200000.0   # m each way along the dawn's front: its chord alw
 const DAWN_COL := Color(1.0, 0.78, 0.4)
 const PAD_COL := Color(1.0, 0.18, 0.12)   # the medical pad's red cross
 const TARGET_COL := Color(1.0, 0.86, 0.3)  # the Network's target city
+const RAID_HZ := 1.5                       # a raid's city: its diamond swells this many times a second ...
+const RAID_SWELL := 0.35                   # ... by up to this share of its size, rimmed in the hostile red
 
 var sim
 var s := PackedFloat64Array()       # distance along the lap at each sample (s[N]: the lap)
 var changes := PackedInt32Array()   # samples where the mode changes, ascending
 var ahead := MIN_AHEAD
 var target := -1                    # the Network: the target city (the view sets it), -1 none
+var target_raid := false            # ... and it is a raid's city, called or on (the view sets it): it pulses
+var _raid_t := 0.0                  # s it has pulsed
 var waypoint := {}                  # ... or a point in its place, {name, x, y} (off the roads: the nearest on-ramp)
 var marks: Array = []               # the Network: [[x, y, kind], ...] traffic and the racer (the view sets them)
 var _ngrid := {}                    # the Network: Vector2i(cell) -> [[road, i0, i1], ...]: runs of road in it
@@ -140,6 +147,7 @@ func _net_setup() -> void:
 
 ## This frame's map. `heading` is the way the view faces (radians, the sim's convention).
 func update(heading: float, delta: float) -> Dictionary:
+	_raid_t = _raid_t + delta if target_raid else 0.0
 	var v: float = sqrt(sim.pod.vx * sim.pod.vx + sim.pod.vy * sim.pod.vy)
 	ahead = lerpf(ahead, target_ahead(v), 1.0 - exp(-delta / EASE_T))
 	if sim.kind == "network" and whole:
@@ -269,6 +277,8 @@ func _net_update(heading: float) -> Dictionary:
 	elif target >= 0 and target < sim.cities.size():
 		var c: Dictionary = sim.cities[target]
 		f["target"] = {"name": c.name, "dist": Vector2(c.cx - sim.pod.x, c.cy - sim.pod.y).length(), "at": _local_xy(c.cx, c.cy, fx, fy)}
+		if target_raid:
+			f.target["raid"] = raid_pulse_at(_raid_t)
 	return f
 
 
@@ -287,7 +297,23 @@ func _whole_update(heading: float) -> Dictionary:
 	elif target >= 0 and target < sim.cities.size():
 		var tc: Dictionary = sim.cities[target]
 		f["target"] = {"name": tc.name, "dist": Vector2(tc.cx - sim.pod.x, tc.cy - sim.pod.y).length(), "at_w": Vector2(tc.cx, tc.cy) - W_MID}
+		if target_raid:
+			f.target["raid"] = raid_pulse_at(_raid_t)
 	return f
+
+
+## A raid's city: its swell `t` s after it began, 0 .. 1, a calm rise and fall RAID_HZ times a second (0 at first).
+static func raid_pulse_at(t: float) -> float:
+	return 0.5 - 0.5 * cos(TAU * RAID_HZ * t)
+
+
+## The target's diamond, from its plain half size r and frame f: (its half size, its hostile rim's strength). With no
+## raid on it, (r, 0): as it ever was. Both maps draw by this.
+static func target_swell(r: float, f: Dictionary) -> Vector2:
+	var p := float((f.get("target", {}) as Dictionary).get("raid", -1.0))
+	if p < 0.0:
+		return Vector2(r, 0.0)
+	return Vector2(r * (1.0 + RAID_SWELL * p), 0.55 + 0.45 * p)
 
 
 ## A whole-country frame fitted onto a w x h panel (as layout): north up, the country square in the

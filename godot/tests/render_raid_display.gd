@@ -1,7 +1,8 @@
 ## Raids on the dash, the maps and the tactical display, and a lost commuter's burst (the stage 1 plan, task 12), in the
 ## game's own VR cockpit with XR off: the Phaethon on a raid city's road, 3.6 km short of its town, at 3,000 mph.
 ##   raid-called       from the seat: the raid called, the dash's line and the map pointing at the city
-##   raid-called-map   ... the map's screen close (the eye's own place, a narrow lens)
+##   raid-called-map   ... the map's screen close (the eye's own place, a narrow lens); raid-called-map-least and
+##                     raid-called-map-most: the raid's city pulsing, at the least and the most of its swell
 ##   raid-on           from the seat: the raid on, the tactical display up; the raiders red on the map and the display
 ##   raid-on-map, raid-on-dash, raid-on-tactical   ... the map, the instrument strip and the display close
 ##   raid-on-map-<SCHEME>   the map close in each of its colour schemes (NETWORK, AMBER, PHOSPHOR, ICE, PAPER)
@@ -23,6 +24,7 @@ const Raids := preload("res://view/network_raids.gd")
 const Chase := preload("res://view/network_chase.gd")
 const Tactical := preload("res://view/tactical_display.gd")
 const Traffic := preload("res://view/network_traffic.gd")
+const MiniMap := preload("res://view/minimap.gd")
 const DT := 1.0 / 120.0
 const MPH := 2.236936
 const SPEED := 3000.0 / MPH
@@ -146,6 +148,12 @@ func _run() -> void:
 	await _snap(game, "raid-called", 90)
 	_look_at(game, cam, (game.minimap_panel as Node3D).global_position)
 	await _snap(game, "raid-called-map", 24)
+	for phase in [["least", 0.0], ["most", 0.5 / MiniMap.RAID_HZ]]:      # (the world held still: the pulse's clock set)
+		game.minimap._raid_t = float(phase[1])
+		var pf: Dictionary = game.minimap.update(sim.pod.th, 0.0)
+		game.minimap_panel.show_frame(pf)
+		print("RAID RENDER: the city's pulse %s: %.2f, diamond %s" % [phase[0], float(pf.target.get("raid", -1.0)), MiniMap.target_swell(0.011, pf)])
+		await _snap(game, "raid-called-map-%s" % phase[0], 24)
 	# on, with the tactical display up
 	R.arrive_r = 15000.0
 	Tactical.wanted = true

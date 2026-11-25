@@ -26,9 +26,10 @@
 ## Contact: a raider within CONTACT_CRAFT of the pod or either engine is one hit taken a GRACE s (signal hit_taken: the
 ## view jolts, and the score takes its points; never health).
 ## Log lines (the flight log): RAID: alarm <CITY> <km> | arrived | kill | commuter lost | hit taken | raider fled | cleared | lost (<why>)
-## The alarm: a tone made in code (alarm_tone: no recording), played once at each call on the director's own player, made
-## at the first call (none in a flight without sound: --mute, a shot). A commuter run down: a burst where it was
-## (view/raid_burst.gd, made at the first), drawn from commuter_lost for whatever craft, armed or not.
+## The alarm: a tone made in code (alarm_tone: no recording), played once at each call on the director's own player (none
+## in a flight without sound: --mute, a shot). A commuter run down: a burst where it was (view/raid_burst.gd), drawn from
+## commuter_lost for whatever craft, armed or not. The tone, its player and the bursts' batch and shader are made at
+## build (which only raids on reach), not at their first use mid-flight.
 extends Node3D
 
 ## A commuter run down, at (x, y) in the sims' frame (for the view's effects).
@@ -77,8 +78,8 @@ var kills := 0                   # raiders shot
 var fled := 0                    # raiders gone without being shot
 var pack: Array = []             # this raid's raiders still in traffic
 var called_m := 0.0              # m to the city (a straight line to its centre) when the alarm went
-var alarm: AlarmPlayer = null    # the alarm's player (made at the first call; none in a flight without sound)
-var burst = null                 # the lost commuters' bursts (view/raid_burst.gd; made at the first)
+var alarm: AlarmPlayer = null    # the alarm's player (made at build; none in a flight without sound)
+var burst = null                 # the lost commuters' bursts (view/raid_burst.gd; made at build)
 # tunables (tests shorten them)
 var first_after := 60.0          # s of waiting before a flight's first
 var lull := Vector2(60.0, 90.0)  # s of waiting after one, drawn between these
@@ -130,6 +131,9 @@ func build(v) -> void:           # (set `traffic` first: view.traffic_net)
 	_rng.seed = 20261124
 	if not commuter_lost.is_connected(_burst_at):
 		commuter_lost.connect(_burst_at)      # (the flash for a commuter lost: the director's own, whatever the craft)
+	alarm_tone()          # (made now, not at the first call)
+	_alarm_player()
+	_make_burst()
 
 
 ## Is the pilot where one can begin: on a public road, not in a shaft, at speed, with traffic's floor free?
@@ -226,17 +230,32 @@ func _alarm() -> bool:
 	return true
 
 
-## The alarm, once at the call: its player made at the first (none in a flight without sound: --mute, a shot).
+## The alarm, once at the call (none in a flight without sound: --mute, a shot).
 func _sound_alarm() -> void:
+	var a := _alarm_player()
+	if a != null:
+		a.sound()
+
+
+## The alarm's player: made at build, or at a call if sound came on since; null in a flight without sound.
+func _alarm_player() -> AlarmPlayer:
 	if view == null or view.muted or String(view.shot_path) != "":
-		return
+		return null
 	if alarm == null:
 		alarm = AlarmPlayer.new()
 		alarm.name = "RaidAlarm"
 		alarm.stream = alarm_tone()
 		alarm.volume_db = ALARM_DB
 		add_child(alarm)
-	alarm.sound()
+	return alarm
+
+
+## The bursts' batch and its shader (hidden until a commuter is lost).
+func _make_burst() -> void:
+	if burst == null:
+		burst = Burst.new()
+		add_child(burst)
+		burst.build(view)
 
 
 ## The raid's alarm, made in code: three rising whoops, battle stations (each climbs from 380 to 1,150 Hz in 0.42 s,
@@ -450,10 +469,7 @@ func _in_contact() -> bool:
 
 ## A commuter lost (commuter_lost): its burst where it was, standing on the deck there, for whatever craft.
 func _burst_at(x: float, y: float) -> void:
-	if burst == null:
-		burst = Burst.new()
-		add_child(burst)
-		burst.build(view)
+	_make_burst()
 	burst.add(Vector3(x, y, _deck_at(x, y)))
 
 

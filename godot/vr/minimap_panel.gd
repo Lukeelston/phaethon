@@ -478,10 +478,7 @@ func show_frame(f: Dictionary) -> void:
 			_tri(hq + Vector2(0, rim), hq + Vector2(-rim, -rim * 0.7), hq + Vector2(rim, -rim * 0.7), Color(0.0, 0.0, 0.0, 0.8))
 			_tri(hq + Vector2(0, hr), hq + Vector2(-hr, -hr * 0.7), hq + Vector2(hr, -hr * 0.7), hs[1])
 	if l.get("target") != null:   # the Network's target city: a diamond on the map, smaller on its rim toward it
-		var tq: Vector2 = l.target[0]
-		var r := 0.011 if l.target[1] else 0.008
-		_tri(tq + Vector2(0, r), tq + Vector2(-r, 0), tq + Vector2(r, 0), Color(tone("target"), 1.0))
-		_tri(tq + Vector2(-r, 0), tq + Vector2(0, -r), tq + Vector2(r, 0), Color(tone("target"), 1.0))
+		_diamond(l.target[0], MiniMap.target_swell(0.011 if l.target[1] else 0.008, f))
 	# the craft: a white arrowhead pointing up the map
 	var cr: Vector2 = l.craft
 	_tri(cr + Vector2(0, 0.011), cr + Vector2(-0.0075, -0.007), cr + Vector2(0.0075, -0.007), Color(tone("craft"), 0.95))
@@ -544,10 +541,7 @@ func _show_whole(f: Dictionary) -> void:
 			"ramp":
 				_seg(q + Vector2(-0.003, 0), q + Vector2(0.003, 0), 0.0016, Color(MiniMap.RAMP_COL, 1.0))
 	if l.target != null:
-		var tq: Vector2 = l.target[0]
-		var r := 0.008
-		_tri(tq + Vector2(0, r), tq + Vector2(-r, 0), tq + Vector2(r, 0), Color(tone("target"), 1.0))
-		_tri(tq + Vector2(-r, 0), tq + Vector2(0, -r), tq + Vector2(r, 0), Color(tone("target"), 1.0))
+		_diamond(l.target[0], MiniMap.target_swell(0.008, f))
 	var cr: Vector2 = l.craft   # the craft: a white arrowhead pointing its way
 	var dq: Vector2 = (l.craft_dir as Vector2).normalized() if (l.craft_dir as Vector2).length() > 0.0 else Vector2.UP
 	var sd := dq.orthogonal()
@@ -622,6 +616,19 @@ func _seg(a: Vector2, b: Vector2, w: float, c: Color) -> void:
 	_v.append(Vector3(b.x + n.x, b.y + n.y, 0.0))
 	for k in 6:
 		_c.append(c)
+
+
+## The target's diamond at q, its half size sw.x; a raid's city (sw.y > 0) swells, on a rim in the hostile red that
+## strong (MiniMap.target_swell; drawn first, so the diamond lies over it).
+func _diamond(q: Vector2, sw: Vector2) -> void:
+	if sw.y > 0.0:
+		var e := sw.x + 0.003
+		var rim := Color(hostile_tone(), sw.y)
+		_tri(q + Vector2(0, e), q + Vector2(-e, 0), q + Vector2(e, 0), rim)
+		_tri(q + Vector2(-e, 0), q + Vector2(0, -e), q + Vector2(e, 0), rim)
+	var r := sw.x
+	_tri(q + Vector2(0, r), q + Vector2(-r, 0), q + Vector2(r, 0), Color(tone("target"), 1.0))
+	_tri(q + Vector2(-r, 0), q + Vector2(0, -r), q + Vector2(r, 0), Color(tone("target"), 1.0))
 
 
 func _tri(a: Vector2, b: Vector2, c: Vector2, col: Color) -> void:

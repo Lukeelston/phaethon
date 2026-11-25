@@ -99,7 +99,7 @@ func _draw_whole() -> void:
 				draw_line(_px(q + Vector2(-4, 0)), _px(q + Vector2(4, 0)), MiniMap.RAMP_COL, 2.5, true)
 	if l.target != null:
 		var tq: Vector2 = l.target[0]
-		draw_colored_polygon(PackedVector2Array([_px(tq + Vector2(0, 8)), _px(tq + Vector2(8, 0)), _px(tq + Vector2(0, -8)), _px(tq + Vector2(-8, 0))]), MiniMap.TARGET_COL)
+		_diamond(tq, MiniMap.target_swell(8.0, _f))
 	var cr: Vector2 = l.craft
 	var dq: Vector2 = (l.craft_dir as Vector2).normalized() if (l.craft_dir as Vector2).length() > 0.0 else Vector2.UP
 	var sd := dq.orthogonal()
@@ -116,6 +116,16 @@ static func dot_style(kind: int) -> Array:
 	if kind == 4:
 		return [4.5, Color(1.0, 0.3, 0.9)]
 	return [2.0, Color(0.9, 0.9, 0.95, 0.75)]
+
+
+## The target's diamond at q, its half size sw.x px; a raid's city (sw.y > 0) swells, on a rim in the hostile red that
+## strong (MiniMap.target_swell).
+func _diamond(q: Vector2, sw: Vector2) -> void:
+	if sw.y > 0.0:
+		var e := sw.x + 3.0
+		draw_colored_polygon(PackedVector2Array([_px(q + Vector2(0, e)), _px(q + Vector2(e, 0)), _px(q + Vector2(0, -e)), _px(q + Vector2(-e, 0))]), Color(Traffic.HOSTILE_COL, sw.y))
+	var r := sw.x
+	draw_colored_polygon(PackedVector2Array([_px(q + Vector2(0, r)), _px(q + Vector2(r, 0)), _px(q + Vector2(0, -r)), _px(q + Vector2(-r, 0))]), MiniMap.TARGET_COL)
 
 
 ## Panel space (origin at the centre, y up) to the control's pixels.
@@ -168,8 +178,7 @@ func _draw() -> void:
 			draw_circle(_px(q), hs[0], hs[1])
 	if l.get("target") != null:   # the Network's target city: a diamond on the map, an arrowhead on its rim
 		var tq: Vector2 = l.target[0]
-		var r := 9.0 if l.target[1] else 7.0
-		draw_colored_polygon(PackedVector2Array([_px(tq + Vector2(0, r)), _px(tq + Vector2(r, 0)), _px(tq + Vector2(0, -r)), _px(tq + Vector2(-r, 0))]), MiniMap.TARGET_COL)
+		_diamond(tq, MiniMap.target_swell(9.0 if l.target[1] else 7.0, _f))
 	var cr: Vector2 = l.craft
 	draw_colored_polygon(PackedVector2Array([_px(cr + Vector2(0, 12)), _px(cr + Vector2(-8, -8)), _px(cr + Vector2(8, -8))]), Color(1, 1, 1, 0.95))
 	var text := MiniMap.readout(_f)

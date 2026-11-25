@@ -944,11 +944,13 @@ func _raid_result() -> void:
 			_flash("RAID LOST  (%d)" % times)
 
 
-## The maps' target (view/minimap.gd, which both maps draw from): the raid's city while one is called or on, the dash's
-## own target otherwise. Every frame, after the director's.
+## The maps' target (view/minimap.gd, which both maps draw from): the raid's city while one is called or on, pulsing
+## (target_raid); the dash's own target otherwise, as ever. Every frame, after the director's.
 func _raid_target() -> void:
 	if minimap and raids:
-		minimap.target = raids.city if raids.state == "called" or raids.state == "on" else net_target
+		var raiding: bool = raids.state == "called" or raids.state == "on"
+		minimap.target = raids.city if raiding else net_target
+		minimap.target_raid = raiding
 
 
 ## The dash on the Network: the target city and how far (straight line), where you left and your

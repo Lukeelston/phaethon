@@ -21,6 +21,14 @@
 ##   burst          a commuter lost (commuter_lost) is a bright burst there for a Phaethon that never armed its gun,
 ##                  standing on the city road's deck, aged by the director's frame and gone within a second
 ##   off            raids off: no director, no alarm, no burst; the dash and the target as ever
+##   build          the director makes the alarm's tone and the bursts' batch (hidden, its shader set) at build, not
+##                  at their first use mid-flight
+##   target pulse   while a raid is called or on, its city's diamond swells and shrinks on both maps (RAID_HZ, calm:
+##                  1 to 2 a second), rimmed in the hostile red: the headset's drawn diamond over eight frames, the
+##                  flat map's by the same rule (MiniMap.target_swell); after the raid and with raids off it is the
+##                  plain diamond, static, as it ever was
+##   never left out every line taken by commuters in her way, a raider still gets its mark (the furthest-off
+##                  commuter's line gives way); three raiders among six commuters off her way do not thin them away
 ## --headless --xr-mode off --audio-driver Dummy -s res://tests/test_raid_display.gd -- --mute
 ## Prints RAID DISPLAY PASS.
 extends SceneTree
@@ -36,6 +44,7 @@ const Chase := preload("res://view/network_chase.gd")
 const Livery := preload("res://view/livery.gd")
 const Outlook := preload("res://view/outlook.gd")
 const Pilot := preload("res://sim/pilot_craft.gd")
+const MiniMap := preload("res://view/minimap.gd")
 const MPH := 2.236936
 var failures := 0
 var checks := 0
@@ -135,6 +144,51 @@ func _apart(a: Color, b: Color) -> float:
 	return Vector3(a.r - b.r, a.g - b.g, a.b - b.b).length()
 
 
+## How wide the headset map's last drawing of colour `col` is, panel units across (0 if none).
+func _extent(panel, col: Color) -> float:
+	var lo := INF
+	var hi := -INF
+	for i in panel._c.size():
+		if (panel._c[i] as Color).is_equal_approx(col):
+			lo = minf(lo, panel._v[i].x)
+			hi = maxf(hi, panel._v[i].x)
+	return hi - lo if hi >= lo else 0.0
+
+
+## The headset map's last drawing: how many vertices are in `col`'s red, green and blue, whatever their strength.
+func _rgb_count(panel, col: Color) -> int:
+	var n := 0
+	for c: Color in panel._c:
+		n += int(absf(c.r - col.r) < 0.002 and absf(c.g - col.g) < 0.002 and absf(c.b - col.b) < 0.002)
+	return n
+
+
+func _spread(a: Array) -> float:
+	return float(a.max()) - float(a.min())
+
+
+## Eight frames of the map 0.1 s apart: the headset's target diamond across, its rim's vertices (in the hostile red at
+## any strength), the flat map's diamond by its rule (half size, rim strength, from 9 px), and each frame's raid pulse.
+func _pulse_frames(v, pnl) -> Dictionary:
+	var mini: Script = MiniMap
+	var out := {"sizes": [], "rims": [], "flat": [], "flat_rim": [], "raid": []}
+	for k in 8:
+		var f: Dictionary = v.minimap.update(v.sim.pod.th, 0.1)
+		pnl.show_frame(f)
+		out.sizes.append(snappedf(_extent(pnl, Color(pnl.tone("target"), 1.0)), 0.0001))
+		out.rims.append(_rgb_count(pnl, MapPanel.hostile_tone()))
+		var sw: Vector2 = mini.call("target_swell", 9.0, f) if _has(mini, "target_swell") else Vector2(9.0, 0.0)
+		out.flat.append(snappedf(sw.x, 0.01))
+		out.flat_rim.append(snappedf(sw.y, 0.01))
+		out.raid.append(float((f.get("target", {}) as Dictionary).get("raid", -1.0)))
+	return out
+
+
+## Is a plain diamond's width on the headset's map (0.011 on the map, 0.008 on its rim: across, twice that)?
+func _plain(across: float) -> bool:
+	return absf(across - 0.022) < 0.0002 or absf(across - 0.016) < 0.0002
+
+
 ## The colours in the headset map's last drawing equal to `col`: how many vertices.
 func _painted(panel, col: Color) -> int:
 	var n := 0
@@ -166,6 +220,13 @@ func _run() -> void:
 	R.tick_every = 1.0e9        # (no commuters lost off-screen while this looks: the counts are this test's)
 	R.arrive_r = 0.0            # (nor an arrival but the one it makes)
 	v.flash_until = 0.0
+
+	# ---- made at build (raids on only), not at first use mid-flight ----
+	var made = R.get("burst")
+	var made_mat = made.material_override if made is MultiMeshInstance3D else null
+	_check("made at the director's build: the alarm's tone (%s) and the bursts' batch (%s), hidden, none drawn, its shader set (%s)" % [Raids._alarm_wav, made, made_mat],
+		Raids._alarm_wav is AudioStreamWAV and made is MultiMeshInstance3D and not made.visible and int(made.shown) == 0
+		and made_mat is ShaderMaterial and (made_mat as ShaderMaterial).shader != null and (made_mat as ShaderMaterial).shader.code.contains("INSTANCE_CUSTOM"))
 
 	# ---- the alarm ----
 	R.reset()
@@ -217,6 +278,15 @@ func _run() -> void:
 	v.minimap.target = other
 	v._sync_world()      # (the view's own frame: the director's update, then the target)
 	_check("... and so it is through the view's frame (target %d, want %d; still %s)" % [v.minimap.target, R.city, R.state], v.minimap.target == R.city and R.state == "called")
+	# check_target_pulse: the raid's city swells on the maps while called
+	var pnl = v.minimap_panel
+	var whole_was: bool = v.minimap.whole
+	v.minimap.whole = false
+	v.minimap.marks = []
+	var hz: float = float((MiniMap as Script).get_script_constant_map().get("RAID_HZ", 0.0))
+	var pc := _pulse_frames(v, pnl)
+	_check("called: its city swells at %.1f a second (calm: 1 to 2): the headset's diamond across %s (plain 0.016 or 0.022), rimmed in the hostile red every frame (%s vertices); the flat map's %s px, rim %s" % [hz, pc.sizes, pc.rims, pc.flat, pc.flat_rim],
+		hz >= 1.0 and hz <= 2.0 and _spread(pc.sizes) > 0.003 and int(pc.rims.min()) == 6 and _spread(pc.flat) > 2.0 and float(pc.flat_rim.min()) >= 0.5 and float(pc.raid.min()) >= 0.0)
 
 	# ---- on: the raiders left and the time ----
 	R._arrive()
@@ -227,6 +297,8 @@ func _run() -> void:
 	v.flash_until = 0.0
 	_target(v)
 	_check("the dash shows it (\"%s\"), the maps still the city (%d)" % [v._net_text(), v.minimap.target], v._net_text() == want_on and v.minimap.target == R.city)
+	var po := _pulse_frames(v, pnl)
+	_check("on: still swelling (%s across, %s rim vertices)" % [po.sizes, po.rims], _spread(po.sizes) > 0.003 and int(po.rims.min()) == 6)
 	var shot = R.pack[0]
 	R.on_kill(shot)
 	T.knock_out(shot)
@@ -273,6 +345,11 @@ func _run() -> void:
 	var own: String = v._net_text()
 	_check("then the dash's own line (\"%s\") and the maps back to its target (%d, want %d)" % [own, v.minimap.target, other],
 		not own.begins_with("RAID") and own.begins_with(String(sim.cities[other].name)) and v.minimap.target == other)
+	var pa := _pulse_frames(v, pnl)
+	_check("after the raid the target is the plain diamond again, static, as it ever was: across %s, rim vertices %s, the frames' pulse %s; the flat map's %s px, rim %s" % [pa.sizes, pa.rims, pa.raid, pa.flat, pa.flat_rim],
+		_spread(pa.sizes) == 0.0 and _plain(float(pa.sizes[0])) and int(pa.rims.max()) == 0 and float(pa.raid.max()) == -1.0
+		and float(pa.flat.min()) == 9.0 and float(pa.flat.max()) == 9.0 and float(pa.flat_rim.max()) == 0.0)
+	v.minimap.whole = whole_was
 	R.reset()
 	_check("waiting: no line (\"%s\")" % R.text(), R.text() == "" and R.state == "")
 
@@ -396,12 +473,50 @@ func _run() -> void:
 	var both := shape.has(911) and shape.has(912)
 	var secs_1s: Array = [t.marks[911].seconds if t.marks.has(911) else -1.0, t.marks[912].seconds if t.marks.has(912) else -1.0]
 	var red_gap: float = _apart(tint[911], tint[912]) if both else -1.0
-	var code: String = t.line_mat.shader.code
+	var code: String = RegEx.create_from_string("//[^\\n]*").sub(t.line_mat.shader.code, "", true)      # (its code, not its comments)
 	_check("a raider and a commuter in her way, each %.2f s / %.2f s off: both red (%.2f apart, the commuter's %s), but the raider's mark is brackets (shape %s) and the commuter's a line (shape %s); the shader lays out a raider's by its INSTANCE_CUSTOM.y, %s m / %s px" % [secs_1s[0], secs_1s[1], red_gap,
 			(tint.get(912, Color.BLACK) as Color).to_html(false), shape.get(911, -1), shape.get(912, -1), t.line_mat.get_shader_parameter("box").x, t.line_mat.get_shader_parameter("box").y],
 		both and absf(float(secs_1s[0]) - 1.0) < 0.05 and absf(float(secs_1s[1]) - 1.0) < 0.05 and red_gap < 0.1
-		and int(shape[911]) == 2 and int(shape[912]) == 1 and code.contains("INSTANCE_CUSTOM.y") and code.contains("brackets")
+		and int(shape[911]) == 2 and int(shape[912]) == 1 and code.contains("raider = INSTANCE_CUSTOM.y;") and code.contains("if (raider > 0.5)") and code.contains("uniform vec2 box")
 		and (t.line_mat.get_shader_parameter("box") as Vector2).is_equal_approx((Tactical as Script).get_script_constant_map().get("HOSTILE_BOX", Vector2.ZERO)))
+	# raiders are not the crowd thinning is for: six commuters off her way keep their lines beside three raiders
+	T.cars.clear()
+	for k in 80:
+		t.sync(1.0 / 120.0, v._rush_flow, true)
+	for k in 6:
+		T.cars.append(_car(sim, 920 + k, e1, here + (3000.0 + 500.0 * k) / 24.0, 1, -112.5 if k % 2 == 0 else 157.5, 2500.0))
+	for k in 3:
+		T.cars.append(_car(sim, 930 + k, e1, here + (2500.0 + 700.0 * k) / 24.0, 1, 22.5, 2500.0, true))
+	for k in 80:
+		t.sync(1.0 / 120.0, v._rush_flow, true)
+	var off_way := 0
+	var raider_marks := 0
+	for m in t.marks.values():
+		off_way += int(not m.hostile and not m.way)
+		raider_marks += int(m.hostile)
+	_check("three raiders among six commuters off her way: not thinned (%s), every commuter's line kept (%d of 6), every raider marked (%d of 3)" % [t.thinned, off_way, raider_marks],
+		not t.thinned and off_way == 6 and raider_marks == 3)
+	# every line taken: a raider is never the one left out
+	T.cars.clear()
+	for k in 80:
+		t.sync(1.0 / 120.0, v._rush_flow, true)
+	for k in 12:
+		T.cars.append(_car(sim, 940 + k, e1, here + (1500.0 + 450.0 * k) / 24.0, 1, 22.5 if k % 2 == 0 else -22.5, 2500.0))
+	for k in 80:
+		t.sync(1.0 / 120.0, v._rush_flow, true)
+	var full_before: int = t.marks.size()
+	T.cars.append(_car(sim, 960, e1, here + 3200.0 / 24.0, 1, 22.5, 2500.0, true))
+	for k in 80:
+		t.sync(1.0 / 120.0, v._rush_flow, true)
+	var late_shape := -1
+	var kl := 0
+	for m in t.marks.values():
+		if m.id == 960:
+			late_shape = t.line_shape[kl]
+		kl += 1
+	_check("every line taken by twelve commuters in her way (%d marks of %d): a raider coming up still gets its mark (%s, shape %d), the furthest-off commuter's giving way (it is %s; %d marks, %d drawn)" % [full_before, Tactical.MAX_LINES, t.marks.has(960), late_shape,
+			"gone" if not t.marks.has(951) else "still there", t.marks.size(), t.line_count],
+		full_before == Tactical.MAX_LINES and t.marks.has(960) and late_shape == 2 and not t.marks.has(951) and t.marks.size() == Tactical.MAX_LINES and t.line_count == Tactical.MAX_LINES)
 	T.cars.clear()
 	Tactical.wanted = false
 	t = Tactical.frame(v, t, 1.0 / 120.0, v._rush_flow, true)
@@ -423,6 +538,11 @@ func _finish(v, prefs_before: String) -> void:
 		o.raids == null and o.traffic_net != null and o.traffic_net.raids == null and o.find_children("network_raids", "", true, false).is_empty()
 		and o.find_children("*", "MultiMeshInstance3D", true, false).filter(func(n): return n.name == "RaidBurst").is_empty()
 		and o.traffic_net.race_text() == "" and not line.begins_with("RAID") and o.minimap.target == o.net_target)
+	var of: Dictionary = o.minimap.update(o.sim.pod.th, 0.1)
+	var mini: Script = MiniMap
+	var osw: Vector2 = mini.call("target_swell", 9.0, of) if _has(mini, "target_swell") else Vector2(-1.0, -1.0)
+	_check("raids off: the target never pulses (flag %s, the frame's pulse %s, the flat map's diamond %s: 9 px and no rim, as ever)" % [o.minimap.get("target_raid"), (of.get("target", {}) as Dictionary).get("raid", "none"), osw],
+		o.minimap.get("target_raid") != true and not (of.get("target", {}) as Dictionary).has("raid") and osw == Vector2(9.0, 0.0))
 	o.queue_free()
 	await process_frame
 	Raids.enabled = true

@@ -1126,6 +1126,19 @@ func _pick_into(out: Array, cars: Array, first: int, last: int, speed: float) ->
 		out.append({"car": c, "along": along, "left": left - pod_left, "seconds": seconds, "way": absf(left - pod_left) <= CORRIDOR})
 
 
+## Every line taken and a raider without one: the lowest-ranked commuter's line goes at once (one off her way before one
+## in it; of those, the furthest off in time).
+func _make_room() -> void:
+	var worst: Mark = null
+	for m: Mark in marks.values():
+		if m.hostile:
+			continue
+		if worst == null or (worst.way and not m.way) or (worst.way == m.way and m.seconds > worst.seconds):
+			worst = m
+	if worst != null:
+		marks.erase(worst.id)
+
+
 func _lines_frame(dt: float, speed: float, shown: bool, strength: float) -> void:
 	var traffic = view.traffic_net if "traffic_net" in view else null
 	if not shown or traffic == null:
@@ -1147,14 +1160,18 @@ func _lines_frame(dt: float, speed: float, shown: bool, strength: float) -> void
 	_pick_into(_found, cars, _scan_at, upto, speed)
 	_scan_at = upto
 	if pass_done:      # a pass is done: what it found is what there is
-		if found.size() > THIN.y:
+		var raiding: bool = traffic.raids != null      # (raids off: as it was)
+		var crowd := found.size()
+		if raiding:      # raiders are not the busy road thinning is for: a raid must not strip the lines off the commuters out of her way
+			for f in found:
+				crowd -= int(bool(f.get("hostile", false)))
+		if crowd > THIN.y:
 			thinned = true
-		elif found.size() <= THIN.x:
+		elif crowd <= THIN.x:
 			thinned = false
 		for old: Mark in marks.values():
 			old.to = 0.0
 		# raiders first (Raids: never the ones left out, nor thinned), then those in her way (nor they), then the rest
-		var raiding: bool = traffic.raids != null      # (raids off: the two passes as they were)
 		for rank in range(0 if raiding else 1, 3):
 			for f in found:
 				var hostile: bool = raiding and bool(f.get("hostile", false))
@@ -1163,6 +1180,8 @@ func _lines_frame(dt: float, speed: float, shown: bool, strength: float) -> void
 				var pass_way := rank < 2
 				var id: int = f.car.id
 				var mark: Mark = marks.get(id)
+				if mark == null and hostile and marks.size() >= MAX_LINES:
+					_make_room()      # (every line taken: a raider is never the one left out)
 				if mark != null:
 					mark.to = 0.0 if (thinned and not pass_way) else 1.0
 				elif marks.size() < MAX_LINES and (pass_way or (not thinned and float(f.seconds) >= BEGIN_T)):
