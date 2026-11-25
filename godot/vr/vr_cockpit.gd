@@ -333,6 +333,7 @@ func parked_systems() -> Dictionary:
 
 func _ready() -> void:
 	var workshop := garage_on_entry
+	var launched := pad_start      # (a menu's Fly or the garage's launch: a new flight; a scene reloaded in flight, a city's GP, is not)
 	_await_neutral_controls = require_neutral_on_entry
 	require_neutral_on_entry = false
 	quest = QuestControlsScript.new()
@@ -349,7 +350,7 @@ func _ready() -> void:
 	if not _nose_loaded and prefs.get("nose", "open") == "closed":   # (once a run: after that the menu's own choice stands)
 		set_nose_closed(true)
 	_nose_loaded = true
-	if _own_slide != null:      # (the last flight's craft lent it its own: back to the pilot's)
+	if _own_slide != null and launched:      # (the last flight's craft lent it its own: a new launch is back to the pilot's)
 		slide_feel = _own_slide
 		_own_slide = null
 	if not _slide_loaded and prefs.has("slide"):

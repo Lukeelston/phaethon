@@ -15,7 +15,8 @@
 ##             launched with untouched, is not saved
 ##   headset   Fly, OPTIONS, PILOT GARAGE (saves nothing), walk back, Fly, MODE thrown to Starfighter, hold Menu, Fly:
 ##             Starfighter. On the Grand Prix a MODE throw is not saved, a SLIDE throw is. The Kiln's saved slide (GRIP,
-##             from its bay) is its flight's alone: not written to vr_prefs.json, not the Vesper's start
+##             from its bay) is its flight's alone, a city's GP entered from it included: not written to
+##             vr_prefs.json, not the Vesper's start
 ## Uses its own prefs file; puts View's statics, the menus' remembered courses, Title.enabled, the cockpit's slide and
 ## vr_prefs.json back.
 ## Run headless with --xr-mode off -s res://tests/test_fly_last_used.gd -- --mute
@@ -502,9 +503,9 @@ func _headset_mode_throw() -> void:
 		"headset: on the Grand Prix a MODE throw is the course's, not saved; a SLIDE throw is (%s, %s, %s)" % [flight.handling_ask, Cockpit.slide_feel, Settings.craft_setup("kiln")])
 
 
-## The headset's slide: the Kiln's SLIDE moved to GRIP in its bay and launched with (saved: the Kiln's alone). Its flight
-## is in GRIP; vr_prefs.json keeps the pilot's own SLIDE; the Vesper, with none saved, starts in the pilot's SLIDE; the
-## Kiln again, in its own GRIP.
+## The headset's slide: the Kiln's SLIDE moved to GRIP in its bay and launched with onto the Network (saved: the Kiln's
+## alone). Its flight is in GRIP, and so is the city's GP it goes on into; vr_prefs.json keeps the pilot's own SLIDE; the
+## Vesper, with none saved, starts in the pilot's SLIDE; the Kiln again, in its own GRIP.
 func _headset_slide_lent() -> void:
 	_fresh()
 	_seed_vr_prefs({"handling": "speed", "slide": "on"})
@@ -513,7 +514,7 @@ func _headset_slide_lent() -> void:
 	if board == null:
 		return
 	board.set_process(false)
-	board.choose_course("range")
+	board.choose_course("network")
 	board._open_garage()
 	var garage = await _next(GARAGE_SCENE)
 	if garage == null or not _board(garage, "kiln"):
@@ -525,6 +526,15 @@ func _headset_slide_lent() -> void:
 		return
 	check(flight.sim.P.vehicle == "kiln" and not Cockpit.slide_feel and Settings.craft_setup("kiln") == {"slide": false},
 		"headset: the Kiln's SLIDE moved to GRIP in its bay: its flight is in GRIP, and it is saved for it (%s, %s)" % [Cockpit.slide_feel, Settings.craft_setup("kiln")])
+	for city in flight.sim.cities:      # (on to a city's GP: the flight's scene again, on that circuit)
+		if city.name == "DUNES":
+			flight.sim.respawn_on(int(city.road), int(city.i), 1)
+	flight.enter_city_gp()
+	flight = await _next(VR_SCENE)
+	if flight == null:
+		return
+	check(flight.sim.track_name == "gp_dunes" and flight.sim.P.vehicle == "kiln" and not Cockpit.slide_feel,
+		"headset: ... and the city's GP it goes on into is still the Kiln's flight, in its GRIP (%s, %s)" % [flight.sim.track_name, Cockpit.slide_feel])
 	flight.return_to_menu()      # (Menu held: it saves the pilot's headset choices)
 	board = await _next(UI.VR_MENU_SCENE)
 	if board == null:
