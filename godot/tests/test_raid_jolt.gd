@@ -1,8 +1,11 @@
 ## Raids: the jolt (view/network_raids.gd hit_taken; craft_view.gd and vr_cockpit.gd jolt; the stage 1 plan, task 10).
 ##   one hit per grace   a raider held overlapping the craft gives one hit_taken a GRACE: 1 in 0.9 s, 3 in 2.1 s;
 ##                       one clear of every body (further than CONTACT_CRAFT) gives none
-##   buzz both           jolt buzzes both controllers
-##   camera still        in the VR cockpit jolt(1.0) moves neither the camera, the headset's origin nor the rig, over 0.3 s
+##   buzz both           jolt buzzes both controllers, harder and longer than a wall hit (0.85 for 0.14 s)
+##   camera still        in the VR cockpit jolt(1.0) moves neither the camera, the headset's origin, the rig nor the
+##                       shell: (isolated) jolt() and then 36 of its own ticks with no frame leave all four bit for bit
+##                       as they were; (in flight) two cockpits flown the same 36 frames, one jolted at the first, stand
+##                       the same at every frame (what moved, and by how much, is told), and its frustum offsets stay 0
 ##   thump               the jolt's thump is a synthesised stream, played when the flight has sound and not when muted
 ##   made at load        with raids on the jolt's thump is synthesised and its headset vignette made at the cockpit's
 ##                       build, hidden once its warm-up frames are drawn; the first jolt makes nothing
@@ -143,20 +146,53 @@ func _stage(v, gap: float):
 	return c
 
 
+const PARTS := ["rig", "origin", "camera", "shell"]
+
+
 func _state(v) -> Array:
-	return [v.rig.transform, v.origin.transform, v.cam.transform]
+	return [v.rig.transform, v.origin.transform, v.cam.transform, v.shell.transform]
 
 
-func _same(a: Array, b: Array) -> bool:
+## How far each of the four (PARTS) stands from where it stood in `a`: the most of its place's and its axes' moves, m.
+static func _moved(a: Array, b: Array) -> Array:
+	var out := []
 	for k in a.size():
 		var x: Transform3D = a[k]
 		var y: Transform3D = b[k]
-		if (x.origin - y.origin).length() > 1.0e-6:
-			return false
+		var d := (x.origin - y.origin).length()
 		for j in 3:
-			if (x.basis[j] - y.basis[j]).length() > 1.0e-6:
-				return false
-	return true
+			d = maxf(d, (x.basis[j] - y.basis[j]).length())
+		out.append(d)
+	return out
+
+
+## "rig 0, origin 0, ..." of the parts that moved more than `tol`, or "" when none did.
+static func _told(moved: Array, tol: float) -> String:
+	var said := []
+	for k in moved.size():
+		if float(moved[k]) > tol:
+			said.append("%s %.6f" % [PARTS[k], float(moved[k])])
+	return ", ".join(said)
+
+
+## A fresh cockpit staged as _stage stages one (a raider far clear), held 0.1 s, then `frames` frames held: the four
+## parts' places at each, and its frustum offsets' largest. jolt(1.0) at frame `jolt_at` (never for -1).
+func _flown(frames: int, jolt_at: int) -> Dictionary:
+	var v = await _cockpit()
+	v.traffic_net._hw_time = -1.0e9
+	var c = _stage(v, 200.0)
+	await _hold(v, c, c.f, 0.1)
+	var seen := []
+	var offsets := 0.0
+	for i in frames:
+		if i == jolt_at:
+			v.jolt(1.0)
+		await _hold(v, c, c.f, STEP)
+		seen.append(_state(v))
+		offsets = maxf(offsets, maxf(absf(v.cam.h_offset), absf(v.cam.v_offset)))
+	v.queue_free()
+	await process_frame
+	return {"seen": seen, "offsets": offsets}
 
 
 func _run() -> void:
@@ -221,26 +257,26 @@ func _run() -> void:
 			body.z -= dz
 	_check("other deck: same x, y, same deck %d hit, 30 m above %d, 30 m below %d in 1 s (want 1, 0, 0)" % counts, counts == [1, 0, 0])
 
-	# the buzz: both hands
+	# the buzz: both hands, harder and longer than a wall hit's (vr_cockpit _on_hit: 0.85 for 0.14 s)
 	v.buzzed.clear()
 	v.jolt(1.0)
-	var both: bool = v.buzzed.any(func(b): return b[0] == v.hands.left) and v.buzzed.any(func(b): return b[0] == v.hands.right)
-	_check("jolt buzzes both controllers (%d pulses)" % v.buzzed.size(), both)
+	var hard := func(b) -> bool: return float(b[1]) >= 1.0 and float(b[2]) >= 0.18
+	var both: bool = v.buzzed.any(func(b): return b[0] == v.hands.left and hard.call(b)) and v.buzzed.any(func(b): return b[0] == v.hands.right and hard.call(b))
+	_check("jolt buzzes both controllers harder and longer than a wall hit, 1.0 for 0.18 s or more (%s)" % [v.buzzed.map(func(b): return [snappedf(b[1], 0.01), snappedf(b[2], 0.01)])], both)
 
-	# the camera and rig stay still through it
-	var still := true
-	var offsets_zero := true
+	# the camera, the headset's origin, the rig and the shell stay still through it: first the jolt alone, ticked with
+	# no frame (nothing else can move them), then in flight against a twin flown the same frames without it
 	c = _stage(v, 200.0)
 	await _hold(v, c, c.f, 0.1)
 	var before := _state(v)
 	v.jolt(1.0)
-	var t := 0.0
-	while t < 0.3 - 1.0e-6:
-		await _hold(v, c, c.f, STEP)
-		t += STEP
-		if not _same(before, _state(v)) or v.cam.h_offset != 0.0 or v.cam.v_offset != 0.0:
-			still = false
-	_check("over 0.3 s of the jolt the VR rig, origin and camera do not move, nor its frustum offsets", still)
+	for i in 36:
+		v._jolt_tick(STEP)
+	var alone: Array = _moved(before, _state(v))
+	_check("the jolt alone, 36 ticks with no frame: rig, origin, camera and shell bit for bit as they were (%s)" % [alone],
+		alone.all(func(d): return float(d) == 0.0))
+	await _hold(v, c, c.f, 0.4)          # (its glow spent; the in-flight check, two cockpits, is made once this one is gone)
+
 	var a40: float = JoltFx.vr_alpha(40.0)
 	var a10: float = JoltFx.vr_alpha(10.0)
 	_check("the headset's red edge: alpha %.2f at 40 degrees off axis (want >= 0.3), %.2f at 10 degrees (want <= 0.05)" % [a40, a10], a40 >= 0.3 and a10 <= 0.05)
@@ -285,6 +321,22 @@ func _run() -> void:
 
 	v.queue_free()
 	await process_frame
+
+	# in flight: two cockpits flown the same 36 frames, one jolted at the first, stand the same at every frame
+	var plain: Dictionary = await _flown(36, -1)
+	var jolted: Dictionary = await _flown(36, 0)
+	var worst := [0.0, 0.0, 0.0, 0.0]
+	var first_off := -1
+	for i in 36:
+		var m: Array = _moved(plain.seen[i], jolted.seen[i])
+		for k in 4:
+			worst[k] = maxf(float(worst[k]), float(m[k]))
+		if first_off < 0 and m.any(func(d): return float(d) > 1.0e-6):
+			first_off = i
+	var told := _told(worst, 1.0e-6)
+	_check("in flight, two cockpits the same 36 frames, one jolted at the first: they stand the same at every frame (%s; the most each part differed: %s), the frustum offsets %.6f" % [
+			"none moved" if told == "" else "moved from frame %d: %s" % [first_off, told], worst, float(jolted.offsets)],
+		told == "" and float(jolted.offsets) == 0.0)
 
 	# the flat view: a brief shake, then rest; raids off: nothing
 	var f = View.new()

@@ -245,7 +245,8 @@ var g_across := 0.0                       # across it, g: + a left turn
 var g_turn := 0.0                         # ... with a shaft's carrying taken out (it presses you into the seat, not across it): the slip bar
 var g_seat := 1.0                         # the 1 g the seat holds you up with: less as she leaves the ground, none in the air
 var _g_from := [0.0, 0.0, -1.0, 0.0]      # the pod's velocity, the sim's clock and its count of the shafts' turning at the last reading
-var _jolt_quad: MeshInstance3D   # the jolt's red vignette before the camera (made on the first jolt)
+var _jolt_quad: MeshInstance3D   # the jolt's red vignette before the camera (made at load with raids on)
+const JOLT_BUZZ_S := 0.2         # s of the jolt's buzz, full strength, both hands (a wall hit's: 0.85 for 0.14 s)
 var _buzz_hold := {}   # controller -> seconds an event buzz still owns it (the shudder waits)
 const SHAKE_M := 0.004   # cockpit shake per unit of air-brake shudder, metres
 const GRAB_SHAKE_M := 0.007   # the gear's grab: the cockpit's jolt, metres (fore and aft, a little up)
@@ -488,13 +489,14 @@ func _field_flash(amount: float) -> void:
 		CanopyScript.flash(canopy, amount)
 
 
-## A raider's ram (Raids): both hands buzz, the edge of the view flashes red, and a thump. Nothing moves: not the
-## camera, the headset's origin, nor the rig. The flash is a vignette quad held before the camera, which goes with the head.
+## A raider's ram (Raids): both hands buzz, harder and longer than a wall hit (_on_hit: 0.85 for 0.14 s), the edge of
+## the view flashes red, and a thump. Nothing moves: not the camera, the headset's origin, nor the rig. The flash is a
+## vignette quad held before the camera, which goes with the head.
 func jolt(strength := 1.0) -> void:
 	_jolt_amp = clampf(strength, 0.0, 1.0)
 	_jolt_glow = _jolt_amp
-	_buzz(hands.left, 0.9, 0.12)
-	_buzz(hands.right, 0.9, 0.12)
+	_buzz(hands.left, 1.0, JOLT_BUZZ_S)
+	_buzz(hands.right, 1.0, JOLT_BUZZ_S)
 	_jolt_thump()
 
 
