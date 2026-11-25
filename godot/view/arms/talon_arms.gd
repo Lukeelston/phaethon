@@ -9,8 +9,11 @@
 ## view/craft_model.gd builds them with the craft on its pod and fires them through view/weapons/fixed_guns_mount.gd.
 ## Everything rides under this node: the VR cockpit hides the pod and carries this node onto its own hull
 ## (vr/vr_cockpit.gd), and the hull whose wing skin opens is whichever this node stands on.
-## Stowed, the rig is hidden and the hull wears its stock skin, which carries the sealed carriages and caps
-## (view/talon_airframe.gd add_pod); out, the hull takes the open-bay skin (with_gun_bays) and the rig is shown.
+## Until the GUN switch first brings them out the hull wears its stock skin, the Talon as it was before them, and the
+## rig is hidden: a Talon never armed looks as it did. Out, the hull takes the open-bay skin (with_gun_bays: the sills)
+## and the rig is shown; stowed again, the rig is hidden and the hull wears her sealed skin (the sills, the shut
+## carriages and caps baked into it: view/talon_airframe.gd add_pod, with_bays). (Codex baked the sealed carriages into
+## every Talon's stock skin; the raids line keeps the stock skin until the first arming, as it keeps the Phaethon's.)
 extends Node3D
 
 const Talon := preload("res://view/talon_airframe.gd")
@@ -39,6 +42,7 @@ var barrels: MeshInstance3D
 var throats: StandardMaterial3D
 var mouths: Array[Marker3D] = []
 var deploy := 0.0
+var _carried := ""      # the skin's bays while this node is carried to another hull (_notification)
 var heat := 0.0:
 	set(value):
 		heat = clampf(value, 0.0, 1.0)
@@ -84,17 +88,17 @@ func build(craft) -> void:
 	hide()
 
 
-## Carried onto another hull (the VR cockpit's, at its build, stowed): that is the hull whose wing skin opens. (Carried
-## while out, the open skin goes with it.)
+## Carried onto another hull (the VR cockpit's, at its build, before they are ever out): that is the hull whose wing
+## skin changes. (Carried later, the skin they have given the old hull goes with them.)
 func _notification(what: int) -> void:
-	if hull == null:
+	if hull == null or hull.mesh == null:
 		return
-	if what == NOTIFICATION_UNPARENTED and deploy > 0.0 and hull.mesh and hull.mesh.has_meta(&"talon_stock"):
-		hull.mesh = hull.mesh.get_meta(&"talon_stock")
+	if what == NOTIFICATION_UNPARENTED and hull.is_inside_tree():      # (not as the craft is freed)
+		_carried = String(hull.mesh.get_meta(&"talon_bays", ""))
+		hull.mesh = Talon.with_bays(hull.mesh, "")
 	elif what == NOTIFICATION_PARENTED and get_parent() is MeshInstance3D:
 		hull = get_parent() as MeshInstance3D
-		if deploy > 0.0:
-			hull.mesh = Talon.with_gun_bays(hull.mesh)
+		hull.mesh = Talon.with_bays(hull.mesh, _carried)
 
 
 func _part(label: String, mesh: ArrayMesh) -> MeshInstance3D:
@@ -115,7 +119,7 @@ func set_deploy(t: float) -> void:
 		hull.mesh = Talon.with_gun_bays(hull.mesh)
 	deploy = next
 	if deploy == 0.0:
-		hull.mesh = hull.mesh.get_meta(&"talon_stock")
+		hull.mesh = Talon.with_bays(hull.mesh, "sealed")      # (stowed again: her shut carriages, in the skin)
 		hide()
 	else:
 		show()

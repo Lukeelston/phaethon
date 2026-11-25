@@ -43,7 +43,13 @@ func _run() -> void:
 	_check(hull.get_child_count() == 0, "A never-armed Talon has no separate weapon")
 	var arms: Arms = _rig(hull)
 	_check(arms == _rig(hull) and arms.get_parent() == hull, "Build is lazy and unique to this hull")
-	_check(hull.mesh == stock and not arms.visible, "Stowed guns use the original sealed wing")
+	_check(hull.mesh == stock and not arms.visible and not stock.has_meta(&"talon_bays"), "Never brought out, the guns leave the stock wing as it was")
+	var tris := {}
+	for bays: String in ["", "open", "sealed"]:
+		var skin: ArrayMesh = Talon.with_bays(stock, bays)
+		tris[bays] = skin.surface_get_array_index_len(skin.surface_find_by_name(Talon.SURFACE)) / 3
+	_check(Talon.with_bays(stock, "") == stock and tris[""] < tris["open"] and tris["open"] < tris["sealed"] and Talon.with_bays(stock, "sealed") == Talon.with_bays(Talon.with_gun_bays(stock), "sealed"),
+		"The stock skin has no bays, the open one the sills, the sealed one the shut carriages too, each made once (%s)" % [tris])
 	_check(arms.carriage.material_override == hull.mesh.surface_get_material(8), "Carriage shells match the wing finish")
 	var colors: PackedColorArray = arms.carriage.mesh.surface_get_arrays(0)[Mesh.ARRAY_COLOR]
 	var trim: Color = Talon.palette("cobalt").trim
@@ -95,9 +101,14 @@ func _run() -> void:
 	arms.set_deploy(0.54)
 	_check(arms.muzzles()[0].is_equal_approx(middle[0]), "Deployment reverses through the same geometry")
 	Model.set_nose_closed(not Model.nose_closed, root)
-	_check(hull.mesh.has_meta(&"talon_stock") and not neighbour.mesh.has_meta(&"talon_stock"), "Opening the nose preserves the armed wing on its owner only")
+	_check(hull.mesh.get_meta(&"talon_bays", "") == "open" and not neighbour.mesh.has_meta(&"talon_stock"), "Opening the nose preserves the armed wing on its owner only")
 	arms.set_deploy(-0.1)
-	_check(not arms.visible and not hull.mesh.has_meta(&"talon_stock") and arms.muzzles()[0].is_equal_approx(stowed[0]), "Full stow restores the appropriate stock shell and original mouth position")
+	var nose_stock := Model.pod_hull(false, true)      # (the stock skin for the nose as it now is)
+	_check(not arms.visible and hull.mesh == Talon.with_bays(nose_stock, "sealed") and hull.mesh.get_meta(&"talon_stock") == nose_stock
+		and neighbour.mesh == nose_stock and arms.muzzles()[0].is_equal_approx(stowed[0]),
+		"Full stow seals the guns into this hull's wing (her shut carriages; the neighbour's stays stock) and restores the original mouth position")
+	Model.set_nose_closed(not Model.nose_closed, root)
+	_check(hull.mesh == Talon.with_bays(Model.pod_hull(false, true), "sealed"), "Opening the nose again keeps the sealed wing")
 	var triangles := 0
 	var surfaces := 0
 	for part: MeshInstance3D in [arms.carriage, arms.caps, arms.barrels, arms.links[0], arms.links[1]]:

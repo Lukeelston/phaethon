@@ -228,7 +228,11 @@ static func _markings(st: SurfaceTool, pal: Dictionary) -> void:
 ## The Talon's plating, appended to the Phaethon's pod hull as its last surface (SURFACE), in `pal`.
 ## The two cheeks converge into a low dorsal beak. Both tow links pass under
 ## its leading section and through the relief at the root.
-static func add_pod(mesh: ArrayMesh, closed_nose: bool, pal: Dictionary, gun_bays := false) -> void:
+## `bays`: what of Codex's wing-root guns (view/arms/talon_arms.gd) the skin carries. "" none: the stock skin, the
+## Talon as it was before them, worn until the GUN switch first brings them out; "sealed" the sills with the shut
+## carriages and their caps, worn stowed from then on (with_bays); "open" the sills alone, worn while they are out
+## (the rig carries the carriages).
+static func add_pod(mesh: ArrayMesh, closed_nose: bool, pal: Dictionary, bays := "") -> void:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var body: Color = pal.body
@@ -301,10 +305,11 @@ static func add_pod(mesh: ArrayMesh, closed_nose: bool, pal: Dictionary, gun_bay
 		[2.56, 0, -0.13, 0.10, 0.05, 0.07]], 1.0, [panel, body, panel, body, panel, body, body], cavity)
 	# The fixed sills are part of the wing. Closed, their two painted upper
 	# carriages and intake caps are baked into this same draw surface.
-	add_gun_sills(st, pal)
-	if not gun_bays:
-		add_gun_carriages(st, pal)
-		add_gun_caps(st, pal)
+	if bays != "":
+		add_gun_sills(st, pal)
+		if bays == "sealed":
+			add_gun_carriages(st, pal)
+			add_gun_caps(st, pal)
 	_markings(st, pal)
 	st.index()
 	st.commit(mesh)
@@ -397,16 +402,25 @@ static func add_gun_caps(st: SurfaceTool, pal: Dictionary) -> void:
 
 ## Keep the stock mesh on every other Talon, including an unarmed partner beside the pilot.
 static func with_gun_bays(stock: ArrayMesh) -> ArrayMesh:
-	if stock.has_meta(&"talon_stock"):
+	return with_bays(stock, "open")
+
+
+## A hull's skin with the guns' bays `bays` (add_pod: "open" or "sealed"; "" the stock skin itself), made once for
+## each stock skin. `mesh` is a stock skin or one made from it (its meta talon_stock names its stock, talon_bays its bays).
+static func with_bays(mesh: ArrayMesh, bays: String) -> ArrayMesh:
+	var stock: ArrayMesh = mesh.get_meta(&"talon_stock", mesh)
+	if bays == "":
 		return stock
-	if _gun_hulls.has(stock):
-		return _gun_hulls[stock]
-	var opened := stock.duplicate() as ArrayMesh
-	opened.surface_remove(opened.surface_find_by_name(SURFACE))
-	add_pod(opened, stock.get_meta(&"talon_nose_closed"), stock.get_meta(&"talon_palette"), true)
-	opened.set_meta(&"talon_stock", stock)
-	_gun_hulls[stock] = opened
-	return opened
+	if not _gun_hulls.has(stock):
+		_gun_hulls[stock] = {}
+	if not _gun_hulls[stock].has(bays):
+		var made := stock.duplicate() as ArrayMesh
+		made.surface_remove(made.surface_find_by_name(SURFACE))
+		add_pod(made, stock.get_meta(&"talon_nose_closed"), stock.get_meta(&"talon_palette"), bays)
+		made.set_meta(&"talon_stock", stock)
+		made.set_meta(&"talon_bays", bays)
+		_gun_hulls[stock][bays] = made
+	return _gun_hulls[stock][bays]
 
 
 ## What the Talon adds to each engine (`out`: -1 the port engine, 1 the starboard), into the engine's own fixed
