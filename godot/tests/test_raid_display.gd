@@ -306,7 +306,8 @@ func _run() -> void:
 	_check("a raider shot: \"%s\"" % R.text(), R.text() == "RAID  %d RAIDERS  1:26" % (n - 1))
 
 	# ---- a commuter lost: its burst, for a Phaethon that never armed its gun ----
-	var gunless: bool = String(sim.P.get("vehicle", "")) == Pilot.STANDARD and v.gunnery == null and v.craft.weapon != null and not v.gun_wanted
+	# (raids on, its fire control is made at load, dormant until the GUN is first armed: view/gunnery.gd)
+	var gunless: bool = String(sim.P.get("vehicle", "")) == Pilot.STANDARD and (v.gunnery == null or v.gunnery.dormant) and v.craft.weapon != null and not v.gun_wanted
 	var zone: Dictionary = R._zone(R.city)
 	var road: int = zone.road
 	var Rd = sim.roads[road]
@@ -332,8 +333,9 @@ func _run() -> void:
 		and side >= 20.0 and ang > deg_to_rad(1.0) and age > 0.0 and age < 0.3)
 	for k in 10:
 		R.update(0.1)
-	_check("... and gone within a second (drawn %d, shown %s); no gun made by it (%s)" % [mm.visible_instance_count if mm else -1, b.visible if b else null, v.gunnery],
-		mm != null and mm.visible_instance_count == 0 and not b.visible and v.gunnery == null)
+	_check("... and gone within a second (drawn %d, shown %s); no gun woken by it (%s, dormant %s)" % [mm.visible_instance_count if mm else -1, b.visible if b else null, v.gunnery,
+			v.gunnery.dormant if v.gunnery else null],
+		mm != null and mm.visible_instance_count == 0 and not b.visible and (v.gunnery == null or v.gunnery.dormant))
 
 	# ---- over: the flash, then the dash's own line and target ----
 	R._end("lost", "time")
