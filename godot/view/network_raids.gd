@@ -18,7 +18,7 @@
 ##   raids.on_kill(car)             a raider shot (the gun's, before traffic.knock_out)
 ##   raids.prey_of(car)             a raider's prey: the nearest commuter ahead on its road and way, within 3 km (or null)
 ##   raids.reset()                  on a restart (a crash's respawn it sees for itself: sim.crash_t)
-##   raids.text()                   the dash's line while a raid is on ("" otherwise)
+##   raids.text()                   the dash's line while one is called or on ("" otherwise): traffic's race_text() gives it
 ##   raids.result                   "cleared" | "lost", once, for the view to take
 ## Hunting: each frame a raider takes its prey's lane and the speed of it plus HUNT_DV (headway 0.05), and on contact
 ## (CONTACT_ALONG, CONTACT_LAT) the commuter is knocked out and lost; with no prey it cruises at the town limit. A raider
@@ -26,6 +26,9 @@
 ## Contact: a raider within CONTACT_CRAFT of the pod or either engine is one hit taken a GRACE s (signal hit_taken: the
 ## view jolts, and the score takes its points; never health).
 ## Log lines (the flight log): RAID: alarm <CITY> <km> | arrived | kill | commuter lost | hit taken | raider fled | cleared | lost (<why>)
+## The alarm: a tone made in code (alarm_tone: no recording), played once at each call on the director's own player, made
+## at the first call (none in a flight without sound: --mute, a shot). A commuter run down: a burst where it was
+## (view/raid_burst.gd, made at the first), drawn from commuter_lost for whatever craft, armed or not.
 extends Node3D
 
 ## A commuter run down, at (x, y) in the sims' frame (for the view's effects).
@@ -36,6 +39,9 @@ signal hit_taken(source: String)
 
 const Settings := preload("res://release/game_settings.gd")
 const Traffic := preload("res://view/network_traffic.gd")
+const Synth := preload("res://audio/course_audio.gd")
+const Burst := preload("res://view/raid_burst.gd")
+const ALARM_DB := -10.0                  # the alarm's level (unheard: 9 dB over the reward chimes' -19, 8 under the jolt's thump)
 const MODES := [["off", "Off"], ["on", "On"]]       # the menus' row: [id, name]
 const MPH := 2.236936
 const RAIDER_VISUAL := Traffic.DEMON     # the raiders' model (a demon's, until Codex's raider has its own slot)
@@ -57,6 +63,7 @@ const CONTACT_CRAFT := 14.0              # m from the pod or either engine's cen
 
 static var enabled := false      # raids
 static var pinned := false       # a test or a render chose it: the saved choice does not replace it
+static var _alarm_wav: AudioStreamWAV
 
 var traffic
 var view
@@ -70,6 +77,8 @@ var kills := 0                   # raiders shot
 var fled := 0                    # raiders gone without being shot
 var pack: Array = []             # this raid's raiders still in traffic
 var called_m := 0.0              # m to the city (a straight line to its centre) when the alarm went
+var alarm: AlarmPlayer = null    # the alarm's player (made at the first call; none in a flight without sound)
+var burst = null                 # the lost commuters' bursts (view/raid_burst.gd; made at the first)
 # tunables (tests shorten them)
 var first_after := 60.0          # s of waiting before a flight's first
 var lull := Vector2(60.0, 90.0)  # s of waiting after one, drawn between these
@@ -96,6 +105,15 @@ var _zones := {}                 # city -> {"road", "z": Vector2i(first, last sa
 var _rng := RandomNumberGenerator.new()
 
 
+## The alarm's player: it counts its plays.
+class AlarmPlayer extends AudioStreamPlayer:
+	var plays := 0
+
+	func sound() -> void:
+		plays += 1
+		play()
+
+
 static func ids(rows: Array) -> Array:
 	return rows.map(func(entry): return entry[0])
 
@@ -110,6 +128,8 @@ func build(v) -> void:           # (set `traffic` first: view.traffic_net)
 	sim = v.sim
 	name = "network_raids"
 	_rng.seed = 20261124
+	if not commuter_lost.is_connected(_burst_at):
+		commuter_lost.connect(_burst_at)      # (the flash for a commuter lost: the director's own, whatever the craft)
 
 
 ## Is the pilot where one can begin: on a public road, not in a shaft, at speed, with traffic's floor free?
@@ -131,6 +151,8 @@ func _due() -> float:
 func update(delta: float) -> void:
 	if traffic == null:
 		return
+	if burst != null:
+		burst.sync(delta)
 	# A crash (any of the sim's: smash, binder, wreck) sets crash_t, and the sim respawns the craft when it runs out
 	# (craft_sim.gd step): a raid then is set aside as a restart sets it aside.
 	if sim.crash_t > 0.0:
@@ -200,7 +222,46 @@ func _alarm() -> bool:
 	_grace = 0.0
 	_count += 1
 	print("RAID: alarm %s %d" % [sim.cities[k].name, roundi(called_m / 1000.0)])
+	_sound_alarm()
 	return true
+
+
+## The alarm, once at the call: its player made at the first (none in a flight without sound: --mute, a shot).
+func _sound_alarm() -> void:
+	if view == null or view.muted or String(view.shot_path) != "":
+		return
+	if alarm == null:
+		alarm = AlarmPlayer.new()
+		alarm.name = "RaidAlarm"
+		alarm.stream = alarm_tone()
+		alarm.volume_db = ALARM_DB
+		add_child(alarm)
+	alarm.sound()
+
+
+## The raid's alarm, made in code: three rising whoops, battle stations (each climbs from 380 to 1,150 Hz in 0.42 s,
+## fast and then slower, and cuts off; 0.12 s between), a bright tone (its second and third harmonics, and a little of
+## a square's edge). 1.62 s, once. Chase's siren wails up and down; this only climbs.
+static func alarm_tone(rate := 22050) -> AudioStreamWAV:
+	if _alarm_wav != null:
+		return _alarm_wav
+	var whoop := 0.42
+	var every := 0.54
+	var n := int(3.0 * every * rate)
+	var l := PackedFloat32Array()
+	l.resize(n)
+	var phase := 0.0
+	for i in n:
+		var k := fmod(float(i) / rate, every)
+		if k >= whoop:
+			continue         # (between whoops: silence)
+		var u := k / whoop
+		phase += TAU * lerpf(380.0, 1150.0, 1.0 - (1.0 - u) * (1.0 - u)) / rate
+		var s := sin(phase)
+		var edge := minf(k / 0.008, 1.0) * minf((whoop - k) / 0.03, 1.0)
+		l[i] = edge * (0.6 * s + 0.24 * sin(2.0 * phase) + 0.14 * sin(3.0 * phase) + 0.1 * clampf(4.0 * s, -1.0, 1.0))
+	_alarm_wav = Synth._wav(l, l.duplicate(), rate, 0.7)
+	return _alarm_wav
 
 
 ## The raid's city, of the ground cities (an orbit entry is never one) that are not the one the pilot is in
@@ -387,6 +448,38 @@ func _in_contact() -> bool:
 	return false
 
 
+## A commuter lost (commuter_lost): its burst where it was, standing on the deck there, for whatever craft.
+func _burst_at(x: float, y: float) -> void:
+	if burst == null:
+		burst = Burst.new()
+		add_child(burst)
+		burst.build(view)
+	burst.add(Vector3(x, y, _deck_at(x, y)))
+
+
+## The deck's height at (x, y), the sims' frame: on the raid city's road (where its commuters are run down), found from
+## its town zone's points and then along the road; with no city, the craft's own road.
+func _deck_at(x: float, y: float) -> float:
+	var road: int = sim.pod.path
+	var i: int = sim.pod.hint
+	if city >= 0:
+		var zone := _zone(city)
+		road = zone.road
+		var pts: PackedVector2Array = zone.pts
+		var near := INF
+		for k in pts.size():
+			var d := pts[k].distance_squared_to(Vector2(x, y))
+			if d < near:
+				near = d
+				i = mini(int(zone.z.x) + k * ZONE_STEP, int(zone.z.y))
+	var R = sim.roads[road]
+	var f := float(clampi(i, 0, R.N - 2))
+	for k in 3:      # (along the road from there: it bends)
+		var j := clampi(int(f), 0, R.N - 2)
+		f = clampf(float(j) + ((x - R.px[j]) * R.tx[j] + (y - R.py[j]) * R.ty[j]) / maxf(1.0, R.len[j]), 0.0, R.N - 1.001)
+	return sim.net_height(road, f)
+
+
 ## A commuter run down: out of traffic, lost, and commuter_lost for the flash.
 func _run_down(p) -> void:
 	traffic.knock_out(p)
@@ -448,5 +541,15 @@ func reset(why := "restart") -> void:
 		_lull_len = _rng.randf_range(lull.x, lull.y)
 
 
+## The dash's line (traffic's race_text() gives it while the raid holds the floor). Called: the city, how far (a
+## straight line to its centre, as the dash reads a distance) and the commuters lost so far. On: the raiders left and
+## the time left. Otherwise "".
 func text() -> String:
+	match state:
+		"called":
+			var c: Dictionary = sim.cities[city]
+			return "RAID  %s  %s  %d LOST" % [c.name, view._far(Vector2(float(c.cx) - sim.pod.x, float(c.cy) - sim.pod.y).length()), lost]
+		"on":
+			var left := int(maxf(time_limit - _t, 0.0))
+			return "RAID  %d RAIDERS  %d:%02d" % [pack.size(), left / 60, left % 60]
 	return ""

@@ -1362,10 +1362,12 @@ func _end_race(result: String) -> void:
 		racer.vdes = 2200.0 / MPH   # off the gas: it drops back and leaves
 
 
-## The dash's line while a racer is about ("" when none).
+## The dash's line while a racer is about, or a chase or a raid holds the floor ("" when none).
 func race_text() -> String:
 	if chase != null and chase.state == "on":
 		return chase.text()
+	if raids != null and race_state == "raid":      # (a raid called or on: its line, view/network_raids.gd)
+		return raids.text()
 	if racer == null or race_state == "" or race_state == "done":
 		return ""
 	if race_state == "tail":

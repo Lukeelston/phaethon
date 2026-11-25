@@ -18,6 +18,7 @@ const MapGlass := preload("res://view/minimap_glass.gd")
 const Interior := preload("res://vr/cockpit_interior.gd")
 const Finish := preload("res://view/craft_materials.gd")
 const Kit := preload("res://view/mesh_kit.gd")
+const Traffic := preload("res://view/network_traffic.gd")
 const POD := "res://art/cockpit/gauges_hd.glb"   # tools/art_gauges_hd.py: the MapPod mesh, in the screen's frame
 const W := 0.22
 const H := 0.22
@@ -109,6 +110,18 @@ var _named_until := 0        # ms: until then the readout names the scheme just 
 ## A scheme's colour: "star", "speed", "target", "craft", "frame", "glass" or "glow".
 func tone(key: String) -> Color:
 	return SCHEMES[scheme][key]
+
+
+## A vehicle's dot on the map, in scheme k: [half size (panel m), colour]. A raider (Raids: Traffic.HOSTILE_MARK) the
+## biggest, in the hostile red whatever the scheme; the racer (kind 4) a bigger one in the scheme's STARFIGHTER colour;
+## every other kind a small one in its craft colour.
+static func dot_style(kind: int, k := 0) -> Array:
+	var sc: Dictionary = SCHEMES[k]
+	if kind == Traffic.HOSTILE_MARK:
+		return [0.0068, Traffic.HOSTILE_COL]
+	if kind == 4:
+		return [0.006, sc.star]
+	return [0.0028, Color(sc.craft, 0.8)]
 
 
 ## Which of SCHEMES has this name, -1 none (the cockpit's saved choice).
@@ -437,11 +450,25 @@ func show_frame(f: Dictionary) -> void:
 		_seg(pq + Vector2(0, -0.009), pq + Vector2(0, 0.009), 0.0028, Color(1, 1, 1, 0.9))
 		_seg(pq + Vector2(-0.008, 0), pq + Vector2(0.008, 0), 0.0018, MiniMap.PAD_COL)
 		_seg(pq + Vector2(0, -0.008), pq + Vector2(0, 0.008), 0.0018, MiniMap.PAD_COL)
-	for d in l.get("dots", []):   # the Network's traffic: small dots; the racer, a bigger magenta one
-		var racer: bool = int(d[1]) == 4
-		var r2 := 0.006 if racer else 0.0028
+	var plain := dot_style(Traffic.CAR, scheme)     # (read once a frame, not a dot at a time)
+	var racer := dot_style(4, scheme)
+	var raiders := []             # (drawn last: over the traffic round them)
+	for d in l.get("dots", []):   # the Network's traffic: small dots; the racer, a bigger one in the towns' colour (dot_style)
+		var kind := int(d[1])
+		if kind == Traffic.HOSTILE_MARK:
+			raiders.append(d[0])
+			continue
+		var st: Array = racer if kind == 4 else plain
+		var r2: float = st[0]
 		var dq: Vector2 = d[0]
-		_tri(dq + Vector2(0, r2), dq + Vector2(-r2, -r2 * 0.7), dq + Vector2(r2, -r2 * 0.7), tone("star") if racer else Color(tone("craft"), 0.8))
+		_tri(dq + Vector2(0, r2), dq + Vector2(-r2, -r2 * 0.7), dq + Vector2(r2, -r2 * 0.7), st[1])
+	if not raiders.is_empty():    # a raider: bigger still, the hostile red on a dark edge (it reads on any scheme's roads)
+		var hs := dot_style(Traffic.HOSTILE_MARK, scheme)
+		var hr: float = hs[0]
+		var rim := hr * 1.4
+		for hq: Vector2 in raiders:
+			_tri(hq + Vector2(0, rim), hq + Vector2(-rim, -rim * 0.7), hq + Vector2(rim, -rim * 0.7), Color(0.0, 0.0, 0.0, 0.8))
+			_tri(hq + Vector2(0, hr), hq + Vector2(-hr, -hr * 0.7), hq + Vector2(hr, -hr * 0.7), hs[1])
 	if l.get("target") != null:   # the Network's target city: a diamond on the map, smaller on its rim toward it
 		var tq: Vector2 = l.target[0]
 		var r := 0.011 if l.target[1] else 0.008

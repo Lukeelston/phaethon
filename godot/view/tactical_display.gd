@@ -22,7 +22,9 @@
 ##   the vehicles     a line of light standing on each vehicle he is closing on and would reach within eight
 ##                    seconds, 1.6 degrees tall: over a crest, over the traffic in front of it. Those in his way
 ##                    (his lane and the next) are coloured by the seconds left, cyan, amber, red (they ask him to
-##                    act now); the rest are short and cyan, and go when the road is busy.
+##                    act now); the rest are short and cyan, and go when the road is busy. A raider (Raids: a hostile
+##                    car) has one wherever it is in the rails' reach, gaining on it or not, full height, in the
+##                    hostile red whatever its seconds, and is never the one left out.
 ##   the exits        over an exit's lane, a row of upright chevrons pointing the way the lane leaves, a wave of
 ##                    light running along them into the ramp, and a gate standing across the lane at its mouth,
 ##                    the row's end. Begun seven seconds before the mouth (never less than 8 km, where the lane's
@@ -1022,7 +1024,8 @@ func worst_load(speed: float, seconds: float) -> float:
 ## The vehicles that could matter, of `cars` (NetworkTraffic.cars): on the road ahead of her (or on a road
 ## running along it at its own level, close by), closing, and reached within LOOK_T at the speed she is
 ## closing now. [{car, along (m ahead by the road), left (m left of her), seconds, way (in her way)}].
-## Not a vehicle she is not gaining on, one going across her road, or one on a road over or under it.
+## Not a vehicle she is not gaining on, one going across her road, or one on a road over or under it. A raider (Raids:
+## hostile) is, wherever it is in reach, gaining on it or not ({..., hostile: true}; seconds INF if she is not).
 func pick(cars: Array, speed: float) -> Array:
 	var out: Array = []
 	_pick_into(out, cars, 0, cars.size(), speed)
@@ -1075,7 +1078,13 @@ func _pick_into(out: Array, cars: Array, first: int, last: int, speed: float) ->
 			along = st_s[j] - pod_s + ex * st_tx[j] + ey * st_ty[j]
 			its *= c.v
 		var closing := speed - its
-		if along <= CAR_NEAR.x or along > reach or closing <= 1.0:
+		if along <= CAR_NEAR.x or along > reach:
+			continue
+		if c.hostile:      # a raider: in reach, it is shown, near or far, gaining on it or not
+			out.append({"car": c, "along": along, "left": left - pod_left, "seconds": along / closing if closing > 1.0 else INF,
+				"way": absf(left - pod_left) <= CORRIDOR, "hostile": true})
+			continue
+		if closing <= 1.0:
 			continue
 		var seconds := along / closing
 		if seconds > LOOK_T:
@@ -1110,10 +1119,14 @@ func _lines_frame(dt: float, speed: float, shown: bool, strength: float) -> void
 			thinned = false
 		for old: Mark in marks.values():
 			old.to = 0.0
-		for pass_way in [true, false]:      # those in her way first: they are never the ones left out
+		# raiders first (Raids: never the ones left out, nor thinned), then those in her way (nor they), then the rest
+		var raiding: bool = traffic.raids != null      # (raids off: the two passes as they were)
+		for rank in range(0 if raiding else 1, 3):
 			for f in found:
-				if bool(f.way) != pass_way:
+				var hostile: bool = raiding and bool(f.get("hostile", false))
+				if (0 if hostile else (1 if bool(f.way) else 2)) != rank:
 					continue
+				var pass_way := rank < 2
 				var id: int = f.car.id
 				var mark: Mark = marks.get(id)
 				if mark != null:
@@ -1126,7 +1139,7 @@ func _lines_frame(dt: float, speed: float, shown: bool, strength: float) -> void
 				if mark != null:
 					mark.seconds = f.seconds
 					mark.way = pass_way
-					mark.tint = soon_tint(mark.seconds) if pass_way else CALM
+					mark.tint = Traffic.HOSTILE_COL if hostile else (soon_tint(mark.seconds) if pass_way else CALM)
 	var mm := lines.multimesh
 	var k := 0
 	var ease := dt / LINE_FADE

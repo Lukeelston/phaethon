@@ -944,8 +944,15 @@ func _raid_result() -> void:
 			_flash("RAID LOST  (%d)" % times)
 
 
+## The maps' target (view/minimap.gd, which both maps draw from): the raid's city while one is called or on, the dash's
+## own target otherwise. Every frame, after the director's.
+func _raid_target() -> void:
+	if minimap and raids:
+		minimap.target = raids.city if raids.state == "called" or raids.state == "on" else net_target
+
+
 ## The dash on the Network: the target city and how far (straight line), where you left and your
-## clock since; a racer's line while one's about.
+## clock since; a racer's line while one's about (a chase's or a raid's while it holds the floor).
 func _net_text() -> String:
 	if sim.time < flash_until:
 		return flash_msg
@@ -2004,6 +2011,7 @@ func _sync_world() -> void:
 			raids.update(get_process_delta_time())
 			_raid_sync()
 			_raid_result()
+			_raid_target()
 		_patrol_lights()
 		if minimap:
 			minimap.marks = traffic_net.marks(sim.pod.x, sim.pod.y, 40000.0)

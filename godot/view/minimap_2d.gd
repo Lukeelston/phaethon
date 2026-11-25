@@ -6,6 +6,7 @@
 extends Control
 
 const MiniMap := preload("res://view/minimap.gd")
+const Traffic := preload("res://view/network_traffic.gd")
 const SIDE := 240.0
 const MARGIN := 10.0
 const TOP := 26.0
@@ -107,6 +108,16 @@ func _draw_whole() -> void:
 		draw_string(ThemeDB.fallback_font, Vector2(0, MARGIN + 14.0), "%s  %.0f mi" % [_f.target.name, float(_f.target.dist) / 1609.344], HORIZONTAL_ALIGNMENT_CENTER, SIDE, 15, MiniMap.TARGET_COL)
 
 
+## A vehicle's dot on the Network's map: [radius px, colour]. A raider (Raids: Traffic.HOSTILE_MARK) the biggest, in the
+## hostile red; the racer (kind 4) a bigger magenta one; every other kind a small grey one.
+static func dot_style(kind: int) -> Array:
+	if kind == Traffic.HOSTILE_MARK:
+		return [5.5, Traffic.HOSTILE_COL]
+	if kind == 4:
+		return [4.5, Color(1.0, 0.3, 0.9)]
+	return [2.0, Color(0.9, 0.9, 0.95, 0.75)]
+
+
 ## Panel space (origin at the centre, y up) to the control's pixels.
 func _px(p: Vector2) -> Vector2:
 	return Vector2(SIDE / 2.0 + p.x, SIDE / 2.0 - p.y)
@@ -140,9 +151,21 @@ func _draw() -> void:
 		for ax in [Vector2(1, 0), Vector2(0, 1)]:
 			draw_line(_px(pq - ax * 9.0), _px(pq + ax * 9.0), Color(1, 1, 1, 0.9), 6.0, true)
 			draw_line(_px(pq - ax * 8.0), _px(pq + ax * 8.0), MiniMap.PAD_COL, 3.5, true)
-	for d in l.get("dots", []):   # the Network's traffic: small dots; the racer, a bigger magenta one
-		var racer: bool = int(d[1]) == 4
-		draw_circle(_px(d[0]), 4.5 if racer else 2.0, Color(1.0, 0.3, 0.9) if racer else Color(0.9, 0.9, 0.95, 0.75))
+	var plain := dot_style(Traffic.CAR)     # (read once a frame, not a dot at a time)
+	var racer := dot_style(4)
+	var raiders := []             # (drawn last: over the traffic round them)
+	for d in l.get("dots", []):   # the Network's traffic: small dots; the racer, a bigger magenta one (dot_style)
+		var kind := int(d[1])
+		if kind == Traffic.HOSTILE_MARK:
+			raiders.append(d[0])
+			continue
+		var st: Array = racer if kind == 4 else plain
+		draw_circle(_px(d[0]), st[0], st[1])
+	if not raiders.is_empty():    # a raider: bigger still, the hostile red on a dark rim (it reads on the roads' magenta and blue alike)
+		var hs := dot_style(Traffic.HOSTILE_MARK)
+		for q: Vector2 in raiders:
+			draw_circle(_px(q), float(hs[0]) + 1.5, Color(0.0, 0.0, 0.0, 0.8))
+			draw_circle(_px(q), hs[0], hs[1])
 	if l.get("target") != null:   # the Network's target city: a diamond on the map, an arrowhead on its rim
 		var tq: Vector2 = l.target[0]
 		var r := 9.0 if l.target[1] else 7.0
