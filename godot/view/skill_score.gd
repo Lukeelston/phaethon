@@ -109,15 +109,20 @@ func _award(kind: String, label: String, points: int, skill := true) -> void:
 	if feedback.size() > 8:
 		feedback.pop_front()
 
-## Points taken away (Raids: a commuter lost, a hit taken, a commuter struck by your fire): the total never goes
-## below 0, the chain and its multiplier are lost, and the best is never lowered.
-func deduct(kind: String, label: String, points: int) -> void:
+## Points taken away (Raids: commuters lost, a hit taken, a commuter struck by your fire): the total never goes below
+## 0 and the best is never lowered. Only one that breaks_chain (a hit taken, the spec: "a hit taken costs points and
+## breaks the chain") loses the chain and its multiplier, and holds the next skill off as an impact does
+## (_bad_until); the rest leave the chain be. `kind` is what it was for ("lost", "hit", "struck"), told in the
+## feedback as its `for`.
+func deduct(kind: String, label: String, points: int, breaks_chain := false) -> void:
 	total = maxi(0, total - points)
-	chain = 0
-	multiplier = 1.0
+	if breaks_chain:
+		chain = 0
+		multiplier = 1.0
+		_bad_until = time + 2.0
 	award_text = "%s  -%d" % [label, points]
 	_notice_until = time + 2.4
-	feedback.append({"kind": "penalty", "points": -points, "multiplier": 1.0})
+	feedback.append({"kind": "penalty", "for": kind, "points": -points, "multiplier": 1.0})
 	if feedback.size() > 8:
 		feedback.pop_front()
 

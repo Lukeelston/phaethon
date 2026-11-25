@@ -3,9 +3,11 @@
 ##   kill       each raider shot: RAIDER DOWN +250 (x the chain's multiplier), the chain grows
 ##   cleared    RAID CLEARED +2000 and +20 for each of the 60 commuters not lost (x the multiplier)
 ##   lost       "RAID LOST" flashed, no award
-##   deduct     a commuter lost -40 (off-screen ticks and run down alike, each exactly once), a hit taken -100, a
-##              commuter struck by your fire during a raid -150 (once for each car); each resets the chain; the total
-##              never goes below 0; the best is untouched
+##   deduct     a commuter run down -40, a hit taken -100, a commuter struck by your fire during a raid -150 (once
+##              for each car); only the hit breaks the chain (and holds the next skill off, as an impact does); each
+##              says what it was for; the total never goes below 0; the best is untouched
+##   off-screen the commuters lost off-screen (the director's lost_off) are charged once, all together ("COMMUTERS
+##              LOST x3", -120), at the arrival or at the raid's end, never while it is called
 ##   free       a commuter struck with no raid on costs nothing
 ##   tone       skill_audio plays its own low tone for a penalty, not the "near" one
 ## Prints RAID SCORE PASS.
@@ -110,34 +112,55 @@ func _run() -> void:
 	R.lost = 1
 	v._raid_sync()
 	var a: int = S.total
-	var reset_chain: bool = S.chain == 0 and S.multiplier == 1.0
+	var kept_by_lost: bool = S.chain == 4 and S.multiplier == 2.0
 	R.hit_taken.emit("raider")
 	var b: int = S.total
+	var broken_by_hit: bool = S.chain == 0 and S.multiplier == 1.0 and S._bad_until > S.time
+	S.chain = 4
+	S.multiplier = 2.0
 	var car := RefCounted.new()
 	v._raid_struck(car)
 	var c: int = S.total
+	var kept_by_struck: bool = S.chain == 4 and S.multiplier == 2.0
 	v._raid_struck(car)      # (the same car again: once)
 	var again: int = S.total
 	v._raid_struck(RefCounted.new())
 	var pen: Array = S.feedback.filter(func(f): return f.kind == "penalty")
-	_check("a commuter lost -40 (%d), a hit -100 (%d), a commuter struck -150 (%d), the same one again nothing (%d), another -150 (%d); chain reset %s; feedback %s; \"%s\"" % [a, b, c, again, S.total, reset_chain, pen, S.award_text],
-		a == 960 and b == 860 and c == 710 and again == 710 and S.total == 560 and reset_chain and pen.size() == 4 and pen[0].points == -40 and pen[1].points == -100 and S.award_text.begins_with("COMMUTER STRUCK"))
+	var fors: Array = pen.map(func(f): return f.get("for", ""))
+	_check("a commuter lost -40 (%d), a hit -100 (%d), a commuter struck -150 (%d), the same one again nothing (%d), another -150 (%d); the chain kept by the loss (%s) and by a strike (%s), broken by the hit (%s); feedback %s; \"%s\"" % [a, b, c, again, S.total, kept_by_lost, kept_by_struck, broken_by_hit, pen, S.award_text],
+		a == 960 and b == 860 and c == 710 and again == 710 and S.total == 560 and kept_by_lost and kept_by_struck and broken_by_hit and pen.size() == 4 and pen[0].points == -40 and pen[1].points == -100
+			and fors == ["lost", "hit", "struck", "struck"] and S.award_text.begins_with("COMMUTER STRUCK"))
 
-	# off-screen losses: counted by R.lost with no signal, each exactly once; a new raid starts the count again
+	# off-screen losses: counted by the director with no signal (lost, and lost_off of them), charged once and all
+	# together at the arrival or the end, not while it is called; a new raid starts the count again
 	_fresh(v)
 	R.state = "called"
 	S.total = 500
 	R.lost = 2
+	R.set("lost_off", 2)
 	v._raid_sync()
 	R.lost = 3
+	R.set("lost_off", 3)
+	v._raid_sync()
+	var while_called: int = S.total
+	var notes_called: int = S.feedback.size()
+	R.state = "on"      # (arrived)
 	v._raid_sync()
 	v._raid_sync()
 	var off: int = S.total
+	var notes_on: int = S.feedback.size()
+	var said: String = S.award_text
 	R.reset()
 	R.state = "called"
 	R.lost = 1
+	R.set("lost_off", 1)
 	v._raid_sync()
-	_check("3 commuters lost off-screen: 500 - 120 = 380 (%d); after a new raid, 1 more: 340 (%d)" % [off, S.total], off == 380 and S.total == 340)
+	var second_called: int = S.total
+	R.state = "over"    # (not reached: its end)
+	v._raid_sync()
+	_check("3 commuters lost off-screen: nothing while called (%d, %d notes), one charge at the arrival: 500 - 120 = 380 (%d, %d note, \"%s\"); after a new raid, 1 more off-screen: nothing while called (%d), 340 at its end (%d)" % [
+			while_called, notes_called, off, notes_on, said, second_called, S.total],
+		while_called == 500 and notes_called == 0 and off == 380 and notes_on == 1 and said == "COMMUTERS LOST x3  -120" and second_called == 380 and S.total == 340)
 
 	# never below 0; the best untouched
 	_fresh(v)
@@ -210,10 +233,12 @@ func _run() -> void:
 	var reset_by_crash: bool = R.state == "" and R.kills == 0 and R.lost == 0
 	v._raid_sync()
 	var after_crash: int = S.total
+	# (the losses no longer break the chain: the kill is paid at the chain's multiplier, the three kills' chain and one more)
+	var pays := roundi(250.0 * minf(5.0, 1.0 + floorf((S.chain + 1) / 3.0) * 0.5))
 	R.kills = 1
 	v._raid_sync()
-	_check("a crash mid-raid: the director sets it aside (%s), the sync pays and charges nothing more (%d, was %d), and the next raid's kill pays 250 (%d)" % [reset_by_crash, after_crash, before_crash, S.total],
-		reset_by_crash and after_crash == before_crash and S.total == before_crash + 250)
+	_check("a crash mid-raid: the director sets it aside (%s), the sync pays and charges nothing more (%d, was %d), and the next raid's kill pays 250 at the chain's multiplier, %d (%d)" % [reset_by_crash, after_crash, before_crash, pays, S.total],
+		reset_by_crash and after_crash == before_crash and S.total == before_crash + pays)
 
 	# the display: a deduction reads "-40", never "+-40", on the desktop HUD's label and in the display's own text
 	_fresh(v)

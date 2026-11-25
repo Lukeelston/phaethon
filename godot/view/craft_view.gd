@@ -182,7 +182,8 @@ var partner_on := false      # common release preference, overridden by launch f
 var race: Node3D             # Eridanus: the racing pilots (view/race_pilots.gd), null when there are none
 var raids: Node3D            # raids on the Network (view/network_raids.gd), null when they are off
 var _raid_kills_paid := 0    # of raids.kills, the raiders the score has paid for
-var _raid_lost_paid := 0     # of raids.lost, the commuters the score has charged for (off-screen and run down alike)
+var _raid_lost_paid := 0     # of the commuters the raiders ran down (raids.lost less raids.lost_off), those the score has charged for
+var _raid_off_paid := 0      # of raids.lost_off (lost off-screen), those it has charged for (together, at the arrival or the end)
 var _raid_results_taken := 0 # of the director's results (its tally's cleared + lost), the ones the score has taken
 var _raid_struck_ids := {}   # commuters the pilot's fire struck this raid (instance id -> true): charged once each
 var thump: AudioStreamPlayer # the jolt's thump (made at load with raids on, _jolt_prepare; none while muted or raids are off)
@@ -914,23 +915,33 @@ func _chase_result() -> void:
 				skill_score._award("chase", "PATROL ESCAPED", 2000)
 
 
-## The raid's score, after the director's frame: each raider shot since the last frame pays RAIDER DOWN, and each
-## commuter lost costs COMMUTER LOST (off-screen ticks have no signal, so the count is read: one charge for each one lost,
-## whichever way it was). A new raid (the director's counts back at 0) starts the count again.
+## The raid's score, after the director's frame: each raider shot since the last frame pays RAIDER DOWN; each commuter
+## the raiders run down costs COMMUTER LOST; the commuters lost off-screen (ticks with no signal: the director's
+## lost_off is read) cost one charge for them all, COMMUTERS LOST xN, once the raid is no longer called (at the arrival
+## or at its end: the dash shows the count meanwhile), not one chime and flash each. None of these breaks the chain
+## (a hit taken does). A new raid (the director's counts back at 0) starts the counts again.
 func _raid_sync() -> void:
 	if raids == null or skill_score == null:
 		return
 	var P: Dictionary = RaidsScript.RAID_POINTS
+	var off: int = raids.lost_off
+	var run_down: int = raids.lost - off
 	if raids.kills < _raid_kills_paid:
 		_raid_kills_paid = 0
-	if raids.lost < _raid_lost_paid:
+	if off < _raid_off_paid:
+		_raid_off_paid = 0
+	if run_down < _raid_lost_paid:
 		_raid_lost_paid = 0
 	while _raid_kills_paid < raids.kills:
 		_raid_kills_paid += 1
 		skill_score._award("raid", "RAIDER DOWN", int(P.raider))
-	while _raid_lost_paid < raids.lost:
+	if raids.state != "called" and off > _raid_off_paid:
+		var n := off - _raid_off_paid
+		_raid_off_paid = off
+		skill_score.deduct("lost", "COMMUTER LOST" if n == 1 else "COMMUTERS LOST x%d" % n, n * int(P.commuter_lost))
+	while _raid_lost_paid < run_down:
 		_raid_lost_paid += 1
-		skill_score.deduct("raid", "COMMUTER LOST", int(P.commuter_lost))
+		skill_score.deduct("lost", "COMMUTER LOST", int(P.commuter_lost))
 	if raids.state != "on":
 		_raid_struck_ids.clear()
 
@@ -941,14 +952,16 @@ func _raid_sync() -> void:
 ## has already settled, whether or not the director's counts were zeroed.
 func _raid_reset_score() -> void:
 	_raid_kills_paid = raids.kills if raids else 0
-	_raid_lost_paid = raids.lost if raids else 0
+	_raid_off_paid = raids.lost_off if raids else 0
+	_raid_lost_paid = (raids.lost - raids.lost_off) if raids else 0
 	_raid_struck_ids.clear()
 
 
-## A raider rammed the craft: a hit taken costs points (the jolt is the view's; it never costs health).
+## A raider rammed the craft: a hit taken costs points and breaks the chain, as an impact does (the jolt is the view's;
+## it never costs health).
 func _raid_hit(_source: String) -> void:
 	if skill_score:
-		skill_score.deduct("raid", "HIT TAKEN", int(RaidsScript.RAID_POINTS.hit))
+		skill_score.deduct("hit", "HIT TAKEN", int(RaidsScript.RAID_POINTS.hit), true)
 
 
 ## The pilot's fire struck a commuter: during a raid, 150 points the first time for each one (a stream of bolts is
@@ -960,7 +973,7 @@ func _raid_struck(car) -> void:
 	if _raid_struck_ids.has(id):
 		return
 	_raid_struck_ids[id] = true
-	skill_score.deduct("raid", "COMMUTER STRUCK", int(RaidsScript.RAID_POINTS.struck))
+	skill_score.deduct("struck", "COMMUTER STRUCK", int(RaidsScript.RAID_POINTS.struck))
 
 
 ## A raid ended (the director's result stays as it left it, so a result is taken when its tally has grown): cleared pays 2000 and 20 for each commuter not lost; lost only says so.

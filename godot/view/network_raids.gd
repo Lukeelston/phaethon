@@ -85,6 +85,7 @@ var tally := {"cleared": 0, "lost": 0}
 var state := ""                  # "" waiting | "called" | "on" | "over" (the lull after one)
 var city := -1                   # the raid's city: an index into sim.cities
 var lost := 0                    # commuters lost: off-screen ticks, and the commuters the raiders ran down
+var lost_off := 0                # ... of them, the off-screen ticks (the score charges them together)
 var kills := 0                   # raiders shot
 var fled := 0                    # raiders gone without being shot
 var pack: Array = []             # this raid's raiders still in traffic
@@ -189,9 +190,10 @@ func update(delta: float) -> void:
 				_clock *= 0.5
 		"called":
 			_tick_t += delta
-			while _tick_t >= tick_every and lost < tick_cap:
+			while _tick_t >= tick_every and lost_off < tick_cap:
 				_tick_t -= tick_every
 				lost += 1
+				lost_off += 1
 			if _gap(city) <= arrive_r:
 				_arrive()
 			elif lost >= tick_cap:      # it is over before the pilot got there
@@ -235,6 +237,7 @@ func _alarm() -> bool:
 	traffic.race_state = "raid"     # (not one of the racer's own states: its machine stands by while this runs)
 	traffic.race_t = 0.0
 	lost = 0
+	lost_off = 0
 	kills = 0
 	fled = 0
 	pack.clear()
@@ -655,6 +658,7 @@ func reset(why := "restart") -> void:
 	state = ""
 	city = -1
 	lost = 0
+	lost_off = 0
 	kills = 0
 	fled = 0
 	_clock = 0.0
