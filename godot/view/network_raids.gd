@@ -5,7 +5,10 @@
 ##   called    an alarm: of the ground cities that are neither the one the pilot is in (net.from, while within
 ##             arrive_r of its town) nor the last raid's, the nearest ahead in a straight line (within 90 degrees of the
 ##             way the craft goes; none ahead, the nearest); traffic's floor held ("raid"), so no racer or chase begins. Until the pilot is within arrive_r of its town zone it is not simulated: a commuter is
-##             lost every tick_every s; at tick_cap, not reached, it is lost
+##             lost every tick_every s, up to tick_cap (lost_off counts them). Not reached, it is lost ("not reached")
+##             only when the pilot has not closed on the city (its centre, in a straight line) for expire_away s on
+##             end, or when its hard cap has passed: max(expire_min, 1.5 x the distance at the alarm / expire_speed),
+##             200 s to 326 s for a centre-to-corner run
 ##   on        arrived: the pack is placed in the town zone (R.mode == 0) on the city's road, over its lanes, as
 ##             traffic's own cars (hostile: kept wherever they are; traffic never turns one round). They keep to the
 ##             zone: TURN_SHORT m short of either end a raider turns round (_keep_in_zone), or on a one-way road (the
@@ -86,6 +89,7 @@ var state := ""                  # "" waiting | "called" | "on" | "over" (the lu
 var city := -1                   # the raid's city: an index into sim.cities
 var lost := 0                    # commuters lost: off-screen ticks, and the commuters the raiders ran down
 var lost_off := 0                # ... of them, the off-screen ticks (the score charges them together)
+var expire_after := 0.0          # s from the alarm: this call's hard cap (expiry)
 var kills := 0                   # raiders shot
 var fled := 0                    # raiders gone without being shot
 var pack: Array = []             # this raid's raiders still in traffic
@@ -99,7 +103,10 @@ var arrive_r := 15000.0          # m from the town zone: in range, and the pack 
 var time_limit := 120.0          # s from arriving
 var away_t := 20.0               # s beyond R_KEEP of the town zone, and of every raider, after arriving
 var tick_every := 5.0            # s between commuters lost while it is off-screen
-var tick_cap := 40               # ... and the most lost that way
+var tick_cap := 40               # ... and the most lost that way (they stop there; the raid stands)
+var expire_away := 30.0          # s on end of the pilot not closing on the called city: not reached
+var expire_min := 200.0          # s: the hard cap's least, ...
+var expire_speed := 1500.0       # ... and the speed (m/s) its 1.5 x the distance at the alarm is reckoned at
 var pack_size := Vector2i(4, 6)  # the first raid brings x, each later one 1 more, up to y
 
 var _grace := 0.0                # s before another hit may be taken
@@ -108,6 +115,9 @@ var _lull_len := -1.0            # s of this lull (-1: none drawn yet)
 var _count := 0                  # raids called this flight
 var _made := 0                   # raiders made this flight (their ids)
 var _tick_t := 0.0               # s toward the next commuter lost off-screen
+var _called_t := 0.0             # s since the alarm
+var _closest := INF              # m: the nearest the pilot has been to the called city's centre since the alarm
+var _not_closing := 0.0          # s since the pilot last came nearer it
 var _t := 0.0                    # s since arriving
 var _away := 0.0                 # s beyond R_KEEP of the town zone and of every raider
 var _why := ""                   # why the last was lost: "away" | "time" | "fled" | "not reached"
@@ -189,14 +199,22 @@ func update(delta: float) -> void:
 			if _clock >= _due() and not _alarm():
 				_clock *= 0.5
 		"called":
+			_called_t += delta
 			_tick_t += delta
 			while _tick_t >= tick_every and lost_off < tick_cap:
 				_tick_t -= tick_every
 				lost += 1
 				lost_off += 1
+			var c: Dictionary = sim.cities[city]
+			var d := Vector2(float(c.cx) - sim.pod.x, float(c.cy) - sim.pod.y).length()
+			if d < _closest:
+				_closest = d
+				_not_closing = 0.0
+			else:
+				_not_closing += delta
 			if _gap(city) <= arrive_r:
 				_arrive()
-			elif lost >= tick_cap:      # it is over before the pilot got there
+			elif _not_closing >= expire_away or _called_t >= expire_after:      # (not coming, or not come in time)
 				_end("lost", "not reached")
 		"on":
 			_t += delta
@@ -244,6 +262,10 @@ func _alarm() -> bool:
 	_killed.clear()
 	_prey.clear()
 	_tick_t = 0.0
+	_called_t = 0.0
+	_closest = called_m
+	_not_closing = 0.0
+	expire_after = expiry(called_m)
 	_t = 0.0
 	_away = 0.0
 	_grace = 0.0
@@ -251,6 +273,12 @@ func _alarm() -> bool:
 	print("RAID: alarm %s %d" % [sim.cities[k].name, roundi(called_m / 1000.0)])
 	_sound_alarm()
 	return true
+
+
+## A call's hard cap, s from the alarm, for a city `m` m off in a straight line then: max(expire_min, 1.5 x m /
+## expire_speed) (Ruling 6, revised: off-screen losses stop at tick_cap; the cap is the raid's, not the losses').
+func expiry(m: float) -> float:
+	return maxf(expire_min, 1.5 * m / expire_speed)
 
 
 ## The alarm, once at the call (none in a flight without sound: --mute, a shot).

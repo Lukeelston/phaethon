@@ -8,7 +8,10 @@
 ##              pilot is in; turned away from the nearest, one ahead is picked; with none ahead, the nearest; slow, the
 ##              way it points decides
 ##   ticks      called and out of range, a commuter is lost every tick_every s; the floor still held
-##   not reached  ... and at tick_cap, with the pilot not there, it is lost ("not reached"), the floor free; no more lost
+##   not reached  ... and at tick_cap the losses stop, the raid still called while the pilot closes on its city; turned
+##              away from it for expire_away s, it is lost ("not reached"), the floor free; no more lost
+##   expiry     the hard cap: max(expire_min 200 s, 1.5 x the distance at the alarm / 1,500 m/s) (326 s for 326 km,
+##              200 for 100 km); with it shortened, a call the pilot is closing on is lost at it ("not reached")
 ##   arrive     an alarm with the pilot already in range: on the next frame, none lost, the pack (4, then one
 ##              more a raid, up to 6) hostile on the city's road in its town zone, spread over its lanes
 ##   cleared    every raider killed: cleared, tallied, the floor released; then the lull
@@ -143,6 +146,14 @@ func _way(v) -> Vector2:
 	return w if w.length() >= v.raids.HEADING_BELOW else Vector2(cos(P.th), sin(P.th))
 
 
+## +1 if the craft goes up its road's samples, -1 down them.
+func _way_sign(v) -> int:
+	var sim = v.sim
+	var R = sim.roads[sim.pod.path]
+	var i := clampi(int(sim.pod.hint), 0, R.N - 1)
+	return 1 if sim.pod.vx * R.tx[i] + sim.pod.vy * R.ty[i] >= 0.0 else -1
+
+
 ## Is city k ahead: its centre within 90 degrees of the way the craft goes?
 func _ahead(v, k: int) -> bool:
 	var c: Dictionary = v.sim.cities[k]
@@ -264,6 +275,7 @@ func _run() -> void:
 	R.away_t = 3.0
 	R.tick_every = 1.0
 	R.tick_cap = 3
+	R.set("expire_away", 1.0)
 	var e3 := [int(sim.pod.path), int(sim.pod.hint), 1]
 	_put_pilot(v, e3[0], e3[1], e3[2])
 
@@ -380,14 +392,25 @@ func _run() -> void:
 			R._gap(R.city) / 1000.0, lost0, l1, l2, R.state, T.race_state],
 		R._gap(R.city) > R.arrive_r and lost0 == 0 and l1 == 1 and l2 == 2 and R.state == "called" and T.race_state == "raid")
 
-	# not reached: at the cap, with the pilot nowhere near, it is lost
+	# the cap: the losses stop at tick_cap, and the raid stands while the pilot closes on its city
 	await _fly(v, 1.0)
 	var l3: int = R.lost
+	await _fly(v, 1.0)
+	var stands: bool = R.state == "called" and R.result == "" and T.race_state == "raid"
+	var closing: float = float(R.get("_not_closing")) if R.get("_not_closing") != null else -1.0
+	_check("at 3.5 s, %d lost (the cap %d), and at 4.5 s still %d: the raid stands (\"%s\", the floor \"%s\"), the pilot closing on %s (%.2f s since it came nearer)" % [
+			l3, R.tick_cap, R.lost, R.state, T.race_state, sim.cities[R.city].name, closing],
+		l3 == R.tick_cap and R.lost == R.tick_cap and stands and closing >= 0.0 and closing < 0.1)
+	# not reached: the pilot turned away from it for expire_away s
+	var turn_at := [int(sim.pod.path), int(sim.pod.hint), -_way_sign(v)]
+	_put_pilot(v, turn_at[0], turn_at[1], turn_at[2])
+	var away_s: float = await _fly_until(v, "over", float(R.get("expire_away")) + 1.0)
 	var expired: bool = R.result == "lost" and R._why == "not reached" and int(R.tally.lost) == 1 and T.race_state == "" and R.state == "over"
 	await _fly(v, 1.0)
-	_check("at 3.5 s, %d lost (the cap %d) and not reached: \"%s\" (%s; tally %s), the floor free (\"%s\"), the lull (\"%s\"); a second on, still %d lost" % [
-			l3, R.tick_cap, R.result, R._why, R.tally, T.race_state, R.state, R.lost],
-		expired and l3 == R.tick_cap and R.lost == R.tick_cap and R.state == "over" and T.hostiles().is_empty())
+	_check("turned away: %.2f s later (expire_away %.1f) not reached: \"%s\" (%s; tally %s), the floor free (\"%s\"), the lull (\"%s\"); a second on, still %d lost" % [
+			away_s, float(R.get("expire_away")), R.result, R._why, R.tally, T.race_state, R.state, R.lost],
+		expired and absf(away_s - float(R.get("expire_away"))) < 0.1 and R.lost == R.tick_cap and R.state == "over" and T.hostiles().is_empty())
+	_put_pilot(v, e3[0], e3[1], e3[2])
 
 	# arrive at once: the next is called with the pilot already near its city
 	R.lull = Vector2(0.5, 0.5)
@@ -629,6 +652,24 @@ func _run() -> void:
 	_check("wrecked with the clock 0.05 s short of first_after: the craft down (%s), no alarm from it or before its respawn after %.2f s (state \"%s\", health %.0f)" % [
 			w_down, w_t, R.state, sim.pod.health],
 		w_down and not alarmed and R.state == "" and sim.pod.health > 0.0)
+	R.reset()
+	T.cars.clear()
+
+	# the hard cap: the defaults' sums, then a short one ending a call the pilot is closing on
+	var fresh = Raids.new()
+	var cap_far: float = fresh.expiry(326000.0) if fresh.has_method("expiry") else -1.0
+	var cap_near: float = fresh.expiry(100000.0) if fresh.has_method("expiry") else -1.0
+	fresh.free()
+	R.set("expire_min", 2.0)
+	R.set("expire_speed", 1.0e12)
+	R.tick_cap = 1000
+	_put_pilot(v, e3[0], e3[1], e3[2])
+	R._clock = R._due()
+	await _fly_until(v, "called", 1.0)
+	var cap_s: float = await _fly_until(v, "over", 4.0)
+	_check("the hard cap: 326 s for a city 326 km off (%.1f), 200 s for 100 km (%.1f); shortened to 2 s, a call closed on all the while (%.2f s since it came nearer) is lost at it after %.2f s: \"%s\" (%s)" % [
+			cap_far, cap_near, float(R.get("_not_closing")) if R.get("_not_closing") != null else -1.0, cap_s, R.result, R._why],
+		absf(cap_far - 326.0) < 0.01 and absf(cap_near - 200.0) < 0.01 and absf(cap_s - 2.0) < 0.1 and R.result == "lost" and R._why == "not reached")
 	R.reset()
 	T.cars.clear()
 
