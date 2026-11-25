@@ -6,6 +6,7 @@ signal interact_requested
 signal launch_requested
 signal back_requested
 signal cockpit_control_requested(control: String)
+signal boot_planted(side: int, at: Vector3, speed: float)
 
 const Pilot := preload("res://garage/pilot_model.gd")
 const Levers := preload("res://input/lever_input.gd")
@@ -27,6 +28,7 @@ var hands := {}
 var _shape: CollisionShape3D
 var _avatar: Pilot
 var _distance := 0.0
+var _head_sway := Vector3.ZERO
 var _origin: Node3D
 var _eye: Camera3D
 var _boom: SpringArm3D
@@ -148,6 +150,7 @@ func set_pilot(pilot: Pilot) -> void:
 
 func set_seated(value: bool, pose: Transform3D) -> void:
 	seated = value
+	_head_sway = Vector3.ZERO
 	_controls.reset()
 	_pad_axes = false
 	if not seated:
@@ -190,8 +193,12 @@ func set_cockpit_grips(handles: Array[Node3D]) -> void:
 
 
 func cockpit_hands() -> Array[XRController3D]:
+	return tracked_hands(true)
+
+
+func tracked_hands(for_seat: bool) -> Array[XRController3D]:
 	var active: Array[XRController3D] = []
-	if seated and xr_live and _xr_focused and not _align_tracking:
+	if seated == for_seat and xr_live and _xr_focused and not _align_tracking:
 		for hand: XRController3D in hands.values():
 			if hand.get_has_tracking_data():
 				active.append(hand)
@@ -200,6 +207,7 @@ func cockpit_hands() -> Array[XRController3D]:
 
 func _on_recenter() -> void:
 	_align_tracking = true
+	_head_sway = Vector3.ZERO
 	if seated:
 		_controls.reset()
 
@@ -483,12 +491,15 @@ func step_locomotion(intent: Vector2, delta: float) -> void:
 		velocity = Vector3.ZERO
 		return
 	var start := global_position
+	var stride_start := start
+	var stride_limit := minf(.22, 5.0 * delta)
 	if xr_live and _xr_focused and not _align_tracking:
 		var room_step := eye_transform().origin-global_position
 		room_step.y = 0
 		if room_step.length_squared() > .000001:
 			move_and_collide(room_step)
 			_origin.global_position -= room_step
+			stride_start = global_position - _tracked_stride(global_position - start, stride_limit)
 	var forward := -eye_transform().basis.z
 	forward.y = 0
 	forward = forward.normalized()
@@ -501,9 +512,35 @@ func step_locomotion(intent: Vector2, delta: float) -> void:
 	move_and_slide()
 	var travel := global_position-start
 	travel.y = 0
-	_distance += travel.length()
+	var stride_motion := global_position - stride_start
+	stride_motion.y = 0
+	var distance := minf(travel.length(), stride_motion.length())
+	var previous_step := floori(_distance / (Pilot.STRIDE * .5))
+	# Tiny tracked-head jitter and tracking reacquisition are not strides.
+	var walking := distance > .06 * delta and distance <= stride_limit
+	if walking:
+		_distance += distance
 	if _avatar:
 		if third_person and travel.length_squared() > .00001:
 			var facing := atan2(-travel.x,-travel.z)-global_rotation.y
 			_avatar.rotation.y = lerp_angle(_avatar.rotation.y,facing,minf(1.0,delta*12.0))
-		_avatar.set_stride(_distance,travel.length_squared() > .000001)
+		_avatar.set_stride(_distance, walking)
+		var step := floori(_distance / (Pilot.STRIDE * .5))
+		# Room-scale tracking can jump on reacquisition. Only real grounded
+		# walking across the next alternating plant produces a shoe contact.
+		if step == previous_step + 1 and is_on_floor():
+			var side := step % 2
+			boot_planted.emit(side, _avatar.planted_sole(side), distance / delta)
+
+
+func _tracked_stride(travel: Vector3, limit: float) -> Vector3:
+	travel.y = 0
+	if travel.length() > limit:
+		_head_sway = Vector3.ZERO
+		return Vector3.ZERO
+	# Keep small, reversing tracking motions inside a 3 cm radius. A pilot
+	# translating steadily carries that radius along, even at walking speed.
+	# Only gait uses this tolerance. Camera and capsule follow the full pose.
+	var offset := _head_sway + travel
+	_head_sway = offset.limit_length(.03)
+	return offset - _head_sway

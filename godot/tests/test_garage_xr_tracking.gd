@@ -15,6 +15,7 @@ class Tracking extends XRInterfaceExtension:
 	var mode_changes := 0
 	var hold_center := false
 	var camera_sample := Transform3D.IDENTITY
+	var haptics: Array[StringName] = []
 
 	func _get_name() -> StringName: return &"GarageTest"
 	func _get_capabilities() -> int: return XRInterface.XR_STEREO
@@ -32,6 +33,10 @@ class Tracking extends XRInterfaceExtension:
 		area = mode
 		return true
 	func _process() -> void: pass
+	func _trigger_haptic_pulse(action_name: String, tracker_name: StringName, _frequency: float,
+			amplitude: float, duration_sec: float, _delay_sec: float) -> void:
+		if action_name == "haptic" and amplitude > 0 and duration_sec > 0:
+			haptics.append(tracker_name)
 
 
 class Walker extends "res://garage/garage_walker.gd":
@@ -213,6 +218,114 @@ func _place_palm(side: String, point: Vector3) -> void:
 	await _tick_input()
 
 
+func _inspection_grips() -> void:
+	var hall := preload("res://garage/garage_environment.gd").new()
+	root.add_child(hall)
+	await _boarding_cards(hall)
+	var station := hall.inspection
+	var grip := preload("res://garage/inspection_wheel_grip.gd").new()
+	var hub := station.rotor_contact_point()
+	var tick := 1.0/60.0
+	var near_seam := Vector3(-.098,.003,0)
+	var past_seam := Vector3(-.098,-.004,0)
+	walker.set_seated(false, Transform3D(Basis.IDENTITY, Vector3(hub.x,0,hub.z+.55)))
+	await _tick_input()
+	for side: String in ["left","right"]:
+		var tracker: StringName = pads[side].name
+		var pulses := driver.haptics.count(tracker)
+		pads[side].set_input(&"grip", 1.0)
+		await _place_palm(side, hub + near_seam)
+		grip.update(station, walker.tracked_hands(false), tick)
+		check(not station._held, "An already squeezed " + side + " grip cannot catch the wheel on approach")
+		pads[side].set_input(&"grip", 0.0)
+		grip.update(station, walker.tracked_hands(false), tick)
+		pads[side].set_input(&"grip", 1.0)
+		grip.update(station, walker.tracked_hands(false), tick)
+		check(driver.haptics.count(tracker) == pulses + 1, "Acquiring with the " + side + " hand sends one haptic click")
+		var before := station.rotor_angle
+		grip.update(station, walker.tracked_hands(false), tick)
+		await _place_palm(side, hub + past_seam)
+		grip.update(station, walker.tracked_hands(false), tick)
+		var turned := angle_difference(before, station.rotor_angle)
+		check(station._held and turned > .04 and turned < .10,
+			"The " + side + " grip turns the wheel smoothly across the angle seam")
+		check(is_equal_approx(station.rotor_speed, turned / (2.0 * tick)),
+			"The wheel estimates release speed over both frames of a repeated pose")
+		if side == "left":
+			grip.update(station, walker.tracked_hands(false), tick)
+			pads.left.set_input(&"grip", 0.0)
+			grip.update(station, walker.tracked_hands(false), tick)
+			check(not station._held and station.rotor_speed > 0.0 and station.is_processing(),
+				"Releasing just after a duplicated XR pose leaves the rotor coasting")
+		else:
+			var held_angle := station.rotor_angle
+			await _place_palm(side, hub + past_seam + Vector3.UP * .00018)
+			for i in 4:
+				grip.update(station, walker.tracked_hands(false), tick)
+			check(station._held and is_zero_approx(station.rotor_speed) and is_equal_approx(station.rotor_angle, held_angle),
+				"Holding the wheel for over 50 ms stops the rotor even with sub-threshold tracking jitter")
+			walker.focused = false
+			await _tick_input()
+			grip.update(station, walker.tracked_hands(false), tick)
+			check(not station._held, "Losing XR focus releases the handwheel")
+			walker.focused = true
+			await _tick_input()
+			grip.update(station, walker.tracked_hands(false), tick)
+			check(not station._held, "Recovering focus with a squeezed grip cannot re-grab the wheel")
+			check(driver.haptics.count(tracker) == pulses + 1, "Holding or recovering focus does not repeat the haptic click")
+			pads.right.set_input(&"grip", 0.0)
+			grip.update(station, walker.tracked_hands(false), tick)
+			pads.right.set_input(&"grip", 1.0)
+			grip.update(station, walker.tracked_hands(false), tick)
+			check(station._held and driver.haptics.count(tracker) == pulses + 2,
+				"A deliberate re-grab after focus recovery sends exactly one new click")
+			pads.right.set_input(&"grip", 0.0)
+		grip.clear(station)
+	await _place_palm("right", hub + Vector3(.40,0,0))
+	grip.update(station, walker.tracked_hands(false), tick)
+	pads.right.set_input(&"grip", 1.0)
+	grip.update(station, walker.tracked_hands(false), tick)
+	check(not station._held, "A grip outside the rim cannot catch the wheel")
+	walker.set_seated(true, hall.seat_transform("basilisk"))
+	await _tick_input()
+	pads.right.set_input(&"grip", 0.0)
+	grip.update(station, walker.tracked_hands(false), tick)
+	pads.right.set_input(&"grip", 1.0)
+	grip.update(station, walker.tracked_hands(false), tick)
+	check(walker.tracked_hands(false).is_empty() and not station._held,
+		"A seated pilot's tracked grips cannot operate the inspection bench")
+	pads.right.set_input(&"grip", 0.0)
+	hall.free()
+
+
+func _boarding_cards(hall: Node3D) -> void:
+	var card := preload("res://garage/garage_prompts.gd").new()
+	root.add_child(card)
+	card.setup(true)
+	var omit: Array[RID] = [walker.get_rid()]
+	for id: String in hall.Pilot.ORDER:
+		var gate: Transform3D = hall.boarding_transform(id)
+		walker.set_seated(false, gate)
+		await _tick_input()
+		var eye := _eye()
+		var mount: Transform3D = hall.marker_guide(id, eye)
+		card.show_controls(hall.Pilot.NAMES[id], false, "Range", false, mount)
+		await process_frame
+		await process_frame
+		var clear := mount.basis.z.dot(mount.origin.direction_to(eye)) > .45
+		for line: Label3D in [card._vr_title,card._vr_hint]:
+			var ink := line.get_aabb()
+			clear = clear and ink.size.x > .07
+			for x in [0.0, 1.0]:
+				for y in [0.0, 1.0]:
+					var corner := line.to_global(ink.position + ink.size * Vector3(x,y,.5))
+					var toward := eye.direction_to(corner)
+					var ray := PhysicsRayQueryParameters3D.create(eye,corner - .01*toward,1,omit)
+					clear = clear and hall.get_world_3d().direct_space_state.intersect_ray(ray).is_empty()
+		check(clear and card._mount_clips.visible, "The " + id + " boarding gate has a clear view of both instruction lines")
+	card.free()
+
+
 func _parked_controls() -> void:
 	var cab := Cab.new()
 	root.add_child(cab)
@@ -383,6 +496,7 @@ func _run() -> void:
 		await _vertical_motion("Standing")
 		await _focus()
 		await _turns()
+		await _inspection_grips()
 		var seat := Transform3D(Basis(Vector3.UP, -.51), Vector3(-4,1.42,6))
 		walker.set_seated(true,seat)
 		await _tick_input()

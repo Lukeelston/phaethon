@@ -5,12 +5,25 @@ render_mode specular_schlick_ggx;
 
 uniform sampler2D aggregate : hint_default_white, repeat_enable, filter_linear_mipmap_anisotropic;
 uniform sampler2D contact : hint_default_white, repeat_disable, filter_linear_mipmap_anisotropic;
+uniform sampler2D direction_stencil : hint_default_black, repeat_disable, filter_linear_mipmap_anisotropic;
 uniform vec2 floor_size;
 uniform vec2 gate_centers[6];
+uniform float bay_pitch;
 varying vec2 floor_m;
 
 void vertex() {
 	floor_m = VERTEX.xz;
+}
+
+// Exact overlap of a painted rectangle with a pixel footprint. A narrow line
+// keeps its physical area as it recedes along the hall in either eye.
+vec2 stripe_coverage(vec2 delta, vec2 radius, vec2 width) {
+	return clamp((min(delta + .5 * width, radius) - max(delta - .5 * width, -radius)) / width, 0.0, 1.0);
+}
+
+float rectangle(vec2 delta, vec2 radius, vec2 width) {
+	vec2 coverage = stripe_coverage(delta,radius,width);
+	return coverage.x * coverage.y;
 }
 
 void fragment() {
@@ -51,12 +64,36 @@ void fragment() {
 	vec3 base = mix(slab_color, paint, aisle);
 	base *= 1.0 + finish * 0.59 + mineral * mix(0.40, 0.23, aisle);
 	base *= 1.0 - polish * 0.077;
+	// Bay paint follows the concrete below it. Nothing is raised above the
+	// slab, so the cut, pores and scuffed spots remain visible through paint.
+	float dz = floor_m.y - gate.y;
+	vec2 lane = stripe_coverage(vec2(side - 2.26, floor_m.y),
+			vec2(.0425, floor_size.y * .5 - .20), footprint);
+	float opening = stripe_coverage(vec2(0.0,dz),vec2(1.0,.83),footprint).y;
+	float amber = lane.x * lane.y * (1.0 - opening);
+	amber = max(amber,rectangle(vec2(side-2.6225,abs(dz)-.83),vec2(.32,.0425),footprint));
+	float dx = floor_m.x - gate.x;
+	float bar = clamp(round(dx/.26 + 1.5),0.0,3.0) - 1.5;
+	vec2 mark = vec2(dx - bar*.26, dz-.23);
+	mat2 rotation = mat2(vec2(.913089,-.407760),vec2(.407760,.913089));
+	vec2 stripe_width = max(fwidth(rotation * floor_m),vec2(.001));
+	amber = max(amber,rectangle(rotation*mark,vec2(.0475,.20),stripe_width));
+	float bay_z = bay_pitch * clamp(round(floor_m.y/bay_pitch),-1.0,1.0);
+	float ivory = rectangle(vec2(side-17.6,abs(floor_m.y-bay_z)-5.60),vec2(12.65,.0335),footprint);
+	vec2 stencil_uv = (floor_m - vec2(0.0, bay_pitch + 1.25)) / vec2(2.70,.93) + .5;
+	if (all(greaterThan(stencil_uv,vec2(0.0))) && all(lessThan(stencil_uv,vec2(1.0)))) {
+		ivory = max(ivory,texture(direction_stencil,stencil_uv).r);
+	}
+	float pigment = clamp(.84 + mineral*.58 + finish*.19 - polish*.12, .30, .95);
+	base = mix(base,vec3(.77,.50,.19),amber*pigment);
+	base = mix(base,vec3(.71,.75,.68),ivory*pigment);
 	// The fixed equipment also intercepts diffuse fill from the hall fixtures.
 	float visibility = texture(contact, floor_m / floor_size + vec2(0.5)).r;
 	AO = visibility;
 	AO_LIGHT_AFFECT = 0.14;
 	ALBEDO = base * mix(0.65, 1.0, visibility) * (1.0 + (shoulder - seal) * 0.11 - seal * 0.54);
-	ROUGHNESS = clamp(0.69 + mineral * 0.32 + finish * 0.29 + pour * 0.065 - 0.06 * aisle - 0.20 * polish - 0.10 * seal, 0.37, 0.83);
+	ROUGHNESS = clamp(0.69 + mineral * 0.32 + finish * 0.29 + pour * 0.065 - 0.06 * aisle - 0.20 * polish - 0.10 * seal
+			- .045 * max(amber,ivory), 0.37, 0.83);
 	NORMAL_MAP = vec3(stone.gb, 1.0);
 	NORMAL_MAP_DEPTH = mix(0.18, 0.08, max(aisle, polish));
 }

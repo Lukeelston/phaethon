@@ -21,10 +21,19 @@ class BakeGarage extends Garage:
 			for z in [-.5, .5]:
 				var p := at + frame * Vector3(size.x * x, 0.0, size.z * z)
 				corners.append(Vector2(p.x, p.z))
-		if at.y - size.y * .5 < .01:
-			shoes.append(corners)
-		else:
+		if at.y - size.y * .5 >= .01:
 			ties.append(corners)
+
+	func _batch_structure() -> void:
+		var plate := _equipment_meshes["SaddleBase"].get_aabb()
+		for mount: Transform3D in _instances["SaddleBase"]:
+			var foot := PackedVector2Array()
+			for x: float in [plate.position.x,plate.end.x]:
+				for z: float in [plate.position.z,plate.end.z]:
+					var corner := mount * Vector3(x,0,z)
+					foot.append(Vector2(corner.x,corner.z))
+			shoes.append(foot)
+		super._batch_structure()
 
 var mask := Image.create_empty(SIZE.x, SIZE.y, false, Image.FORMAT_L8)
 var failed := false
@@ -49,6 +58,17 @@ func _bake() -> void:
 		_stamp(tie, .04, .19, .49)
 	var cabinets := 0
 	var benches := 0
+	# In a headless bake the renderer does not retain MultiMesh transforms.
+	# Use the six fixed collision feet for the bolted marker bases.
+	var marker_feet := garage._building.find_children("MarkerFoot*", "CollisionShape3D", false, false)
+	for shape: CollisionShape3D in marker_feet:
+		var box := shape.shape as BoxShape3D
+		var foot := PackedVector2Array()
+		for x: float in [-.5, .5]:
+			for z: float in [-.5, .5]:
+				var corner := shape.transform * Vector3(x*box.size.x, 0, z*box.size.z)
+				foot.append(Vector2(corner.x,corner.z))
+		_stamp(foot,.035,.19,.71)
 	for node in garage.get_children():
 		if node is not MeshInstance3D:
 			continue
@@ -61,13 +81,16 @@ func _bake() -> void:
 				for z in [-1, 1]:
 					_stamp(_outline(node, -.01, .06, Vector2i(x,z)), .025, .12, .73)
 			cabinets += 1
+	if garage.shoes.size() != 72 or marker_feet.size() != 6:
+		push_error("Garage bake missing a trestle or bay marker footprint")
+		failed = true
 	if failed:
 		garage.free()
 		quit(1)
 		return
 	var result := mask.save_png(OUTPUT)
-	print("Workshop contact bake: %d craft, %d footplates, %d ties, %d cabinets, %d benches, %s" %
-		[Garage.Pilot.ORDER.size(), garage.shoes.size(), garage.ties.size(), cabinets, benches, error_string(result)])
+	print("Workshop contact bake: %d craft, %d footplates, %d marker feet, %d ties, %d cabinets, %d benches, %s" %
+		[Garage.Pilot.ORDER.size(), garage.shoes.size(), marker_feet.size(), garage.ties.size(), cabinets, benches, error_string(result)])
 	garage.free()
 	quit(0 if result == OK else 1)
 

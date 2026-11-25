@@ -9,7 +9,7 @@ from pathlib import Path
 
 import numpy as np
 import trimesh
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 from trimesh.visual.material import PBRMaterial
 
 from art_shrike_airframe import Mesh, panel_faces, unit, vec
@@ -229,6 +229,245 @@ def cart():
     return m
 
 
+def sign_tray(m, width, height, radius, back, front, face, edge):
+    """Roll the perimeter of a sheet-metal tray, including its plan-view corners."""
+    rings = []
+    for inset, z in ((.005, back), (.0015, back+.002), (0, back+.005),
+                     (0, front-.005), (.0015, front-.002), (.005, front)):
+        points = []
+        for corner, (sx, sy) in enumerate(((1,1),(-1,1),(-1,-1),(1,-1))):
+            for angle in np.linspace(corner*np.pi/2, (corner+1)*np.pi/2, 5):
+                x = sx*(width/2-radius) + (radius-inset)*np.cos(angle)
+                y = sy*(height/2-radius) + (radius-inset)*np.sin(angle)
+                points.append(vec(x,y,z))
+        rings.append(np.asarray(points))
+    m.poly(rings[0],vec(0,0,-1),edge)
+    m.poly(rings[-1],vec(0,0,1),face)
+    for lower, upper in zip(rings,rings[1:]):
+        for i in range(len(lower)):
+            j = (i+1) % len(lower)
+            side = np.cross(lower[j]-lower[i],upper[i]-lower[i])
+            m.poly([lower[i],lower[j],upper[j],upper[i]],side,edge)
+
+
+def marker_wing():
+    m = Fixture()
+    # Formed body with a replaceable enamel face, seated on its dark return.
+    sign_tray(m, 1.65,.333,.043, -.032,.011, "steel","dark")
+    sign_tray(m, 1.628,.313,.033, .011,.025, "case","case")
+    m.block((-.713,0,.0265),(.016,.199,.003),"ochre",.001)
+    for x, y in product((-.774,.774),(-.110,.110)):
+        m.turned((x,y,.0248),(0,0,1),[(0,0),(0,.009),(.002,.010),(.005,.008),
+                  (.005,.0035),(.003,.0035),(.003,0)],"steel",8)
+    # The continuous return meets the cross-rail at either mounting angle.
+    m.block((0,-.107,-.045),(1.42,.069,.028),"steel",.004)
+    m.block((0,-.133,-.064),(1.44,.017,.017),"dark",.004)
+    return m
+
+
+def marker_post():
+    m = Fixture()
+    m.block((0,.017,0),(.345,.034,.267),"dark",.013)
+    m.block((0,.042,0),(.305,.018,.228),"steel",.006)
+    m.block((0,.552,0),(.103,1.010,.089),"dark",.009)
+    m.block((0,.112,0),(.143,.121,.127),"steel",.011)
+    for x,z in product((-.119,.119),(-.081,.081)):
+        m.turned((x,.0505,z),(0,1,0),[(0,0),(0,.016),(.003,.016),(.004,.013),
+                 (.004,0)],"dark",12)
+        m.turned((x,.054,z),(0,1,0),[(0,0),(0,.012),(.008,.012),(.010,.010),
+                 (.010,0)],"bright",6)
+    m.block((0,.932,0),(.134,.105,.132),"steel",.009)
+    return m
+
+
+def shutter_curtain():
+    """Continuous interlocking roll-formed slats, with the front towards +Z."""
+    m = Fixture()
+    pitch = .165
+    profile = [(0, .075), (.014, .073), (.028, .084), (.039, .103),
+               (.052, .108), (.132, .108), (.146, .100), (pitch, .075)]
+    for slat in range(29):
+        for (ay,az),(by,bz) in zip(profile, profile[1:]):
+            y = .102 + pitch * slat
+            points = [(-5.515,y+ay,az),(5.515,y+ay,az),
+                      (5.515,y+by,bz),(-5.515,y+by,bz)]
+            m.poly(points,(0,az-bz,by-ay),"steel")
+    return m
+
+
+def shutter_frame():
+    m = Fixture()
+    # The bottom rail and its compressible seal meet the slab beneath the curtain.
+    m.block((0,.030,.096),(11.035,.060,.102),"rubber",.022)
+    m.block((0,.080,.097),(11.06,.059,.115),"steel",.010)
+    for side in (-1,1):
+        x = side * 5.545
+        m.block((x,2.495,.045),(.20,4.99,.18),"dark",.018)
+        m.block((x+side*.066,2.454,.158),(.060,4.89,.136),"steel",.012)
+        m.block((x-side*.032,2.454,.142),(.125,4.89,.065),"insert",.007)
+        # Replaceable ochre guide guards end below the headbox. Their bolts
+        # sit on the guard face, with a separate folded, scuff-prone toe.
+        m.block((x+side*.02,1.015,.191),(.148,2.03,.080),"ochre",.016)
+        m.block((x+side*.02,.078,.230),(.193,.15,.087),"dark",.013)
+        for y in (.29, .97, 1.86, 2.73, 4.16):
+            z = .231 if y < 2.03 else .175
+            dx = .02 if y < 2.03 else -.032
+            m.turned((x+side*dx,y,z),(0,0,1),[(0,0),(0,.021),(.004,.021),
+                     (.004,.015),(.013,.015),(.014,.012),(.014,0)],"bright",6)
+    # The rolled front of the barrel hood shares tangent strips across the span.
+    section = [(4.81,-.02),(4.81,.235),(4.824,.280),(4.859,.308),
+               (5.083,.308),(5.128,.297),(5.193,.230),(5.213,.193),(5.213,-.02)]
+    for (ay,az),(by,bz) in zip(section,section[1:]):
+        m.poly([(-5.72,ay,az),(5.72,ay,az),(5.72,by,bz),(-5.72,by,bz)],
+               (0,az-bz,by-ay),"steel")
+    for x in (-5.72, 5.72):
+        cap = [(x,y,z) for y,z in section]
+        m.poly(cap,(np.sign(x),0,0),"dark")
+    for x in (-3.77,0,3.77):
+        m.block((x,4.975,.31),(.030,.222,.014),"insert",.005)
+    return m
+
+
+def saddle_base():
+    """Anchor plate below either leg of an airframe support trestle."""
+    m = Fixture()
+    m.block((0,.0275,0),(.54,.055,.20),"dark",.009)
+    # Each anchor clamps the plate with a broad washer beneath the hex head.
+    for x in (-.214,.214):
+        m.turned((x,.055,0),(0,1,0),[(0,.026),(.006,.026),(.006,.016)],"steel",10)
+        m.turned((x,.061,0),(0,1,0),[(0,.019),(.014,.019),
+                 (.017,.015),(.017,0)],"bright",6)
+    return m
+
+
+def saddle_screw():
+    """The permanent spindle, hexagonal locknut and swivel bearing."""
+    m = Fixture()
+    m.turned((0,-.231,0),(0,1,0),[(0,.053),(.080,.053),(.085,.047),(.085,.030)],"dark",12)
+    m.turned((0,-.147,0),(0,1,0),[(0,.054),(.021,.054),(.026,.049),(.026,.030)],"steel",6)
+    m.turned((0,-.122,0),(0,1,0),[(0,.030),(.064,.030)],"insert",12)
+    m.turned((0,-.062,0),(0,1,0),[(0,.027),(.010,.035),(.021,.035),
+             (.035,.024)],"steel",12)
+    return m
+
+
+def saddle_thread():
+    """Physical Acme flanks for inspection at arm's length; the shaft bears the silhouette."""
+    m = Fixture()
+    # Each flank shares an edge with its neighbor around the machined spindle.
+    pitch, revolutions, per_turn = .016, 4, 12
+    profile = [(.030,-.0048),(.036,-.0014),(.036,.0014),(.030,.0048)]
+    for i in range(revolutions * per_turn):
+        a,b = 2*np.pi*i/per_turn, 2*np.pi*(i+1)/per_turn
+        for (r0,h0),(r1,h1) in zip(profile,profile[1:]):
+            points = np.array([(r*np.cos(t),-.122 + pitch*t/(2*np.pi) + h,r*np.sin(t))
+                               for t,r,h in ((a,r0,h0),(b,r0,h0),(b,r1,h1),(a,r1,h1))])
+            normal = np.cross(points[1]-points[0],points[2]-points[0])
+            if normal.dot(vec(np.cos((a+b)/2),0,np.sin((a+b)/2))) < 0:
+                normal = -normal
+            m.poly(points,normal,"bright")
+    return m
+
+
+def saddle_shoe():
+    """Swivelling steel shoe below three molded load pads. Local Y=0 is the skin."""
+    m = Fixture()
+    m.block((0,-.039,0),(.118,.019,.158),"steel",.006)
+    for z in (-.053,0,.053):
+        m.block((0,-.015,z),(.120,.030,.053 if z == 0 else .051),"rubber",.0045)
+    return m
+
+
+def shutter_stencils():
+    """Whole identifiers in padded cells so minified digits never sample a neighbor."""
+    image = Image.new("L",(768,512))
+    pen = ImageDraw.Draw(image)
+    font = ImageFont.truetype(str(DEST.parents[1] / "art/signs/RG2014D.ttf"),207)
+    for i in range(6):
+        number = f"{i+1:02d}"
+        x,y = (i % 3)*256+128, (i // 3)*256+128
+        pen.text((x,y),number,font=font,anchor="mm",fill=255)
+    image.save(DEST.with_name("workshop_shutter_numbers.png"),optimize=True)
+
+
+def trench_grate():
+    """Flush removable cast grates and their recessed channel, along local X."""
+    m = Fixture()
+    half, width = 5.40, .202
+    # Redundant back faces are omitted on surfaces embedded in the slab.
+    def strip(x0, x1, ya, za, yb, zb, normal, finish):
+        m.poly([(x0,ya,za),(x1,ya,za),(x1,yb,zb),(x0,yb,zb)],normal,finish)
+
+    strip(-half,half,-.069,-width/2,-.069,width/2,(0,1,0),"dark")
+    for side in (-1,1):
+        edge = side * width / 2
+        strip(-half,half,-.069,edge,0,edge,(0,0,-side),"dark")
+        strip(-half,half,0,edge,0,side*.085,(0,1,0),"insert")
+        strip(-half,half,0,side*.085,-.021,side*.085,(0,0,-side),"steel")
+    for idx in range(10):
+        start = -half + idx*1.08
+        for i in range(12):
+            # Cast faces are crowned by 1.5 mm and taper into the channel.
+            # A sightline through the 22 mm slot reaches the actual trough.
+            x = start + .045 + i*.09
+            section = [(x-.028,-.026),(x-.034,-.003),(x-.032,-.0008),
+                       (x+.032,-.0008),(x+.034,-.003),(x+.028,-.026)]
+            for (xa,ya),(xb,yb) in zip(section,section[1:]):
+                m.poly([(xa,ya,-.085),(xb,yb,-.085),(xb,yb,.085),(xa,ya,.085)],
+                       (ya-yb,xb-xa,0),"insert")
+        # Captive hex fixings secure the leading bar of each removable panel.
+        x = start+.045
+        for side in (-1,1):
+            m.turned((x,-.0008,side*.061),(0,1,0),
+                     [(0,.010),(.0012,.010),(.0012,.004),(-.0012,.004)],
+                     "dark",6)
+    for end in (-half,half):
+        m.poly([(end,0,-width/2),(end,-.069,-width/2),(end,-.069,width/2),
+                (end,0,width/2)],(-np.sign(end),0,0),"dark")
+    return m
+
+
+def high_bay_lamp():
+    """Pressed-aluminium luminaire and bridge clips, relative to the lens face."""
+    m = Fixture()
+    # A folded extrusion creates a splayed reflector below the dark upper case.
+    cross = [(-.205,.189),(-.243,.154),(-.243,.043),(-.227,.017),(-.194,.009),
+             (-.166,.047),(.166,.047),(.194,.009),(.227,.017),(.243,.043),
+             (.243,.154),(.205,.189)]
+    for i,((za,ya),(zb,yb)) in enumerate(zip(cross,cross[1:])):
+        m.poly([(-1.756,ya,za),(1.756,ya,za),(1.756,yb,zb),(-1.756,yb,zb)],
+               (0,za-zb,yb-ya),"bright" if 4 <= i <= 6 else "dark")
+    m.poly([(-1.756,.189,-.205),(1.756,.189,-.205),(1.756,.189,.205),
+            (-1.756,.189,.205)],(0,1,0),"steel")
+    for x in (-1.753,1.753):
+        m.block((x,.102,0),(.040,.184,.475),"insert",.016)
+    for x in (-.572,.572):
+        m.poly([(x-.005,.009,-.186),(x+.005,.009,-.186),(x+.005,.009,.186),
+                (x-.005,.009,.186)],(0,-1,0),"insert")
+    for x in (-1.14,1.14):
+        # The ceilings' lower chord has its underside at y=6.32. A dark
+        # bracket with folded feet joins it directly to the luminaire.
+        m.block((x,.256,0),(.055,.134,.055),"steel",.004)
+        m.block((x,.317,0),(.132,.013,.125),"dark",.004)
+    return m
+
+
+def aisle_stencil():
+    """A single painted direction for the pedestrian aisle, facing the entrance."""
+    image = Image.new("L",(1024,256))
+    pen = ImageDraw.Draw(image)
+    font = ImageFont.truetype(str(DEST.parents[1] / "art/signs/RG2014D.ttf"),176)
+    words = "WORKSHOP"
+    left,top,right,bottom = pen.textbbox((0,0),words,font=font)
+    word = Image.new("L",(right-left,bottom-top))
+    ImageDraw.Draw(word).text((-left,-top),words,font=font,fill=255)
+    # Stretch along the direction of travel, as on an actual floor stencil.
+    image.paste(word.resize((692,176),Image.Resampling.LANCZOS),(58,40))
+    pen.polygon([(792,115),(868,38),(944,115),(920,139),(886,104),
+                 (886,216),(850,216),(850,104),(815,139)],fill=255)
+    image.save(DEST.with_name("workshop_direction.png"),optimize=True)
+
+
 def finish_atlas():
     """Paint material-scale variation, with a full-width tile on the three-metre bench."""
     colors = Image.new("RGB", ATLAS_SIZE)
@@ -276,7 +515,12 @@ def build():
     material = PBRMaterial(name="WorkshopFinishes", baseColorTexture=colors,
                            metallicRoughnessTexture=orm, metallicFactor=1., roughnessFactor=1.)
     scene = trimesh.Scene()
-    for name,fixture in (("MachineBench",bench()),("RollCabinet",cart())):
+    for name,fixture in (("MachineBench",bench()),("RollCabinet",cart()),
+                         ("MarkerWing",marker_wing()),("MarkerPost",marker_post()),
+                         ("ShutterCurtain",shutter_curtain()),("ShutterFrame",shutter_frame()),
+                         ("SaddleBase",saddle_base()),("SaddleScrew",saddle_screw()),("SaddleThread",saddle_thread()),
+                         ("SaddleShoe",saddle_shoe()),("TrenchGrate",trench_grate()),
+                         ("HighBayLamp",high_bay_lamp())):
         faces = np.asarray(fixture.indices).reshape(-1,3)
         geometry = trimesh.Trimesh(fixture.pos,faces,vertex_normals=fixture.norm,process=False)
         assert np.all(geometry.area_faces > 1e-12), f"{name}: degenerate faces"
@@ -285,6 +529,8 @@ def build():
         scene.add_geometry(geometry,node_name=name,geom_name=name)
         print(name,len(faces),"triangles",geometry.bounds.tolist())
     DEST.write_bytes(scene.export(file_type="glb"))
+    aisle_stencil()
+    shutter_stencils()
 
 
 if __name__ == "__main__":

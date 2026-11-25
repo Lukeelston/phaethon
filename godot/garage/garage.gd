@@ -8,6 +8,8 @@ const PilotModel := preload("res://garage/pilot_model.gd")
 const ParkedCockpit := preload("res://garage/garage_cockpit.gd")
 const Runup := preload("res://garage/garage_runup.gd")
 const Prompts := preload("res://garage/garage_prompts.gd")
+const WheelGrip := preload("res://garage/inspection_wheel_grip.gd")
+const ShopAudio := preload("res://garage/workshop_audio.gd")
 
 var environment: Workshop
 var walker: Walker
@@ -15,9 +17,12 @@ var pilot: PilotModel
 var seated_craft := ""
 var _cockpit: ParkedCockpit
 var _runups: Dictionary[String, Runup] = {}
+var _exterior_screening := 0.0
 var _touching_hands: Array[XRController3D] = []
 var _prompts: Prompts
 var _nearby := ""
+var _near_rotor := false
+var _wheel_grip := WheelGrip.new()
 var _using_pad := false
 var _departing := false
 var _boarding := false
@@ -43,6 +48,12 @@ func _ready() -> void:
 	if Fleet.ORDER.has(Route.arrival_craft):
 		arrival = environment.boarding_transform(Route.arrival_craft)
 	walker.set_seated(false, arrival)
+	if not OS.get_cmdline_user_args().has("--mute"):
+		var sound := ShopAudio.new()
+		sound.name = "ShopAudio"
+		add_child(sound)
+		sound.exterior_screening_changed.connect(_screen_parked_engines)
+		sound.setup(walker, environment.get_node("ServiceEntry"), environment.inspection)
 	walker.interact_requested.connect(interact)
 	walker.launch_requested.connect(launch_flight)
 	walker.back_requested.connect(return_to_menu)
@@ -60,8 +71,34 @@ func _process(delta: float) -> void:
 	if not seated_craft.is_empty():
 		_operate_cockpit(delta)
 	var nearby := environment.nearest_bay(walker.global_position) if seated_craft.is_empty() else ""
-	if nearby != _nearby or _using_pad != walker.using_gamepad:
+	var at_rotor := _at_rotor()
+	if walker.xr_live and at_rotor:
+		_wheel_grip.update(environment.inspection, walker.tracked_hands(false), delta)
+	elif _near_rotor:
+		_wheel_grip.clear(environment.inspection)
+	if nearby != _nearby or at_rotor != _near_rotor or _using_pad != walker.using_gamepad:
 		_update_prompt()
+	elif walker.xr_live and seated_craft.is_empty() and not at_rotor:
+		_prompts.place_on_marker(environment.marker_guide(nearby,walker.global_position))
+
+
+func _at_rotor() -> bool:
+	if not seated_craft.is_empty() or _boarding:
+		return false
+	var station := environment.inspection
+	var feet := station.to_local(walker.global_position)
+	if feet.z < 1.04 or feet.z > 2.07 or absf(feet.x - Workshop.Inspection.HANDWHEEL.x) > .90:
+		return false
+	if walker.xr_live:
+		return true
+	var eye := walker.eye_transform()
+	return -eye.basis.z.dot(eye.origin.direction_to(station.rotor_contact_point())) > .32
+
+
+func _screen_parked_engines(amount: float) -> void:
+	_exterior_screening = amount
+	for runup: Runup in _runups.values():
+		runup.screen_exterior(amount)
 
 
 func _runup_for(id: String, power: StartupSequence = null) -> Runup:
@@ -71,6 +108,7 @@ func _runup_for(id: String, power: StartupSequence = null) -> Runup:
 		runup.name = "Runup"
 		bay.add_child(runup)
 		runup.setup(bay, power)
+		runup.screen_exterior(_exterior_screening)
 		_runups[id] = runup
 	return _runups[id]
 
@@ -100,6 +138,9 @@ func interact() -> void:
 		return
 	if seated_craft != "":
 		leave_seat()
+		return
+	if _at_rotor():
+		environment.inspection.spin_rotor()
 		return
 	var craft := environment.nearest_bay(walker.global_position)
 	if not Fleet.ORDER.has(craft):
@@ -182,11 +223,15 @@ func _next_frame(_stage: String) -> void:
 func _update_prompt() -> void:
 	_nearby = environment.nearest_bay(walker.global_position) if seated_craft.is_empty() else ""
 	_using_pad = walker.using_gamepad
+	_near_rotor = _at_rotor()
+	if _near_rotor:
+		_prompts.show_rotor(_using_pad, environment.inspection.global_transform)
+		return
 	var craft := _nearby if seated_craft.is_empty() else seated_craft
 	var craft_name := str(Fleet.NAMES.get(craft, ""))
 	var anchor := environment.spawn_transform()
 	if not seated_craft.is_empty():
 		anchor = environment.seat_transform(craft)
-	elif not craft.is_empty():
-		anchor = environment.boarding_transform(craft)
+	elif walker.xr_live:
+		anchor = environment.marker_guide(craft,walker.global_position)
 	_prompts.show_controls(craft_name, not seated_craft.is_empty(), Route.destination_label(), _using_pad, anchor)

@@ -115,6 +115,73 @@ func _check_boarding_lane(walker: CharacterBody3D, aisle_x: float, gate: Vector3
 			"Clear marked boarding lane for %s at offset %.2f m" % [id, offset])
 
 
+func _wait_for_door(entry: Node3D, minimum: float, maximum: float) -> bool:
+	for tick in 180:
+		if entry.open_fraction >= minimum and entry.open_fraction <= maximum:
+			return true
+		await physics_frame
+	return false
+
+
+func _walk_through_annex(garage, gate: Vector3) -> void:
+	var walker = garage.walker
+	var entry = garage.environment.get_node_or_null("ServiceEntry")
+	var desk = garage.environment.get_node_or_null("FleetInspection")
+	if not check(entry != null, "The annex has automatic service doors"):
+		return
+	# Exit one running craft and take the normal marked route to the workshop.
+	var aisle := Vector3(0, 0, gate.z)
+	var threshold := Vector3(0, 0, -23.36)
+	var hall_side := threshold + Vector3.BACK * 3.0
+	var room_side := threshold + Vector3.FORWARD * 2.80
+	walker.set_physics_process(false)
+	var reached: bool = await _walk_to(walker, aisle) and await _walk_to(walker, hall_side)
+	check(reached and entry.open_fraction < .01, "Walk from the running craft to the closed annex doors")
+	var crossing := Transform3D(Basis.IDENTITY, threshold + Vector3(0,.025,1.0))
+	check(walker.test_move(crossing, Vector3.FORWARD * 2.0), "The shut leaves block a standing pilot")
+	reached = await _walk_to(walker, threshold)
+	check(reached and await _wait_for_door(entry, .99, 1.0), "Approaching from the hall opens the annex")
+	# Idle in the doorway past the dwell and closing times; a timer alone must
+	# never close the two colliders across a pilot who has stopped walking.
+	for tick in 140:
+		await physics_frame
+		_move(walker, Vector3.ZERO)
+	check(entry.open_fraction > .99 and walker.global_position.distance_to(threshold) < .25,
+		"The doors stay open around a stationary pilot")
+	for x: float in [-.72, 0.0, .72]:
+		crossing.origin.x = x
+		check(not walker.test_move(crossing, Vector3.FORWARD * 2.0),
+			"The full open doorway clears the pilot at lateral offset %.2f m" % x)
+	reached = await _walk_to(walker, room_side)
+	check(reached and await _wait_for_door(entry, .68, .91), "The doors start closing after the pilot clears them")
+	reached = await _walk_to(walker, threshold)
+	check(reached and await _wait_for_door(entry, .99, 1.0),
+		"Approaching the moving leaves from inside reverses them safely")
+	reached = await _walk_to(walker, Vector3(0,0,-29.15))
+	var hit := KinematicCollision3D.new()
+	var towards_desk: Transform3D = walker.global_transform
+	towards_desk.origin.y += .025
+	check(desk != null and reached and walker.test_move(towards_desk, Vector3.FORWARD * 1.0, hit)
+		and desk.is_ancestor_of(hit.get_collider()), "The pilot can reach the counter and its front stops the walking body")
+	if desk != null:
+		_key(KEY_E)
+		check(is_zero_approx(desk.rotor_speed), "Using the counter away from the handwheel leaves it at rest")
+		reached = await _walk_to(walker, desk.to_global(Vector3(desk.HANDWHEEL.x,0,1.48)))
+		walker.look_at(walker.global_position + Vector3.BACK)
+		_key(KEY_E)
+		check(reached and is_zero_approx(desk.rotor_speed), "The handwheel ignores use behind the pilot's back")
+		var wheel: Vector3 = desk.rotor_contact_point()
+		walker.look_at(Vector3(wheel.x,walker.global_position.y,wheel.z))
+		_key(KEY_E)
+		await physics_frame
+		check(not walker.seated and desk.rotor_speed > 0.0,
+			"Using the handwheel spins the inspection rotor without boarding a craft")
+	check(await _wait_for_door(entry, 0.0, .01), "The annex door closes while the pilot reads the board")
+	reached = await _walk_to(walker, hall_side) and await _walk_to(walker, aisle) and await _walk_to(walker, gate)
+	check(reached and walker.is_on_floor(), "Walk back through the closed doors to the original running craft")
+	walker.set_physics_process(true)
+
+
 func _floor_and_bays(garage) -> void:
 	var workshop = garage.environment
 	var walker = garage.walker
@@ -197,12 +264,19 @@ func _indicator_pair(workshop, id: String) -> Vector2i:
 		roundi(2.0 * lenses.get_instance_custom_data(first + 1).r))
 
 
+func _board_matches(board, row: int, stages: Array[String]) -> bool:
+	return board != null and board.engine_stage(row, 0) == stages[0] and board.engine_stage(row, 1) == stages[1]
+
+
 func _fly_and_return(garage, xr: bool) -> void:
 	var id := "orrery" if xr else "vesper"
 	garage.walker.set_physics_process(true)
 	var finishes := {}
+	var hull_finishes := {}
 	for craft: String in Fleet.ORDER:
-		finishes[craft] = garage.environment.bay_node(craft).paint
+		var parked = garage.environment.bay_node(craft)
+		finishes[craft] = parked.paint
+		hull_finishes[craft] = _hull_finishes(parked)
 	check(finishes.vesper == "violet" and finishes.orrery == UI.Livery.FACTORY,
 		"Only the selected Vesper wears the pilot's violet paint")
 	var at: Transform3D = garage.environment.boarding_transform(id)
@@ -213,6 +287,9 @@ func _fly_and_return(garage, xr: bool) -> void:
 	var bay = garage.environment.bay_node(id)
 	var runup = bay.get_node("Runup")
 	var systems: StartupSequence = runup.startup
+	var board = garage.environment.get_node_or_null("FleetInspection")
+	var row := Fleet.ORDER.find(id)
+	var board_tracks_startup := _board_matches(board, row, systems.stage)
 	var stands: Transform3D = bay.model.pod.global_transform
 	var secondaries: Array = []
 	for engine: Node3D in bay.model.engines:
@@ -226,6 +303,7 @@ func _fly_and_return(garage, xr: bool) -> void:
 	var signals: Array[Vector2i] = []
 	while not systems.all_running() and Time.get_ticks_msec() < deadline:
 		staggered = staggered or systems.stage[0] != systems.stage[1]
+		board_tracks_startup = board_tracks_startup and _board_matches(board, row, systems.stage)
 		var pair := _indicator_pair(garage.environment, id)
 		if signals.is_empty() or signals.back() != pair:
 			signals.append(pair)
@@ -235,6 +313,8 @@ func _fly_and_return(garage, xr: bool) -> void:
 		"The sign shows each engine cranking amber and reaching green idle in firing order")
 	check(garage.environment._lamp_states.count(0) == 2 * (Fleet.ORDER.size() - 1),
 		"Only the occupied bay's indicators light")
+	check(board_tracks_startup and _board_matches(board, row, systems.stage),
+		"The inspection board follows each side of the real engine startup sequence")
 	check(systems.all_running() and staggered and garage.walker.seated and current_scene == garage,
 		"Left and right engines start in sequence while the seated pilot stays in the workshop")
 	var grips: Array = bay.get_node("OccupiedCockpit").throttle_grips()
@@ -254,10 +334,24 @@ func _fly_and_return(garage, xr: bool) -> void:
 	runup.work("handling", 1)
 	runup.work("slide", -1)
 	_key(KEY_E)
+	check(not garage.walker.seated and board != null and is_zero_approx(board.rotor_speed),
+		"Using the cockpit exit dismounts the pilot and leaves the distant rotor still")
+	if not xr:
+		await _walk_through_annex(garage, at.origin)
+		var cold_pair: Array[String] = ["off", "off"]
+		var hot_bay_only := true
+		for other_row in Fleet.ORDER.size():
+			hot_bay_only = hot_bay_only and _board_matches(board, other_row, systems.stage if other_row == row else cold_pair)
+		check(hot_bay_only, "The live board retains the running craft and five cold neighbours after dismount")
 	_key(KEY_E)
 	check(garage.walker.seated and bay.get_node("Runup").startup == systems and systems.all_running(),
 		"Stepping out and returning keeps this airframe running")
 	var old: WeakRef = weakref(garage)
+	var fixtures: Array[WeakRef] = []
+	for fixture in ["ServiceEntry", "FleetInspection", "BridgeCrane"]:
+		var installed: Node = garage.environment.get_node_or_null(NodePath(fixture))
+		if installed != null:
+			fixtures.append(weakref(installed))
 	_key(KEY_F)
 	if not await _scene("res://vr.tscn" if xr else UI.GAME_SCENE):
 		return
@@ -268,9 +362,24 @@ func _fly_and_return(garage, xr: bool) -> void:
 	check(UI.Livery.current == finishes[id], "Launch uses the finish the pilot saw from the aisle")
 	check(flight.sim.P.handling == "starfighter", "The physical handling switch carries its selected mode onto the pad")
 	check(old.get_ref() == null, "Flight releases the garage")
+	check(fixtures.size() == 3 and fixtures.all(func(ref: WeakRef) -> bool: return ref.get_ref() == null),
+		"Leaving for flight releases the doors, fleet board and crane")
 	if xr:
 		check(flight.startup == systems and flight.startup.all_running() and flight.startup.park and not Cockpit.slide_feel,
 			"The runway receives the exact startup, park brake and slide switch state the pilot left in the bay")
+		# Work the flight's real overhead controls to catch the left engine at
+		# idle while the right one is still lighting. XR input polling is offline.
+		if not systems.guard_open:
+			flight.startup_work("engine", 1)
+		flight.startup_work("engine", -1)
+		flight.startup_work("engine", 1)
+		flight.startup_work("start", 1)
+		for tick in 600:
+			systems.step(STEP, [0.0, 0.0])
+			if systems.running(0):
+				break
+		check(systems.running(0) and not systems.running(1), "The flight dismounts during a real staggered start")
+		var stages_at_exit: Array[String] = systems.stage.duplicate()
 		flight.menu_open(true)
 		for choice in ["options", "garage"]:
 			for index in flight.menu.items.size():
@@ -283,14 +392,22 @@ func _fly_and_return(garage, xr: bool) -> void:
 		if not await _scene(GARAGE):
 			return
 		garage = current_scene
-		_check_returned_finishes(garage, finishes)
+		_check_returned_finishes(garage, finishes, hull_finishes)
 		check(not garage.walker.seated and garage.environment.nearest_bay(garage.walker.global_position) == id,
 			"Headset dismount arrives alongside the craft it flew")
 		var returned = garage.environment.bay_node(id).get_node("Runup")
-		check(returned.startup == systems and returned.startup.all_running() and not returned.telemetry.slide
+		check(returned.startup == systems and returned.startup.stage == stages_at_exit and not returned.telemetry.slide
 			and returned.telemetry.handling == "starfighter", "Headset return restores that flight's engines and switches")
-		check(_indicator_pair(garage.environment, id) == Vector2i(2,2),
-			"Stepping out of a running craft from flight immediately restores its two green windows")
+		check(_board_matches(garage.environment.inspection, row, stages_at_exit)
+			and _indicator_pair(garage.environment, id) == Vector2i(2,1),
+			"Returning from flight restores the different port and starboard states on both displays")
+		for tick in 180:
+			if systems.all_running():
+				break
+			await process_frame
+		check(_indicator_pair(garage.environment, id) == Vector2i(2,2)
+			and _board_matches(garage.environment.inspection, row, systems.stage),
+			"The returning craft completes its starboard start on the apron and both displays turn green")
 		_key(KEY_E)
 		_key(KEY_I)
 		await process_frame
@@ -324,7 +441,7 @@ func _fly_and_return(garage, xr: bool) -> void:
 	if not await _scene(GARAGE):
 		return
 	garage = current_scene
-	_check_returned_finishes(garage, finishes)
+	_check_returned_finishes(garage, finishes, hull_finishes)
 	check(not paused and not garage.walker.seated and garage.environment.nearest_bay(garage.walker.global_position) == id,
 		"Leave the parked flight on foot alongside the same craft")
 	_key(KEY_ESCAPE)
@@ -332,10 +449,35 @@ func _fly_and_return(garage, xr: bool) -> void:
 		check(current_scene is Control, "Walking back returns to the desktop title")
 
 
-func _check_returned_finishes(garage, expected: Dictionary) -> void:
+func _hull_finishes(bay) -> Array:
+	var parts: Array[MeshInstance3D] = [bay.model.pod]
+	for engine: Node3D in bay.model.engines:
+		parts.append(engine.get_child(0))
+	var result := []
+	for part in parts:
+		for surface in part.mesh.get_surface_count():
+			var material := part.get_active_material(surface)
+			var colors = part.mesh.surface_get_arrays(surface)[Mesh.ARRAY_COLOR]
+			result.append(hash(colors) if colors is PackedColorArray else 0)
+			if material is ShaderMaterial:
+				result.append(material.shader.resource_path)
+				if material.shader.resource_path == "res://view/fleet_finish.gdshader":
+					for map: String in ["albedo_map", "normal_map", "orm_map"]:
+						var texture := material.get_shader_parameter(map) as Texture2D
+						result.append(texture.resource_path if texture else "")
+					result.append(material.get_shader_parameter("repaint"))
+					result.append(material.get_shader_parameter("enamel"))
+			elif material is BaseMaterial3D:
+				result.append(material.albedo_color)
+				result.append(material.albedo_texture.resource_path if material.albedo_texture else "")
+	return result
+
+
+func _check_returned_finishes(garage, expected: Dictionary, hull_finishes: Dictionary) -> void:
 	for craft: String in Fleet.ORDER:
-		check(garage.environment.bay_node(craft).paint == expected[craft],
-			"Returning to the workshop preserves the finish on " + craft)
+		var bay = garage.environment.bay_node(craft)
+		check(bay.paint == expected[craft] and _hull_finishes(bay) == hull_finishes[craft],
+			"Returning to the workshop preserves the actual hull and both nacelle finishes on " + craft)
 
 
 func _run() -> void:

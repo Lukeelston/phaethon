@@ -1,6 +1,7 @@
 extends Node3D
 
 const UI := preload("res://release/release_config.gd")
+const BayFont := preload("res://art/signs/RG2014D.ttf")
 
 var _title: Label
 var _hint: Label
@@ -10,6 +11,7 @@ var _vr_title: Label3D
 var _vr_hint: Label3D
 var _vr_status: Label3D
 var _face: QuadMesh
+var _mount_clips: MultiMeshInstance3D
 var _seated := false
 var _state := ""
 
@@ -61,6 +63,22 @@ func _make_placard() -> void:
 	backing.mesh = _face
 	backing.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_placard.add_child(backing)
+	var clips := MultiMesh.new()
+	clips.transform_format = MultiMesh.TRANSFORM_3D
+	var metal := BoxMesh.new()
+	metal.size = Vector3(.042,.086,.026)
+	var finish := StandardMaterial3D.new()
+	finish.albedo_color = Color("#78878b")
+	finish.metallic = .64
+	finish.roughness = .42
+	metal.material = finish
+	clips.mesh = metal
+	clips.instance_count = 2
+	for i in 2:
+		clips.set_instance_transform(i,Transform3D(Basis.IDENTITY,Vector3((i-.5)*.57,.100,-.014)))
+	_mount_clips = MultiMeshInstance3D.new()
+	_mount_clips.multimesh = clips
+	_placard.add_child(_mount_clips)
 	_vr_title = _sign_line(42, 0.037, UI.AMBER)
 	_vr_hint = _sign_line(28, -0.038, UI.INK)
 	_vr_status = _sign_line(26, 0.063, UI.AMBER)
@@ -75,6 +93,8 @@ func _sign_line(size: int, height: float, color: Color) -> Label3D:
 	line.pixel_size = 0.00089
 	line.modulate = color
 	line.outline_size = 0
+	line.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
+	line.alpha_cut = Label3D.ALPHA_CUT_OPAQUE_PREPASS
 	_placard.add_child(line)
 	return line
 
@@ -97,6 +117,38 @@ func _show_status() -> void:
 	if _status:
 		_status.text = _state
 		_status.visible = _seated and not _state.is_empty()
+
+
+func show_rotor(pad: bool, counter: Transform3D) -> void:
+	_seated = false
+	_show_status()
+	if _placard:
+		_sign_type(false)
+		_mount_clips.hide()
+		# Mount this instruction on the forward fascia, below the spindle.
+		_placard.global_transform = counter.translated_local(Vector3(1.0, .847, .947)).scaled_local(Vector3.ONE * .60)
+		_face.size = Vector2(.99, .19)
+		_vr_title.position = Vector3(-.46, .037, .003)
+		_vr_hint.position = Vector3(-.46, -.038, .003)
+		_vr_title.text = "Rotor inspection"
+		_vr_hint.text = "Grip and turn the rim     A  Spin"
+	else:
+		_title.text = "%s  Spin inspection rotor" % ("A" if pad else "E")
+		_hint.text = "Watch the dial as the rotor turns."
+
+
+func place_on_marker(mount: Transform3D) -> void:
+	if _placard and not _placard.global_transform.is_equal_approx(mount):
+		_placard.global_transform = mount
+
+
+func _sign_type(on_marker: bool) -> void:
+	_vr_title.font = BayFont if on_marker else null
+	_vr_hint.font = BayFont if on_marker else null
+	_vr_title.font_size = 62 if on_marker else 42
+	_vr_hint.font_size = 40 if on_marker else 28
+	_vr_title.pixel_size = .00120 if on_marker else .00089
+	_vr_hint.pixel_size = .00115 if on_marker else .00089
 
 
 func show_controls(craft: String, seated: bool, destination: String, pad: bool, anchor: Transform3D) -> void:
@@ -123,9 +175,12 @@ func show_controls(craft: String, seated: bool, destination: String, pad: bool, 
 	elif not craft.is_empty():
 		action = "%s  Board %s" % [board, craft]
 	if _placard:
-		# Walking anchors are floor poses. A seated anchor is already at the pilot's eyes.
-		var offset := Vector3(-0.24, 1.55, -1.65)
-		_placard.global_transform = anchor.orthonormalized().translated_local(offset)
+		_sign_type(not seated)
+		if not seated:
+			action = "A   BOARD" if not craft.is_empty() else "WALK TO A COCKPIT"
+			hint = "B   MENU" if not craft.is_empty() else "LEFT STICK  WALK     RIGHT STICK  TURN"
+		_mount_clips.visible = not seated
+		_placard.global_transform = anchor
 		_face.size = Vector2(.74, .32) if seated else Vector2(.99, .19)
 		for row: Label3D in [_vr_title, _vr_status, _vr_hint]:
 			row.position.x = -.34 if seated else -.46

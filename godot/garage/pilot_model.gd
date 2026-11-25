@@ -88,6 +88,12 @@ func set_stride(distance: float, moving: bool) -> void:
 		_pose()
 
 
+func planted_sole(side: int) -> Vector3:
+	# The boot origin is the ankle, 95 mm above the sole. Bias slightly toward
+	# the heel, where the first contact takes place.
+	return _boots[side].to_global(Vector3(0,-.095,.045))
+
+
 func set_first_person(value: bool) -> void:
 	_first_person = value
 	_head.visible = not value

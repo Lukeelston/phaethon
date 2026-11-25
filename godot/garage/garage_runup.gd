@@ -33,6 +33,7 @@ var _switch_audio: SwitchVoice
 var _anchors := {}
 var _engine_mounts: Array[Node3D] = []
 var _outside: Array[AudioStreamPlayer3D] = []
+var _exterior_screening := 0.0
 var _muted := OS.get_cmdline_user_args().has("--mute")
 
 
@@ -296,6 +297,20 @@ func _close_cockpit_audio() -> void:
 	_anchors.clear()
 
 
+func screen_exterior(amount: float) -> void:
+	_exterior_screening = amount
+	for emitter in _outside:
+		_filter_exterior(emitter)
+
+
+func _filter_exterior(emitter: AudioStreamPlayer3D) -> void:
+	# The laminated window passes the idle's low rumble more readily than
+	# bearing and exhaust detail. Scale the spatial reference distance so the
+	# existing engine gain and its cockpit boarding fade can work independently.
+	emitter.unit_size = 4.0 * db_to_linear(-3.0 * _exterior_screening)
+	emitter.attenuation_filter_cutoff_hz = 5000.0 * pow(.12, _exterior_screening)
+
+
 ## When the pilot steps out, only two spatial idle loops remain in the hall.
 ## Both sounds originate at the actual parked engine, using that craft's low-bank take.
 func _exterior_sound() -> void:
@@ -312,7 +327,7 @@ func _exterior_sound() -> void:
 		for engine in _airframe.model.engines:
 			var emitter := AudioStreamPlayer3D.new()
 			emitter.stream = wav
-			emitter.unit_size = 4.0
+			_filter_exterior(emitter)
 			emitter.max_distance = 34.0
 			emitter.pitch_scale = float(EngineVoice.TUNE.v8_rpm[0]) / 800.0 * tuning.y
 			add_child(emitter)
