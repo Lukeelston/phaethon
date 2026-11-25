@@ -173,9 +173,10 @@ func _run() -> void:
 	_go(v, "options")
 	var one: Array = _keys(v)
 	var head: String = v.menu.text().get_slice("\n", 0)
-	_check("the OPTIONS page's first panel is as it was (%s), headed \"%s\"" % [one, head],
-		one == ["consumables", "powerups", "field", "autopilot", "rush", "nose", "back"] and head == "OPTIONS   1 / 2" and v.menu.at == 0 and v.menu.paged())
-	_check("... and its BACK says where stepping on goes: \"%s\"" % v.menu.text().get_slice("\n", 8).strip_edges(), v.menu.text().get_slice("\n", 8).contains("BACK   (DOWN: PAGE 2)"))
+	# (parked at its launch site, it begins with Codex's PILOT GARAGE: vr_cockpit.gd _menu_items, craft_view.gd can_visit_garage)
+	_check("the OPTIONS page's first panel is as it was, with the garage first (%s), headed \"%s\"" % [one, head],
+		v.can_visit_garage() and one == ["garage", "consumables", "powerups", "field", "autopilot", "rush", "nose", "back"] and head == "OPTIONS   1 / 2" and v.menu.at == 0 and v.menu.paged())
+	_check("... and its BACK says where stepping on goes: \"%s\"" % v.menu.text().get_slice("\n", one.size() + 1).strip_edges(), v.menu.text().get_slice("\n", one.size() + 1).contains("BACK   (DOWN: PAGE 2)"))
 	for k in one.size() - 1:
 		v.menu.move(1)
 	var on_back: String = v.menu.key()
@@ -191,7 +192,7 @@ func _run() -> void:
 	v.menu.move(1)
 	v.menu.move(1)
 	v.menu.move(1)
-	_check("down past the last panel's BACK is the first panel's first line (%s, panel %d)" % [v.menu.key(), v.menu.page + 1], v.menu.key() == "consumables" and v.menu.page == 0)
+	_check("down past the last panel's BACK is the first panel's first line (%s, panel %d)" % [v.menu.key(), v.menu.page + 1], v.menu.key() == one[0] and v.menu.page == 0)
 	v.menu.move(-1)
 	_check("... and up from there the last panel's BACK", v.menu.key() == "back" and v.menu.page == 1)
 	_go(v, "back")

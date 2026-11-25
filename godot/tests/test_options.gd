@@ -71,11 +71,12 @@ func _run() -> void:
 	_go(v, "options")
 	var page: Array = _keys(v)
 	var text: String = v.menu.text()
+	# (parked at its launch site, it begins with Codex's PILOT GARAGE: vr_cockpit.gd _menu_items, craft_view.gd can_visit_garage)
 	_check("it opens the second page: %s, headed \"%s\", the cursor on its first line" % [page, text.get_slice("\n", 0)],
-		page == ["consumables", "powerups", "field", "autopilot", "rush", "nose", "back"] and text.begins_with("OPTIONS") and v.menu.at == 0 and text.contains("HEAT AND ENERGY   OFF") and text.contains("POWER-UPS   ON"))
+		v.can_visit_garage() and page == ["garage", "consumables", "powerups", "field", "autopilot", "rush", "nose", "back"] and text.begins_with("OPTIONS") and v.menu.at == 0 and text.contains("HEAT AND ENERGY   OFF") and text.contains("POWER-UPS   ON"))
 	_go(v, "consumables")
 	_check("HEAT AND ENERGY switched on: the sim's limits on from that moment, the engines at their resting heat (%.2f), the line reads ON, saved (%s)" % [v.sim.eL.heat, _saved().get("consumables", "")],
-		Cockpit.consumables and v.sim.P.limits and v.sim.eL.heat == 0.3 and v.menu.text().contains("HEAT AND ENERGY   ON") and _saved().get("consumables", "") == "on" and v.menu.at == 0)
+		Cockpit.consumables and v.sim.P.limits and v.sim.eL.heat == 0.3 and v.menu.text().contains("HEAT AND ENERGY   ON") and _saved().get("consumables", "") == "on" and v.menu.key() == "consumables")
 	_go(v, "powerups")
 	await process_frame
 	_check("POWER-UPS switched off: the gates gone (%s), saved (%s)" % [v.power_ups == null, _saved().get("powerups", "")],
