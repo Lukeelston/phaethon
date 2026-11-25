@@ -1,5 +1,6 @@
 ## WindAudio: the air the pod is tearing through. Three stereo noise loops, synthesized once at
-## setup (no assets), decorrelated left and right so the wind sits around your head:
+## setup (no assets), decorrelated left and right so the wind sits around your head. Each is a loop
+## of its own length (NOISE_LOOP_S), long enough that its repeat is not heard:
 ##   rush    pink noise: the airstream. Louder with speed; its low-pass opens with speed, so
 ##           it brightens from a hiss at a jog to a tearing roar at 5,000 mph.
 ##   buffet  brown-noise rumble with slow gusts: kicks up when the craft slides (slip angle)
@@ -26,7 +27,13 @@ extends Node
 
 const EngineAudio := preload("res://audio/engine_audio.gd")   # the seal follows its second engine
 const RATE := 44100
-const LOOP_S := 2.0     # seamless loops; filtering and gusts hide the repeat
+const LOOP_S := 2.0     # the flaps', the drag's, the hum's and the speed tone's loops: their heaves and partials are whole cycles in it
+# The three noise beds' loops, each its own length so their repeats never line up. (They were LOOP_S. Luke,
+# after flight 35: "the tunnels has a swooshing sound every second and a half": the 2 s rush loop, played at
+# pitch 1.14 at 1,127 mph, came round every 1.75 s, and under a city's hall the roof's reverb lifts the Wind
+# bus about 9 dB. Measured in the game's mix, tests/film_swoosh.gd.) At its highest pitch (1.2) the rush now
+# repeats every 8.3 s; each is normalised to the RMS its 2 s loop had, so every layer's level holds.
+const NOISE_LOOP_S := {"rush": 10.0, "whistle": 8.3, "buffet": 7.1}
 const XF_S := 0.25      # loop crossfade
 const SOUND := 343.0    # m/s
 const BOOM_S := 4.2
@@ -141,13 +148,13 @@ func setup(craft_sim) -> void:
 	streams.drag = make_loop("drag", 2024)
 	for layer in ["rush", "buffet", "whistle", "flapL", "flapR", "drag"]:
 		if not layer.begins_with("flap") and not streams.has(layer):
-			streams[layer] = make_loop(layer, 1000 + layer.length())
+			streams[layer] = make_loop(layer, 1000 + layer.length(), NOISE_LOOP_S.get(layer, LOOP_S))
 		var p := AudioStreamPlayer.new()
 		p.stream = streams.flap if layer.begins_with("flap") else streams[layer]
 		p.bus = busmap[layer]
 		p.volume_db = -80.0
 		add_child(p)
-		p.play(randf() * LOOP_S)
+		p.play(randf() * p.stream.get_length())
 		players[layer] = p
 	_bus("Field", "Master")   # the field bypasses the sealed wind's low-pass
 	var rumble_bus := _bus("FieldRumble", "Field")
@@ -205,11 +212,17 @@ static func _bus(name: String, send: String) -> int:
 	return i
 
 
-## One seamless stereo loop of the given noise colour. Generated LOOP_S + XF_S long, then the
+## One seamless stereo loop of the given noise colour. Generated `secs` + XF_S long, then the
 ## tail is crossfaded (equal power) into the head, so the jump from the last sample back to the
-## first lands on the sample that originally followed it.
-static func make_loop(kind: String, seed: int) -> AudioStreamWAV:
-	var n := int(RATE * LOOP_S)
+## first lands on the sample that originally followed it. `secs` is the noise beds' own (rush,
+## buffet, whistle: NOISE_LOOP_S); the flap's and the drag's heaves are whole cycles in LOOP_S, so
+## theirs is always LOOP_S. Longer than LOOP_S, a loop is scaled to the RMS its LOOP_S loop (the
+## same seed) has, not to the same peak: a longer stretch of noise reaches a higher peak, and
+## peak-normalised it came out about 1 dB quieter.
+static func make_loop(kind: String, seed: int, secs := LOOP_S) -> AudioStreamWAV:
+	if not kind in ["rush", "buffet", "whistle"]:
+		secs = LOOP_S
+	var n := int(RATE * secs)
 	var xf := int(RATE * XF_S)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed
@@ -380,13 +393,20 @@ static func make_loop(kind: String, seed: int) -> AudioStreamWAV:
 		for v in buf:
 			peak = maxf(peak, absf(v))
 	var k := 0.7 / peak
+	if secs != LOOP_S:   # the level its LOOP_S loop had
+		var want := _rms16(make_loop(kind, seed))
+		var sq := 0.0
+		for buf in chans:
+			for v in buf:
+				sq += v * v
+		k = want / (32767.0 * sqrt(sq / (2.0 * n)))
 	var left := chans[0]
 	var right := chans[1]
 	var data := PackedByteArray()
 	data.resize(n * 4)
 	for i in n:
-		data.encode_s16(i * 4, int(left[i] * k * 32767.0))
-		data.encode_s16(i * 4 + 2, int(right[i] * k * 32767.0))
+		data.encode_s16(i * 4, int(clampf(left[i] * k, -1.0, 1.0) * 32767.0))
+		data.encode_s16(i * 4 + 2, int(clampf(right[i] * k, -1.0, 1.0) * 32767.0))
 	var w := AudioStreamWAV.new()
 	w.format = AudioStreamWAV.FORMAT_16_BITS
 	w.stereo = true
@@ -396,6 +416,16 @@ static func make_loop(kind: String, seed: int) -> AudioStreamWAV:
 	w.loop_begin = 0
 	w.loop_end = n
 	return w
+
+
+## A 16-bit stereo stream's RMS, both channels, in sample units.
+static func _rms16(w: AudioStreamWAV) -> float:
+	var d := w.data
+	var sq := 0.0
+	for i in d.size() / 2:
+		var v := float(d.decode_s16(i * 2))
+		sq += v * v
+	return sqrt(sq / maxf(d.size() / 2, 1))
 
 
 ## A fixed, deep field resonance: 36 Hz with gentle harmonics at 72/108/144 Hz so the headset's
