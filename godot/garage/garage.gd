@@ -10,6 +10,9 @@ const Runup := preload("res://garage/garage_runup.gd")
 const Prompts := preload("res://garage/garage_prompts.gd")
 const WheelGrip := preload("res://garage/inspection_wheel_grip.gd")
 const ShopAudio := preload("res://garage/workshop_audio.gd")
+const Livery := preload("res://view/livery.gd")
+const Settings := preload("res://release/game_settings.gd")
+const REFUSED_RUNNING := "Shut the engines down first"      # (a run-up bay keeps its paint)
 
 var environment: Workshop
 var walker: Walker
@@ -26,6 +29,8 @@ var _wheel_grip := WheelGrip.new()
 var _using_pad := false
 var _departing := false
 var _boarding := false
+var _refused := ""          # why the last change at the bay in front of the pilot was refused ("" none) ...
+var _refused_bay := ""      # ... and at which bay
 
 
 func _ready() -> void:
@@ -58,6 +63,7 @@ func _ready() -> void:
 	walker.launch_requested.connect(launch_flight)
 	walker.back_requested.connect(return_to_menu)
 	walker.cockpit_control_requested.connect(_work_control)
+	walker.bay_control_requested.connect(_work_bay)
 	_prompts = Prompts.new()
 	add_child(_prompts)
 	_prompts.setup(walker.xr_live)
@@ -116,6 +122,62 @@ func _runup_for(id: String, power: StartupSequence = null) -> Runup:
 func _work_control(control: String) -> void:
 	if not _departing and not seated_craft.is_empty():
 		_runups[seated_craft].work(control)
+
+
+## On foot at a bay (garage_walker.gd bay_control_requested): "paint" takes the next paint on the row for the craft
+## standing there (view/livery.gd choices_for, wrapping), saved at once under its key (the one the flight and the menus
+## read), and the bay's craft is built again in it. Refused, and the prompt says why, while that bay's engines run.
+func _work_bay(control: String) -> void:
+	if _departing or _boarding or not seated_craft.is_empty() or _at_rotor():
+		return
+	var bay := environment.nearest_bay(walker.global_position)
+	if not Fleet.GARAGE_BAYS.has(bay):
+		return
+	var craft := environment.bay_craft(bay)
+	if control != "paint":
+		return
+	if not _bay_cold(bay):
+		_refused = REFUSED_RUNNING
+		_refused_bay = bay
+		_update_prompt()
+		return
+	var ids := Livery.ids_for(craft)
+	Settings.set_choice(Livery.key_for(craft), ids[(ids.find(Livery.saved_for(craft)) + 1) % ids.size()])
+	_rebuild_bay(bay, craft)
+	_refused = ""
+	_update_prompt()
+
+
+## Is a bay's craft cold: no run-up, or one with the battery off and both engines off?
+func _bay_cold(bay: String) -> bool:
+	if not _runups.has(bay):
+		return true
+	var startup := _runups[bay].startup
+	return not startup.batt and startup.stage[0] == "off" and startup.stage[1] == "off"
+
+
+## Build a cold bay's craft again in place (garage_environment.gd rebuild_bay), as `craft` in its saved paint. The cab
+## built for it goes, so the next boarding builds it in the new paint; its run-up is set up again on the new airframe,
+## with the switches moved in this visit (`keep_switches`).
+func _rebuild_bay(bay: String, craft: String, keep_switches := true) -> void:
+	var moved := {}
+	if _runups.has(bay):
+		if keep_switches:
+			moved = _runups[bay].switch_settings.duplicate()
+		_runups[bay].free()
+		_runups.erase(bay)
+	if _cockpit != null and _cockpit.get_parent() == environment.bay_node(bay):
+		_cockpit.free()
+		_cockpit = null
+	environment.rebuild_bay(bay, craft, Livery.built(craft))
+	if not moved.is_empty():
+		_runup_for(bay).apply_switches(moved)
+
+
+## The name of the paint a craft wears, as its row names it ("Factory", "Cobalt blue").
+func _paint_name(craft: String) -> String:
+	var ids := Livery.ids_for(craft)
+	return str(Livery.choices_for(craft)[maxi(0, ids.find(Livery.saved_for(craft)))][1])
 
 
 func _operate_cockpit(delta: float) -> void:
@@ -226,11 +288,14 @@ func _update_prompt() -> void:
 	if _near_rotor:
 		_prompts.show_rotor(_using_pad, environment.inspection.global_transform)
 		return
-	var craft := _nearby if seated_craft.is_empty() else seated_craft
+	var craft := environment.bay_craft(_nearby) if seated_craft.is_empty() else seated_craft
 	var craft_name := str(Fleet.NAMES.get(craft, ""))
 	var anchor := environment.spawn_transform()
 	if not seated_craft.is_empty():
 		anchor = environment.seat_transform(craft)
 	elif walker.xr_live:
-		anchor = environment.marker_guide(craft,walker.global_position)
-	_prompts.show_controls(craft_name, not seated_craft.is_empty(), Route.destination_label(), _using_pad, anchor)
+		anchor = environment.marker_guide(_nearby,walker.global_position)
+	if _refused_bay != _nearby or not seated_craft.is_empty():
+		_refused = ""
+	var paint := _paint_name(craft) if seated_craft.is_empty() and not craft.is_empty() else ""
+	_prompts.show_controls(craft_name, not seated_craft.is_empty(), Route.destination_label(), _using_pad, anchor, paint, _refused)

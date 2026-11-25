@@ -30,6 +30,7 @@ carries an operated cockpit's startup and parking-brake state onto the pad.
 |---|---|---|---|
 | Walk and look | WASD and mouse | Left and right sticks | Left stick to walk, right stick to turn smoothly |
 | Board or step out | E | A | Right A |
+| Next paint for the craft at the bay (on foot) | I | X | Left X |
 | Start or shut down | I | X | Left X or overhead controls |
 | Toggle parking brake | P | Left stick click | Left stick click or PARK switch |
 | Work the throttles | W/S left, Up/Down right, X for idle | Left and right sticks forward | Grab and move either lever, or squeeze the opposite trigger |

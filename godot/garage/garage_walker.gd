@@ -6,6 +6,9 @@ signal interact_requested
 signal launch_requested
 signal back_requested
 signal cockpit_control_requested(control: String)
+# On foot, the same two buttons work the bay in front of the pilot (garage.gd _work_bay): "paint" (key I, pad X, left
+# X in the headset) and "body" (key P, pad L3, left stick click in the headset).
+signal bay_control_requested(control: String)
 signal boot_planted(side: int, at: Vector3, speed: float)
 
 const Pilot := preload("res://garage/pilot_model.gd")
@@ -309,8 +312,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		KEY_ESCAPE: back_requested.emit()
 		KEY_V: _inspect(not third_person)
 		KEY_I, KEY_P:
-			if not seated or xr_live: return
-			cockpit_control_requested.emit("power" if key == KEY_I else "park")
+			if xr_live: return
+			if seated:
+				cockpit_control_requested.emit("power" if key == KEY_I else "park")
+			else:
+				bay_control_requested.emit("paint" if key == KEY_I else "body")
 		_: return
 	if is_inside_tree():
 		get_viewport().set_input_as_handled()
@@ -428,7 +434,7 @@ func _xr_input(delta := 1.0 / 60.0) -> Vector2:
 	var actions := down - _xr_down if _xr_focused else Vector3i.ZERO
 	var switches := Vector2i(int(have_left and left.is_button_pressed("ax_button")),
 			int(have_left and left.is_button_pressed("primary_click")))
-	var pressed := switches - _xr_cockpit_down if seated and not _align_tracking and _xr_focused and _left_live else Vector2i.ZERO
+	var pressed := switches - _xr_cockpit_down if not _align_tracking and _xr_focused and _left_live else Vector2i.ZERO
 	_xr_cockpit_down = switches
 	if not _left_live:
 		actions.y = 0
@@ -447,8 +453,12 @@ func _xr_input(delta := 1.0 / 60.0) -> Vector2:
 	if actions.x > 0: interact_requested.emit()
 	elif actions.y > 0: launch_requested.emit()
 	elif actions.z > 0: back_requested.emit()
-	elif pressed.x > 0: cockpit_control_requested.emit("power")
-	elif pressed.y > 0: cockpit_control_requested.emit("park")
+	elif pressed.x > 0:
+		if seated: cockpit_control_requested.emit("power")
+		else: bay_control_requested.emit("paint")
+	elif pressed.y > 0:
+		if seated: cockpit_control_requested.emit("park")
+		else: bay_control_requested.emit("body")
 	var stick := left.get_vector2("primary") if have_left else Vector2.ZERO
 	return _stick(Vector2(stick.x,-stick.y))
 

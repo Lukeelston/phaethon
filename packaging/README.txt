@@ -51,6 +51,7 @@ Choose a map on the main menu, then one of two:
   The menu names that craft just above Fly.
 - Pilot garage opens the workshop. Walk to a craft, press E to board it and
   F to launch: you fly it on the map you chose. Esc goes back to the menu.
+  Standing at a craft's bay, I (pad X) gives it the next paint on its row.
 
 NEW IN 0.5.0
 - Three more craft: Orrery IX, Kiln Six and Vesper. Choose your craft in the

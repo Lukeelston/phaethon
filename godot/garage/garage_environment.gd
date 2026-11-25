@@ -51,6 +51,7 @@ const ENGINE_SHOES := {
 }
 
 var _bays := {}
+var _standing := {}      # bay -> the craft standing in it (its own)
 var _gates := {}
 var _marker_guides: Dictionary[String, Array] = {}
 var _finishes := {}
@@ -133,6 +134,21 @@ func build() -> void:
 
 func bay_node(id: String) -> Node3D:
 	return _bays.get(id)
+
+
+## The craft standing in a bay.
+func bay_craft(id: String) -> String:
+	return _standing.get(id, "")
+
+
+## A bay's craft built again in place (garage.gd: its paint changed), as `craft` in `finish`: the same bay node, so the
+## inspection board's and the service lamps' connections, the stands and the gate stay as they are.
+func rebuild_bay(id: String, craft: String, finish: String) -> void:
+	var bay := bay_node(id) as Parked
+	if bay == null:
+		return
+	bay.rebuild(craft, finish)
+	_standing[id] = craft
 
 
 func seat_transform(id: String) -> Transform3D:
@@ -459,6 +475,7 @@ func _berth(id: String, index: int, paint: String) -> void:
 	add_child(bay)
 	bay.build(id, paint)
 	_bays[id] = bay
+	_standing[id] = id
 	# Keep the entire painted opening clear of a broad coaming like Vesper's.
 	var shell_bounds: AABB = bay.model.pod.transform * bay.model.pod.mesh.get_aabb()
 	var shell_edge := side * shell_bounds.get_center().x + shell_bounds.size.x * .5

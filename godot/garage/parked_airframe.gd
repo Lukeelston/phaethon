@@ -19,6 +19,20 @@ var sim: Dictionary
 var model: Model
 var paint := Livery.FACTORY
 var engine_centers: Array[Vector3] = []
+var _colliders: Array[StaticBody3D] = []
+
+
+## Build it again in place, as `id` in `finish` (a bay's paint changed): the airframe and its colliders go and come
+## back; this node, its signals and whatever else stands on it (a run-up, a cab: the garage's) stay.
+func rebuild(id: String, finish := Livery.FACTORY) -> void:
+	if model != null:
+		model.free()
+		model = null
+	for body in _colliders:
+		body.free()
+	_colliders.clear()
+	engine_centers.clear()
+	build(id, finish)
 
 
 func build(id: String, finish := Livery.FACTORY) -> void:
@@ -108,6 +122,7 @@ func _collider(label: String, shape: Shape3D, frame: Transform3D) -> void:
 	var body := StaticBody3D.new()
 	body.name = label + "Collision"
 	add_child(body, true)
+	_colliders.append(body)
 	var part := CollisionShape3D.new()
 	part.shape = shape
 	part.transform = frame

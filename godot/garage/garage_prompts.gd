@@ -10,6 +10,8 @@ var _placard: Node3D
 var _vr_title: Label3D
 var _vr_hint: Label3D
 var _vr_status: Label3D
+var _vr_bay: Label3D       # on foot at a bay, under the sign's two lines: its paint control (or why it was refused)
+var _backing: MeshInstance3D
 var _face: QuadMesh
 var _mount_clips: MultiMeshInstance3D
 var _seated := false
@@ -54,6 +56,7 @@ func _make_placard() -> void:
 	_placard = Node3D.new()
 	add_child(_placard)
 	var backing := MeshInstance3D.new()
+	_backing = backing
 	_face = QuadMesh.new()
 	_face.size = Vector2(0.99, 0.19)
 	var enamel := StandardMaterial3D.new()
@@ -83,6 +86,10 @@ func _make_placard() -> void:
 	_vr_hint = _sign_line(28, -0.038, UI.INK)
 	_vr_status = _sign_line(26, 0.063, UI.AMBER)
 	_vr_status.hide()
+	_vr_bay = _sign_line(40, -0.112, UI.INK)
+	_vr_bay.font = BayFont
+	_vr_bay.pixel_size = .00115
+	_vr_bay.hide()
 
 
 func _sign_line(size: int, height: float, color: Color) -> Label3D:
@@ -125,6 +132,8 @@ func show_rotor(pad: bool, counter: Transform3D) -> void:
 	if _placard:
 		_sign_type(false)
 		_mount_clips.hide()
+		_vr_bay.hide()
+		_backing.position.y = 0.0
 		# Mount this instruction on the forward fascia, below the spindle.
 		_placard.global_transform = counter.translated_local(Vector3(1.0, .847, .947)).scaled_local(Vector3.ONE * .60)
 		_face.size = Vector2(.99, .19)
@@ -135,6 +144,7 @@ func show_rotor(pad: bool, counter: Transform3D) -> void:
 	else:
 		_title.text = "%s  Spin inspection rotor" % ("A" if pad else "E")
 		_hint.text = "Watch the dial as the rotor turns."
+		_status.hide()
 
 
 func place_on_marker(mount: Transform3D) -> void:
@@ -151,9 +161,13 @@ func _sign_type(on_marker: bool) -> void:
 	_vr_hint.pixel_size = .00115 if on_marker else .00089
 
 
-func show_controls(craft: String, seated: bool, destination: String, pad: bool, anchor: Transform3D) -> void:
+## `paint`: on foot at a bay, the name of the paint the craft there wears (its control is offered); `refused`: why the
+## last change at that bay was refused ("" none).
+func show_controls(craft: String, seated: bool, destination: String, pad: bool, anchor: Transform3D, paint := "",
+		refused := "") -> void:
 	_seated = seated
 	_show_status()
+	var at_bay := not seated and not craft.is_empty() and not paint.is_empty()
 	var board := "A" if pad or _placard else "E"
 	var fly := "Y" if pad or _placard else "F"
 	var back := "B" if pad or _placard else "Esc"
@@ -174,6 +188,8 @@ func show_controls(craft: String, seated: bool, destination: String, pad: bool, 
 		hint += "\n%s  Launch flight     %s  Step out     %s  Menu" % [fly, board, back]
 	elif not craft.is_empty():
 		action = "%s  Board %s" % [board, craft]
+		if at_bay:
+			hint = "%s  Paint: %s\n%s" % ["X" if pad else "I", paint, hint]
 	if _placard:
 		_sign_type(not seated)
 		if not seated:
@@ -192,6 +208,16 @@ func show_controls(craft: String, seated: bool, destination: String, pad: bool, 
 			_placard.global_transform = rail.rotated_local(Vector3.UP, deg_to_rad(75)).scaled_local(Vector3.ONE * .68)
 		_vr_title.text = action
 		_vr_hint.text = hint
+		# on foot at a bay a third line, under the two (the card grows downward, from its clips): the paint control
+		_vr_bay.visible = at_bay
+		_vr_bay.modulate = UI.AMBER if not refused.is_empty() else UI.INK
+		_vr_bay.text = refused.to_upper() if not refused.is_empty() else "X   PAINT  " + paint.to_upper()
+		if at_bay:
+			_face.size = Vector2(.99, .30)
+		_backing.position.y = -.055 if at_bay else 0.0
 	else:
 		_title.text = action
 		_hint.text = hint
+		if not seated:
+			_status.text = refused
+			_status.visible = not refused.is_empty()
