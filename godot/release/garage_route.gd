@@ -27,6 +27,15 @@ static func enter(tree: SceneTree, xr: bool, course: String) -> void:
 	tree.call_deferred("change_scene_to_file", GARAGE_SCENE)
 
 
+## The menus' Fly button: at once, in the craft last used, with its saved switches (the paint is read where the
+## craft is built, from the same saved choice).
+static func fly(tree: SceneTree, xr: bool, course: String) -> void:
+	if UI.course_index(course) < 0:
+		return
+	var craft: String = UI.Settings.selected_craft()
+	start_flight(tree, xr, craft, UI.course_overrides(course), {craft: UI.Settings.craft_setup(craft)})
+
+
 static func enter_parked(tree: SceneTree, flight: View, xr: bool) -> void:
 	if not flight.can_visit_garage():
 		return
@@ -36,8 +45,10 @@ static func enter_parked(tree: SceneTree, flight: View, xr: bool) -> void:
 	is_xr = xr
 	arrival_craft = sim.P.vehicle
 	var arrival: Dictionary = _bays.get(arrival_craft, {})
-	arrival.merge(flight.parked_systems(), true)
+	var parked := flight.parked_systems()
+	arrival.merge(parked, true)
 	_bays[arrival_craft] = arrival
+	UI.Settings.set_craft_setup(arrival_craft, parked)
 	_destination = "emergency" if job == "emergency" else UI.course_for(track, View.spot_override)
 	_overrides = [track, job, View.spot_override]
 	tree.call_deferred("change_scene_to_file", GARAGE_SCENE)
@@ -59,6 +70,7 @@ static func launch_flight(tree: SceneTree, craft_id: String, bays: Dictionary = 
 		return
 	arrival_craft = ""
 	UI.Settings.set_selected_craft(craft_id)
+	UI.Settings.set_craft_setup(craft_id, bays.get(craft_id, {}))
 	var route := _overrides if not _overrides.is_empty() else UI.course_overrides(_destination)
 	start_flight(tree, is_xr, craft_id, route, bays)
 

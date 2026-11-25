@@ -73,3 +73,39 @@ static func set_choice(key: String, value: String) -> void:
 	var error := config.save(prefs_path)
 	if error != OK:
 		push_warning("Could not save the %s preference: %s" % [key, error_string(error)])
+
+
+## The switch set-up a craft was last flown with ("garage" section, one entry a craft): "handling" ("speed" or
+## "starfighter") and "slide" (bool), each present only when saved and valid. Anything else stored is dropped (a
+## stale or hand-edited file); the engine state is never saved, a flight always begins on a cold pad.
+static func craft_setup(id: String) -> Dictionary:
+	var config := ConfigFile.new()
+	if config.load(prefs_path) != OK:
+		return {}
+	return _valid_setup(config.get_value("garage", Craft.known(id), {}))
+
+## Merges the valid keys of `moved` over the craft's saved set-up. Nothing valid, nothing saved.
+static func set_craft_setup(id: String, moved: Dictionary) -> void:
+	var valid := _valid_setup(moved)
+	if valid.is_empty():
+		return
+	var setup := craft_setup(id)
+	setup.merge(valid, true)
+	var config := ConfigFile.new()
+	config.load(prefs_path)
+	config.set_value("garage", Craft.known(id), setup)
+	var error := config.save(prefs_path)
+	if error != OK:
+		push_warning("Could not save the %s set-up: %s" % [id, error_string(error)])
+
+static func _valid_setup(raw: Variant) -> Dictionary:
+	var valid := {}
+	if not raw is Dictionary:
+		return valid
+	var handling = raw.get("handling")
+	if handling is String and handling in ["speed", "starfighter"]:
+		valid["handling"] = handling
+	var slide = raw.get("slide")
+	if slide is bool:
+		valid["slide"] = slide
+	return valid
