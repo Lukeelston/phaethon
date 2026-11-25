@@ -35,7 +35,9 @@
 ## The alarm: a tone made in code (alarm_tone: no recording), played once at each call on the director's own player (none
 ## in a flight without sound: --mute, a shot). A commuter run down: a burst where it was (view/raid_burst.gd), drawn from
 ## commuter_lost for whatever craft, armed or not. The tone, its player and the bursts' batch and shader are made at
-## build (which only raids on reach), not at their first use mid-flight.
+## build (which only raids on reach), not at their first use mid-flight; so is a fixed-gun craft's fire control
+## (view/gunnery.gd make, dormant: not stepped until the GUN is first armed), which at its first arming cost a frame of
+## 25 ms (70 on a cold shader cache).
 extends Node3D
 
 ## A commuter run down, at (x, y) in the sims' frame (for the view's effects).
@@ -48,6 +50,7 @@ const Settings := preload("res://release/game_settings.gd")
 const Traffic := preload("res://view/network_traffic.gd")
 const Synth := preload("res://audio/course_audio.gd")
 const Burst := preload("res://view/raid_burst.gd")
+const GunneryScript := preload("res://view/gunnery.gd")
 const ALARM_DB := -10.0                  # the alarm's level (unheard: 9 dB over the reward chimes' -19, 8 under the jolt's thump)
 const MODES := [["off", "Off"], ["on", "On"]]       # the menus' row: [id, name]
 const MPH := 2.236936
@@ -144,6 +147,9 @@ func build(v) -> void:           # (set `traffic` first: view.traffic_net)
 	alarm_tone()          # (made now, not at the first call)
 	_alarm_player()
 	_make_burst()
+	var weapon = v.craft.weapon if v.get("craft") != null else null
+	if weapon != null and not weapon.steps_stowed() and v.get("gunnery") == null:      # (fixed guns: a turret's is made at once)
+		v.gunnery = GunneryScript.make(v, true)
 
 
 ## Is the pilot where one can begin: on a public road, not in a shaft, at speed, with traffic's floor free?

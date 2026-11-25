@@ -18,9 +18,12 @@
 ## where it has none of them, RATE, BOLT_V, one hit a bolt, REACH, and its power's heat (the Basilisk's).
 ## Bolts and bursts are kept in the sims' frame (x, y, height) and drawn about the floating origin.
 ## The switch (deploy) and the trigger are the cockpit's: vr/vr_cockpit.gd, or K and F in the flat view. Fixed guns'
-## fire control is made the first time the GUN is armed: a flight that never arms them builds none of it (a turret's
-## is made at once, as its sight ball and glow are stepped while it is stowed).
+## fire control: with Raids on, the director makes it at load (network_raids.gd build), dormant: not stepped until
+## the GUN is first armed, so arming costs no frame; with Raids off it is made the first time the GUN is armed (a flight
+## that never arms them builds none of it), its sounds read already at the view's build (warm_sounds). A turret's is
+## made at once, as its sight ball and glow are stepped while it is stowed.
 ##   gunnery = Gunnery.frame(view, gunnery, delta)        # once per frame, after the camera and the world
+##   view.gunnery = Gunnery.make(view, true)              # (the director: fixed guns' made at load, dormant)
 class_name Gunnery
 extends Node3D
 
@@ -31,6 +34,7 @@ const SightShader := preload("res://view/gun_sight.gdshader")
 const GlowShader := preload("res://view/gun_glow.gdshader")
 const SmokeShader := preload("res://view/gun_smoke.gdshader")
 const AUDIO_DIR := "res://audio/turret/"
+const SOUND_NAMES := ["fire", "deploy", "stow", "impact", "burst"]
 
 const REACH := 2600.0             # m: the sight looks this far for something to be on
 const SKY := 2000.0               # ... and with nothing there, it stands this far out
@@ -111,6 +115,9 @@ var _gun_audio: Array = []
 var _world_audio: Array = []
 var _was_out := false
 var _was_moving := false
+var dormant := false               # made at load (Raids on) and not stepped until the GUN is first armed
+var build_ms := 0.0                # what build() took (the cost probe reads it)
+static var _sound_cache := {}      # name -> AudioStream: the fire control's sounds, read from disk once a run
 var _aim_from := Vector3.INF       # the aim's last ground search: from, along, and where it met the ground (INF: nowhere)
 var _aim_along := Vector3.ZERO
 var _aim_hit := Vector3.INF
@@ -121,21 +128,45 @@ var _now := 0.0                    # s of this fire control's frames (step)
 
 ## Once per frame. Creates itself, if the craft has a weapon, the first time its GUN is armed (`gun_wanted`): a
 ## flight that never arms its fixed guns builds no fire control (its batches, its sounds). A turret's is made at
-## once: stowed, it is still stepped (its mount's steps_stowed). Once made, it steps on.
+## once: stowed, it is still stepped (its mount's steps_stowed). One made at load (dormant: the director's, Raids on)
+## is not stepped until the GUN is first armed. Once made and woken, it steps on.
 static func frame(v, g, delta: float):
 	if v == null or v.craft == null or v.craft.weapon == null:
 		return g
 	if g == null:
 		if not v.gun_wanted and not v.craft.weapon.steps_stowed():
 			return g
-		g = load("res://view/gunnery.gd").new()
-		v.add_child(g)
-		g.build(v)
+		g = make(v)
+	if g.dormant:
+		if not v.gun_wanted:
+			return g
+		g.dormant = false
 	g.step(delta)
 	return g
 
 
+## A fire control for view v's craft, built (its sights, batches and players) and in the view's tree; `asleep`: dormant
+## until the GUN is first armed.
+static func make(v, asleep := false):
+	var g = load("res://view/gunnery.gd").new()
+	g.dormant = asleep
+	v.add_child(g)
+	g.build(v)
+	return g
+
+
+## The fire control's sounds, read from disk once (the first fire control's build reads them, or an armed craft's view
+## at its build, Raids off, so its first arming reads none).
+static func warm_sounds() -> void:
+	for n: String in SOUND_NAMES:
+		if not _sound_cache.has(n):
+			var path: String = AUDIO_DIR + n + ".wav"
+			if ResourceLoader.exists(path):
+				_sound_cache[n] = load(path)
+
+
 func build(v) -> void:
+	var t_build := Time.get_ticks_usec()
 	view = v
 	name = "Gunnery"
 	mount = v.craft.weapon
@@ -154,10 +185,10 @@ func build(v) -> void:
 	_bolt_mm = _batch("GunBolts", _bolt_mesh(), _glow_material(true), MAX_BOLTS)
 	_flash_mm = _batch("GunFlashes", _disc(), _glow_material(false), MAX_FX)
 	_smoke_mm = _batch("GunSmoke", _disc(), _smoke_material(), MAX_FX)
-	for n in ["fire", "deploy", "stow", "impact", "burst"]:
-		var path: String = AUDIO_DIR + n + ".wav"
-		if ResourceLoader.exists(path):
-			_sounds[n] = load(path)
+	warm_sounds()
+	for n: String in SOUND_NAMES:
+		if _sound_cache.has(n):
+			_sounds[n] = _sound_cache[n]
 	var at: Node = mount.node() if mount.node() != null else self      # (a mount with no node of its own: here)
 	_servo = _player(at, -2.0)
 	for i in 3:
@@ -167,6 +198,7 @@ func build(v) -> void:
 		p.unit_size = 60.0
 		p.max_distance = 6000.0
 		_world_audio.append(p)
+	build_ms = (Time.get_ticks_usec() - t_build) / 1000.0
 
 
 ## A sight's quad, hidden: drawn facing the eye, over everything (view/gun_sight.gdshader), its own material.

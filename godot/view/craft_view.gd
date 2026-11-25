@@ -409,6 +409,8 @@ func _ready() -> void:
 		traffic_net.raids = raids
 		raids.hit_taken.connect(func(_source): jolt(1.0))
 		raids.hit_taken.connect(_raid_hit)
+	elif craft and craft.weapon != null:
+		GunneryScript.warm_sounds()      # (Raids off: the fire control is made at the first arming, its sounds read now)
 
 
 func _sim_step() -> void:

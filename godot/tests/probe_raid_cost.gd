@@ -14,9 +14,11 @@
 ##                arrival     the frame the pack is put down (a full pack: pack_size 6)
 ##                hunting     the six moved 1.1-2.4 km ahead on the craft's road, hunting; the craft held at their speed;
 ##                            the GUN safe
-##                first arm   the frame the GUN is first armed (the fire control made: batches, sights, players) and the
-##                            frames after it, through the arms' deploy (--arm=split: view/gunnery.gd frame's four
-##                            steps, new, add_child, build and the first step, made here by hand and timed one by one)
+##                first arm   the frame the GUN is first armed (the fire control made: batches, sights, players; or, one
+##                            made at load and dormant, woken) and the frames after it, through the arms' deploy
+##                            (--arm=split: view/gunnery.gd frame's four steps, new, add_child, build and the first step,
+##                            made here by hand and timed one by one; with one made at load, its build then, as it
+##                            timed itself, and its waking, frame() by hand, timed)
 ##                first fire  the frames of the first shots (the bolts', flashes' and smoke's batches first drawn)
 ##                firing      the fire control swapped for a timed one (a thin subclass), the six kept 0.7-1.8 km out
 ##                            along the bore, PIN_DEG off it, on the road beneath (put back each frame, outside the
@@ -495,7 +497,17 @@ func _raid() -> bool:
 	# the first arm: the fire control made by the game itself (view/gunnery.gd frame), as in a flight; with --arm=split,
 	# frame()'s four steps made here one at a time, timed (the timed subclass in place of view/gunnery.gd)
 	var split := {}
-	if arm_split:
+	var made_at_load = game.get("gunnery")
+	if made_at_load != null:
+		print("RAID COST the fire control was made at load (dormant %s): its build took %.3f ms then; stepped since: %s" % [made_at_load.get("dormant"),
+			float(made_at_load.get("build_ms")), float(made_at_load.get("_now")) > 0.0])
+	if arm_split and made_at_load != null:
+		game.gun_wanted = true
+		var t0 := Time.get_ticks_usec()
+		game.gunnery = load("res://view/gunnery.gd").frame(game, made_at_load, DT)
+		split = {"woken (frame(), its first step)": (Time.get_ticks_usec() - t0) / 1000.0, "built at load": float(made_at_load.get("build_ms"))}
+		print("RAID COST first arm, split (made at load; woken here by hand, before the frame): %s ms" % str(split))
+	elif arm_split:
 		var t0 := Time.get_ticks_usec()
 		var made = TG.new()
 		var t1 := Time.get_ticks_usec()
@@ -533,7 +545,7 @@ func _raid() -> bool:
 			ResourceLoader.load(path, "", ResourceLoader.CACHE_MODE_IGNORE)
 			wav_ms += (Time.get_ticks_usec() - t0) / 1000.0
 	# firing, timed; the six put back ahead (0.7 to 1.8 km), where the gun is laid on them
-	if not arm_split:
+	if not arm_split or made_at_load != null:      # (the split's own is timed already; one made at load is not)
 		_swap_gun(TG)
 	var g = game.gunnery
 	print("RAID COST first arm's work: the fire control built %s %.3f ms; its five sounds read from disk again %.3f ms" % [
