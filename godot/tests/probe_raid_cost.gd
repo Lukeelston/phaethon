@@ -20,7 +20,8 @@
 ##                first fire  the frames of the first shots (the bolts', flashes' and smoke's batches first drawn)
 ##                firing      the fire control swapped for a timed one (a thin subclass), the six put back 0.7-1.8 km
 ##                            ahead (the craft held at the nearest one's speed), 120 frames to settle, then
-##                            FRAMES (600) of fire on the pack: the director's update, the fire control's step and the
+##                            --frames (1200 by default) of fire on the pack: the director's update (its prey search
+##                            timed inside it only), the fire control's step and the
 ##                            view's raid hooks (_raid_sync, _raid_result, _raid_target, _jolt_tick, _gun_controls),
 ##                            each timed by a thin subclass; the raiders kept whole (their damage cleared each frame,
 ##                            outside the timing) so the pack stays six; the trigger let go one frame in 360 (a pilot's
@@ -32,9 +33,17 @@
 ##                            stowed; the burst; the jolt's vignette at full; the six raiders in traffic. The viewport's
 ##                            GPU time (medians, and each part's median difference from all hidden, round by round)
 ##                kills       then the damage is let stand: the frames the raiders are shot down
+##   --mode=whole The whole frame, Raids on against Raids off at the same seat and place (--raids=on|off; the head
+##                only, for both): the plain game, no timed subclass. Both rail the craft at 1,150 mph (a city's cap)
+##                from 100 samples into DUNES's town zone; on, a full raid there and the GUN armed and firing on it:
+##                the six put 0.7-1.8 km out along the bore, PIN_DEG off it (four inside the assist's 3 degree cone,
+##                two outside: the road there bends, so its lanes alone would leave the cone empty), on the road
+##                beneath, and put back each frame and kept whole, outside the timing; off, nothing (no director, the
+##                GUN never armed). 240 frames to warm, 120 to settle, then --frames timed: the view's _process, the
+##                renderer's CPU, the GPU. Alternate the two; the difference is what a raid costs.
 ## Run windowed (a small window: the work is offscreen), with sound (a flight has it) on the Dummy driver:
 ## --xr-mode off --resolution 640x360 --fixed-fps 120 --audio-driver Dummy -s res://tests/probe_raid_cost.gd --
-##   --mode=off|raid [--frames=1200] [--vehicle=phaethon|talon] [--size=4128x2208] [--arm=split]
+##   --mode=off|raid|whole [--frames=1200] [--vehicle=phaethon|talon] [--size=4128x2208] [--arm=split] [--raids=on|off]
 ## Prints "RAID COST ..." lines, then "RAID COST DONE". Nothing it prints is a headset's figure: one flat wide view.
 extends SceneTree
 
@@ -48,6 +57,7 @@ const MPH := 2.236936
 const RAIDS_PATH := "res://view/network_raids.gd"
 const BUDGET_CPU := 0.5          # ms a frame: the director, flyers and weapons together, at a full raid (the plan)
 const BUDGET_GPU := 0.3          # ms: no new GPU cost over this
+const PIN_DEG := [1.0, -1.6, 1.3, -3.6, 2.4, 5.0]   # --mode=whole: the six, degrees left of the bore, 700 m on and 220 m apart
 
 # Thin subclasses, made from source at run time so that this file still loads on the base, which has no director.
 const TIMED_SEAT := """extends "res://vr/vr_cockpit.gd"
@@ -76,16 +86,20 @@ func _gun_controls() -> void:
 const TIMED_RAIDS := """extends "res://view/network_raids.gd"
 var spent_us := 0
 var part_us := {"prey": 0, "contact": 0, "gap": 0}
+var _in_update := false
 func update(delta: float) -> void:
 	for k in part_us:
 		part_us[k] = 0
 	var t0 := Time.get_ticks_usec()
+	_in_update = true
 	super.update(delta)
+	_in_update = false
 	spent_us = Time.get_ticks_usec() - t0
 func prey_of(c) -> Variant:
 	var t0 := Time.get_ticks_usec()
 	var p = super.prey_of(c)
-	part_us["prey"] += Time.get_ticks_usec() - t0
+	if _in_update:
+		part_us["prey"] += Time.get_ticks_usec() - t0
 	return p
 func _in_contact() -> bool:
 	var t0 := Time.get_ticks_usec()
@@ -134,6 +148,7 @@ var size := Vector2i(4128, 2208)
 var frames := 1200
 var vehicle := "phaethon"
 var arm_split := false           # --arm=split: the first arm's steps made by hand, timed one by one
+var raids_on := true             # --mode=whole: --raids=on|off
 var vp: SubViewport
 var vp_rid: RID
 var game
@@ -161,6 +176,8 @@ func _run() -> void:
 			vehicle = arg.trim_prefix("--vehicle=")
 		elif arg == "--arm=split":
 			arm_split = true
+		elif arg.begins_with("--raids="):
+			raids_on = arg.trim_prefix("--raids=") == "on"
 		elif arg.begins_with("--size="):
 			var wh := arg.trim_prefix("--size=").split("x")
 			size = Vector2i(int(wh[0]), int(wh[1]))
@@ -171,8 +188,10 @@ func _run() -> void:
 		ok = await _off()
 	elif mode == "raid":
 		ok = await _raid()
+	elif mode == "whole":
+		ok = await _whole()
 	else:
-		push_error("--mode=off or --mode=raid")
+		push_error("--mode=off, --mode=raid or --mode=whole")
 		ok = false
 	if game:
 		game.free()
@@ -333,6 +352,74 @@ func _nothing_new(when: String) -> bool:
 	return fine
 
 
+# --- the whole frame, Raids on against off -----------------------------------------------------------------------
+
+func _whole() -> bool:
+	if raids_on and not ResourceLoader.exists(RAIDS_PATH):
+		push_error("This build has no raids: --mode=whole --raids=on is for the head")
+		return false
+	_make(raids_on, Seat)
+	var sim = game.sim
+	var T = game.traffic_net
+	var t := _town(sim)
+	var zone: Vector2i = t.z
+	sim.respawn_on(int(t.road), int(zone.x) + 100, 1)
+	var speed := 1150.0 / MPH
+	_last_us = Time.get_ticks_usec()
+	for i in 240:
+		await _frame("warm", speed)
+	var R = game.get("raids")
+	var g = null
+	if raids_on:
+		if R == null:
+			push_error("No director with Raids pinned on")
+			return false
+		R.pack_size = Vector2i(6, 6)
+		R.time_limit = 1.0e9
+		R._alarm()
+		R.city = int(t.city)
+		await _frame("arrive", speed)
+		if R.state != "on":
+			push_error("The pack never arrived (state %s)" % R.state)
+			return false
+		_pack_ahead(R, T, 700.0, 220.0)
+		game.gun_wanted = true
+		for i in 150:                  # (the arms out: 1 s)
+			await _frame("deploy", speed)
+		g = game.gunnery
+		if g == null:
+			push_error("No fire control on arming")
+			return false
+		g.hold_fire = true
+	else:
+		if not _nothing_new("at the start"):
+			return false
+	var on_raider := 0
+	for i in 120 + frames:
+		if g != null:
+			g._damage.clear()          # (the six kept whole, and where they were put: outside the timing)
+			_pin_on_bore(R, T, g)
+		await _frame("whole" if i >= 120 else "settle", speed)
+		if g != null and i >= 120 and g.aim_car != null and g.aim_car.hostile:
+			on_raider += 1
+	var rows := _phase("whole")
+	var bad := 0
+	for r in rows:
+		bad += int(r.crash) + int(r.off_road)
+	var ok := bad == 0
+	if raids_on:
+		ok = ok and R.state == "on" and R.pack.size() == 6
+		print("RAID COST whole on: %d raiders, %d shots, the aim on a raider %d of %d frames, %d commuters lost" % [R.pack.size(), g.shots, on_raider, frames, R.lost])
+	else:
+		ok = _nothing_new("after %d frames" % (360 + frames)) and ok
+	var cpu := rows.map(func(r): return float(r.cpu))
+	print("RAID COST WHOLE %s %s %d frames from %d samples into %s's zone at 1,150 mph: process mean %.3f p50 %.3f p95 %.3f max %.3f ms; render cpu mean %.3f; gpu p50 %.3f; traffic %.3f ms, %.0f cars; %d frames crashed or off the road" % [
+		"on" if raids_on else "off", game.sim.P.vehicle, rows.size(), 100, t.name, _mean(cpu), _mid(cpu), _p95(cpu), _max(cpu),
+		_mean(rows.map(func(r): return float(r.rcpu))), _mid(rows.map(func(r): return float(r.gpu))), _mean(rows.map(func(r): return float(r.traffic))),
+		_mean(rows.map(func(r): return float(r.cars))), bad])
+	return ok
+
+
 # --- Raids on ----------------------------------------------------------------------------------------------------
 
 func _raid() -> bool:
@@ -372,7 +459,7 @@ func _raid() -> bool:
 	var forced: bool = R.state == ""
 	if forced:
 		R._alarm()
-	var alarm_i := _rows.size() - 1
+	var alarm_i := _rows.size() if forced else _rows.size() - 1      # (forced: between frames, so the next frame is its first)
 	print("RAID COST alarm after %d waiting frames%s: %s (%d km), state %s; the alarm's player %s, played %s" % [n, " (forced: none came)" if forced else "",
 		sim.cities[R.city].name if R.city >= 0 else "none", roundi(R.called_m / 1000.0), R.state, R.alarm, R.alarm.plays if R.alarm else 0])
 	for i in 30:
@@ -596,6 +683,38 @@ func _pack_ahead(R, T, near := 1100.0, apart := 260.0) -> void:
 		c.lane = k % nl
 		c.lat = T._lane_lat(c, c.lane)
 		c.v = 1150.0 / MPH      # (a city's limit: traffic's SF_V)
+		T._place(c)
+
+
+## --mode=whole: the six put 700 m out along the bore and 220 m apart, PIN_DEG off it, on the craft's road beneath (its
+## nearest sample, across it where they stand), going its way at its speed.
+func _pin_on_bore(R, T, g) -> void:
+	var sim = game.sim
+	var road: int = sim.pod.path
+	var Rd = sim.roads[road]
+	var ray: Array = g.mount.aim_ray(game.cam)
+	var o: Vector3 = g.to_sim(ray[0])
+	var d: Vector3 = g.dir_to_sim(ray[1])
+	var ahead := Vector2(d.x, d.y).normalized()
+	var left := Vector2(-ahead.y, ahead.x)
+	var way := int(T.oneway.get(road, 1))
+	var hint := int(sim.pod.hint)
+	for k in R.pack.size():
+		var c = R.pack[k]
+		var a: float = deg_to_rad(float(PIN_DEG[k % PIN_DEG.size()]))
+		var at := Vector2(o.x, o.y) + (ahead * cos(a) + left * sin(a)) * (700.0 + 220.0 * float(k))
+		var near := hint
+		var nd := INF
+		for i in range(maxi(0, hint - 10), mini(Rd.N - 1, hint + 110)):
+			var dd: float = Vector2(Rd.px[i], Rd.py[i]).distance_squared_to(at)
+			if dd < nd:
+				nd = dd
+				near = i
+		c.road = road
+		c.dir = way
+		c.f = float(near) + ((at.x - Rd.px[near]) * Rd.tx[near] + (at.y - Rd.py[near]) * Rd.ty[near]) / float(Rd.len[near])
+		c.lat = (at.x - Rd.px[near]) * Rd.nx[near] + (at.y - Rd.py[near]) * Rd.ny[near]
+		c.v = 1150.0 / MPH
 		T._place(c)
 
 
