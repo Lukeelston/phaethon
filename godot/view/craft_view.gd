@@ -185,13 +185,15 @@ var _raid_kills_paid := 0    # of raids.kills, the raiders the score has paid fo
 var _raid_lost_paid := 0     # of raids.lost, the commuters the score has charged for (off-screen and run down alike)
 var _raid_results_taken := 0 # of the director's results (its tally's cleared + lost), the ones the score has taken
 var _raid_struck_ids := {}   # commuters the pilot's fire struck this raid (instance id -> true): charged once each
-var thump: AudioStreamPlayer # the jolt's thump (made on the first one; none while muted or raids are off)
+var thump: AudioStreamPlayer # the jolt's thump (made at load with raids on, _jolt_prepare; none while muted or raids are off)
 var muted := false           # --mute: no sound of the jolt's either
 var _jolt_t := 0.0           # s of the flat view's shake left
 var _jolt_amp := 0.0         # its strength
 var _jolt_glow := 0.0        # the red vignette's strength, falling
-var _jolt_layer: CanvasLayer # the flat view's vignette (made on the first jolt)
+var _jolt_layer: CanvasLayer # the flat view's vignette (made at load with raids on)
 var _jolt_rect: ColorRect
+var _jolt_shown := -1.0      # the vignette's strength its shader was last given (told only when it changes)
+var _jolt_warm := 0          # frames the vignette is still drawn at nothing, so its shader is compiled at load
 var chase: Node3D            # chase mode on the Network (view/network_chase.gd), null when it's off
 var pad: Node3D              # the starting pad (view/start_pad.gd), when the flight began on one
 const StartPadScript := preload("res://view/start_pad.gd")
@@ -409,6 +411,7 @@ func _ready() -> void:
 		traffic_net.raids = raids
 		raids.hit_taken.connect(func(_source): jolt(1.0))
 		raids.hit_taken.connect(_raid_hit)
+		_jolt_prepare()
 	elif craft and craft.weapon != null:
 		GunneryScript.warm_sounds()      # (Raids off: the fire control is made at the first arming, its sounds read now)
 
@@ -568,6 +571,46 @@ func _jolt_thump() -> void:
 	thump.play()
 
 
+## Raids on: what the first ram would make, made at load (it cost that frame 6 to 9 ms, and the next 5 to 11): the
+## thump, synthesised, and its player (none while muted or in a shot), and the vignette (the flat view's layer; the
+## headset's quad, vr/vr_cockpit.gd), drawn at nothing for its first frames so its shader is compiled now.
+func _jolt_prepare() -> void:
+	JoltFx.thump()
+	if not muted and shot_path == "" and thump == null:
+		thump = AudioStreamPlayer.new()
+		thump.stream = JoltFx.thump()
+		thump.volume_db = -2.0
+		add_child(thump)
+	_jolt_vignette()
+	_jolt_warm = 2
+
+
+## The vignette's node (the flat view's: a layer over the view, its ColorRect drawn by JoltFx's canvas shader), hidden.
+func _jolt_vignette() -> void:
+	if _jolt_layer != null:
+		return
+	_jolt_layer = CanvasLayer.new()
+	_jolt_layer.layer = 60
+	_jolt_rect = ColorRect.new()
+	_jolt_rect.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_jolt_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_jolt_rect.material = JoltFx.canvas_material()
+	_jolt_rect.visible = false
+	_jolt_layer.add_child(_jolt_rect)
+	add_child(_jolt_layer)
+
+
+## The vignette `node` drawn while it glows (and at nothing through its warm-up frames), its shader `mat` told the
+## strength only when that has changed.
+func _jolt_show(node, mat: ShaderMaterial) -> void:
+	node.visible = _jolt_glow > 0.0 or _jolt_warm > 0
+	if _jolt_warm > 0:
+		_jolt_warm -= 1
+	if _jolt_glow != _jolt_shown:
+		_jolt_shown = _jolt_glow
+		mat.set_shader_parameter("amount", _jolt_glow)
+
+
 ## Every frame: the flat view's shake (the camera's frustum offset: its place is the sim's) and the vignette's fall.
 ## (The headset's overrides this to the vignette alone.)
 func _jolt_tick(delta: float) -> void:
@@ -580,17 +623,9 @@ func _jolt_tick(delta: float) -> void:
 	if _jolt_glow > 0.0 or _jolt_layer != null:
 		_jolt_glow = maxf(_jolt_glow - delta / JoltFx.FLASH_S, 0.0)
 		if _jolt_layer == null and _jolt_glow > 0.0:
-			_jolt_layer = CanvasLayer.new()
-			_jolt_layer.layer = 60
-			_jolt_rect = ColorRect.new()
-			_jolt_rect.set_anchors_preset(Control.PRESET_FULL_RECT)
-			_jolt_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
-			_jolt_rect.material = JoltFx.canvas_material()
-			_jolt_layer.add_child(_jolt_rect)
-			add_child(_jolt_layer)
+			_jolt_vignette()
 		if _jolt_rect != null:
-			_jolt_rect.visible = _jolt_glow > 0.0
-			(_jolt_rect.material as ShaderMaterial).set_shader_parameter("amount", _jolt_glow)
+			_jolt_show(_jolt_rect, _jolt_rect.material as ShaderMaterial)
 
 
 ## Overridable: feedback for wall contact, strength 1 for a damaging hit, less for a scrape

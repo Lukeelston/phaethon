@@ -499,20 +499,27 @@ func jolt(strength := 1.0) -> void:
 
 
 func _jolt_tick(delta: float) -> void:
-	if _jolt_glow > 0.0 and _jolt_quad == null and cam != null:
-		_jolt_quad = MeshInstance3D.new()
-		var q := QuadMesh.new()
-		q.size = Vector2(JoltFx.QUAD_SIZE, JoltFx.QUAD_SIZE)
-		_jolt_quad.mesh = q
-		_jolt_quad.material_override = JoltFx.spatial_material()
-		_jolt_quad.position = Vector3(0.0, 0.0, -JoltFx.QUAD_Z)
-		_jolt_quad.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		cam.add_child(_jolt_quad)
+	if _jolt_glow > 0.0 and _jolt_quad == null:
+		_jolt_vignette()
 	if _jolt_glow > 0.0:
 		_jolt_glow = maxf(_jolt_glow - delta / JoltFx.FLASH_S, 0.0)
 	if _jolt_quad != null:
-		_jolt_quad.visible = _jolt_glow > 0.0
-		(_jolt_quad.material_override as ShaderMaterial).set_shader_parameter("amount", _jolt_glow)
+		_jolt_show(_jolt_quad, _jolt_quad.material_override as ShaderMaterial)
+
+
+## The headset's vignette: a quad held before the camera (it goes with the head, so it moves nothing), hidden.
+func _jolt_vignette() -> void:
+	if _jolt_quad != null or cam == null:
+		return
+	_jolt_quad = MeshInstance3D.new()
+	var q := QuadMesh.new()
+	q.size = Vector2(JoltFx.QUAD_SIZE, JoltFx.QUAD_SIZE)
+	_jolt_quad.mesh = q
+	_jolt_quad.material_override = JoltFx.spatial_material()
+	_jolt_quad.position = Vector3(0.0, 0.0, -JoltFx.QUAD_Z)
+	_jolt_quad.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_jolt_quad.visible = false
+	cam.add_child(_jolt_quad)
 
 
 func _buzz(c: XRController3D, amp: float, dur: float, delay := 0.0) -> void:

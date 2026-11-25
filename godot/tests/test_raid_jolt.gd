@@ -4,6 +4,8 @@
 ##   buzz both           jolt buzzes both controllers
 ##   camera still        in the VR cockpit jolt(1.0) moves neither the camera, the headset's origin nor the rig, over 0.3 s
 ##   thump               the jolt's thump is a synthesised stream, played when the flight has sound and not when muted
+##   made at load        with raids on the jolt's thump is synthesised and its headset vignette made at the cockpit's
+##                       build, hidden once its warm-up frames are drawn; the first jolt makes nothing
 ##   bump not double     with obstacle collisions on, a ram that also gives bump events gives hit_taken once in 0.9 s
 ##   end reason          the last raider shot gives "cleared" with no reason
 ##   flat shake          in the flat view the jolt shakes for at most 0.15 s and then rests
@@ -169,6 +171,24 @@ func _run() -> void:
 		return
 	T._hw_time = -1.0e9
 	R.hit_taken.connect(func(_s): hits += 1)
+
+	# made at load: the thump synthesised, the headset's vignette made and, past its warm-up, hidden; the first jolt
+	# makes nothing in the camera
+	var quad = v.get("_jolt_quad")
+	var synth_at_load: bool = JoltFx._thump != null
+	var c0 = _stage(v, 200.0)
+	await _hold(v, c0, c0.f, 4.0 * STEP)
+	var hidden_after: bool = quad != null and is_instance_valid(quad) and not quad.visible
+	var cam_kids: int = v.cam.get_child_count()
+	v.jolt(1.0)
+	v._jolt_tick(STEP)
+	var shown_now: bool = quad != null and quad.visible
+	var made_none: bool = v.cam.get_child_count() == cam_kids and v.get("_jolt_quad") == quad
+	v._jolt_glow = 0.0
+	v._jolt_tick(STEP)
+	_check("made at load: the thump synthesised (%s), the headset's vignette made (%s) and hidden after its warm-up (%s); the first jolt shows it (%s) and makes nothing in the camera (%s)" % [
+			synth_at_load, quad != null, hidden_after, shown_now, made_none],
+		synth_at_load and quad != null and hidden_after and shown_now and made_none)
 
 	# one hit per grace window
 	var c = _stage(v, 0.0)
