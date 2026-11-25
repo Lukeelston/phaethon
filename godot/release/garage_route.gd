@@ -4,6 +4,7 @@ extends RefCounted
 const UI := preload("res://release/release_config.gd")
 const View := preload("res://view/craft_view.gd")
 const Craft := preload("res://sim/pilot_craft.gd")
+const Sim := preload("res://sim/craft_sim.gd")
 const GARAGE_SCENE := "res://garage/garage.tscn"
 
 static var is_xr := false
@@ -28,12 +29,24 @@ static func enter(tree: SceneTree, xr: bool, course: String) -> void:
 
 
 ## The menus' Fly button: at once, in the craft last used, with its saved switches (the paint is read where the
-## craft is built, from the same saved choice).
+## craft is built, from the same saved choice). A course with its own start handling keeps it: the saved handling is
+## left out there, the slide still comes (the ruling of 2026-11-25: a Grand Prix starts in Starfighter whatever was
+## saved).
 static func fly(tree: SceneTree, xr: bool, course: String) -> void:
 	if UI.course_index(course) < 0:
 		return
 	var craft: String = UI.Settings.selected_craft()
-	start_flight(tree, xr, craft, UI.course_overrides(course), {craft: UI.Settings.craft_setup(craft)})
+	var route := UI.course_overrides(course)
+	var setup := UI.Settings.craft_setup(craft)
+	if _track_sets_handling(route[0]):
+		setup.erase("handling")
+	start_flight(tree, xr, craft, route, {craft: setup})
+
+
+## Does a track start in a handling of its own? The sim's own test (sim/craft_sim.gd:831, CraftSim.new): a track in its
+## COURSES starts in Starfighter, Carving in the default Speedcraft, unless a handling is asked for.
+static func _track_sets_handling(track: String) -> bool:
+	return Sim.COURSES.has(track)
 
 
 static func enter_parked(tree: SceneTree, flight: View, xr: bool) -> void:

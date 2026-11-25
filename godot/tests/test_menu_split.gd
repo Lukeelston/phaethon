@@ -132,12 +132,12 @@ func _layout(titled: bool) -> void:
 	check(_chosen(menu, "range"), "%s: back from the garage the course chosen before the visit is chosen (%s)" % [layout, menu.selected_course])
 	# Fly: the saved craft with its saved switches, on the chosen course, once; Pilot garage after it does nothing
 	fly = menu.find_child("Fly", true, false) as Button
-	_course(menu, "carving").pressed.emit()
+	_course(menu, "network").pressed.emit()      # (a map with no start handling of its own: the saved one is flown)
 	changes = 0
 	scene_changed.connect(_counted)
 	fly.pressed.emit()
 	var flown: String = View.vehicle_override
-	check(flown == "kiln" and View.garage_on_entry.get("handling") == "starfighter" and View.track_override == UI.course_overrides("carving")[0],
+	check(flown == "kiln" and View.garage_on_entry.get("handling") == "starfighter" and View.track_override == UI.course_overrides("network")[0],
 		"%s: Fly flies the saved craft (%s) with its saved switches (%s) on the chosen course (%s)" % [layout, flown, View.garage_on_entry, View.track_override])
 	View.vehicle_override = "marker"
 	menu.fly()
@@ -147,7 +147,7 @@ func _layout(titled: bool) -> void:
 	View.vehicle_override = flown
 	await _frames(12)
 	scene_changed.disconnect(_counted)
-	check(changes == 1 and current_scene is View and current_scene.sim.track_name == "carving",
+	check(changes == 1 and current_scene is View and current_scene.sim.kind == "network",
 		"%s: one scene change, to the chosen course's flight (%d changes, %s)" % [layout, changes, current_scene.scene_file_path if current_scene else "none"])
 
 

@@ -1,7 +1,9 @@
 ## The per-craft switch set-up store (release/game_settings.gd's craft_setup) and Garage.fly, the menus' Fly button:
 ## it starts at once in the craft last used, with that craft's saved switches and paint. Nothing saved is the Phaethon
 ## in its Factory paint; a hand-edited value is dropped; the engine state is never saved; a launch in one craft leaves
-## another's set-up as it was.
+## another's set-up as it was. A course with its own start handling (the sim's rule: a Grand Prix circuit Starfighter,
+## Carving Speedcraft) keeps it: Fly leaves out the saved handling there, not the slide; the Range and the Network
+## take the saved handling.
 ## Run headless with --xr-mode off -s res://tests/test_fly_last_used.gd -- --mute
 extends SceneTree
 
@@ -79,6 +81,25 @@ func _run() -> void:
 	check(View.vehicle_override == "kiln", "Fly flies the selected craft")
 	check(View.garage_on_entry == {"handling": "starfighter", "slide": true}, "Fly carries the saved set-up onto the pad: %s" % View.garage_on_entry)
 	check(View.track_override == UI.course_overrides("range")[0], "Fly starts at the chosen course")
+	await _settle()
+	Garage.fly(self, false, "network")
+	check(View.garage_on_entry == {"handling": "starfighter", "slide": true} and View.track_override == "network",
+		"Fly carries the saved handling onto the Network too: %s" % View.garage_on_entry)
+	await _settle()
+
+	# a course with its own start handling keeps it; the saved slide still comes
+	Settings.set_craft_setup("kiln", {"handling": "speed"})
+	Garage.fly(self, false, "gp")
+	check(View.garage_on_entry == {"slide": true} and View.track_override == "gp",
+		"Fly on the Grand Prix leaves out the saved handling (the course starts in Starfighter), keeps the slide: %s" % View.garage_on_entry)
+	await _settle()
+	Settings.set_selected_craft("orrery")
+	Settings.set_craft_setup("orrery", {"handling": "starfighter"})
+	Garage.fly(self, false, "carving")
+	check(View.vehicle_override == "orrery" and View.garage_on_entry == {} and View.track_override == "carving",
+		"Fly on Carving leaves out the saved handling (the course starts in Speedcraft): %s" % View.garage_on_entry)
+	check(Settings.craft_setup("orrery") == {"handling": "starfighter"} and Settings.craft_setup("kiln") == {"handling": "speed", "slide": true},
+		"... and the saved set-ups are kept as they were")
 	await _settle()
 
 	Settings.set_selected_craft("talon")
