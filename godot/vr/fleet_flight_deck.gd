@@ -792,18 +792,20 @@ func fit_harness(shell: Node3D, interior: Node3D) -> void:
 	for side: float in [-1.0, 1.0]:
 		# Shoulder strap: down the back's face from its slot, then over the cushion to the buckle.
 		var down := []
-		for i in 15:
-			var t := i / 14.0
+		# Sample closer than the shortest tuft shoulder: long chords cut through
+		# the curved padding even when their endpoints lie on its surface.
+		for i in 61:
+			var t := i / 60.0
 			var y := lerpf(.86, .32, t)
 			var hit := _drop(seats, Vector3(side * lerpf(.10, .125, t), y, .45), Vector3.BACK)
 			if not hit.is_empty() and hit.normal.dot(Vector3.FORWARD) > .35:
-				down.append([hit.position + hit.normal * .0035, hit.normal])
+				down.append([hit.position + hit.normal * .005, hit.normal])
 		if down.size() < 4:
 			continue
 		var run := down.duplicate()
 		var heel: Vector3 = down.back()[0]
-		for i in range(1, 9):
-			var t := i / 8.0
+		for i in range(1, 25):
+			var t := i / 24.0
 			var guide := heel.lerp(buckle + Vector3(side * .028, 0, 0), t)
 			var hit := _drop(seats, Vector3(guide.x, .75, guide.z), Vector3.DOWN)
 			if not hit.is_empty() and hit.position.y > heel.y - .2:
@@ -823,7 +825,7 @@ func fit_harness(shell: Node3D, interior: Node3D) -> void:
 			var guide := Vector3(side * lerpf(.27, .035, t), .75, lerpf(.95, buckle.z + .012, t))
 			var hit := _drop(seats, guide, Vector3.DOWN)
 			if not hit.is_empty() and hit.position.y > buckle.y - .25:
-				belt.append([hit.position + hit.normal * .004, hit.normal])
+				belt.append([hit.position + hit.normal * .008, hit.normal])
 		if belt.size() > 3:
 			_strap(webbing, belt, .05, .0034)
 	var mesh := webbing.commit()

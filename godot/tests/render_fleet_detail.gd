@@ -2,7 +2,7 @@
 ## parts a geometry and finish pass works on, each from where it is seen. Grown from Codex's review
 ## capture (C:\Users\Luke\tmp\phaethon-geometry-review\capture.gd), 2026-11-23.
 ## Run windowed:  --xr-mode off -s res://tests/render_fleet_detail.gd -- --mute --out=ABSOLUTE_DIRECTORY
-##   --vehicle=orrery,kiln     only those craft
+##   --crafts=orrery,kiln      only those craft (the game's --vehicle selects one craft)
 ##   --only=engine,seat        only those shots
 ##   --wire                    wireframe over the shaded picture's geometry (faceting, density)
 ##   --size=1600x1000          picture size
@@ -61,9 +61,9 @@ func _run() -> void:
 	Livery.pinned = true
 	Livery.current = Livery.FACTORY      # (each craft as designed: "ember" is the Ember paint on these)
 	Outlook.pinned = true
-	Outlook.time = "afternoon"
-	Outlook.weather = "fair"
-	Seat.track_override = "range"
+	Outlook.time = _arg("--review-time", "afternoon")
+	Outlook.weather = _arg("--review-weather", "fair")
+	Seat.track_override = _arg("--review-track", "range")
 	Seat.job_override = "none"
 	Seat._camera_loaded = true
 	Seat.camera = "cockpit"
@@ -74,12 +74,21 @@ func _run() -> void:
 	Seat._map_loaded = true
 	Seat._school_loaded = true
 	root.msaa_3d = Viewport.MSAA_4X
-	var vehicles := Array(_arg("--vehicle", "shrike,orrery,kiln,vesper").split(","))
+	var vehicles := Array(_arg("--crafts", "shrike,orrery,kiln,vesper").split(","))
 	var shots := Array(_arg("--only", ",".join(SHOTS)).split(","))
 	for id: String in vehicles:
+		if not Pilot.ORDER.has(id):
+			push_error("Unknown review craft: " + id)
+			quit(1)
+			return
 		Seat.vehicle_override = id
 		var game := Seat.new()
 		root.add_child(game)
+		if game.sim._overrides.vehicle != id:
+			push_error("Review selected " + str(game.sim._overrides.vehicle) + " instead of " + id)
+			game.free()
+			quit(1)
+			return
 		game.set_process(false)
 		for i in 12:
 			game._process(1.0 / 120.0)
@@ -87,6 +96,7 @@ func _run() -> void:
 			if child is CanvasLayer:
 				child.hide()
 		var cam := game.cam as Camera3D
+		RenderingServer.viewport_set_measure_render_time(root.get_viewport_rid(), true)
 		cam.near = 0.01
 		var shell: Transform3D = game.shell.global_transform
 		var cab: Transform3D = game.canopy.global_transform
@@ -97,6 +107,14 @@ func _run() -> void:
 			var eye: Vector3
 			cam.fov = 40
 			match shot:
+				"whole":
+					target = (cab.origin + engine.origin - cab.basis.x * game.sim.P.engineGap * 0.5) * 0.5
+					eye = target + cab.basis * Vector3(26, 14, -19)
+					cam.fov = 33
+				"rear":
+					target = engine * Vector3(0, 0.1, 0.5)
+					eye = engine * Vector3(6.8, 3.2, 8.7)
+					cam.fov = 40
 				"exterior":
 					target = engine * Vector3.ZERO
 					eye = engine * Vector3(8.4, 3.5, -6.5)
@@ -113,6 +131,14 @@ func _run() -> void:
 					target = cab * Vector3(0, -0.1, 0.2)
 					eye = cab * Vector3(2.6, 1.1, -2.4)
 					cam.fov = 44
+				"cab-rear":
+					target = cab * Vector3(0, -0.15, 1.2)
+					eye = cab * Vector3(2.1, 0.5, 4.2)
+					cam.fov = 44
+				"cab-belly":
+					target = cab * Vector3(0, -0.30, 1.5)
+					eye = cab * Vector3(1.5, -1.1, 3.0)
+					cam.fov = 50
 				"eye":
 					target = shell * (Seat.EYE + Vector3(0, -0.22, -1.0))
 					eye = eye_at
@@ -175,6 +201,14 @@ func _run() -> void:
 				quit(1)
 				return
 			print("FLEET DETAIL ", path)
+			if "--measure" in OS.get_cmdline_user_args():
+				var gpu: Array[float] = []
+				for frame in 180:
+					await RenderingServer.frame_post_draw
+					if frame >= 60:
+						gpu.append(RenderingServer.viewport_get_measured_render_time_gpu(root.get_viewport_rid()))
+				gpu.sort()
+				print("CRAFT STATIC GPU ", JSON.stringify({"craft":id,"shot":shot,"width":root.size.x,"height":root.size.y,"samples":gpu.size(),"median_ms":gpu[gpu.size()/2],"p95_ms":gpu[int(gpu.size()*.95)],"draws":root.get_render_info(Viewport.RENDER_INFO_TYPE_VISIBLE,Viewport.RENDER_INFO_DRAW_CALLS_IN_FRAME)}))
 		game.free()
 		await process_frame
 	quit()

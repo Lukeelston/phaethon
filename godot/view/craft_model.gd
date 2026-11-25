@@ -707,11 +707,11 @@ static func _engine_body(out: float, fins := true, talon := false) -> ArrayMesh:
 		surfaces.append_array(Fins.stabiliser_fittings(out, side, STEEL, DARK))
 	var parts := [
 		[Fairings.nacelle(), Transform3D.IDENTITY, STEEL],
-		[Kit.rounded_box(Vector3(ENG_W + 0.1, ENG_H + 0.1, 0.45), 6.0), Kit.at(Vector3(0, 0, -3.6)), DARK.lightened(0.15)],   # intake lip
+		[Kit.rounded_box(Vector3(ENG_W + 0.1, ENG_H + 0.1, 0.45), 6.0, 32), Kit.at(Vector3(0, 0, -3.6)), DARK.lightened(0.15)],   # intake lip
 		[Kit.box(Vector3(ENG_W - 0.3, ENG_H - 0.22, 0.04)), Kit.at(Vector3(0, 0, -3.84)), Color(0.05, 0.05, 0.06)],   # intake throat
 		[Kit.box(Vector3(0.08, ENG_H - 0.22, 0.06)), Kit.at(Vector3(0, 0, -3.85)), DARK.lightened(0.3)],         # splitter between the twin intakes
-		[Kit.rounded_box(Vector3(ENG_W + 0.06, ENG_H + 0.06, 0.6), 6.0), Kit.at(Vector3(0, 0, -2.5)), Livery.coat("engine")],    # band
-		[Kit.rounded_box(Vector3(ENG_W + 0.04, ENG_H + 0.04, 0.25), 6.0), Kit.at(Vector3(0, 0, 0.6)), Livery.coat("engine")],    # pinstripe
+		[Kit.rounded_box(Vector3(ENG_W + 0.06, ENG_H + 0.06, 0.6), 6.0, 24), Kit.at(Vector3(0, 0, -2.5)), Livery.coat("engine")],    # band
+		[Kit.rounded_box(Vector3(ENG_W + 0.04, ENG_H + 0.04, 0.25), 6.0, 24), Kit.at(Vector3(0, 0, 0.6)), Livery.coat("engine")],    # pinstripe
 	]
 	parts.append_array(surfaces)      # the dorsal fin, its painted tip and the stabiliser (or what their moving parts stand on)
 	parts.append_array([

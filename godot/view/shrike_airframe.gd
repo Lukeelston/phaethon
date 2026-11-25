@@ -196,6 +196,30 @@ static func dress_pod(hull: MeshInstance3D) -> void:
 	trim.add_to_group("exterior")
 	trim.mesh = part(&"PodStrakes")
 	hull.add_child(trim)
+	# The lamp carriers overhang the tapered tail. Tie them back to the actual
+	# hull with six short stays; their curved backing used to hang in space.
+	var host := hull.mesh.generate_triangle_mesh()
+	var stays := []
+	for side in [-1.0, 1.0]:
+		for t in [.18, .50, .82]:
+			var lamp := Vector3(side * (.08 + .81*t), -.041 + .092*t + .016*sin(PI*t), 2.29-.17*t-.33*t*t-.005)
+			var hit := host.intersect_ray(Vector3(lamp.x, 1.0, lamp.z-.30), Vector3.DOWN)
+			if hit.is_empty():
+				push_error("Shrike tail lamp stay has no hull attachment")
+				continue
+			var foot: Vector3 = hit.position - Vector3.UP*.004
+			var end := lamp - Vector3.UP*.012
+			var span := end-foot
+			var frame := Transform3D(Basis.looking_at(-span.normalized(),Vector3.UP),(end+foot)*.5)
+			stays.append([Kit.rounded_box(Vector3(.042,.024,span.length()+.012),5.0,8),frame,CARBON])
+			stays.append([Kit.rounded_box(Vector3(.072,.014,.074),5.0,8),Kit.at(foot),CARBON])
+			stays.append([Kit.cyl(.010,.010,.012,10),Kit.at(foot+Vector3(0,.010,-.019)),ALLOY])
+	var supports := MeshInstance3D.new()
+	supports.name = "TailLampMounts"
+	supports.add_to_group("exterior")
+	supports.mesh = Kit.compound(stays)
+	supports.material_override = Finish.powder_coat()
+	hull.add_child(supports)
 
 
 static func fit_seat(parent: Node3D, offset := Vector3.ZERO) -> void:

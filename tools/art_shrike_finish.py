@@ -31,18 +31,18 @@ PAINT = {
     "spine": TEAL,
 }
 PROPERTIES = {
-    "skin": (83, 52),
-    "fin": (89, 44),
+    "skin": (95, 0),
+    "fin": (101, 0),
     "exhaust": (115, 210),
-    "carbon": (139, 30),
-    "metal": (91, 215),
-    "brake": (109, 46),
-    "ivory": (93, 45),
-    "bronze": (96, 190),
-    "teal": (91, 49),
-    "grip": (180, 5),
-    "coachwork": (84, 48),
-    "spine": (83, 49),
+    "carbon": (133, 0),
+    "metal": (91, 255),
+    "brake": (116, 0),
+    "ivory": (102, 0),
+    "bronze": (104, 255),
+    "teal": (100, 0),
+    "grip": (194, 0),
+    "coachwork": (97, 0),
+    "spine": (96, 0),
 }
 FONT = ROOT / "godot/art/signs/RG2014EM.ttf"
 
@@ -209,6 +209,7 @@ def sheet(name, w, h):
             255 - np.maximum(128 - bump, 0) * 0.72,
             rough + grain * 1.7 + (128 - bump) * 0.22,
             np.full_like(grain, metallic),
+            np.full_like(grain, 255 if name in ("skin", "fin", "brake", "ivory", "teal", "coachwork", "spine") else 0),
         ),
         axis=-1,
     )
@@ -217,7 +218,8 @@ def sheet(name, w, h):
 
 def generate():
     ART.mkdir(parents=True, exist_ok=True)
-    atlases = [plate((SIZE, SIZE), v) for v in (DARK, (255, 110, 55), (128, 128, 255))]
+    atlases = [plate((SIZE, SIZE), DARK), Image.new("RGBA", (SIZE, SIZE), (255, 110, 0, 0)),
+               plate((SIZE, SIZE), (128, 128, 255))]
     for name, (x, y, w, h) in REGIONS.items():
         for target, part in zip(atlases, sheet(name, w, h)):
             # Four texels of edge extrusion protect the first filtered mip levels.

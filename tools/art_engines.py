@@ -16,10 +16,10 @@ TILE = 256
 # Each finish occupies a padded patch in a single shared PBR atlas.
 ORANGE, CERAMIC, GRAPHITE, STEEL, CAUTION, TITANIUM, IVORY, SERVICE = range(8)
 FINISHES = [
-    ((199, 80, 31), 0.34, 0.35), ((138, 128, 110), 0.54, 0.76),
-    ((50, 55, 58), 0.62, 0.44), ((153, 159, 160), 0.33, 0.89),
-    ((214, 168, 66), 0.49, 0.34), ((86, 91, 100), 0.43, 0.84),
-    ((201, 196, 175), 0.44, 0.39), ((47, 67, 69), 0.52, 0.40),
+    ((199, 80, 31), 0.42, 0.0), ((138, 128, 110), 0.66, 0.0),
+    ((50, 55, 58), 0.62, 0.0), ((153, 159, 160), 0.33, 1.0),
+    ((214, 168, 66), 0.52, 0.0), ((86, 91, 100), 0.44, 1.0),
+    ((201, 196, 175), 0.47, 0.0), ((47, 67, 69), 0.58, 0.0),
 ]
 
 
@@ -51,8 +51,9 @@ def surface_maps(directory):
             ramp = x - y * 0.20
             flash = ((ramp > 0.19) & (ramp < 0.29)) | ((ramp > 0.315) & (ramp < 0.333))
             colour[flash] = (226, 208, 161)
-        elif index == CERAMIC:
-            # Exhaust ceramic picks up a broad bronze-blue heat tint toward the edge.
+        elif index == TITANIUM:
+            # Oxide colours belong to the hot metal. Refractory ceramic stays
+            # matte and dielectric rather than inheriting a metal rainbow.
             tint = np.array([(70,70,74), (88,91,106), (109,84,91), (151,119,83), (174,164,140)])
             for channel in range(3):
                 colour[:, :, channel] = np.interp(y + 0.022*np.sin(9*x), np.linspace(0,1,5), tint[:,channel]) + variation
@@ -71,16 +72,23 @@ def surface_maps(directory):
         for px,py in [(0.13,0.14),(0.87,0.14),(0.13,0.86),(0.87,0.86)]:
             d = np.hypot(x-px, y-py)
             sockets += np.exp(-(d/0.018)**2) - 0.50*np.exp(-((d-0.022)/0.006)**2)
-        relief = 0.75*groove + sockets if index in (ORANGE,GRAPHITE,SERVICE,IVORY) else 0.28*groove
-        wear = np.clip(scuff*(0.45 if metal < 0.7 else 0.22),0,1)
+        panel = index in (ORANGE,SERVICE,IVORY)
+        # Hardware shares these islands with rolled lips and tubes. A pressed
+        # panel border there repeated once per sector, drawing false mesh seams.
+        relief = 0.75*groove + sockets if panel else np.zeros_like(x)
+        painted = index in (ORANGE, GRAPHITE, CAUTION, IVORY, SERVICE)
+        wear = np.clip(scuff*0.32,0,1) if panel else np.zeros_like(x)
         colour = colour*(1.0-0.46*relief[:, :, None])*(1-wear[:,:,None]) + np.array([174,174,164])*wear[:,:,None]
         dy, dx = np.gradient(relief)
         maps["NacelleColour"][rows, cols] = colour.clip(0, 255).astype(np.uint8)
         maps["NacelleMetalRough"][rows, cols] = np.stack((
-            (1-0.26*relief)*255, (rough*255 + grain*2.2 + brushing*4 + 25*relief - 24*wear), (metal+(1-metal)*wear)*255
+            (1-0.26*relief)*255,
+            (rough*255 + grain*2.2 + brushing*(4 if metal > 0.7 else 0.6) + 25*relief - 24*wear),
+            (metal+(1-metal)*wear if painted else np.full_like(x,metal))*255
         ), axis=-1).clip(0, 255).astype(np.uint8)
-        maps["NacelleNormal"][rows, cols] = np.stack((
-            128 + grain*1.7 + 115*dx, 128 + brushing*3 - 115*dy, np.full_like(x, 252)), axis=-1).clip(0, 255).astype(np.uint8)
+        normal = np.stack((grain*1.2 + 115*dx, brushing*(2 if metal>.7 else .4) - 115*dy, np.full_like(x,127.5)),axis=-1)
+        normal /= np.linalg.norm(normal,axis=-1,keepdims=True)
+        maps["NacelleNormal"][rows, cols] = ((normal*.5+.5)*255).clip(0,255).astype(np.uint8)
     for name, bitmap in maps.items():
         write_png(directory / (name + ".png"), bitmap)
 
@@ -89,7 +97,7 @@ def material(directory):
     mat = bpy.data.materials.new("Nacelle heat-treated alloy and enamel")
     mat.use_nodes = True
     nodes, links = mat.node_tree.nodes, mat.node_tree.links
-    pbr = nodes.get("Principled BSDF")
+    pbr = next(n for n in nodes if n.type == "BSDF_PRINCIPLED")
     def texture(name, data=False):
         node = nodes.new("ShaderNodeTexImage")
         node.image = bpy.data.images.load(str(directory / (name + ".png")))
@@ -114,8 +122,10 @@ class Nacelle:
         self.points = []
         self.faces = []
         self.uvs = []
+        self.normals = []
+        self.smooth = []
 
-    def face(self, points, outward, finish, uv=None):
+    def face(self, points, outward, finish, uv=None, normals=None):
         if uv is None:
             uv = [(0, 0), (1, 0), (1, 1), (0, 1)][:len(points)]
         assert len(points) == len(uv)
@@ -123,6 +133,16 @@ class Nacelle:
         if (points[1] - points[0]).cross(points[2] - points[0]).dot(Vector(outward)) < 0:
             points.reverse()
             uv = list(reversed(uv))
+            if normals is not None:
+                normals = list(reversed(normals))
+        self.smooth.append(normals is not None)
+        if normals is None:
+            # Zero requests Blender's geometric corner normal. In particular,
+            # triangulated non-planar plates need each triangle's own normal.
+            normals = [(0,0,0)] * len(points)
+        for normal in normals:
+            n = Vector(normal).normalized()
+            self.normals.append((n.x,-n.z,n.y))
         start = len(self.points)
         self.points.extend((p.x, -p.z, p.y) for p in points)
         self.faces.append(tuple(range(start, start + len(points))))
@@ -157,8 +177,19 @@ class Nacelle:
             for j in range(len(rings) - 1):
                 s = j / (len(rings) - 1)
                 e = (j + 1) / (len(rings) - 1)
+                smooth = None
+                if not segmented:
+                    # Smooth around the rolled circumference, retaining the
+                    # authored axial breaks between the rolled profile stations.
+                    smooth = []
+                    for angle in (a,b,b,a):
+                        w,h = radii[j]
+                        tangent = Vector(pos(angle+.0001,w,h,z_values[j]))-Vector(pos(angle-.0001,w,h,z_values[j]))
+                        along = Vector(pos(angle,*radii[j+1],z_values[j+1]))-Vector(pos(angle,w,h,z_values[j]))
+                        normal = tangent.cross(along).normalized()
+                        smooth.append(normal if normal.dot(Vector(radial))>=0 else -normal)
                 self.face([*rings[j], rings[j + 1][1], rings[j + 1][0]], radial, finish,
-                          [(0,s),(1,s),(1,e),(0,e)])
+                          [(0,s),(1,s),(1,e),(0,e)], normals=smooth)
             lip = [pos(t, radii[-1][0] - 0.033, radii[-1][1] - 0.025, z_values[-1] - 0.008) for t in (a,b)]
             self.face([*rings[-1], lip[1], lip[0]], (0, 0, 1), STEEL)
 
@@ -170,6 +201,9 @@ class Nacelle:
             loop.uv = point
         mesh.materials.append(mat)
         mesh.update()
+        for polygon,smooth in zip(mesh.polygons,self.smooth):
+            polygon.use_smooth = smooth
+        mesh.normals_split_custom_set(self.normals)
         obj = bpy.data.objects.new(name, mesh)
         bpy.context.collection.objects.link(obj)
         bpy.context.view_layer.objects.active = obj
@@ -186,7 +220,7 @@ class Nacelle:
         circle = [u*math.cos(math.tau*j/sides)+v*math.sin(math.tau*j/sides) for j in range(sides)]
         for j,n in enumerate(circle):
             m = circle[(j+1)%sides]
-            self.face([a+n*radius,b+n*radius,b+m*radius,a+m*radius], n+m, finish)
+            self.face([a+n*radius,b+n*radius,b+m*radius,a+m*radius], n+m, finish, normals=[n,n,m,m])
         self.face([a+n*radius for n in circle], -axis, STEEL, [(0.5+n.dot(u)*0.48,0.5+n.dot(v)*0.48) for n in circle])
         self.face([b+n*radius for n in circle], axis, STEEL, [(0.5+n.dot(u)*0.48,0.5+n.dot(v)*0.48) for n in circle])
 
@@ -208,19 +242,21 @@ def brake_leaf(front):
 
 
 def detail_hardware(kit):
-    kit.sleeve([-4.015,-3.96,-3.81,-3.48],[(1.155,0.477),(1.238,0.511),(1.26,0.527),(1.226,0.489)],40,TITANIUM)
+    kit.sleeve([-4.015,-3.96,-3.81,-3.48],[(1.155,0.477),(1.238,0.511),(1.26,0.527),(1.226,0.489)],80,TITANIUM)
     kit.sleeve([2.07,2.19,2.58,2.84],[(1.075,0.402),(1.119,0.434),(1.125,0.438),(1.118,0.428)],28,TITANIUM,True)
     for z in (2.33,2.69):
         kit.sleeve([z-0.038,z-0.024,z+0.024,z+0.038],[(1.12,0.437),(1.145,0.453),(1.145,0.453),(1.12,0.437)],32,GRAPHITE)
     # Rolled intake bellmouths, with a dark inner wall and an exposed machined lip.
     for cx in (-0.55,0.55):
         section = [(0.368,-3.842),(0.36,-3.965),(0.371,-4.015),(0.414,-4.008),(0.449,-3.847)]
-        for j in range(36):
-            a,b = (math.tau*n/36 for n in (j,j+1))
+        for j in range(64):
+            a,b = (math.tau*n/64 for n in (j,j+1))
             for k,((r,z),(rr,zz)) in enumerate(zip(section,section[1:])):
                 ring = [(cx+s*math.cos(t),s*math.sin(t),d) for s,d,t in [(r,z,a),(r,z,b),(rr,zz,b),(rr,zz,a)]]
                 mid = (a+b)/2
-                kit.face(ring, ((zz-z)*math.cos(mid),(zz-z)*math.sin(mid),r-rr), [GRAPHITE,TITANIUM,STEEL,TITANIUM][k])
+                normals=[((zz-z)*math.cos(t),(zz-z)*math.sin(t),r-rr) for t in (a,b,b,a)]
+                kit.face(ring, ((zz-z)*math.cos(mid),(zz-z)*math.sin(mid),r-rr), [GRAPHITE,TITANIUM,STEEL,TITANIUM][k],
+                         uv=[(a/math.tau,k/4),(b/math.tau,k/4),(b/math.tau,(k+1)/4),(a/math.tau,(k+1)/4)],normals=normals)
     # Scalloped overlapping exit petals with a real return into the dark nozzle well.
     for j in range(24):
         a = math.tau*(j+0.032)/24

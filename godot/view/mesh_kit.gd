@@ -64,6 +64,10 @@ static func ball(r: float, segs := 16) -> SphereMesh:
 
 
 static func _sp(t: float, e: float) -> float:
+	# Trig roundoff at the axes is magnified by the fractional exponent: a
+	# nominal zero becomes a visible millimetre-wide oval at a box's pole.
+	if absf(t) < 0.000001:
+		return 0.0
 	return signf(t) * pow(absf(t), e)
 
 
@@ -98,7 +102,12 @@ static func rounded_box(size: Vector3, n := 8.0, seg := 18) -> ArrayMesh:
 			var b := a + 1
 			var c := a + cols + 1
 			var d := c + 1
-			for tri in [[a, b, c], [b, d, c]]:
+			var triangles := []
+			if i > 0:
+				triangles.append([a, b, c])
+			if i < seg - 1:
+				triangles.append([b, d, c])
+			for tri in triangles:
 				st.add_index(tri[0])
 				st.add_index(tri[2] if flip else tri[1])
 				st.add_index(tri[1] if flip else tri[2])

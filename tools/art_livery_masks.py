@@ -123,6 +123,7 @@ def fleet_base(craft):
 FLEET_SHEETS = {
     "enamel": (0, 0, 256, 256, ("paint",)),
     "accent": (256, 0, 256, 256, ("accent",)),
+    "bolster": (896, 256, 128, 256, ("accent",)),
     "stripe": (256, 512, 256, 256, ("paint", "accent", "trim")),
     "access": (512, 512, 256, 256, ("paint",)),
     "number": (768, 640, 256, 128, ("accent", "trim")),

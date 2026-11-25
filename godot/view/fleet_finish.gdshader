@@ -29,6 +29,10 @@ uniform vec4 to_g : source_color = vec4(0.0);
 uniform vec4 to_b : source_color = vec4(0.0);
 uniform vec4 to_a : source_color = vec4(0.0);
 uniform float normal_depth = 0.74;
+// ORM alpha identifies painted surfaces. It does not change the opaque pipeline.
+uniform bool packed_paint_finish = false;
+uniform float paint_roughness_bias = 0.0;
+uniform float paint_clearcoat = 0.22;
 // How much of the baked occlusion also falls on direct light: a little, as a crease's own shadow.
 uniform float occlusion_on_light : hint_range(0.0, 1.0) = 0.3;
 
@@ -36,7 +40,8 @@ const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 
 void fragment() {
 	vec3 base = texture(albedo_map, UV).rgb;
-	vec3 finish = texture(orm_map, UV).rgb;
+	vec4 finish = texture(orm_map, UV);
+	float paint = packed_paint_finish ? finish.a : 0.0;
 	if (repaint) {
 		vec4 share = texture(livery_mask, UV);
 		vec3 made = share.r * from_r.rgb + share.g * from_g.rgb + share.b * from_b.rgb + share.a * from_a.rgb;
@@ -57,8 +62,11 @@ void fragment() {
 	vec3 dndx = dFdx(NORMAL);
 	vec3 dndy = dFdy(NORMAL);
 	float kernel = min(0.5 * (dot(dndx, dndx) + dot(dndy, dndy)), 0.18);
-	float alpha2 = finish.g * finish.g * finish.g * finish.g;
+	float rough = clamp(finish.g + paint * paint_roughness_bias, 0.12, 1.0);
+	float alpha2 = rough * rough * rough * rough;
 	ROUGHNESS = sqrt(sqrt(clamp(alpha2 + kernel, 0.0, 1.0)));
+	CLEARCOAT = paint * paint_clearcoat;
+	CLEARCOAT_ROUGHNESS = clamp(0.28 + sqrt(kernel), 0.0, 1.0);
 	NORMAL_MAP = texture(normal_map, UV).rgb;
-	NORMAL_MAP_DEPTH = normal_depth;
+	NORMAL_MAP_DEPTH = normal_depth * mix(1.0, 0.20, paint);
 }
