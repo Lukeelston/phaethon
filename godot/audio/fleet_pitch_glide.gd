@@ -7,6 +7,9 @@ const RESERVE := 1024               # 23 ms of scheduling margin at headset fram
 const SLICE := 32                   # exact filter endpoints every 0.73 ms
 const RESPONSE := RATE * .010       # critical damping; near target in about 47 ms
 const SLICE_DECAY := exp(-float(SLICE)/RESPONSE)
+# Keep the generator alive while the audio driver finishes playing released voices.
+# Each player receives an independent playback ring from this immutable format.
+static var _generator_format: AudioStreamGenerator
 var sources: Array[AudioStreamWAV] = []  # configured mip assets, in order
 var _pcm: Array[PackedFloat32Array] = []
 var _length := 0
@@ -102,10 +105,11 @@ static func _decode_range(raw: PackedByteArray, samples: PackedFloat32Array, fir
 func _begin_playback(streams: Array, start_fraction: float) -> void:
 	sources.assign(streams)
 	_phase = fposmod(start_fraction, 1.0) * _length
-	var generator := AudioStreamGenerator.new()
-	generator.mix_rate = RATE
-	generator.buffer_length = .095
-	stream = generator
+	if _generator_format == null:
+		_generator_format = AudioStreamGenerator.new()
+		_generator_format.mix_rate = RATE
+		_generator_format.buffer_length = .095
+	stream = _generator_format
 	# Generator streams must run on the mixer, including when a platform's
 	# default is sample playback. Start after receiving the first target.
 	playback_type = AudioServer.PLAYBACK_TYPE_STREAM
