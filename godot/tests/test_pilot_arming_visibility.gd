@@ -86,8 +86,9 @@ func inspect_vehicle(id: String) -> void:
 	var hull: MeshInstance3D = game.shell.get_node("PodHull")
 	var rig
 	match id:
-		"phaethon": rig = game.craft.call("phaethon_arms")
-		"talon": rig = load("res://view/talon_airframe.gd").call("wing_arms", hull)
+		# (the Phaethon's and the Talon's: built with the craft, view/craft_model.gd; the cockpit carries the Talon's
+		# onto its hull. The rest are fitted on the cockpit's hull for stage 2.)
+		"phaethon", "talon": rig = game.craft.arms
 		"shrike": rig = load("res://view/shrike_airframe.gd").call("ensure_arms", hull)
 		_: rig = game.craft.fleet.call("ensure_arms", hull)
 	if rig == null:
