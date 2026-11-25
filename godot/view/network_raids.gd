@@ -7,9 +7,11 @@
 ##             way the craft goes; none ahead, the nearest); traffic's floor held ("raid"), so no racer or chase begins. Until the pilot is within arrive_r of its town zone it is not simulated: a commuter is
 ##             lost every tick_every s; at tick_cap, not reached, it is lost
 ##   on        arrived: the pack is placed in the town zone (R.mode == 0) on the city's road, over its lanes, as
-##             traffic's own cars (hostile: kept wherever they are, never turned round). It ends when no raider is
-##             left (cleared if any was killed, else lost), or lost: the pilot away_t s beyond R_KEEP of the town,
-##             or time_limit s gone. Surviving raiders flee: taken out of traffic. The floor is released
+##             traffic's own cars (hostile: kept wherever they are; traffic never turns one round). They keep to the
+##             zone: TURN_SHORT m short of either end a raider turns round (_keep_in_zone), or on a one-way road (the
+##             pilot's, traffic.oneway) is held there. It ends when no raider is left (cleared if any was killed,
+##             else lost), or lost: the pilot away_t s beyond R_KEEP of the town and of every raider, or time_limit s
+##             gone. Surviving raiders flee: taken out of traffic. The floor is released
 ##   over      the lull after one, lull s (the same clock as the first wait) until the next is called
 ## A restart (reset), or a crash and the sim's respawn after it, sets a raid aside: no award, the pack gone, the
 ## floor free.
@@ -61,6 +63,7 @@ const SAVED_START := 60                  # commuters a raid starts with: the cle
 ## commuters struck by the pilot's own fire are deductions (never health).
 const RAID_POINTS := {"raider": 250, "cleared": 2000, "saved_each": 20, "commuter_lost": 40, "hit": 100, "struck": 150}
 const CONTACT_CRAFT := 14.0              # m from the pod or either engine's centre to a raider's centre, in three dimensions: a ram
+const TURN_SHORT := 500.0                # m short of either end of its town zone a raider turns round (or is held, one-way)
 
 static var enabled := false      # raids
 static var pinned := false       # a test or a render chose it: the saved choice does not replace it
@@ -85,7 +88,7 @@ var first_after := 60.0          # s of waiting before a flight's first
 var lull := Vector2(60.0, 90.0)  # s of waiting after one, drawn between these
 var arrive_r := 15000.0          # m from the town zone: in range, and the pack is placed
 var time_limit := 120.0          # s from arriving
-var away_t := 20.0               # s beyond R_KEEP of the town zone after arriving
+var away_t := 20.0               # s beyond R_KEEP of the town zone, and of every raider, after arriving
 var tick_every := 5.0            # s between commuters lost while it is off-screen
 var tick_cap := 40               # ... and the most lost that way
 var pack_size := Vector2i(4, 6)  # the first raid brings x, each later one 1 more, up to y
@@ -97,7 +100,7 @@ var _count := 0                  # raids called this flight
 var _made := 0                   # raiders made this flight (their ids)
 var _tick_t := 0.0               # s toward the next commuter lost off-screen
 var _t := 0.0                    # s since arriving
-var _away := 0.0                 # s beyond R_KEEP of the town zone
+var _away := 0.0                 # s beyond R_KEEP of the town zone and of every raider
 var _why := ""                   # why the last was lost: "away" | "time" | "fled" | "not reached"
 var _last_city := -1             # the last raid's city: not picked for the next
 var _wrecked := false            # the craft is down (sim.crash_t): the sim respawns it when that runs out
@@ -193,12 +196,13 @@ func update(delta: float) -> void:
 				return
 			for c in pack:
 				_hunt(c, delta)
+				_keep_in_zone(c)
 			_grace = maxf(_grace - delta, 0.0)
 			if _grace <= 0.0 and sim.crash_t <= 0.0 and _in_contact():
 				_grace = GRACE
 				print("RAID: hit taken")
 				hit_taken.emit("raider")
-			_away = _away + delta if _gap(city) > Traffic.R_KEEP else 0.0
+			_away = _away + delta if _far_from_it() else 0.0
 			if _away >= away_t:
 				_end("lost", "away")
 			elif _t >= time_limit:
@@ -349,6 +353,47 @@ func _zone(k: int) -> Dictionary:
 	pts.append(Vector2(R.px[z.y], R.py[z.y]))
 	_zones[k] = {"road": road, "z": z, "pts": pts}
 	return _zones[k]
+
+
+## Is the pilot away from the raid: beyond R_KEEP of its town zone and of every raider still in it? (A raider kept
+## to the zone is never the nearer, but the pack is the fight: a pilot after one is not away.)
+func _far_from_it() -> bool:
+	if _gap(city) <= Traffic.R_KEEP:
+		return false
+	var r2 := Traffic.R_KEEP * Traffic.R_KEEP
+	for c in pack:
+		if Vector2(c.x - sim.pod.x, c.y - sim.pod.y).length_squared() <= r2:
+			return false
+	return true
+
+
+## A raider keeps to the raid's town zone: on the zone's road, TURN_SHORT m short of its end the way it goes, it turns
+## round (its way the other, its lane mirrored so it stays where it is across the road, its next junction found
+## again); on a one-way road (traffic.oneway: the pilot's, where nothing comes at the pilot) it is held there instead,
+## stopped. A raider off the zone's road is left to traffic. (Run each frame after _hunt, which sets its speed.)
+func _keep_in_zone(c) -> void:
+	var zone := _zone(city)
+	if c.road != int(zone.road):
+		return
+	var z: Vector2i = zone.z
+	var R = sim.roads[c.road]
+	var short: float = TURN_SHORT / float(R.len[clampi(int(c.f), 0, R.N - 1)])
+	var end: float = float(z.y) - short if c.dir > 0 else float(z.x) + short
+	if (c.f - end) * c.dir < 0.0:
+		return
+	if int(traffic.oneway.get(c.road, 0)) == c.dir:      # (turned round, it would come against the pilot's way)
+		c.f = end
+		c.v = 0.0
+		c.vdes = 0.0
+		traffic._place(c)
+		return
+	c.dir = -c.dir
+	c.lane = traffic._lanes[c.road].size() - 1 - c.lane
+	c.nsp_road = -1
+	c.plan = null
+	c.decided = -1
+	c.vcap_road = -1
+	traffic._place(c)
 
 
 ## m from the pilot to city k's town zone (to its nearest point read).
