@@ -7,9 +7,15 @@
 ## once the gun is armed (the assist looks among the raid's pack):
 ##   lazy                   no fire control until the GUN is first armed; armed, one is made, the craft's own figures
 ##                          on it, and its arms are out in 1 s
-##   bore                   the aim runs along the craft's way, level with the road, not down the drawn barrels
+##   bore                   the aim runs along the heading of what the guns ride (the Phaethon's engines, the Talon's
+##                          pod: Ruling 13), level with the road, not down the drawn barrels; in a 10 degree slide it
+##                          stays on the heading, the slip off it
 ##   check_dead_ahead_kill  a raider 800 m ahead within 1 degree of the bore is knocked out within 2 s
-##   check_assist_cone      one at 2.5 degrees is hit, the lead pip on it; one at 6 degrees takes no hit in 2 s of fire
+##   check_assist_cone      one at 2.5 degrees is hit, the lead pip on it; one at 6 degrees, on the road as that one
+##                          is, takes no hit in 2 s of fire, and with the cone opened to 8 degrees the same one is hit
+##                          (so the cone spares it, not the ground)
+##   check_line_of_sight    one in the cone behind a crest (a ridge across the bore, in a fire control whose ground
+##                          has one) is not taken, nor hit, in 2 s; the crest gone, it is hit within 2 s
 ##   check_commuter_ahead   a commuter dead ahead is struck (sparks), never knocked out
 ##   check_heat             held on for fireS s it overheats; it fires again coolS s later
 ##   check_talon_rate       the Talon fires 18 shots a second (within 10%)
@@ -32,6 +38,19 @@ const MPH := 0.44704
 const SPEED := 1500.0 * MPH     # m/s
 const STRAIGHT := 1600.0        # m of road ahead that must run straight and level
 const SECTIONS := 2             # the Phaethon, the Talon
+## A fire control whose ground has a ridge across the bore (check_line_of_sight): crest_half m either side of crest_at
+## along crest_along (the sims' plane), crest_top high.
+const CREST_GUN := """extends "res://view/gunnery.gd"
+var crest_at := Vector2.INF
+var crest_along := Vector2.ZERO
+var crest_half := 25.0
+var crest_top := -INF
+func ground_at(x: float, y: float) -> float:
+	var h := super.ground_at(x, y)
+	if crest_at != Vector2.INF and absf((Vector2(x, y) - crest_at).dot(crest_along)) <= crest_half:
+		h = maxf(h, crest_top)
+	return h
+"""
 var failures := 0
 var checks := 0
 var sections := 0               # (a section that dies on a script error never counts itself: the verdict then fails)
@@ -82,6 +101,8 @@ func _run() -> void:
 		check_commuter_ahead(v, g)
 		check_heat(v, g)
 		check_stowed_no_fire(v, g)
+		check_slide(v, g, "phaethon")
+		check_line_of_sight(v, g)
 		sections += 1
 	v.queue_free()
 	await process_frame
@@ -91,6 +112,7 @@ func _run() -> void:
 	if g != null:
 		check_bore(v, g, "talon")
 		check_talon_rate(v, g)
+		check_slide(v, g, "talon")
 		sections += 1
 	v.queue_free()
 	await process_frame
@@ -275,10 +297,20 @@ static func _clear(v, g) -> void:
 
 # --- the checks ----------------------------------------------------------------------------------------------
 
+## The heading of what the guns ride (sims' plane, a unit vector): the Phaethon's engines (between their two), the
+## Talon's pod.
+static func _heading(v, id: String) -> Vector2:
+	var sim = v.sim
+	if id == "phaethon":
+		return Vector2(cos(sim.eL.th) + cos(sim.eR.th), sin(sim.eL.th) + sin(sim.eR.th)).normalized()
+	return Vector2(cos(sim.pod.th), sin(sim.pod.th))
+
+
 func check_bore(v, g, id: String) -> void:
 	var sim = v.sim
 	var bore := _bore(v, g)
-	var travel := Vector3(sim.pod.vx, sim.pod.vy, sim.pod.vz).normalized()
+	var head := _heading(v, id)
+	var travel := Vector3(head.x, head.y, 0.0)      # (level: the craft held level along a level road)
 	var barrels := Vector3.ZERO
 	for m: Transform3D in v.craft.arms.muzzles():
 		barrels += -m.basis.z
@@ -290,8 +322,73 @@ func check_bore(v, g, id: String) -> void:
 	for p: Vector3 in g.mount.muzzles():
 		mid += p
 	mid /= maxf(1.0, g.mount.muzzles().size())
-	check("%s: the bore runs along the craft's way, level with the road (%.4f deg off it), from between its muzzles (%.3f m)" % [id, off,
+	check("%s: the bore runs along the heading of what the guns ride, level with the road (%.4f deg off it), from between its muzzles (%.3f m)" % [id, off,
 		g.to_render(bore[0]).distance_to(mid)], off < 0.01 and g.to_render(bore[0]).distance_to(mid) < 0.01 and g.mount.muzzles().size() == 2)
+
+
+## Ruling 13: in a slide (the craft's way 10 degrees off its heading) the bore stays on the heading of what the guns
+## ride, the slip off it: the bolts leave the nose.
+func check_slide(v, g, id: String) -> void:
+	var sim = v.sim
+	var head := _heading(v, id)
+	var slip := deg_to_rad(10.0)
+	var way := Vector2(head.x * cos(slip) - head.y * sin(slip), head.x * sin(slip) + head.y * cos(slip))
+	for b in [sim.eL, sim.eR, sim.pod]:
+		b.vx = way.x * SPEED
+		b.vy = way.y * SPEED
+		b.vz = 0.0
+	var d: Vector3 = _bore(v, g)[1]
+	var off_head := rad_to_deg(Vector2(d.x, d.y).angle_to(head))
+	var off_way := rad_to_deg(Vector2(d.x, d.y).angle_to(way))
+	_hold_speed(v)
+	check("%s: in a 10 degree slide the bore stays on the heading (%.3f deg off it), %.2f deg off the way it goes" % [id, absf(off_head), absf(off_way)],
+		absf(off_head) < 0.01 and absf(absf(off_way) - 10.0) < 0.05)
+
+
+## A raider in the cone behind a crest is not taken (the assist's line of sight): a fire control whose ground has a
+## ridge across the bore halfway out, 15 m over the bore, in place of the craft's own; then the ridge taken away.
+func check_line_of_sight(v, g) -> void:
+	var script := GDScript.new()
+	script.source_code = CREST_GUN
+	if script.reload() != OK:
+		check("the crest fire control compiles", false)
+		return
+	for p in [g._servo] + g._gun_audio:      # (its players hang on the arms)
+		if is_instance_valid(p):
+			p.get_parent().remove_child(p)
+			p.free()
+	v.remove_child(g)
+	g.free()
+	var cg = script.new()
+	v.add_child(cg)
+	cg.build(v)
+	v.gunnery = cg
+	cg.want_out = true
+	var frames := 0
+	while not cg.mount.is_out() and frames < int(2.0 / DT):
+		cg.step(DT)
+		frames += 1
+	var hw: float = v.sim.roads[v.sim.pod.path].w[int(v.sim.pod.hint)] * 0.5
+	var dist := minf(800.0, 0.8 * hw / tan(deg_to_rad(2.5)))
+	var raider = _put(v, cg, 2.5, dist, true)
+	var bore := _bore(v, cg)
+	var o: Vector3 = bore[0]
+	var d: Vector3 = bore[1]
+	cg.crest_along = Vector2(d.x, d.y).normalized()
+	cg.crest_at = Vector2(o.x, o.y) + cg.crest_along * dist * 0.5
+	cg.crest_top = o.z + 15.0
+	var hits: int = cg.hits
+	var taken := {"any": false}
+	_fire(cg, 2.0, func() -> bool:
+		taken.any = taken.any or cg.aim_car == raider
+		return false)
+	var behind_hits: int = cg.hits - hits
+	cg.crest_at = Vector2.INF
+	hits = cg.hits
+	var frames_clear := _fire(cg, 2.0, func() -> bool: return cg.hits > hits)
+	check("a raider %.0f m out at 2.5 deg behind a crest is not taken (%s) nor hit (%d hits in 2 s); the crest gone, it is hit after %.2f s" % [dist,
+		taken.any, behind_hits, frames_clear * DT], not taken.any and behind_hits == 0 and cg.hits > hits)
+	_clear(v, cg)
 
 
 func check_dead_ahead_kill(v, g) -> void:
@@ -318,16 +415,27 @@ func check_assist_cone(v, g) -> void:
 	check("a raider %.0f m out at 2.5 deg is hit (%d hits in %.2f s), the lead pip on it (%s), the boresight ring shown (%s)" % [dist, g.hits - hits,
 		frames * DT, seen.pip, seen.ring], g.hits > hits and seen.pip and seen.ring)
 	_clear(v, g)
-	var wide = _put(v, g, 6.0, 800.0, true)
+	var wide_dist := minf(800.0, 0.8 * hw / tan(deg_to_rad(6.0)))     # (on the road as the 2.5 degree one is: the ground does not spare it)
+	var wide = _put(v, g, 6.0, wide_dist, true)
 	hits = g.hits
 	var shots: int = g.shots
 	var wide_seen := {"pip": false}
 	_fire(g, 2.0, func() -> bool:
 		wide_seen.pip = wide_seen.pip or g.sight.visible
 		return false)
+	var wide_hits: int = g.hits - hits
+	var wide_shots: int = g.shots - shots
+	# the same one with the cone opened to 8 degrees: hit (it was the cone that spared it)
+	var cone_was: float = g.mount._assist
+	g.mount._assist = 8.0
+	hits = g.hits
+	var opened := _fire(g, 2.0, func() -> bool: return g.hits > hits)
+	var opened_hits: int = g.hits - hits
+	g.mount._assist = cone_was
 	_clear(v, g)
-	check("one 800 m out at 6 deg takes no hit in 2 s (%d hits; the guns fired %d down the bore), no pip on it (%s)" % [g.hits - hits, g.shots - shots, wide_seen.pip],
-		g.hits == hits and g.shots - shots > 10 and not wide_seen.pip)
+	check("one %.0f m out at 6 deg, on the road, takes no hit in 2 s (%d hits; the guns fired %d down the bore), no pip on it (%s); with the cone opened to 8 deg it is hit after %.2f s (%d)" % [
+		wide_dist, wide_hits, wide_shots, wide_seen.pip, opened * DT, opened_hits],
+		wide_hits == 0 and wide_shots > 10 and not wide_seen.pip and opened_hits > 0)
 	T.cars.erase(wide)
 	v.raids.pack.erase(wide)
 
