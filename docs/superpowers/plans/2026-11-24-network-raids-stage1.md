@@ -247,7 +247,7 @@ A pure refactor: the Basilisk's behaviour is unchanged.
   func node() -> Node3D                  # where its sounds hang
   ```
 - `Gunnery.frame(v, g, delta)` creates itself when `v.craft.weapon != null` (was `v.craft.turret`), and `g.mount = v.craft.weapon`.
-- `TurretMount.new(turret)`. Its `fouled` keeps `clear_of_cab` and `_crosses_engines`; the latter moves into the mount unchanged.
+- `TurretMount.new(turret, craft)` (the craft for its engines). Its `fouled` keeps `clear_of_cab` and `_crosses_engines`; the latter moves into the mount unchanged. `WeaponMount` also carries `var power` (the battery bus, set before `step`).
 
 - [ ] **Step 1: Run** `test_turret, test_cockpit_clash, render_basilisk` (render: check it runs) on the base. Record the verdicts: they are the bar.
 - [ ] **Step 2: Implement** `WeaponMount` and `TurretMount`, then switch `gunnery.gd` to `mount`.
