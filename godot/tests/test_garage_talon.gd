@@ -2,7 +2,9 @@
 ## body, it stands in the Phaethon's bay, which holds either body (sim/pilot_craft.gd bay_of, has_bay).
 ##   the swap     on foot at the Phaethon's bay the walker's "park" button (P here, L3 on a pad, the left stick's click in
 ##                the headset) stands the other body there, saved (Settings.phaethon_body), in its own saved paint; at
-##                any other bay it does nothing; a run-up bay refuses it and the prompt says why
+##                any other bay it does nothing; a run-up bay refuses it and the prompt says why; the bay starts
+##                fresh (a start-up worked there is not carried to the other body); on a pad, L3 swaps only with its
+##                stick at rest (a push while walking is not a swap)
 ##   its paint    the paint control then acts on the Talon, under its own key; the Phaethon's stays
 ##   flying it    boarded, its cab is the Talon's plated hull; launched, the flight is the Talon's, with the switch moved in
 ##                its bay, saved for it; the menus' craft is the Talon
@@ -11,7 +13,8 @@
 ##   Fly          from the menu afterwards, Fly flies the Talon
 ##   the gate     the Phaethon's bay's boarding gate stays Codex's (2.45 m out) with the Talon standing there, and the
 ##                Talon's collider is its hull proper (its wings reach past that gate: parked_airframe.gd HULL_REACH),
-##                so a pilot at the gate stands clear of it
+##                so a pilot at the gate stands clear of it; those bounds are read off the hull once and kept (a
+##                Talon paint press or a second swap to it reads no mesh back), and equal ones read fresh
 ##   cost         the body's rebuild on the main thread (printed: BODY REBUILD)
 ## Its own settings file for the run: the default one is left as it was.
 ## Run headless with --xr-mode off -s res://tests/test_garage_talon.gd -- --mute
@@ -26,6 +29,8 @@ const View := preload("res://view/craft_view.gd")
 const CM := preload("res://view/craft_model.gd")
 const Menu := preload("res://release/menu.gd")
 const Title := preload("res://release/title_stage.gd")
+const Parked := preload("res://garage/parked_airframe.gd")
+const PAD := 6      # (a pad device no driver has: its stick and L3 sent as events, as tests/test_release_input.gd does)
 const GARAGE := "res://garage/garage.tscn"
 var checks := 0
 var failures := 0
@@ -93,6 +98,25 @@ func _key(code: Key) -> void:
 		Input.flush_buffered_events()
 
 
+func _pad_axis(axis: JoyAxis, value: float) -> void:
+	var event := InputEventJoypadMotion.new()
+	event.device = PAD
+	event.axis = axis
+	event.axis_value = value
+	Input.parse_input_event(event)
+	Input.flush_buffered_events()
+
+
+func _pad_button(button: JoyButton) -> void:
+	for down in [true, false]:
+		var event := InputEventJoypadButton.new()
+		event.device = PAD
+		event.button_index = button
+		event.pressed = down
+		Input.parse_input_event(event)
+		Input.flush_buffered_events()
+
+
 func _stand_at(garage, bay: String) -> void:
 	garage.walker.set_seated(false, garage.environment.boarding_transform(bay))
 	await _frames(2)
@@ -141,6 +165,15 @@ func _talon(garage) -> void:
 	await _stand_at(garage, Pilot.STANDARD)
 	check(garage._prompts._hint.text.begins_with("I  Paint: Factory     P  Body: Phaethon"),
 		"At the Phaethon's bay the prompt offers its paint and its body: \"%s\"" % garage._prompts._hint.text.get_slice("\n", 0))
+	# (the Phaethon's start-up worked first, its PARK released: the swap starts the bay fresh)
+	garage.interact()
+	var phaethon_runup: Node = bay.get_node_or_null("Runup")
+	if phaethon_runup != null:
+		phaethon_runup.work("park", -1)
+	var worked: bool = phaethon_runup != null and phaethon_runup.operated and not phaethon_runup.startup.park
+	garage.leave_seat()
+	await _frames(2)
+	var reads: int = Parked.hull_reads
 	var t0 := Time.get_ticks_usec()
 	_key(KEY_P)
 	var ms := (Time.get_ticks_usec() - t0) / 1000.0
@@ -149,6 +182,9 @@ func _talon(garage) -> void:
 	check(hall.bay_node(Pilot.STANDARD) == bay and hall.bay_craft(Pilot.STANDARD) == Pilot.TALON and bay.sim.P.vehicle == Pilot.TALON
 		and Settings.phaethon_body() == Pilot.TALON and bay.paint == Livery.built(Pilot.TALON) and hall.bay_node(Pilot.TALON) == bay,
 		"P at the Phaethon's bay stands the Talon there, in its own saved paint (%s), and saves the choice" % bay.paint)
+	check(worked and not garage._runups.has(Pilot.STANDARD) and bay.get_node_or_null("Runup") == null and bay.get_node_or_null("OccupiedCockpit") == null,
+		"... starting the bay fresh: the Phaethon's worked start-up (its PARK released) and its cab are not carried to the Talon")
+	check(Parked.hull_reads == reads + 1, "Standing the Talon there read its hull's bounds once (%d reads)" % (Parked.hull_reads - reads))
 	check(garage._prompts._title.text == "E  Board Phaethon Talon" and garage._prompts._hint.text.contains("P  Body: Phaethon Talon"),
 		"... and the prompt names the Talon (\"%s\")" % garage._prompts._title.text)
 	var bounds: AABB = bay.model.pod.transform * bay.model.pod.mesh.get_aabb()
@@ -173,6 +209,22 @@ func _talon(garage) -> void:
 	check(Livery.saved_for(Pilot.TALON) == next and Livery.saved_for(Pilot.STANDARD) == phaethon_paint and bay.paint == next
 		and bay.model.pod.mesh == _talon_hull(next),
 		"The paint control at that bay paints the Talon (%s, its own key), not the Phaethon (%s), and the hull wears it" % [next, phaethon_paint])
+	# ---- a pad's L3: only with its stick at rest; a second swap to the Talon
+	_pad_axis(JOY_AXIS_LEFT_Y, -0.8)
+	_pad_button(JOY_BUTTON_LEFT_STICK)
+	await _frames(1)
+	var pushed_kept: bool = hall.bay_craft(Pilot.STANDARD) == Pilot.TALON and Settings.phaethon_body() == Pilot.TALON
+	_pad_axis(JOY_AXIS_LEFT_Y, 0.0)
+	_pad_button(JOY_BUTTON_LEFT_STICK)
+	await _frames(1)
+	var at_rest_swapped: bool = hall.bay_craft(Pilot.STANDARD) == Pilot.STANDARD and Settings.phaethon_body() == Pilot.STANDARD
+	_key(KEY_P)      # (the Talon again, from the keyboard)
+	await _frames(1)
+	check(pushed_kept and at_rest_swapped and hall.bay_craft(Pilot.STANDARD) == Pilot.TALON,
+		"On a pad, L3 with the left stick pushed swaps nothing; with it at rest it swaps the body (and P swaps it back)")
+	check(Parked.hull_reads == reads + 1 and bay.model.pod.mesh == _talon_hull(next)
+		and Parked.talon_hull_bounds(bay.model.pod.mesh) == Parked.hull_bounds_of(bay.model.pod.mesh),
+		"The Talon's paint press and its second swap read no hull back: its kept bounds, which equal ones read fresh")
 	# ---- boarded and launched
 	garage.interact()
 	var cab: Node3D = bay.get_node_or_null("OccupiedCockpit")

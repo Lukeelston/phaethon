@@ -52,7 +52,8 @@ Choose a map on the main menu, then one of two:
 - Pilot garage opens the workshop. Walk to a craft, press E to board it and
   F to launch: you fly it on the map you chose. Esc goes back to the menu.
   Standing at a craft's bay, I (pad X) gives it the next paint on its row.
-  At the Phaethon's bay, P (pad L3) swaps its body: the Phaethon or the Talon.
+  At the Phaethon's bay, P (pad L3, with that stick at rest) swaps its body:
+  the Phaethon or the Talon.
 
 NEW IN 0.5.0
 - Three more craft: Orrery IX, Kiln Six and Vesper. Choose your craft in the

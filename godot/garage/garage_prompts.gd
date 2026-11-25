@@ -109,6 +109,10 @@ func _sign_line(size: int, height: float, color: Color) -> Label3D:
 func boarding(craft: String) -> void:
 	_vr_title.text = "Boarding " + craft
 	_vr_hint.text = ""
+	# (the bay's controls are not taken while the cab builds: garage.gd _work_bay. The sign is its two lines again)
+	_vr_bay.hide()
+	_face.size = Vector2(.99, .19)
+	_backing.position.y = 0.0
 
 
 func set_runup_status(value: String) -> void:

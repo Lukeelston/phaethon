@@ -1,9 +1,11 @@
 ## Tracked garage rig using synthetic floor/seated head and grip poses. XR remains off.
+## Its own settings file for the run (the hall's Phaethon bay stands the saved body): the default one is left as it was.
 ## Run headless: --headless --xr-mode off -s res://tests/test_garage_xr_tracking.gd
 extends SceneTree
 
 const Pilot := preload("res://garage/pilot_model.gd")
 const Cab := preload("res://garage/garage_cockpit.gd")
+const Settings := preload("res://release/game_settings.gd")
 const CONFIDENT := XRPose.XR_TRACKING_CONFIDENCE_HIGH
 
 # An offline tracking driver. Like OpenXR, the camera center includes XRServer's
@@ -53,10 +55,31 @@ var walker: Walker
 var suit: Pilot
 var checks := 0
 var failures := 0
+var _settings_before := ""
+var _default_existed := false
+var _default_settings := PackedByteArray()
 
 
 func _initialize() -> void:
 	_run.call_deferred()
+
+
+## Its own settings file for the run, as tests/test_garage_paint.gd has; the default file is the player's.
+func _own_settings(file_name: String) -> void:
+	_settings_before = Settings.prefs_path
+	_default_existed = FileAccess.file_exists(_settings_before)
+	_default_settings = FileAccess.get_file_as_bytes(_settings_before) if _default_existed else PackedByteArray()
+	Settings.prefs_path = "user://%s-%d.cfg" % [file_name, OS.get_process_id()]
+	if FileAccess.file_exists(Settings.prefs_path):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(Settings.prefs_path))
+
+
+func _settings_back() -> bool:
+	if Settings.prefs_path != _settings_before and FileAccess.file_exists(Settings.prefs_path):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(Settings.prefs_path))
+	Settings.prefs_path = _settings_before
+	return FileAccess.file_exists(_settings_before) == _default_existed \
+		and (not _default_existed or FileAccess.get_file_as_bytes(_settings_before) == _default_settings)
 
 
 func check(ok: bool, label: String) -> void:
@@ -443,6 +466,7 @@ func _run() -> void:
 		push_error("Run in an isolated headless process with XR off")
 		quit(1)
 		return
+	_own_settings("test-garage-xr-tracking")
 	driver.head = XRPositionalTracker.new()
 	driver.head.name = &"head"
 	driver.head.type = XRServer.TRACKER_HEAD
@@ -518,29 +542,43 @@ func _run() -> void:
 		await _tick_input()
 		check(_eye().distance_to(seat.origin) < .007, "A change to seated reference space recenters at the same cockpit eye")
 		_gloves()
-		walker.set_seated(false,start)
-		await _tick_input()
-		check(walker.cockpit_input() == walker.CockpitControls.IDLE and walker.cockpit_hands().is_empty(),
-				"Dismount removes all cockpit input")
 		var bay_controls: Array[String] = []
 		var cab_controls: Array[String] = []
 		var at_bay := func(action: String) -> void: bay_controls.append(action)
 		var in_cab := func(action: String) -> void: cab_controls.append(action)
 		walker.bay_control_requested.connect(at_bay)
 		walker.cockpit_control_requested.connect(in_cab)
+		pads.left.set_input(&"ax_button", true)      # (pressed in the seat, held through the dismount)
+		await _tick_input()
+		walker.set_seated(false,start)
+		await _tick_input()
+		check(walker.cockpit_input() == walker.CockpitControls.IDLE and walker.cockpit_hands().is_empty(),
+				"Dismount removes all cockpit input")
+		check(_eye().distance_to(_visor()) < .012 and absf(_eye().y-Pilot.STANDING_EYE.y) < .006,
+			"Dismount in local reference space restores one standing eye height")
+		pads.left.set_input(&"ax_button", false)
+		await _tick_input()
+		check(cab_controls == ["power"] and bay_controls.is_empty(),
+			"Left X pressed in the seat and held through the dismount works the battery once, and nothing on foot (%s, %s)" % [cab_controls, bay_controls])
+		cab_controls.clear()
 		pads.left.set_input(&"ax_button", true)
 		await _tick_input()
 		pads.left.set_input(&"ax_button", false)
+		pads.left.set_input(&"primary", Vector2(0, .8))      # (walking: the click with the stick pushed)
 		pads.left.set_input(&"primary_click", true)
 		await _tick_input()
 		pads.left.set_input(&"primary_click", false)
 		await _tick_input()
-		check(bay_controls == ["paint", "body"] and cab_controls.is_empty(),
-			"On foot, left X and the left stick's click work the bay (%s), not the cockpit (%s)" % [bay_controls, cab_controls])
+		var pushed := bay_controls.duplicate()
+		pads.left.set_input(&"primary", Vector2.ZERO)
+		pads.left.set_input(&"primary_click", true)
+		await _tick_input()
+		pads.left.set_input(&"primary_click", false)
+		await _tick_input()
+		check(pushed == ["paint"] and bay_controls == ["paint", "body"] and cab_controls.is_empty(),
+			"On foot, left X and the left stick's click work the bay (%s), not the cockpit (%s); the click only with that stick at rest (pushed: %s)" % [bay_controls, cab_controls, pushed])
 		walker.bay_control_requested.disconnect(at_bay)
 		walker.cockpit_control_requested.disconnect(in_cab)
-		check(_eye().distance_to(_visor()) < .012 and absf(_eye().y-Pilot.STANDING_EYE.y) < .006,
-			"Dismount in local reference space restores one standing eye height")
 		check(driver.mode_changes == 0, "The garage leaves the runtime's incoming reference space in place")
 	else:
 		check(false, "Garage constructed its production XR cameras and controller rig")
@@ -550,5 +588,6 @@ func _run() -> void:
 	XRServer.remove_interface(driver)
 	for pad in pads.values(): XRServer.remove_tracker(pad)
 	XRServer.remove_tracker(driver.head)
+	check(_settings_back(), "the default settings file is as it was (the run had its own)")
 	print("GARAGE XR TRACKING %s (%d checks, %d failures)" % ["PASS" if failures == 0 else "FAIL", checks, failures])
 	quit(int(failures > 0))

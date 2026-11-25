@@ -31,6 +31,7 @@ var _departing := false
 var _boarding := false
 var _refused := ""          # why the last change at the bay in front of the pilot was refused ("" none) ...
 var _refused_bay := ""      # ... and at which bay
+var _bay_names := {}        # bay -> {paint, body}: what the prompt names there, read on entry and when the bay is worked (_name_bay)
 
 
 func _ready() -> void:
@@ -40,6 +41,8 @@ func _ready() -> void:
 	environment = Workshop.new()
 	environment.name = "Workshop"
 	add_child(environment)
+	for id: String in Fleet.GARAGE_BAYS:
+		_name_bay(id)
 	var returning := Route.take_parked_bays()
 	for id: String in returning:
 		var bay: Dictionary = returning[id]
@@ -157,8 +160,9 @@ func _work_bay(control: String) -> void:
 	else:
 		var body := Fleet.TALON if craft == Fleet.STANDARD else Fleet.STANDARD
 		Settings.set_phaethon_body(body)
-		_rebuild_bay(bay, body, false)      # (another craft: its bay's switches start at their defaults)
+		_rebuild_bay(bay, body, false)      # (another craft: its bay starts fresh, its switches and start-up at their defaults)
 	_refused = ""
+	_name_bay(bay)
 	_update_prompt()
 
 
@@ -172,20 +176,31 @@ func _bay_cold(bay: String) -> bool:
 
 ## Build a cold bay's craft again in place (garage_environment.gd rebuild_bay), as `craft` in its saved paint. The cab
 ## built for it goes, so the next boarding builds it in the new paint; its run-up is set up again on the new airframe,
-## with the switches moved in this visit (`keep_switches`).
+## with the switches moved in this visit and its start-up if the pilot worked it (PARK released, the self-test run:
+## launch_flight hands that on), when `keep_switches`.
 func _rebuild_bay(bay: String, craft: String, keep_switches := true) -> void:
 	var moved := {}
+	var carried: StartupSequence = null
 	if _runups.has(bay):
 		if keep_switches:
 			moved = _runups[bay].switch_settings.duplicate()
+			if _runups[bay].operated:
+				carried = _runups[bay].startup
 		_runups[bay].free()
 		_runups.erase(bay)
 	if _cockpit != null and _cockpit.get_parent() == environment.bay_node(bay):
 		_cockpit.free()
 		_cockpit = null
 	environment.rebuild_bay(bay, craft, Livery.built(craft))
-	if not moved.is_empty():
-		_runup_for(bay).apply_switches(moved)
+	if carried != null or not moved.is_empty():
+		_runup_for(bay, carried).apply_switches(moved)
+
+
+## What the prompt names at a bay: the paint its craft wears and the craft (the body) standing there. Kept, so a prompt
+## refresh (every switch between pad and keyboard) reads no settings file.
+func _name_bay(bay: String) -> void:
+	var craft := environment.bay_craft(bay)
+	_bay_names[bay] = {"paint": _paint_name(craft) if not craft.is_empty() else "", "body": str(Fleet.NAMES.get(craft, ""))}
 
 
 ## The name of the paint a craft wears, as its row names it ("Factory", "Cobalt blue").
@@ -312,6 +327,7 @@ func _update_prompt() -> void:
 		anchor = environment.marker_guide(_nearby,walker.global_position)
 	if _refused_bay != _nearby or not seated_craft.is_empty():
 		_refused = ""
-	var paint := _paint_name(craft) if seated_craft.is_empty() and not craft.is_empty() else ""
-	var body := craft_name if seated_craft.is_empty() and _nearby == Fleet.STANDARD else ""
+	var named: Dictionary = _bay_names.get(_nearby, {}) if seated_craft.is_empty() else {}
+	var paint: String = named.get("paint", "")
+	var body: String = named.get("body", "") if _nearby == Fleet.STANDARD else ""
 	_prompts.show_controls(craft_name, not seated_craft.is_empty(), Route.destination_label(), _using_pad, anchor, paint, _refused, body)

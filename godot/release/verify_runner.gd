@@ -102,7 +102,7 @@ func _garage_visit() -> bool:
 	garage.launch_flight()
 	await frames(3)
 	var flight := get_tree().current_scene as View
-	if not check("garage launches the selected pilot craft on the Network", flight != null and flight.sim.P.vehicle == craft and flight.sim.kind == "network"):
+	if not check("garage launches the craft standing in the selected craft's bay on the Network", flight != null and flight.sim.P.vehicle == craft and flight.sim.kind == "network"):
 		return false
 	var pilot := flight.pod_mesh.get_node_or_null("ChasePilot")
 	check("desktop flight carries the seated pilot", pilot != null and pilot.get_child_count() > 0)

@@ -7,7 +7,8 @@ signal launch_requested
 signal back_requested
 signal cockpit_control_requested(control: String)
 # On foot, the same two buttons work the bay in front of the pilot (garage.gd _work_bay): "paint" (key I, pad X, left
-# X in the headset) and "body" (key P, pad L3, left stick click in the headset).
+# X in the headset) and "body" (key P, pad L3, left stick click in the headset). The stick's click is that stick's
+# own: "body" only while it rests inside DEADZONE, so a hard push while walking past the bay swaps nothing.
 signal bay_control_requested(control: String)
 signal boot_planted(side: int, at: Vector3, speed: float)
 
@@ -280,6 +281,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not is_node_ready() or not _focused:
 		return
 	var key := KEY_NONE
+	var pushed := false      # (L3 clicked while its stick is pushed: walking, not asking for the body)
 	if event is InputEventKey and event.pressed and not event.echo:
 		key = event.physical_keycode if event.physical_keycode != KEY_NONE else event.keycode
 		using_gamepad = false
@@ -293,7 +295,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			JOY_BUTTON_Y: key = KEY_F
 			JOY_BUTTON_B: key = KEY_ESCAPE
 			JOY_BUTTON_X: key = KEY_I
-			JOY_BUTTON_LEFT_STICK: key = KEY_P
+			JOY_BUTTON_LEFT_STICK:
+				key = KEY_P
+				pushed = not _at_rest(Vector2(Input.get_joy_axis(event.device, JOY_AXIS_LEFT_X), Input.get_joy_axis(event.device, JOY_AXIS_LEFT_Y)))
 			JOY_BUTTON_RIGHT_STICK: key = KEY_V
 	elif not xr_live and event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		if event.relative.length_squared() > .01:
@@ -315,7 +319,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			if xr_live: return
 			if seated:
 				cockpit_control_requested.emit("power" if key == KEY_I else "park")
-			else:
+			elif key == KEY_I or not pushed:
 				bay_control_requested.emit("paint" if key == KEY_I else "body")
 		_: return
 	if is_inside_tree():
@@ -329,6 +333,11 @@ func _notification(what: int) -> void:
 		if seated: _controls.reset()
 	elif what == NOTIFICATION_APPLICATION_FOCUS_IN:
 		_focused = true
+
+
+## A stick resting inside its deadzone (what _stick reads as no walking).
+func _at_rest(v: Vector2) -> bool:
+	return v.length() <= DEADZONE
 
 
 func _stick(v: Vector2) -> Vector2:
@@ -450,6 +459,7 @@ func _xr_input(delta := 1.0 / 60.0) -> Vector2:
 		var triggers := Vector2(left.get_float("trigger") if have_left else 0.0, right.get_float("trigger") if have_right else 0.0)
 		var grips := Vector2(left.get_float("grip") if have_left else 0.0, right.get_float("grip") if have_right else 0.0)
 		_controls.tracked(palms, triggers, grips, delta)
+	var stick := left.get_vector2("primary") if have_left else Vector2.ZERO
 	if actions.x > 0: interact_requested.emit()
 	elif actions.y > 0: launch_requested.emit()
 	elif actions.z > 0: back_requested.emit()
@@ -458,8 +468,7 @@ func _xr_input(delta := 1.0 / 60.0) -> Vector2:
 		else: bay_control_requested.emit("paint")
 	elif pressed.y > 0:
 		if seated: cockpit_control_requested.emit("park")
-		else: bay_control_requested.emit("body")
-	var stick := left.get_vector2("primary") if have_left else Vector2.ZERO
+		elif _at_rest(stick): bay_control_requested.emit("body")
 	return _stick(Vector2(stick.x,-stick.y))
 
 

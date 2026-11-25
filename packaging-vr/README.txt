@@ -89,8 +89,9 @@ START HERE
    flew last (the board names it). Or highlight Pilot garage: walk to a craft,
    board it with right A and launch with left Y, on the map you chose. Standing
    at a craft's bay, left X gives it the next paint on its row; at the
-   Phaethon's bay, a left stick click swaps its body (the Phaethon or the Talon).
-   Click either stick to recenter.
+   Phaethon's bay, a left stick click while you stand still (the stick let go)
+   swaps its body (the Phaethon or the Talon). On the main menu, click either
+   stick to recenter.
 5. In the cockpit, release triggers/buttons and center the sticks once, then
    gently squeeze both triggers to begin. The Fly press cannot accelerate you.
 No Godot editor is needed. The game runs locally; it has no online account.

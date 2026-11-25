@@ -16,6 +16,9 @@ const SHELL_HEIGHT := .72
 const ENGINE_HEIGHT := 1.56
 const HULL_REACH := 1.30      # m out to either side: the Talon's hull proper (its wings reach 2.92; the Phaethon's hull 1.19)
 
+static var _talon_bounds := {}      # nose closed? -> the Talon's hull proper's bounds: the same in every paint (only its colours differ)
+static var hull_reads := 0          # how many times a hull's vertices have been read back (tests/test_garage_talon.gd counts them)
+
 var sim: Dictionary
 var model: Model
 var paint := Livery.FACTORY
@@ -92,7 +95,7 @@ func build(id: String, finish := Livery.FACTORY) -> void:
 		var fairing := engine.get_child(0) as MeshInstance3D
 		_bounds_collider("Engine", fairing.mesh.get_aabb(), engine.transform)
 	model._place_fin_batches()
-	_bounds_collider("Cockpit", _hull_bounds(model.pod.mesh) if id == Pilot.TALON else model.pod.mesh.get_aabb(), model.pod.transform)
+	_bounds_collider("Cockpit", talon_hull_bounds(model.pod.mesh) if id == Pilot.TALON else model.pod.mesh.get_aabb(), model.pod.transform)
 	# All six silhouettes remain in the hall. Fin screws, cold nozzle vanes, brake
 	# leaves and thin trim only draw at distances where a pilot can discern them.
 	for piece: MeshInstance3D in model.find_children("*","MeshInstance3D",true,false):
@@ -104,7 +107,18 @@ func build(id: String, finish := Livery.FACTORY) -> void:
 
 ## The Talon's pod's bounds for its collider: its hull proper. Its wings reach 2.9 m out, past the Phaethon's bay's
 ## gate (2.45 m: the bay holds either body), so they are left out of it; a pilot at that gate is not put inside them.
-func _hull_bounds(mesh: Mesh) -> AABB:
+## Read off the mesh once for each nose and kept (reading a mesh's vertices back is a readback from the renderer, and
+## a new paint is the same shape): a paint press or a swap to the Talon reads nothing.
+static func talon_hull_bounds(mesh: Mesh) -> AABB:
+	var closed: bool = mesh.get_meta(&"talon_nose_closed", Model.nose_closed)
+	if not _talon_bounds.has(closed):
+		_talon_bounds[closed] = hull_bounds_of(mesh)
+	return _talon_bounds[closed]
+
+
+## The bounds of a mesh's vertices within HULL_REACH of its centreline, read from its surfaces.
+static func hull_bounds_of(mesh: Mesh) -> AABB:
+	hull_reads += 1
 	var hull := AABB()
 	var first := true
 	for s in mesh.get_surface_count():
