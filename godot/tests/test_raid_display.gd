@@ -9,9 +9,13 @@
 ##   target         both maps point to the raid's city while it is called or on (the map's own frame, and through the
 ##                  view's frame), and back to the dash's target after
 ##   hostile dots   both maps' dot_style(HOSTILE_MARK): the hostile red, bigger than a commuter's and the racer's; theirs
-##                  as they were, in every colour scheme; the headset's map draws a raider in it
+##                  as they were, in every colour scheme; the headset's map draws a raider in it. That screen takes its
+##                  vertex colours as linear: its red is HOSTILE_COL in linear, which it shows as HOSTILE_COL itself, and
+##                  in every scheme (AMBER's orange roads too) it stands well off the roads, the target and the traffic
 ##   tactical       a raider in the display's reach is picked though she is not gaining on it, or would reach it only in
-##                  a minute; its line is in the hostile red whatever its seconds; a commuter beside it as before
+##                  a minute; its line is in the hostile red whatever its seconds; a commuter beside it as before. Beside
+##                  a commuter she would reach in the same second (a red as near as makes no odds) a raider is a shape
+##                  of its own: brackets round it (shape 2, the shader's INSTANCE_CUSTOM.y), not a line (shape 1)
 ##   alarm          a muted flight makes none; with sound, a synthesised tone (no loop, 1.3 to 2.2 s) played once at
 ##                  each call (counted on its player)
 ##   burst          a commuter lost (commuter_lost) is a bright burst there for a Phaethon that never armed its gun,
@@ -124,6 +128,11 @@ func _car(sim, id: int, road: int, f: float, dir: int, lat: float, mph: float, h
 	c.hy = R.ty[i] * dir
 	c.hostile = hostile
 	return c
+
+
+## How far apart two colours are (straight-line distance in RGB, 0 .. 1.73).
+func _apart(a: Color, b: Color) -> float:
+	return Vector3(a.r - b.r, a.g - b.g, a.b - b.b).length()
 
 
 ## The colours in the headset map's last drawing equal to `col`: how many vertices.
@@ -289,20 +298,31 @@ func _run() -> void:
 	if hasp:
 		var panel_ok := true
 		var bad := []
+		var nearest_gap := INF
+		var nearest_to := ""
 		for k in MapPanel.SCHEMES.size():
 			var sc: Dictionary = MapPanel.SCHEMES[k]
 			var hp: Array = map_panel.call("dot_style", Traffic.HOSTILE_MARK, k)
 			var cp: Array = map_panel.call("dot_style", Traffic.CAR, k)
 			var rp: Array = map_panel.call("dot_style", 4, k)
-			var ok: bool = ((hp[1] as Color).is_equal_approx(Traffic.HOSTILE_COL) and float(hp[0]) > float(cp[0]) and float(hp[0]) > float(rp[0])
+			var ok: bool = ((hp[1] as Color).is_equal_approx(Traffic.HOSTILE_COL.srgb_to_linear()) and float(hp[0]) > float(cp[0]) and float(hp[0]) > float(rp[0])
 				and is_equal_approx(float(cp[0]), 0.0028) and (cp[1] as Color).is_equal_approx(Color(sc.craft, 0.8))
 				and is_equal_approx(float(rp[0]), 0.006) and (rp[1] as Color).is_equal_approx(sc.star))
 			if not ok:
 				bad.append(sc.name)
 			panel_ok = panel_ok and ok
+			# as the screen shows them (its vertex colours linear): the raider's red against the scheme's own colours
+			var seen: Color = (hp[1] as Color).linear_to_srgb()
+			for key in ["star", "speed", "target", "craft"]:
+				var gap := _apart(seen, (sc[key] as Color).linear_to_srgb())
+				if gap < nearest_gap:
+					nearest_gap = gap
+					nearest_to = "%s %s" % [sc.name, key]
 		var h0: Array = map_panel.call("dot_style", Traffic.HOSTILE_MARK)
-		_check("the headset's map, in every scheme: a raider's dot the hostile red and bigger than a commuter's and the racer's; theirs as they were (wrong in %s); dot_style(HOSTILE_MARK) %s" % [bad, h0],
-			panel_ok and (h0[1] as Color).is_equal_approx(Traffic.HOSTILE_COL))
+		var shown: Color = (h0[1] as Color).linear_to_srgb()
+		_check("the headset's map, in every scheme: a raider's dot the hostile red and bigger than a commuter's and the racer's; theirs as they were (wrong in %s); dot_style(HOSTILE_MARK) %s, HOSTILE_COL in linear, which the screen shows as %s (HOSTILE_COL %s)" % [bad, h0, shown.to_html(false), Traffic.HOSTILE_COL.to_html(false)],
+			panel_ok and (h0[1] as Color).is_equal_approx(Traffic.HOSTILE_COL.srgb_to_linear()) and _apart(shown, Traffic.HOSTILE_COL) < 0.01)
+		_check("... and as shown it stands well off every scheme's roads, target and traffic: nearest %s, %.2f apart (over 0.45)" % [nearest_to, nearest_gap], nearest_gap > 0.45)
 	else:
 		_check("the headset's map has dot_style()", false)
 	var P = v.minimap_panel
@@ -314,7 +334,7 @@ func _run() -> void:
 	var p2 := p1 + left_of * 300.0
 	v.minimap.marks = [[p1.x, p1.y, Traffic.HOSTILE_MARK], [p2.x, p2.y, Traffic.CAR]]
 	P.show_frame(v.minimap.update(sim.pod.th, 1.0 / 60.0))
-	var red: int = _painted(P, Traffic.HOSTILE_COL)
+	var red: int = _painted(P, Traffic.HOSTILE_COL.srgb_to_linear())
 	var grey: int = _painted(P, Color(P.tone("craft"), 0.8))
 	_check("the headset's map draws a raider 600 m ahead in the hostile red (%d vertices) and a commuter beside it as ever (%d)" % [red, grey], red == 3 and grey == 3)
 	v.minimap.marks = []
@@ -356,6 +376,32 @@ func _run() -> void:
 	_check("their lines: the three raiders' in the hostile red, full height and strength, whatever their seconds (%d of %d drawn so); the commuter's by its seconds as ever (%s against %s)" % [reds, t.line_count, tints.get(907), soon],
 		t.line_count == 4 and reds == 3 and tints[901] != null and (tints[901] as Color).is_equal_approx(Traffic.HOSTILE_COL) and (tints[903] as Color).is_equal_approx(Traffic.HOSTILE_COL)
 		and (tints[902] as Color).is_equal_approx(Traffic.HOSTILE_COL) and t.marks[903].way and t.marks[902].way and tints[907] != null and (tints[907] as Color).is_equal_approx(soon))
+	# a raider and a commuter she would reach in the same second: both red, so the raider's is a shape of its own
+	T.cars.clear()
+	for k in 80:
+		t.sync(1.0 / 120.0, v._rush_flow, true)
+	var at_1s := 2500.0 / MPH * 1.0      # m: closing at 2,500 mph, one second off
+	var raider_1s := _car(sim, 911, e1, here + at_1s / 24.0, 1, 22.5, 2500.0, true)
+	var commuter_1s := _car(sim, 912, e1, here + at_1s / 24.0, 1, -22.5, 2500.0)
+	T.cars.append_array([raider_1s, commuter_1s])
+	for k in 80:
+		t.sync(1.0 / 120.0, v._rush_flow, true)
+	var shape := {}
+	var tint := {}
+	var kk := 0
+	for m in t.marks.values():      # (the lines are laid in the marks' order; all eased in by now)
+		shape[m.id] = t.line_shape[kk]
+		tint[m.id] = t.line_tints[kk]
+		kk += 1
+	var both := shape.has(911) and shape.has(912)
+	var secs_1s: Array = [t.marks[911].seconds if t.marks.has(911) else -1.0, t.marks[912].seconds if t.marks.has(912) else -1.0]
+	var red_gap: float = _apart(tint[911], tint[912]) if both else -1.0
+	var code: String = t.line_mat.shader.code
+	_check("a raider and a commuter in her way, each %.2f s / %.2f s off: both red (%.2f apart, the commuter's %s), but the raider's mark is brackets (shape %s) and the commuter's a line (shape %s); the shader lays out a raider's by its INSTANCE_CUSTOM.y, %s m / %s px" % [secs_1s[0], secs_1s[1], red_gap,
+			(tint.get(912, Color.BLACK) as Color).to_html(false), shape.get(911, -1), shape.get(912, -1), t.line_mat.get_shader_parameter("box").x, t.line_mat.get_shader_parameter("box").y],
+		both and absf(float(secs_1s[0]) - 1.0) < 0.05 and absf(float(secs_1s[1]) - 1.0) < 0.05 and red_gap < 0.1
+		and int(shape[911]) == 2 and int(shape[912]) == 1 and code.contains("INSTANCE_CUSTOM.y") and code.contains("brackets")
+		and (t.line_mat.get_shader_parameter("box") as Vector2).is_equal_approx((Tactical as Script).get_script_constant_map().get("HOSTILE_BOX", Vector2.ZERO)))
 	T.cars.clear()
 	Tactical.wanted = false
 	t = Tactical.frame(v, t, 1.0 / 120.0, v._rush_flow, true)

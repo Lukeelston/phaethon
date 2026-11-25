@@ -4,6 +4,9 @@
 ##   raid-called-map   ... the map's screen close (the eye's own place, a narrow lens)
 ##   raid-on           from the seat: the raid on, the tactical display up; the raiders red on the map and the display
 ##   raid-on-map, raid-on-dash, raid-on-tactical   ... the map, the instrument strip and the display close
+##   raid-on-map-<SCHEME>   the map close in each of its colour schemes (NETWORK, AMBER, PHOSPHOR, ICE, PAPER)
+##   raid-tactical-pair     a raider and a commuter in the next lane, at rest 1.34 km on (each a second off at 3,000 mph,
+##                          both red): the raider's brackets beside the commuter's line, the world held still
 ##   raid-burst        a commuter lost 1.2 km ahead, 0.15 s on; raid-burst-ring the same at 0.45 s; raid-burst-far one
 ##                     5 km ahead at 0.2 s
 ##   raid-alarm.wav    the alarm's tone, as made
@@ -165,6 +168,14 @@ func _run() -> void:
 	await _snap(game, "raid-on", 90)
 	_look_at(game, cam, (game.minimap_panel as Node3D).global_position)
 	await _snap(game, "raid-on-map", 24)
+	var P = game.minimap_panel
+	for s in P.SCHEMES.size():      # the map in each of its schemes (the world held still)
+		P.set_scheme(s, false)
+		P.show_frame(game.minimap.update(sim.pod.th, 0.0))
+		_look_at(game, cam, (P as Node3D).global_position)
+		await _snap(game, "raid-on-map-%s" % String(P.SCHEMES[s].name), 24)
+	P.set_scheme(0, false)
+	P.show_frame(game.minimap.update(sim.pod.th, 0.0))
 	_look_at(game, cam, (game.dashboard as Node3D).global_position)
 	await _snap(game, "raid-on-dash", 34)
 	var nearest = null
@@ -174,6 +185,51 @@ func _run() -> void:
 	if nearest:
 		_look_at(game, cam, nearest.lamp_position)
 		await _snap(game, "raid-on-tactical", 30)
+	# a raider and a commuter in the next lane, each a second off: both red, told apart by the raider's brackets
+	var T = game.traffic_net
+	var pc = T._pod_as_car()
+	var nl: int = T._lanes[pc.road].size()
+	var pair := []
+	for n in 2:
+		var c = T.Car.new()
+		c.id = 990100 + n
+		c.kind = T.DEMON if n == 0 else T.CAR
+		c.visual = c.kind
+		c.hostile = n == 0
+		if c.hostile:
+			c.col = Traffic.HOSTILE_COL
+		c.road = pc.road
+		c.dir = pc.dir
+		c.f = pc.f + pc.dir * SPEED * 1.0 / 24.0      # (at rest, a second off at her speed)
+		c.lane = 0
+		var best := INF
+		for l in nl:      # her own lane, and the one beside it
+			var off: float = absf(T._lane_lat(c, l) - pc.lat)
+			if off < best:
+				best = off
+				c.lane = l
+		if n == 1:
+			c.lane = c.lane + 1 if c.lane + 1 < nl else c.lane - 1
+		c.lat = T._lane_lat(c, c.lane)
+		c.v = 0.0
+		c.vdes = 0.0
+		c.turn_p = 0.0
+		c.nsp_road = -1
+		T._place(c)
+		T.cars.append(c)
+		pair.append(c)
+	T._render()
+	for i in 80:
+		game.tactical.sync(DT, game._rush_flow, true)
+	var shapes := []
+	var kk := 0
+	for m in game.tactical.marks.values():
+		if m.car in pair:
+			shapes.append("%s shape %d %s %.2f s" % ["raider" if m.car.hostile else "commuter", game.tactical.line_shape[kk], game.tactical.line_tints[kk].to_html(false), m.seconds])
+		kk += 1
+	print("RAID RENDER: the pair: %s" % [shapes])
+	_look_at(game, cam, (pair[0].lamp_position + pair[1].lamp_position) * 0.5)
+	await _snap(game, "raid-tactical-pair", 14)
 	# a commuter lost ahead: the world held still, the burst stepped on its own
 	var road: int = sim.pod.path
 	var Rd = sim.roads[road]

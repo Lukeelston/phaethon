@@ -23,8 +23,10 @@
 ##                    seconds, 1.6 degrees tall: over a crest, over the traffic in front of it. Those in his way
 ##                    (his lane and the next) are coloured by the seconds left, cyan, amber, red (they ask him to
 ##                    act now); the rest are short and cyan, and go when the road is busy. A raider (Raids: a hostile
-##                    car) has one wherever it is in the rails' reach, gaining on it or not, full height, in the
-##                    hostile red whatever its seconds, and is never the one left out.
+##                    car) has a mark of its own wherever it is in the rails' reach, gaining on it or not: corner
+##                    brackets round it (HOSTILE_BOX), the stem standing over them, in the hostile red whatever its
+##                    seconds, and it is never the one left out. By its shape, not its red, it is not a commuter he
+##                    is about to hit (whose line is a red as near as makes no odds).
 ##   the exits        over an exit's lane, a row of upright chevrons pointing the way the lane leaves, a wave of
 ##                    light running along them into the ramp, and a gate standing across the lane at its mouth,
 ##                    the row's end. Begun seven seconds before the mouth (never less than 8 km, where the lane's
@@ -150,6 +152,7 @@ const THIN := Vector2i(4, 6)                # more candidates than the second: o
 const LINE_ANGLE := 1.6                     # degrees: a line's height as the eye sees it ...
 const LINE_H := Vector2(5.0, 700.0)         # ... never lower or higher than these, m
 const LINE_W := Vector2(2.0, 4.5)           # its half width: m, and never under this many pixels
+const HOSTILE_BOX := Vector2(16.0, 10.0)    # a raider's brackets (Raids): their half size, m, and never under this many pixels
 const LINE_FADE := 0.3                      # s
 const SIDE_LINE := Vector2(0.6, 0.5)        # a vehicle not in her way: its line this much of the height, and of the strength
 const SOON := Vector3(5.0, 2.5, 1.2)        # s to reach it: calm from the first, amber at the second, red by the third
@@ -210,7 +213,7 @@ var exits: Array = []                       # the exits and joins whose chevrons
 var chevron_count := 0
 var chev_laid: Array = []                   # the chevrons as they were laid: [the exit's key, its place and facing (scaled by its tier), m still to the mouth, "chevron" "gate" or "join", its tier, its own half size m, what the shader is given] (tests read it: a headless renderer gives nothing back)
 var line_count := 0                         # the lines drawn this frame ...
-var _line_way := PackedByteArray()
+var line_shape := PackedByteArray()         # ... and each one's shape: 0 a line off her way, 1 a line in it, 2 a raider's brackets (tests read them)
 var line_tints := PackedColorArray()        # ... and each one's colour and strength (tests read them: a headless renderer gives nothing back)
 var thinned := false
 var _found: Array = []                      # the vehicles that could matter, found so far this pass through the traffic
@@ -272,6 +275,7 @@ class Mark:
 	var to := 1.0            # ... and where that is going
 	var seconds := 0.0       # till she reaches it, as the last pass through the traffic found
 	var way := false         # in her way
+	var hostile := false     # a raider (Raids): its brackets, not a line
 	var tint := Color.WHITE  # its colour, for those seconds
 
 
@@ -341,7 +345,8 @@ const LINE_SHADER := """
 // The tactical display's lines on the vehicles (view/tactical_display.gd). An instance stands at a vehicle's
 // lamps; the quad has no shape of its own (UV is its corner, -1..1). It is stood straight up, turned to the
 // eye, line_tan of its distance tall and never thinner than a few pixels. COLOR: its colour and strength;
-// INSTANCE_CUSTOM.x: its height, of the full one.
+// INSTANCE_CUSTOM.x: its height, of the full one. INSTANCE_CUSTOM.y 1: a raider's (Raids), not a line: corner
+// brackets round the vehicle, `box` m in half size and never under box.y pixels, and the stem standing over them.
 shader_type spatial;
 render_mode unshaded, blend_mix, depth_draw_never, depth_test_disabled, cull_disabled, shadows_disabled, fog_disabled;
 uniform mat4 to_seat = mat4(1.0);      // the world to the cockpit's own frame at the seated eye (-Z its nose)
@@ -354,10 +359,14 @@ float through_glass(vec3 world_place) {
 uniform float line_tan = 0.0175;
 uniform vec2 line_h = vec2(5.0, 420.0);
 uniform vec2 line_w = vec2(2.0, 2.5);
+uniform vec2 box = vec2(16.0, 10.0);
 uniform vec2 fade_in = vec2(60.0, 220.0);
 uniform float gain = 1.0;
 varying vec3 tint;
 varying float lit;
+varying float raider;      // 1: a raider's brackets
+varying vec2 bq;           // ... where the fragment is, in the brackets' half sizes from the vehicle (y up)
+varying float stem_u;      // ... and the stem's half width in the same
 
 void vertex() {
 	vec3 c = (MODELVIEW_MATRIX * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
@@ -370,20 +379,44 @@ void vertex() {
 	float wide = max(line_w.x, line_w.y * pixel);
 	lit = COLOR.a * gain * smoothstep(fade_in.x, fade_in.y, dist) * through_glass(MODEL_MATRIX[3].xyz);
 	tint = pow(COLOR.rgb, vec3(2.2));      // authored sRGB
+	raider = INSTANCE_CUSTOM.y;
+	bq = vec2(0.0);
+	stem_u = 0.0;
 	vec3 p = c;
 	if (lit > 0.004) {
-		p += up * ((UV.y * 0.5 + 0.5) * tall) + side * (UV.x * wide);
+		if (raider > 0.5) {
+			float half_box = max(box.x, box.y * pixel);
+			float y = mix(-half_box, max(tall, half_box * 2.2), UV.y * 0.5 + 0.5);
+			p += up * y + side * (UV.x * half_box);
+			bq = vec2(UV.x, y / half_box);
+			stem_u = wide / half_box;
+		} else {
+			p += up * ((UV.y * 0.5 + 0.5) * tall) + side * (UV.x * wide);
+		}
 	}
 	POSITION = PROJECTION_MATRIX * vec4(p, 1.0);
 }
 
 void fragment() {
-	float x = abs(UV.x);
-	float y = UV.y * 0.5 + 0.5;
-	float stem = (1.0 - smoothstep(0.22, 0.46, x)) * smoothstep(0.0, 0.04, y) * 0.8;
-	float head = 1.0 - smoothstep(0.75, 1.0, x + abs(y - 0.95) / 0.05);      // a small diamond at its top
+	float a;
+	if (raider > 0.5) {
+		float ax = abs(bq.x);
+		float ay = abs(bq.y);
+		float edge = max(ax, ay);
+		float aa = max(fwidth(edge), 0.01);
+		// four L-shaped corners of a square round it, open along the middle of each side
+		float brackets = smoothstep(0.78 - aa, 0.78, edge) * (1.0 - smoothstep(1.0 - aa, 1.0, edge)) * smoothstep(0.4, 0.4 + aa, min(ax, ay));
+		float stem = (1.0 - smoothstep(stem_u * 0.22, stem_u * 0.46, ax)) * smoothstep(1.0, 1.0 + aa * 2.0, bq.y) * 0.8;
+		a = max(brackets, stem);
+	} else {
+		float x = abs(UV.x);
+		float y = UV.y * 0.5 + 0.5;
+		float stem = (1.0 - smoothstep(0.22, 0.46, x)) * smoothstep(0.0, 0.04, y) * 0.8;
+		float head = 1.0 - smoothstep(0.75, 1.0, x + abs(y - 0.95) / 0.05);      // a small diamond at its top
+		a = max(stem, head);
+	}
 	ALBEDO = tint;
-	ALPHA = clamp(lit * max(stem, head), 0.0, 1.0);
+	ALPHA = clamp(lit * a, 0.0, 1.0);
 }
 """
 
@@ -623,12 +656,13 @@ func build(v) -> void:
 	line_mat.set_shader_parameter("line_tan", tan(deg_to_rad(LINE_ANGLE)))
 	line_mat.set_shader_parameter("line_h", LINE_H)
 	line_mat.set_shader_parameter("line_w", LINE_W)
+	line_mat.set_shader_parameter("box", HOSTILE_BOX)
 	line_mat.set_shader_parameter("fade_in", CAR_NEAR)
 	line_mat.set_shader_parameter("pane", Vector2(deg_to_rad(PANE.x), deg_to_rad(PANE.y)))
 	lines = _batch("tactical_lines", MAX_LINES, line_mat, bounds)
 	line_tints.resize(MAX_LINES)
-	_line_way.resize(MAX_LINES)
-	_line_way.fill(255)
+	line_shape.resize(MAX_LINES)
+	line_shape.fill(255)
 	# the exits' chevrons
 	var chev_shader := Shader.new()
 	chev_shader.code = CHEVRON_SHADER
@@ -1139,6 +1173,7 @@ func _lines_frame(dt: float, speed: float, shown: bool, strength: float) -> void
 				if mark != null:
 					mark.seconds = f.seconds
 					mark.way = pass_way
+					mark.hostile = hostile
 					mark.tint = Traffic.HOSTILE_COL if hostile else (soon_tint(mark.seconds) if pass_way else CALM)
 	var mm := lines.multimesh
 	var k := 0
@@ -1152,11 +1187,12 @@ func _lines_frame(dt: float, speed: float, shown: bool, strength: float) -> void
 		var colour := mark.tint
 		colour.a = mark.a * (1.0 if in_way else SIDE_LINE.y)
 		mm.set_instance_transform(k, Transform3D(Basis.IDENTITY, mark.car.lamp_position))
-		if line_tints[k] != colour or _line_way[k] != int(in_way):
+		var shape := 2 if mark.hostile else int(in_way)
+		if line_tints[k] != colour or line_shape[k] != shape:
 			mm.set_instance_color(k, colour)
-			mm.set_instance_custom_data(k, Color(1.0 if in_way else SIDE_LINE.x, 0.0, 0.0, 0.0))
+			mm.set_instance_custom_data(k, Color(1.0 if in_way else SIDE_LINE.x, 1.0 if mark.hostile else 0.0, 0.0, 0.0))
 			line_tints[k] = colour
-			_line_way[k] = int(in_way)
+			line_shape[k] = shape
 		k += 1
 	mm.visible_instance_count = k
 	line_count = k

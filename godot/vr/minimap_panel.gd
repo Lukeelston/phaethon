@@ -113,15 +113,23 @@ func tone(key: String) -> Color:
 
 
 ## A vehicle's dot on the map, in scheme k: [half size (panel m), colour]. A raider (Raids: Traffic.HOSTILE_MARK) the
-## biggest, in the hostile red whatever the scheme; the racer (kind 4) a bigger one in the scheme's STARFIGHTER colour;
-## every other kind a small one in its craft colour.
+## biggest, in the hostile red whatever the scheme (hostile_tone); the racer (kind 4) a bigger one in the scheme's
+## STARFIGHTER colour; every other kind a small one in its craft colour.
 static func dot_style(kind: int, k := 0) -> Array:
 	var sc: Dictionary = SCHEMES[k]
 	if kind == Traffic.HOSTILE_MARK:
-		return [0.0068, Traffic.HOSTILE_COL]
+		return [0.0068, hostile_tone()]
 	if kind == 4:
 		return [0.006, sc.star]
 	return [0.0028, Color(sc.craft, 0.8)]
+
+
+## A raider's colour on this screen. Traffic.HOSTILE_COL is authored as it is to be seen (the flat map and the tactical
+## display show it so); this screen's vertex colours are taken as linear (its material, and the windscreen's copy), so
+## as it was it showed an orange-red: it is put into linear here, and the screen shows the red itself. The same in every
+## scheme: on AMBER's orange roads it stands off by hue, its size and its dark edge (tests/test_raid_display.gd).
+static func hostile_tone() -> Color:
+	return Traffic.HOSTILE_COL.srgb_to_linear()
 
 
 ## Which of SCHEMES has this name, -1 none (the cockpit's saved choice).
