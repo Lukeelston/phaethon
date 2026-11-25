@@ -216,7 +216,7 @@ class Model:
             self.face([p[i] - d, p[j] - d, p[j] + d, p[i] + d], mat)
 
 
-def write_glb(path, models, rotate):
+def write_glb(path, models, rotate, *, nodes=None):
     data = bytearray()
     views = []
     access = []
@@ -263,11 +263,13 @@ def write_glb(path, models, rotate):
                 ],
             }
         )
-    nodes = [{"name": name, "mesh": i} for i, (name, m) in enumerate(models)]
+    if nodes is None:
+        nodes = [{"name": name, "mesh": i} for i, (name, m) in enumerate(models)]
+    children = {i for node in nodes for i in node.get("children", [])}
     obj = {
         "asset": {"version": "2.0", "generator": "Phaethon fleet workshop"},
         "scene": 0,
-        "scenes": [{"nodes": list(range(len(nodes)))}],
+        "scenes": [{"nodes": [i for i in range(len(nodes)) if i not in children]}],
         "nodes": nodes,
         "meshes": meshes,
         "accessors": access,
