@@ -13,7 +13,8 @@
 ##              livery repaints with the craft's own mask and the livery's colours, set when it is built and
 ##              left alone a frame after; the Shrike's pod, piping and coaming in its paint
 ##   flights    unpinned, a flight builds each craft in the menus' choice for that craft
-##   pixels     (needs a window) the fleet's finish in Factory draws exactly as eddf4f7's shader did; in a
+##   pixels     (needs a window) the legacy finish path draws exactly as eddf4f7's shader did; the refined
+##              Factory finish changes painted regions only, and keeps its material profile in a livery; in a
 ##              livery its enamel takes the paint's hue with its own light and dark (not a flat fill), and
 ##              its metal, rubber, ceramic, cloth, vent and printed tiles do not move a step
 ##   turntable  the title's turntable shows a fleet craft in its own paint, and a press of the paint row
@@ -431,43 +432,61 @@ func _pixels() -> void:
 	var same := []
 	var kept := []
 	var moved := []
+	var refined := []
 	for id: String in Fleet.OWN:
 		var atlas := load(Fleet.ASSET_DIR + id + ".tres") as StandardMaterial3D
-		var factory := Fleet.finish_for(atlas)
+		var factory := Fleet.finish_for(atlas, id)
+		var legacy := factory.duplicate() as ShaderMaterial
+		legacy.set_shader_parameter("packed_paint_finish", false)
 		var before := Fleet.finish_for(atlas)
 		before.shader = old
 		Livery.current = "cobalt"
-		var cobalt := Fleet.finish_for(atlas)
+		var cobalt := Fleet.finish_for(atlas, id)
 		Fleet.repaint(cobalt, load(Fleet.ASSET_DIR + id + Fleet.MASK), Fleet.colours(id))
 		Livery.current = Livery.FACTORY
 		var shots := []
-		for mat in [factory, before, cobalt]:
+		for mat in [factory, legacy, before, cobalt]:
 			quad.material_override = mat
 			shots.append(await _capture())
+		# Compare livery grain without lighting: dielectric specular is white,
+		# so it contributes different relative contrast on cream and dark blue.
+		# The four lit renders above still check coat, profile and fixed surfaces.
+		for mat: ShaderMaterial in [factory, cobalt]:
+			var unlit := mat.duplicate() as ShaderMaterial
+			unlit.shader = Shader.new()
+			unlit.shader.code = mat.shader.code.replace("shader_type spatial;", "shader_type spatial;\nrender_mode unshaded;")
+			quad.material_override = unlit
+			shots.append(await _capture())
 		var size: Vector2i = shots[0].get_size()
-		# Factory against eddf4f7's shader: every pixel
+		# Legacy mode retains the old response; the authored finish is intentional.
 		var differ := 0
 		for y in range(0, size.y, 2):
 			for x in range(0, size.x, 2):
-				differ += int(shots[0].get_pixel(x, y) != shots[1].get_pixel(x, y))
+				differ += int(shots[1].get_pixel(x, y) != shots[2].get_pixel(x, y))
 		same.append("%s %d" % [id, differ])
 		# the tiles a livery leaves alone: not a step, in their middles
 		var stepped := 0
 		for tile: Array in KEPT_TILES:
 			for j in 12:
 				for i in 12:
-					var p := _pixel(size, (Vector2(tile[0], tile[1]) + Vector2(0.1 + 0.8 * i / 11.0, 0.1 + 0.8 * j / 11.0)) / 4.0)
-					stepped += int(shots[0].get_pixel(p.x, p.y) != shots[2].get_pixel(p.x, p.y))
+					# The cloth tile now shares its right half with recolourable vinyl.
+					var span := 0.35 if tile == [3, 1] else 0.8
+					var p := _pixel(size, (Vector2(tile[0], tile[1]) + Vector2(0.1 + span * i / 11.0, 0.1 + 0.8 * j / 11.0)) / 4.0)
+					stepped += int(shots[0].get_pixel(p.x, p.y) != shots[3].get_pixel(p.x, p.y))
+					# The paint coat and craft-specific roughness must not coat metal or fabric.
+					stepped += int(shots[0].get_pixel(p.x, p.y) != shots[1].get_pixel(p.x, p.y))
 		kept.append("%s %d" % [id, stepped])
 		# the enamel tile: cobalt's hue, and the factory's own light and dark (their correlation, their spread)
 		var a := []
 		var b := []
 		var blue := 0
+		var changed := 0
 		for j in 24:
 			for i in 24:
 				var p := _pixel(size, Vector2(0.025 + 0.2 * i / 23.0, 0.025 + 0.2 * j / 23.0))
-				var f: Color = shots[0].get_pixel(p.x, p.y)
-				var c: Color = shots[2].get_pixel(p.x, p.y)
+				var f: Color = shots[4].get_pixel(p.x, p.y)
+				var c: Color = shots[5].get_pixel(p.x, p.y)
+				changed += int(shots[0].get_pixel(p.x, p.y) != shots[1].get_pixel(p.x, p.y))
 				a.append(_lum(f))
 				b.append(_lum(c))
 				blue += int(c.b > c.g and c.g > c.r)
@@ -475,11 +494,13 @@ func _pixels() -> void:
 		var spread_f := _spread(a)
 		var spread_c := _spread(b)
 		moved.append("%s blue %d/576 r %.2f spread %.3f/%.3f" % [id, blue, r, spread_c, spread_f])
+		refined.append(changed > 100)
 		if blue < 560 or r < 0.6 or spread_c < 0.4 * spread_f:
 			moved[-1] += " (WRONG)"
 	stage.queue_free()
 	await process_frame
-	check("the fleet's finish in Factory draws exactly as eddf4f7's did (pixels that differ: %s)" % [same], same.all(func(s): return s.ends_with(" 0")))
+	check("the legacy finish path draws exactly as eddf4f7's did (pixels that differ: %s)" % [same], same.all(func(s): return s.ends_with(" 0")))
+	check("each refined factory finish visibly changes painted surfaces", refined.all(func(value): return value))
 	check("in Cobalt their metal, rubber, ceramic, cloth and vent tiles do not move a step (pixels that do: %s)" % [kept], kept.all(func(s): return s.ends_with(" 0")))
 	check("... and their enamel takes Cobalt's hue with its own light and dark, not a flat fill (%s)" % [moved], not str(moved).contains("WRONG"))
 

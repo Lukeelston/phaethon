@@ -8,7 +8,7 @@ static var hd := true   # false before the first finish is made: v0.3.2's proced
 
 
 static func powder_coat() -> StandardMaterial3D:
-	return _finish("powder", 0.12, 0.78, 0.20)
+	return _finish("powder", 0.0, 0.78, 0.20)
 
 
 static func machined() -> StandardMaterial3D:
@@ -33,7 +33,7 @@ static func webbing() -> StandardMaterial3D:
 ## square tile so the weave and casting marks retain their scale around corners.
 static func deck_finish(key: String) -> StandardMaterial3D:
 	match key:
-		"carbon": return _finish(key, 0.15, 0.40, 0.10)
+		"carbon": return _finish(key, 0.0, 0.40, 0.10)
 		"walnut": return _finish(key, 0.0, 0.42, 0.12)
 		"casting": return _finish(key, 0.08, 0.56, 0.14)
 		"porcelain": return _finish(key, 0.0, 0.25, 0.02)
@@ -65,7 +65,7 @@ static func rubber() -> StandardMaterial3D:
 
 
 static func painted_metal() -> StandardMaterial3D:
-	return _finish("paint", 0.34, 0.43, 0.07)
+	return _finish("paint", 0.0, 0.43, 0.07)
 
 
 static func indicator() -> StandardMaterial3D:

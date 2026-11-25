@@ -34,7 +34,7 @@ static func supports(vehicle: String) -> bool:
 func _init(vehicle: String) -> void:
 	id = vehicle
 	var source := (load(ASSET_DIR + id + ".glb") as PackedScene).instantiate()
-	var paint := finish_for(load(ASSET_DIR + id + ".tres") as StandardMaterial3D)
+	var paint := finish_for(load(ASSET_DIR + id + ".tres") as StandardMaterial3D, id)
 	if id == Pilot.VESPER and Livery.current == Livery.STAR_COMMAND:      # (its own racing atlas, Codex's: worn as painted)
 		paint.set_shader_parameter("albedo_map", load(ASSET_DIR + "vesper_star_command.webp"))
 	elif not Livery.is_factory():      # (Factory: the atlas as it was painted)
@@ -50,13 +50,21 @@ func _init(vehicle: String) -> void:
 ## The baked bodywork's finish (view/fleet_finish.gdshader) from the atlas material the tools write:
 ## the same maps, with the occlusion the tools bake into the vertex colours, and specular
 ## anti-aliasing on the radiused edges. The Shrike's bodywork uses it too (view/shrike_airframe.gd).
-static func finish_for(atlas: StandardMaterial3D) -> ShaderMaterial:
+static func finish_for(atlas: StandardMaterial3D, vehicle := "shrike") -> ShaderMaterial:
 	var mat := ShaderMaterial.new()
 	mat.shader = FINISH
 	mat.set_shader_parameter("albedo_map", atlas.albedo_texture)
 	mat.set_shader_parameter("normal_map", atlas.normal_texture)
 	mat.set_shader_parameter("orm_map", atlas.roughness_texture)
 	mat.set_shader_parameter("normal_depth", atlas.normal_scale)
+	mat.set_shader_parameter("packed_paint_finish", true)
+	# The survey enamel is satin, the workhorse tougher, the racer lacquered,
+	# and the gunship has a low-glare finish. Bare fittings keep their own maps.
+	var finishes := {"orrery": Vector2(0.025, 0.18), "kiln": Vector2(0.085, 0.12),
+		"vesper": Vector2(-0.045, 0.32), "basilisk": Vector2(0.17, 0.06), "shrike": Vector2(0.0, 0.26)}
+	var finish: Vector2 = finishes.get(vehicle, Vector2(0.0, 0.22))
+	mat.set_shader_parameter("paint_roughness_bias", finish.x)
+	mat.set_shader_parameter("paint_clearcoat", finish.y)
 	return mat
 
 

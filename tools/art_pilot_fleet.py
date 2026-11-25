@@ -71,13 +71,18 @@ def skin_patch(m, rows, start, end, angles, exp, mat, lift=0.012):
     # Include each host loft station so a cover cannot bridge across a chine.
     # The outer rows turn down through the skin and close the old floating edge.
     segments = max(6, math.ceil(abs(angles[1] - angles[0]) / 9))
-    stations = [start - 0.012, start, *range(math.floor(start) + 1, math.ceil(end)), end, end + 0.012]
+    low, high = sorted((start, end))
+    direction = 1 if end > start else -1
+    interior = list(range(math.floor(low) + 1, math.ceil(high)))
+    if direction < 0:
+        interior.reverse()
+    stations = [start - direction*0.012, start, *interior, end, end + direction*0.012]
     azimuths = [-0.012, *np.linspace(0, 1, segments + 1), 1.012]
 
     def sample(u, v):
         f = np.interp(u * (len(stations) - 1), range(len(stations)), stations)
         az = np.interp(v * (len(azimuths) - 1), range(len(azimuths)), azimuths)
-        edge = max(start - f, f - end, -az, az - 1, 0) / 0.012
+        edge = max(low - f, f - high, -az, az - 1, 0) / 0.012
         return at(f, az, lift - (lift + 0.003) * edge**2)
 
     base, first_index = len(m.pos), len(m.indices)
@@ -118,6 +123,43 @@ def hoop(m, z, x, y, w, h, t, depth, mat, exp=0.94, bonded=False):
 
 def tube(m, pts, r, mat, n=10):
     m.sweep(pts, r, mat, sides_for(r, max(n, 10)))
+
+
+def fastener(m, at, normal, radius=0.025):
+    """A seated washer and bevelled hex head, with a dark socket on the crown.
+
+    The washer enters its host by 3 mm: these belong to a flange, not to the air.
+    Kept in the parent's static mesh, with no material or draw-call proliferation.
+    """
+    p, n = np.asarray(at, dtype=float), unit(np.asarray(normal, dtype=float))
+    # Seat against the actual exported surface, including the bevel of a ring.
+    # Nominal flange planes are several millimetres ahead of their rolled faces.
+    points = np.asarray(m.pos)
+    faces = points[np.asarray(m.indices).reshape(-1, 3)]
+    a, e1, e2 = faces[:, 0], faces[:, 1] - faces[:, 0], faces[:, 2] - faces[:, 0]
+    origin, direction = p + n * 0.08, -n
+    cross = np.cross(direction, e2)
+    det = np.sum(e1 * cross, axis=1)
+    inv = np.divide(1.0, det, out=np.zeros_like(det), where=np.abs(det) > 1e-12)
+    delta = origin - a
+    u = np.sum(delta * cross, axis=1) * inv
+    q = np.cross(delta, e1)
+    v, distance = (q @ direction) * inv, np.sum(e2 * q, axis=1) * inv
+    hit = (np.abs(det) > 1e-12) & (u >= 0) & (v >= 0) & (u + v <= 1) & (distance > 0) & (distance < 0.18)
+    if not hit.any():
+        raise ValueError(f"Fastener has no supporting surface at {tuple(p)}")
+    k = np.flatnonzero(hit)[np.argmin(distance[hit])]
+    p = origin + direction * distance[k]
+    face_normal = unit(np.cross(e1[k], e2[k]))
+    n = face_normal if np.dot(face_normal, n) > 0 else -face_normal
+    m.pipe(p - n * 0.003, p + n * 0.003, radius * 1.23, "dark", 12, lip=0.001)
+    m.pipe(p + n * 0.002, p + n * (radius * 0.55), radius, "alloy", 6)
+    right = unit(np.cross(n, np.eye(3)[np.argmin(np.abs(n))]))
+    up = np.cross(n, right)
+    socket = [p + n * (radius * 0.55 + 0.0002) +
+              (right * math.cos(TAU * k / 6) + up * math.sin(TAU * k / 6)) * radius * 0.40
+              for k in range(6)]
+    m.poly(socket, n, "dark")
 
 
 def badge(m, z, x, y, side, width, height):
@@ -295,6 +337,13 @@ def orrery_engine(m, side):
         for dz in (-0.19, 0.19):
             hoop(m, z + dz, 0, 0.19, w * 1.012, h * 1.012, 0.07, 0.063, "gold", bonded=True)
         hoop(m, z, 0, 0.19, w * 0.794, h * 0.794, 0.047, 0.19, "accent")
+        # Serviceable annular housings: fasteners seat on each broad end flange.
+        for face in (-1, 1):
+            for i in range(8):
+                a = (i + 0.5) * TAU / 8
+                fastener(m, (w * 0.90 * signed(math.cos(a), 0.94),
+                             0.19 + h * 0.90 * signed(math.sin(a), 0.94), z + face * 0.235),
+                         (0, 0, face), 0.027)
         for i in range(8):
             a = i * TAU / 8
             m.pipe(
@@ -404,8 +453,24 @@ def kiln_engine(m, side):
                 p = a + (b - a) * t
                 # Turn the narrow fin to a crowned edge in a single cut on
                 # either side. The centre of the lower face sits in the block.
-                m.pipe(p, p + (b - a) * 0.066, 0.39, "brushed", 18, lip=0.007, crowned=True)
-            m.pipe(b - (b - a) * 0.12, b + (b - a) * 0.08, 0.36, "enamel", 16, 0.32, lip=0.012)
+                m.pipe(p, p + (b - a) * 0.066, 0.39, "brushed", 48, lip=0.007, crowned=True)
+            m.pipe(b - (b - a) * 0.12, b + (b - a) * 0.08, 0.36, "enamel", 48, 0.32, lip=0.012)
+            axis = unit(b - a)
+            lateral = unit(np.cross(axis, vec(0, 0, 1)))
+            fore = np.cross(axis, lateral)
+            head = b + (b - a) * 0.08
+            for k in range(4):
+                a_head = (k + 0.5) * TAU / 4
+                fastener(m, head + (lateral * math.cos(a_head) + fore * math.sin(a_head)) * 0.232,
+                         axis, 0.024)
+            # A removable plug boss and ceramic insulator explain the previously
+            # featureless head. The lead is clipped back into the valley cover.
+            m.pipe(head - axis * 0.004, head + axis * 0.026, 0.065, "brushed", 6)
+            m.pipe(head + axis * 0.020, head + axis * 0.095, 0.034, "ceramic", 16)
+            lead = head + axis * 0.080
+            tube(m, [lead, lead + vec(-s * 0.14, 0.09, -0.04),
+                     vec(s * 0.31, 0.72, z + 0.06), vec(s * 0.25, 0.61, z + 0.08)],
+                 0.018, "rubber", 12)
             # Individual bronze hot headers fold down to the common collector.
             tube(
                 m,
@@ -420,6 +485,13 @@ def kiln_engine(m, side):
                 12,
             )
         m.pipe((s * 1.31, -0.13, -1.73), (s * 1.31, -0.13, 1.46), 0.17, "gold", 16)
+        # Collector end flange and two saddles: a long hot pipe needs support.
+        for z in (-1.70, 1.42):
+            m.pipe((s * 1.31, -0.13, z - 0.026), (s * 1.31, -0.13, z + 0.026),
+                   0.192, "brushed", 32, lip=0.004)
+        for z in (-1.24, 0.83):
+            tube(m, [(s * 1.05, -0.45, z), (s * 1.20, -0.39, z), (s * 1.31, -0.25, z)],
+                 0.036, "dark", 12)
         tube(
             m,
             [(s * 1.31, -0.13, 1.46), (s * 1.23, -0.12, 1.82), (s * 0.84, -0.16, 2.34)],
@@ -486,8 +558,8 @@ def vesper_engine(m, side):
         ]
         loft(m, rows, "enamel", 0.53, 32, False)
         for j, (a, b) in enumerate(((0.37, 1.92), (2.0, 3.60), (3.72, 5.10), (5.22, 6.8))):
-            skin_patch(m, rows, a, b, (45, 131), 0.53, "access" if j % 2 == 0 else "stripe")
-        skin_patch(m, rows, 2.40, 3.08, (64, 115), 0.53, "number", 0.026)
+            skin_patch(m, rows, a, b, (45, 131), 0.53, "access" if j % 2 == 0 else "stripe", 0.0035)
+        skin_patch(m, rows, 2.40, 3.08, (64, 115), 0.53, "number", 0.005)
         hoop(m, -4.59, sign * 0.8, 0.035, 0.444, 0.251, 0.15, 0.14, "accent", 0.55)
         loft(
             m,
@@ -522,7 +594,9 @@ def vesper_engine(m, side):
     )
     for z in (1.16, 1.38, 1.6, 1.82):
         loft(m, [(z, 0, 0.48, 0.53, 0.034), (z + 0.08, 0, 0.46, 0.56, 0.028)], "vent", 0.55, 14)
-    badge(m, -2.92, 1.482, 0.218, side, 0.86, 0.18)
+    # The former plaque sat across the wing root, which covered its name.
+    # Put it on the lower shoulder where the whole registration is visible.
+    badge(m, -3.05, 1.46, 0.0, side, 0.76, 0.10)
 
 
 def outboard_patch(m, rows, a, b, side, half, exp, region, lift=0.012):
@@ -582,6 +656,9 @@ def basilisk_engine(m, side):
     for z in (-3.05, -1.25, 0.95):
         x, y, w, h = at_rows(body, z)
         hoop(m, z, x, y, w + 0.012, h + 0.012, 0.05, 0.085, "dark", exp)
+        for sx in (-1, 1):
+            # Clamp bolts on the shoulder of each armour band.
+            fastener(m, (sx * w * 0.70, y + h + 0.012, z), (0, 1, 0), 0.024)
     loft(
         m,
         [
@@ -1224,7 +1301,7 @@ def seat(craft):
                 (0.13, s * 0.245, 0.077, 0.046, 0.060),
                 (0.18, s * 0.21, 0.06, 0.031, 0.04),
             ],
-            "accent",
+            "bolster",
             0.74,
             24,
         )
@@ -1476,6 +1553,10 @@ def basilisk_sponsons(m):
         badge(m, -0.95, SPONSON_X + 0.222, 0.10, s, 0.62, 0.11)
         # The hinge knuckles along the outboard edge (the starboard hatch turns on them).
         for z in (-1.36, -0.82, -0.28):
+            # Welded hinge feet carry each fixed knuckle down into the sponson;
+            # the aft barrel otherwise cleared the taper beneath the moving lid.
+            m.pipe((s*(HATCH_HINGE[0]-.034),HATCH_HINGE[1]-.034,z),
+                   (s*HATCH_HINGE[0],HATCH_HINGE[1],z),.014,"brushed",10)
             m.pipe(
                 (s * HATCH_HINGE[0], HATCH_HINGE[1], z - 0.06),
                 (s * HATCH_HINGE[0], HATCH_HINGE[1], z + 0.06),
