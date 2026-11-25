@@ -2,7 +2,7 @@
 ## of them and still flown from the menus, and each parked craft in its own saved paint (view/livery.gd's per-craft
 ## keys: "paint" for the Phaethon, "paint_<id>" for the others), outside and in its occupied cab, the Vesper's Star
 ## Command among them; building the bays leaves the flight's paint (Livery.current) as it was; nothing parked carries a
-## raid or a live gun.
+## raid or a live gun, with Raids on.
 ## Run headless with --xr-mode off -s res://tests/test_garage_fleet_paint.gd -- --mute
 extends SceneTree
 
@@ -134,6 +134,8 @@ func _talon_flight() -> void:
 	check(flight is Flat and flight.sim.P.vehicle == Pilot.TALON, "The menu's Start flies the Talon")
 	for tick in 10:
 		await process_frame
+	check(not _scripted(root, "res://view/network_raids.gd").is_empty(),
+		"With Raids on, the flight builds its raid director (the garage's check would have found one)")
 	check(not flight.can_visit_garage(), "A parked Talon is not offered the garage, which has no bay for it")
 	var pause_menu = root.get_node("ReleasePause")
 	pause_menu.set_paused(true)
@@ -163,6 +165,7 @@ func _run() -> void:
 	Settings.set_selected_craft(Pilot.TALON)
 	for id: String in SAVED:
 		Settings.set_choice(Livery.key_for(id), SAVED[id])
+	Settings.set_choice("raids", "on")      # (Raids on: still, nothing parked builds a raid director or a fire control)
 	Livery.current = SENTINEL
 	change_scene_to_file(UI.MENU_SCENE)
 	if await _scene(UI.MENU_SCENE):
