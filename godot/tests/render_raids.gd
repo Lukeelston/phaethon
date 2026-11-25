@@ -556,8 +556,9 @@ func _menus_set() -> bool:
 	return true
 
 
-## Does each option row's label fit its button? For the Raids, Pilot craft and Time buttons, every label they can show
-## (each craft's name, each hour) against the room inside the button (its width less its style's margins). Prints
+## Does each option row's label fit its button? For the Raids, Pilot craft, Time, Role and Chase buttons, every label
+## they can show (each craft's name, each hour) against the room inside the button (its width less its style's
+## margins); and where the menu's last control (Quit, or the headset's Start and Quit) stands against the window. Prints
 ## "fits" or "CUT" with the widths in pixels of the window. (The saved choices differ between checkouts' profiles: this
 ## measures every choice, so the head and the base are compared like for like.)
 func _measure(view: String, menu: Node) -> void:
@@ -567,6 +568,8 @@ func _measure(view: String, menu: Node) -> void:
 		"Raids": ["Raids:  Off", "Raids:  On"],
 		"Pilot craft": crafts.values().map(func(n): return "Pilot craft   ·   %s   ›" % n),
 		"Time": times.map(func(t): return "Time:  %s" % t[1]),
+		"Role": ["Role:  Racer", "Role:  Patrol"],
+		"Chase": ["Chase:  Off", "Chase:  On"],
 	}
 	for title in asks:
 		var b := _find_button(menu, title)
@@ -582,6 +585,26 @@ func _measure(view: String, menu: Node) -> void:
 			var w := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
 			said.append("%s %s (%d)" % ["fits" if w <= room else "CUT", text.replace("   ", " ").replace("  ", " "), roundi(w)])
 		print("RAIDS RENDER %s: %s button %d px across, %d inside; showing \"%s\": %s" % [view, title, roundi(b.size.x), roundi(room), b.text, "; ".join(said)])
+	for last in ["Quit to desktop", "Start flight"]:
+		var q := _find_text(menu, last)
+		if q != null:
+			var r := q.get_global_rect()
+			var seen := q.get_viewport().get_visible_rect().size
+			print("RAIDS RENDER %s: \"%s\" at y %d..%d of the %d px it is drawn in: %s" % [view, q.text.get_slice(" —", 0), roundi(r.position.y), roundi(r.end.y), roundi(seen.y),
+				"on screen" if r.end.y <= seen.y + 0.5 else "OFF SCREEN"])
+	var order = menu.get("buttons")
+	if order is Array:
+		print("RAIDS RENDER %s: the stick's order: %s" % [view, " | ".join((order as Array).map(func(b): return (b as Button).text.get_slice("  ", 0).get_slice(":", 0).strip_edges()))])
+
+
+func _find_text(node: Node, text: String) -> Button:
+	if node is Button and (node as Button).text.begins_with(text):
+		return node
+	for child in node.get_children():
+		var b := _find_text(child, text)
+		if b != null:
+			return b
+	return null
 
 
 func _find_button(node: Node, title: String) -> Button:
