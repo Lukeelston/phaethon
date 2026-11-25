@@ -136,11 +136,11 @@ func _rows() -> void:
 		var ids := Livery.ids_for(craft)
 		var phaethon := craft == Pilot.STANDARD
 		var right: bool = ids[0] == Livery.FACTORY and not ids.has("police") and not ids.has("boxcover") \
-			and (ids.size() == Livery.CHOICES.size() - 1 and not ids.has("ember") if phaethon else ids.size() == Livery.CHOICES.size() and ids.has("ember"))
+			and (ids.size() == Livery.CHOICES.size() - 1 and not ids.has("ember") if phaethon else ids.size() == Livery.CHOICES.size() + Livery.OWN.get(craft, []).size() and ids.has("ember"))
 		if not right:
 			wrong.append("%s %s" % [craft, ids])
 		keys[Livery.key_for(craft)] = craft
-	check("every craft's paint row starts at Factory; the Phaethon's has no second Ember, the others all eight paints (wrong: %s)" % [wrong], wrong.is_empty())
+	check("every craft's paint row starts at Factory; the Phaethon's has no second Ember, the others all eight paints (and their own: the Vesper's Star Command) (wrong: %s)" % [wrong], wrong.is_empty())
 	check("each craft saves its own paint, the Phaethon's under the \"paint\" it always had (%s)" % [keys],
 		keys.size() == Pilot.ORDER.size() and keys.get("paint") == Pilot.STANDARD)
 

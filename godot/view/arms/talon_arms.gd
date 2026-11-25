@@ -1,117 +1,218 @@
-## The Talon's wing guns (sim/pilot_craft.gd WEAPONS "wing_guns"): one in each wing root, where Codex's swept wing
-## leaves the chine beside the cockpit (view/talon_airframe.gd), fixed forward: the starfighter's, faster and lighter
-## than the Phaethon's cannons (Raids, 2026-11-24; Luke: "Modelled and hidden - have codex work on the art"). These
-## are stand-ins, plain boxes, until Codex's models fill the same contract, which every craft's arms keep
-## (docs/superpowers/specs/2026-11-24-raids-art-brief-codex.md):
-##   func build(craft) -> void           into the craft's hull/engines, stowed; craft is the CraftModel
+## The Talon's two leading-edge bays (Codex's art; sim/pilot_craft.gd WEAPONS "wing_guns"), in place of the raids'
+## stand-ins. The raid controller supplies normalized deploy time and heat. Neither rig nor meshes tick. They keep the
+## contract every craft's arms keep (docs/superpowers/specs/2026-11-24-raids-art-brief-codex.md):
+##   func build(craft) -> void           onto the craft's visible hull, stowed; craft is the CraftModel (its pod), or
+##                                       for a preview the hull itself
 ##   func set_deploy(t: float) -> void   0 stowed .. 1 out
-##   func muzzles() -> Array             global Transform3Ds, -Z out of each mouth
-##   var heat: float                     0..1: the barrels' glow follows it
-## build() puts this node where it rides. What rides on the pod goes under this node, on craft.pod: the VR cockpit
-## moves the node onto its own hull with the pod's other fittings (vr/vr_cockpit.gd), so in VR the guns are on the
-## hull the seat sees.
-## Each gun, pod-local (forward -Z; x mirrored to port): a dark housing inside the wing root, its port where the root's
-## leading edge meets the chine; a port cover over it, in the leading edge's titanium; a barrel in the housing.
-## Deploying: the cover slides inboard into the chine (t 0 .. 0.35), then the barrel runs 0.6 m out of the port
-## (0.3 .. 1). Stowed, nothing of it is drawn: it costs nothing until the GUN switch brings it out.
-##   arms = TalonArms.new(); arms.build(craft); arms.set_deploy(t); arms.muzzles(); arms.heat = h
+##   func muzzles() -> Array             global Transform3Ds, -Z out of each mouth (port, starboard)
+##   var heat: float                     0..1: both throats glow with it
+## view/craft_model.gd builds them with the craft on its pod and fires them through view/weapons/fixed_guns_mount.gd.
+## Everything rides under this node: the VR cockpit hides the pod and carries this node onto its own hull
+## (vr/vr_cockpit.gd), and the hull whose wing skin opens is whichever this node stands on.
+## Until the GUN switch first brings them out the hull wears its stock skin, the Talon as it was before them, and the
+## rig is hidden: a Talon never armed looks as it did. Out, the hull takes the open-bay skin (with_gun_bays: the sills)
+## and the rig is shown; stowed again, the rig is hidden and the hull wears her sealed skin (the sills, the shut
+## carriages and caps baked into it: view/talon_airframe.gd add_pod, with_bays). (Codex baked the sealed carriages into
+## every Talon's stock skin; the raids line keeps the stock skin until the first arming, as it keeps the Phaethon's.)
 extends Node3D
 
-const Kit := preload("res://view/mesh_kit.gd")
-const Finishes := preload("res://view/craft_materials.gd")
-const TurretScript := preload("res://view/turret.gd")
 const Talon := preload("res://view/talon_airframe.gd")
-const STAND_IN := true      # (tests/test_arms.gd checks the stand-ins' own parts only where this is: Codex's art drops it)
+const Finish := preload("res://view/craft_materials.gd")
+const Kit := preload("res://view/mesh_kit.gd")
+const TRAVEL := 0.83
+const STOWED_TIP_Z := Talon.GUN_FRONT + 0.085
+const LIFT_ARM := 0.53
+const LOW_ANGLE := deg_to_rad(9.0)
+const HIGH_ANGLE := deg_to_rad(69.0)
+const PIVOTS := [-1.48, -0.78]
+const PIVOT_Y := -0.022
+const SIDES := 16
+const CARBON := Color(0.115, 0.14, 0.16)
+const BLUED := Color(0.23, 0.30, 0.34)
+const EDGE := Color(0.63, 0.69, 0.70)
+const BORE := Color(0.032, 0.040, 0.045)
+const COOL := Color(0.12, 0.04, 0.012)
+const HOT := Color(1.0, 0.34, 0.055)
 
-const GUN := Vector3(1.18, -0.14, 0.0)         # each gun's line, pod-local (the starboard one's; x mirrored to port)
-const GUNMETAL := Color(0.20, 0.21, 0.23)
-const HOUSING := Vector3(0.064, 0.064, 0.86)
-const HOUSING_Z := -0.52                       # its middle: from its port at -0.95 (the leading edge's middle across it) to -0.09
-const BARREL := Vector3(0.05, 0.05, 0.84)
-const BARREL_Z := -0.525                       # stowed: its mouth 5 mm inside the port
-const PANEL := Vector3(0.072, 0.072, 0.008)
-const PANEL_Z := -0.955                        # shut: over the port, on its face
-const PANEL_SLIDE := 0.15                      # the cover slides this far inboard, into the chine ...
-const RUN := 0.6                               # ... and then the barrel runs this far out
-const T_PANEL := Vector2(0.0, 0.35)            # the deploy's share for the cover ...
-const T_RUN := Vector2(0.3, 1.0)               # ... and for the barrel
-
+var hull: MeshInstance3D
+var carriage: MeshInstance3D
+var caps: MeshInstance3D
+var links: Array[MeshInstance3D] = []
+var barrels: MeshInstance3D
+var throats: StandardMaterial3D
+var mouths: Array[Marker3D] = []
+var deploy := 0.0
+var _carried := ""      # the skin's bays while this node is carried to another hull (_notification)
 var heat := 0.0:
 	set(value):
 		heat = clampf(value, 0.0, 1.0)
-		_glow()
-var guns: Array[Node3D] = []       # port, starboard: each gun (housing, cover, barrel)
-var _panels: Array[Node3D] = []
-var _barrels: Array[Node3D] = []
-var _glow_mat: StandardMaterial3D  # the barrels': it glows with the heat
-static var _meshes := {}           # the parts' meshes, made once for every Talon (in every paint: titanium and dark)
+		if throats:
+			throats.emission = COOL.lerp(HOT, heat)
+			throats.emission_energy_multiplier = 0.05 + 2.1 * heat
 
 
 func build(craft) -> void:
-	name = "Arms"
-	(craft.pod as Node3D).add_child(self)
-	_glow_mat = _barrel_material()
-	for s: float in [-1.0, 1.0]:
-		var gun := Node3D.new()
-		gun.name = "WingGunL" if s < 0.0 else "WingGunR"
-		gun.position = GUN * Vector3(s, 1.0, 1.0)
-		add_child(gun)
-		guns.append(gun)
-		_part(gun, "Housing", _mesh("housing"), Finishes.painted_metal()).position = Vector3(0.0, 0.0, HOUSING_Z)
-		_panels.append(_part(gun, "Panel", _mesh("panel"), Finishes.painted_metal()))
-		_barrels.append(_part(gun, "Barrel", _mesh("barrel"), _glow_mat))
-	set_deploy(0.0)
-	_glow()
+	if hull != null:
+		return
+	hull = craft as MeshInstance3D if craft is MeshInstance3D else craft.pod as MeshInstance3D
+	name = "TalonArms"
+	if get_parent() == null:
+		hull.add_child(self)
+	var pal: Dictionary = hull.mesh.get_meta(&"talon_palette")
+	var skin := SurfaceTool.new()
+	skin.begin(Mesh.PRIMITIVE_TRIANGLES)
+	Talon.add_gun_carriages(skin, pal)
+	skin.index()
+	carriage = _part("GunCarriages", skin.commit())
+	carriage.material_override = Finish.painted_metal()
+	skin = SurfaceTool.new()
+	skin.begin(Mesh.PRIMITIVE_TRIANGLES)
+	Talon.add_gun_caps(skin, pal)
+	skin.index()
+	caps = _part("MuzzleCaps", skin.commit())
+	caps.material_override = carriage.material_override
+	barrels = _part("WingGuns", _barrels())
+	var link_mesh := _lift_links(pal)
+	for z: float in PIVOTS:
+		var link := _part("FrontLinks" if links.is_empty() else "RearLinks", link_mesh)
+		link.position = Vector3(0, PIVOT_Y, z)
+		link.material_override = Finish.painted_metal()
+		links.append(link)
+	for side: float in [-1.0, 1.0]:
+		var mouth := Marker3D.new()
+		mouth.name = "PortMouth" if side < 0.0 else "StarboardMouth"
+		mouth.position = _axis(side) + Vector3.BACK * STOWED_TIP_Z
+		barrels.add_child(mouth)
+		mouths.append(mouth)
+	heat = heat
+	hide()
+
+
+## Carried onto another hull (the VR cockpit's, at its build, before they are ever out): that is the hull whose wing
+## skin changes. (Carried later, the skin they have given the old hull goes with them.)
+func _notification(what: int) -> void:
+	if hull == null or hull.mesh == null:
+		return
+	if what == NOTIFICATION_UNPARENTED and hull.is_inside_tree():      # (not as the craft is freed)
+		_carried = String(hull.mesh.get_meta(&"talon_bays", ""))
+		hull.mesh = Talon.with_bays(hull.mesh, "")
+	elif what == NOTIFICATION_PARENTED and get_parent() is MeshInstance3D:
+		hull = get_parent() as MeshInstance3D
+		hull.mesh = Talon.with_bays(hull.mesh, _carried)
+
+
+func _part(label: String, mesh: ArrayMesh) -> MeshInstance3D:
+	var part := MeshInstance3D.new()
+	part.name = label
+	part.mesh = mesh
+	part.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	part.add_to_group("exterior")
+	add_child(part)
+	return part
 
 
 func set_deploy(t: float) -> void:
-	var at := clampf(t, 0.0, 1.0)
-	var slide := smoothstep(T_PANEL.x, T_PANEL.y, at)
-	var run := smoothstep(T_RUN.x, T_RUN.y, at)
-	for k in guns.size():
-		var inboard := -signf(guns[k].position.x)
-		guns[k].visible = at > 0.0
-		_panels[k].position = Vector3(inboard * PANEL_SLIDE * slide, 0.0, PANEL_Z)
-		_barrels[k].position = Vector3(0.0, 0.0, BARREL_Z - RUN * run)
+	var next := clampf(t, 0.0, 1.0)
+	if next == deploy or not hull:
+		return
+	if deploy == 0.0:
+		hull.mesh = Talon.with_gun_bays(hull.mesh)
+	deploy = next
+	if deploy == 0.0:
+		hull.mesh = Talon.with_bays(hull.mesh, "sealed")      # (stowed again: her shut carriages, in the skin)
+		hide()
+	else:
+		show()
+	# Parallel lift arms keep the two bores level as their housings rise and advance.
+	# Their painted backs clear the cockpit rails before the inner tubes extend.
+	var lift := lerpf(LOW_ANGLE, HIGH_ANGLE, smoothstep(0.0, 1.0, deploy))
+	for link in links:
+		link.rotation.x = -lift
+	var raised := Vector3(0, sin(lift) - sin(LOW_ANGLE), cos(lift) - cos(LOW_ANGLE)) * LIFT_ARM
+	carriage.position = raised
+	var cap_rotation := Basis(Vector3.RIGHT, deg_to_rad(104.0) * smoothstep(0, 0.50, deploy))
+	caps.transform = Transform3D(cap_rotation, raised + Talon.SHUTTER_PIN - cap_rotation * Talon.SHUTTER_PIN)
+	barrels.position = raised + Vector3.FORWARD * TRAVEL * smoothstep(0.30, 1, deploy)
 
 
 func muzzles() -> Array:
-	var out := []
-	for barrel: Node3D in _barrels:
-		out.append(barrel.global_transform * Transform3D(Basis.IDENTITY, Vector3(0.0, 0.0, -BARREL.z / 2.0)))
-	return out
+	var transforms := []
+	for mouth in mouths:
+		transforms.append(mouth.global_transform)
+	return transforms
 
 
-func _glow() -> void:
-	if _glow_mat:
-		_glow_mat.emission = TurretScript.COIL_COOL.lerp(TurretScript.COIL_HOT, heat)
-		_glow_mat.emission_energy_multiplier = 6.0 * heat
+static func _axis(side: float) -> Vector3:
+	return Vector3(Talon.GUN_X * side, Talon.GUN_Y, 0.0)
 
 
-static func _barrel_material() -> StandardMaterial3D:
-	var mat := StandardMaterial3D.new()
-	mat.vertex_color_use_as_albedo = true
-	mat.metallic = 0.6
-	mat.roughness = 0.35
-	mat.emission_enabled = true
-	mat.emission = TurretScript.COIL_COOL
-	mat.emission_energy_multiplier = 0.0
-	return mat
+## Two cheek links around each breech. They share across port and starboard, and this
+## one mesh fits both pivot stations. Titanium eyes catch the changing light in flight.
+static func _lift_links(pal: Dictionary) -> ArrayMesh:
+	var parts := []
+	var pin := Kit.cyl(.046, .046, .223, 12)
+	var boss := Kit.cyl(.042, .042, .008, 12)
+	var beam := Kit.rounded_box(Vector3(.038, .068, LIFT_ARM), 6.0, 6)
+	for side: float in [-1.0, 1.0]:
+		var x := Talon.GUN_X * side
+		for offset: float in [-.091, .091]:
+			parts.append([beam, Kit.at(Vector3(x + offset, 0, LIFT_ARM * .5)), pal.panel])
+		for z: float in [0.0, LIFT_ARM]:
+			parts.append([pin, Kit.at(Vector3(x, 0, z), Vector3(0, 0, PI / 2)), pal.metal])
+			parts.append([boss, Kit.at(Vector3(x - side * .114, 0, z), Vector3(0, 0, PI / 2)), pal.trim])
+	return Kit.compound(parts, null, true)
 
 
-static func _mesh(key: String) -> ArrayMesh:
-	if not _meshes.has(key):
-		var spec: Array = {"housing": [HOUSING, Talon.CAVITY], "panel": [PANEL, Talon.TITANIUM], "barrel": [BARREL, GUNMETAL]}[key]
-		_meshes[key] = Kit.compound([[Kit.box(spec[0]), Transform3D.IDENTITY, spec[1]]])
-	return _meshes[key]
+## Axially profiled, hollow tips, interrupted heat vents and a faired breech. Both guns share two surfaces.
+func _barrels() -> ArrayMesh:
+	var metal := SurfaceTool.new()
+	metal.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var glow := SurfaceTool.new()
+	glow.begin(Mesh.PRIMITIVE_TRIANGLES)
+	# From the inner throat forward, around the chamfered lip, then aft to the slide.
+	var profile := [
+		Vector3(0.14, 0.031, 0), Vector3(0.025, 0.045, 0), Vector3(0.004, 0.047, 0),
+		Vector3(0.0, 0.051, 1), Vector3(0.0, 0.064, 1), Vector3(0.009, 0.070, 1),
+		Vector3(0.082, 0.070, 2), Vector3(0.090, 0.058, 1), Vector3(0.179, 0.056, 2),
+		Vector3(0.188, 0.073, 1), Vector3(0.226, 0.073, 2), Vector3(0.233, 0.064, 1),
+		Vector3(0.59, 0.064, 2), Vector3(0.61, 0.081, 1), Vector3(0.70, 0.081, 3),
+		Vector3(0.72, 0.074, 1), Vector3(1.32, 0.072, 3)]
+	var colors := [BORE, EDGE, BLUED, CARBON]
+	for side: float in [-1.0, 1.0]:
+		var centre := _axis(side) + Vector3.BACK * STOWED_TIP_Z
+		for j in range(1, profile.size()):
+			var front: Vector3 = profile[j - 1]
+			var rear: Vector3 = profile[j]
+			_ring(metal, centre, front.x, front.y, rear.x, rear.y, colors[int(rear.z)])
+		for start: float in [0.26, 0.35, 0.44, 0.53]:
+			for slot in 4:
+				_ring(glow, centre, start, 0.065, start + 0.034, 0.065, Color.WHITE, slot * 4, 2)
+		_ring(glow, centre, 0.033, 0.044, 0.058, 0.042, Color.WHITE)
+	metal.index()
+	var mesh := metal.commit()
+	mesh.surface_set_material(0, Kit.polished(0.74, 0.32))
+	glow.index()
+	glow.commit(mesh)
+	throats = StandardMaterial3D.new()
+	throats.albedo_color = Color(0.21, 0.105, 0.045)
+	throats.roughness = 0.32
+	throats.metallic = 0.42
+	throats.emission_enabled = true
+	throats.cull_mode = BaseMaterial3D.CULL_DISABLED
+	mesh.surface_set_material(1, throats)
+	return mesh
 
 
-static func _part(parent: Node3D, part_name: String, mesh: Mesh, mat: Material) -> MeshInstance3D:
-	var mi := MeshInstance3D.new()
-	mi.name = part_name
-	mi.mesh = mesh
-	mi.material_override = mat
-	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	mi.add_to_group("exterior")      # (outside the cabin: the cockpit's fitting checks leave it be)
-	parent.add_child(mi)
-	return mi
+static func _ring(st: SurfaceTool, centre: Vector3, z0: float, r0: float, z1: float, r1: float,
+		color: Color, first := 0, count := SIDES) -> void:
+	for i in range(first, first + count):
+		var angle := TAU * i / SIDES
+		var radial := Vector3(cos(angle), sin(angle), 0)
+		var next := Vector3(cos(angle + TAU / SIDES), sin(angle + TAU / SIDES), 0)
+		var p := centre + radial * r0 + Vector3.BACK * z0
+		var q := centre + next * r0 + Vector3.BACK * z0
+		var r := centre + next * r1 + Vector3.BACK * z1
+		var s := centre + radial * r1 + Vector3.BACK * z1
+		var normal := (radial + next).normalized() * (z1 - z0) + Vector3.FORWARD * (r1 - r0)
+		Talon._face(st, p, q, r, normal, color)
+		Talon._face(st, p, r, s, normal, color)

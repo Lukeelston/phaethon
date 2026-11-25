@@ -78,6 +78,46 @@ func _check_network_spawn(network: Network) -> void:
 		else:
 			check(first_choices == choices, "Replaying the traffic seed reproduces the same bodies, roads and lanes")
 
+func _check_raider(network: Network, camera: Camera3D) -> void:
+	check(not network._mm.has(Network.RAIDER) and network._drawing.writers.size() == Network.FLEET.size(),
+			"Ordinary traffic allocates and warms no raider batch")
+	network.cars.clear()
+	var threat := Network.Car.new()
+	threat.kind = Network.DEMON
+	threat.road = 0
+	threat.f = 100.0
+	network._place(threat)
+	network.cars.append(threat)
+	network.set_raider_visual(threat)
+	var batch: Batch = network._mm[Network.RAIDER]
+	network.set_raider_visual(threat)
+	check(network._mm[Network.RAIDER] == batch and not batch.multimesh.use_colors,
+			"Raiders share one batch, with fixed armour instead of commuter paint")
+	for mesh: Mesh in [batch.multimesh.mesh, batch.distant.mesh]:
+		check(mesh.get_surface_count() == 1 and mesh.surface_get_array_index_len(0) > 0,
+				"Raider body uses a single indexed surface at each tier")
+		var size := mesh.get_aabb().size
+		check(size.z > 12.0 and size.z < 14.0 and size.x > 4.0 and size.x < 6.0,
+				"Raider fits the demon's scale in each tier")
+	check(batch.distant.mesh.surface_get_array_index_len(0) < batch.multimesh.mesh.surface_get_array_index_len(0),
+			"Raider sheds detailed armour at distance")
+	var center := Vector3(threat.x - network.view.org_x, 4.0, -threat.y + network.view.org_y)
+	var heading := Vector3(threat.hx, 0.0, -threat.hy)
+	camera.position = center + 45.0 * heading
+	network._render()
+	check(batch.multimesh.visible_instance_count == 1 and threat.lamp_color == Network.RAIDER_LAMP,
+			"Incoming raider uses detail and hostile front lamps")
+	camera.position = center - 1600.0 * heading
+	network._render()
+	check(batch.distant.visible_instance_count == 1 and threat.lamp_color == Network.RAIDER_LAMP,
+			"Departing raider uses its distance mesh and hostile rear lamps")
+	network.cars.clear()
+	network.release_raider_visual()
+	check(not network._mm.has(Network.RAIDER) and network._drawing.writers.size() == Network.FLEET.size(),
+			"Finishing a raid releases both raider buffers")
+	camera.position = Vector3.ZERO
+
+
 func run() -> void:
 	var camera := Camera3D.new()
 	root.add_child(camera)
@@ -135,6 +175,7 @@ func run() -> void:
 			boards[roundi(racer.multimesh.get_instance_custom_data(i).r * 3.0)] = true
 	check(boards.size() == 4 and racer.multimesh.use_custom_data and racer.multimesh.visible_instance_count == Network.RACERS.size(), "Four independent pilot number boards in one draw batch")
 	_check_network_spawn(network)
+	_check_raider(network, camera)
 	highway.sync(10.0)
 	var counts: Array[int] = []
 	for model in range_models:

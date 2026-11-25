@@ -61,7 +61,7 @@ const GunneryScript := preload("res://view/gunnery.gd")
 const ALARM_DB := -10.0                  # the alarm's level (unheard: 9 dB over the reward chimes' -19, 8 under the jolt's thump)
 const MODES := [["off", "Off"], ["on", "On"]]       # the menus' row: [id, name]
 const MPH := 2.236936
-const RAIDER_VISUAL := Traffic.DEMON     # the raiders' model (a demon's, until Codex's raider has its own slot)
+const RAIDER_VISUAL := Traffic.RAIDER    # the raiders' model: Codex's raider, in its own slot (view/network_traffic.gd make_raider_batch)
 const READY_V := 900.0 / MPH             # m/s: "at speed", chase's figure
 const ZONE_STEP := 20                    # samples (480 m) between the town zone's points its distance is read from
 const CLEAR_OF_PILOT := 1500.0           # m: no raider is put down nearer the pilot than this (unless the zone has no room)
@@ -165,6 +165,8 @@ func build(v) -> void:           # (set `traffic` first: view.traffic_net)
 	var weapon = v.craft.weapon if v.get("craft") != null else null
 	if weapon != null and not weapon.steps_stowed() and v.get("gunnery") == null:      # (fixed guns: a turret's is made at once)
 		v.gunnery = GunneryScript.make(v, true)
+	if traffic != null:
+		traffic.make_raider_batch()      # (the raiders' model: made now, warmed with traffic's at the start)
 
 
 ## Is the pilot where one can begin: on a public road, not in a shaft, at speed, with traffic's floor free?
@@ -479,6 +481,7 @@ func _arrive() -> void:
 			room.append(f)
 	if room.size() < n:
 		room = stations      # (the pilot is in the middle of it: anywhere in the zone)
+	traffic.make_raider_batch()      # (made at build: here only if build had no traffic)
 	for k in n:
 		var c := Traffic.Car.new()
 		c.id = 960000 + _made

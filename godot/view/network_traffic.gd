@@ -85,12 +85,15 @@ const LAMP_ENERGY := Vector2(6.0, 4.5)   # the lamps' strength by day and at nig
 # light, and its colour is what says whether it is something to overtake wide. Head lamps are white on all of them.
 const TAIL := [Color(1.0, 0.15, 0.08), Color(1.0, 0.5, 0.1), Color(1.0, 0.15, 0.08), Color(1.0, 0.5, 0.1), Color(1.0, 0.3, 0.9)]
 const HEAD := Color(1.0, 0.95, 0.85)
+const RAIDER_LAMP := Color(1.0, 0.025, 0.035)
+const RAIDER_LAMP_SIZE := Vector3(2.0, 0.26, 12.86)
 const BODY_MIN_ANG := 0.0011     # a car's least half-width on the picture: it and every other body grow together past 3.6 km
 const BODY_HALF_WIDTH := 4.3     # ... a car's, m as drawn
 const TRACTOR := 5 # Render slot for the lead unit of a transport.
 const COURIER := 6
 const TENDER := 7
 const CRYOTANK := 8
+const RAIDER := 9 # Optional visual slot, allocated on the first raid.
 const BODY_VARIANTS := {CAR: COURIER, SLOW: TENDER, TRANSPORT: CRYOTANK}
 const FLEET := [
 	preload("res://art/traffic/commuter.glb"), preload("res://art/traffic/shuttle.glb"),
@@ -99,6 +102,7 @@ const FLEET := [
 	preload("res://art/traffic/courier.glb"), preload("res://art/traffic/tender.glb"),
 	preload("res://art/traffic/cryotank.glb"),
 ]
+const BODY_BOUNDS := AABB(Vector3(-40000, -100, -40000), Vector3(80000, 20000, 80000))
 const NUMBER_BOARDS := {"VEGA": 0.0, "KESTREL": 1.0/3.0, "MARROW": 2.0/3.0, "TALLOW": 1.0}
 # [top mph, lateral grip g, headway s, colour]: a racer's style
 const RACERS := {
@@ -235,6 +239,7 @@ class Car:
 	var lamp_nose := 13.0              # m from its middle forward to its head lamps
 	var lamp_tail := 13.0              # ... and back to its tail lamps (a transport's: behind the last of its train)
 	var lamp_tail_color := Color.RED   # its kind's (TAIL), kept here so a frame reads it and looks nothing up
+	var lamp_head_color := HEAD
 
 	func draw(frame: FleetFrame, batch: Batch.Writer) -> void:
 		if place_pending:
@@ -247,11 +252,12 @@ class Car:
 			draw_hy = hy
 			draw_yaw = Basis(Vector3.UP, atan2(-hx, hy))
 			draw_basis = draw_yaw.scaled(Vector3.ONE * SCALE)
-			var lamps: Vector3 = LAMPS[kind]
+			var lamps: Vector3 = RAIDER_LAMP_SIZE if visual == RAIDER else LAMPS[kind]
 			lamp_basis = draw_yaw * Basis.from_scale(lamps)
 			lamp_nose = TRACTOR_NOSE if kind == TRANSPORT else lamps.z
 			lamp_tail = lamps.z + ((TRAIN - 1) * TRAIN_GAP if kind == TRANSPORT else 0.0)
-			lamp_tail_color = TAIL[kind]
+			lamp_tail_color = RAIDER_LAMP if visual == RAIDER else TAIL[kind]
+			lamp_head_color = RAIDER_LAMP if visual == RAIDER else HEAD
 		var banked: Simulation.TrackPath = frame.roads[road]
 		if banked.banked:
 			var at := clampi(int(f), 0, banked.N - 2)
@@ -321,7 +327,7 @@ class Car:
 		if shaft_on:
 			lp = frame.shaft.point(road, f - dir * off / 24.0, lat, 1.0 + 1.2 * SCALE, frame.ox, frame.oy)
 
-		var lc := HEAD if coming else lamp_tail_color
+		var lc := lamp_head_color if coming else lamp_tail_color
 		if chase == "pursuer":      # a patrol's lights, seen from any distance: red, blue, red, blue
 			lc = Color(1.0, 0.1, 0.08) if int(Time.get_ticks_msec() / 200) % 2 == 0 else Color(0.15, 0.35, 1.0)
 		if hostile:
@@ -329,7 +335,7 @@ class Car:
 		lamp_position = lp
 		lamp_color = lc
 		if shaft_on:      # round a shaft's bulb the vehicle's own left-to-right is the bulb's, not the map's
-			lamp_basis = (frame.shaft.frame(road, f) * Basis(Vector3.UP, PI if dir < 0 else 0.0)) * Basis.from_scale(LAMPS[kind])
+			lamp_basis = (frame.shaft.frame(road, f) * Basis(Vector3.UP, PI if dir < 0 else 0.0)) * Basis.from_scale(RAIDER_LAMP_SIZE if visual == RAIDER else LAMPS[kind])
 			draw_hx = INF      # (and its heading's own frame is found again when it comes off the bulb)
 
 	## On a banked bend (CraftSim.NET_BANKS) every body stands on the deck as it leans there: at the deck's
@@ -355,7 +361,7 @@ class Car:
 		var fl := clampf(f - dir * off / 24.0, 0.0, last)
 		var il := clampi(int(fl), 0, R.N - 2)
 		lamp_position = Vector3(cx - hx * off - frame.ox, frame.height(road, fl) + 1.0 + 1.2 * SCALE + Simulation.net_bank_lift(R, il, fl - il, lat), -(cy - hy * off - frame.oy))
-		lamp_color = HEAD if coming else lamp_tail_color
+		lamp_color = lamp_head_color if coming else lamp_tail_color
 		if chase == "pursuer":
 			lamp_color = Color(1.0, 0.1, 0.08) if int(Time.get_ticks_msec() / 200) % 2 == 0 else Color(0.15, 0.35, 1.0)
 		if hostile:
@@ -376,7 +382,7 @@ class Car:
 		var coming := hx * (frame.eye_x - cx) + hy * (frame.eye_y - cy) > 0.0
 		var off := -lamp_nose if coming else lamp_tail
 		lamp_position = Vector3(cx - hx * off - frame.ox, h + 1.2 * SCALE, -(cy - hy * off - frame.oy))
-		lamp_color = HEAD if coming else lamp_tail_color
+		lamp_color = lamp_head_color if coming else lamp_tail_color
 		if chase == "pursuer":
 			lamp_color = Color(1.0, 0.1, 0.08) if int(Time.get_ticks_msec() / 200) % 2 == 0 else Color(0.15, 0.35, 1.0)
 		if hostile:
@@ -1388,21 +1394,10 @@ func race_text() -> String:
 # --- rendering and the sims' obstacles ---------------------------------------------------------
 
 func _build_meshes() -> void:
-	var bounds := AABB(Vector3(-40000, -100, -40000), Vector3(80000, 20000, 80000))
 	for kind in FLEET.size():
-		var batch := Batch.new()
-		batch.name = "traffic_tractor" if kind == TRACTOR else "traffic_%d" % kind
 		var slots := TARGET * (TRAIN - 1) if kind in [TRANSPORT, CRYOTANK] else TARGET + 8
-		batch.configure(FLEET[kind], slots, 500.0, bounds, true, kind == RACER)
-		add_child(batch)
-		_mm[kind] = batch
-		_drawing.writers.append(batch.writer)
+		_add_body_batch(kind, FLEET[kind], slots, "traffic_tractor" if kind == TRACTOR else "traffic_%d" % kind)
 	_drawing.tractor = _drawing.writers[TRACTOR]
-	# Far bodies: never under a couple of pixels wide (art/traffic/fleet.gdshader), every kind grown alike so a
-	# freighter stays bigger than a car at any distance.
-	for kind in _mm:
-		for node in [_mm[kind], (_mm[kind] as Node).get_node("Distance")]:
-			(node as GeometryInstance3D).set_instance_shader_parameter("grow_per_m", BODY_MIN_ANG / BODY_HALF_WIDTH)
 	# A pair of lamps per vehicle: its tail lamps, or its head lamps when its nose is toward the eye, the size
 	# they are, so a vehicle a kilometre off is a pair and one at the horizon a faint point. They were one glow a
 	# vehicle, a quarter of a degree across at any distance (as wide as the vehicle past a kilometre) and as
@@ -1424,8 +1419,48 @@ func _build_meshes() -> void:
 	bm.set_shader_parameter("grow_per_m", BODY_MIN_ANG / BODY_HALF_WIDTH)
 	_beams.material_override = bm
 	_beams.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	_beams.custom_aabb = AABB(Vector3(-40000, -100, -40000), Vector3(80000, 20000, 80000))
+	_beams.custom_aabb = BODY_BOUNDS
 	add_child(_beams)
+
+
+func _add_body_batch(slot: int, model: PackedScene, slots: int, label: String) -> void:
+	var batch := Batch.new()
+	batch.name = label
+	batch.configure(model, slots, 500.0, BODY_BOUNDS, slot != RAIDER, slot == RACER)
+	add_child(batch)
+	_mm[slot] = batch
+	_drawing.writers.append(batch.writer)
+	# Every body grows alike in angular size at the horizon, including optional ones.
+	for node in [batch, batch.get_node("Distance")]:
+		(node as GeometryInstance3D).set_instance_shader_parameter("grow_per_m", BODY_MIN_ANG / BODY_HALF_WIDTH)
+
+
+## Called by the raid director after traffic.build(), when dressing a ground raider.
+## Its existing driving class still controls its motion; ordinary spawns never request this model.
+func set_raider_visual(car: Car) -> void:
+	make_raider_batch()
+	car.visual = RAIDER
+	car.draw_hx = INF # Refresh lamp geometry even for a vehicle already travelling straight.
+
+
+## The raiders' batch, made once. The raid director (view/network_raids.gd) makes it at its build, which only a
+## flight with Raids on reaches: so it is drawn once with the rest while traffic warms its shaders at the start, and is
+## never loaded or made mid-flight at a raid's arrival. With Raids off nothing makes it.
+func make_raider_batch() -> void:
+	if not _mm.has(RAIDER):
+		_add_body_batch(RAIDER, load("res://art/traffic/raider.glb") as PackedScene, 12, "traffic_raider")
+
+
+## Release the optional buffers once the director has removed the last raider.
+func release_raider_visual() -> void:
+	if not _mm.has(RAIDER):
+		return
+	for car in cars:
+		if car.visual == RAIDER:
+			return
+	_drawing.writers.pop_back()
+	(_mm[RAIDER] as Batch).free()
+	_mm.erase(RAIDER)
 
 
 ## The lamps' mesh: a quad with all four corners at one point, its corner in UV (the shader spreads it).

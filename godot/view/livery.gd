@@ -17,6 +17,9 @@
 ## designed. The Phaethon's factory paint is Ember orange, so its row has no second Ember. The others
 ## wear a livery over their painted atlases (view/fleet_airframe.gd, view/shrike_airframe.gd): its paint
 ## on their enamel, its accent on their accent, its pin on their trim lines, and nothing else touched.
+## One livery is a craft's own: the Vesper's Star Command (Codex's), a white, green and red racing atlas of
+## its own (art/pilot_fleet/vesper_star_command.webp) worn instead of a repaint. It is on the Vesper's row only,
+## after Factory, and saved as its paint like any other.
 ##   Livery.current = "cobalt"            before a craft is built (and `pinned`, so a saved choice is left alone)
 ##   Livery.coat("paint")                 the colour of a part in the current livery (Factory's: Ember's)
 ##   Livery.built(vehicle)                the livery the menus' choice builds that craft in
@@ -26,6 +29,8 @@ const Settings := preload("res://release/game_settings.gd")
 const Pilot := preload("res://sim/pilot_craft.gd")
 
 const FACTORY := "factory"      # each craft as it was designed (the Phaethon: Ember orange)
+const STAR_COMMAND := "star_command"      # the Vesper's own racing livery (view/fleet_airframe.gd wears its atlas)
+const OWN := {Pilot.VESPER: [[STAR_COMMAND, "Star Command"]]}      # a craft's own liveries: on its row after Factory
 const TABLE := {
 	"ember": {"name": "Ember orange", "paint": Color(0.95, 0.42, 0.08), "stripe": Color(0.11, 0.12, 0.14), "pin": Color(0.96, 0.95, 0.9),
 		"engine": Color(0.86, 0.27, 0.09), "skin": Color(0.80, 0.82, 0.86)},
@@ -43,6 +48,9 @@ const TABLE := {
 		"engine": Color(0.88, 0.86, 0.80), "skin": Color(0.80, 0.82, 0.86), "accent": Color(0.84, 0.81, 0.73)},
 	"obsidian": {"name": "Obsidian black", "paint": Color(0.035, 0.035, 0.04), "stripe": Color(0.20, 0.21, 0.23), "pin": Color(0.90, 0.30, 0.06),
 		"engine": Color(0.05, 0.05, 0.06), "skin": Color(0.34, 0.35, 0.38), "accent": Color(0.10, 0.10, 0.11)},
+	# the Vesper's own (on its row only: OWN); its colours are its atlas's, for what is drawn in a livery's colours
+	STAR_COMMAND: {"name": "Star Command", "paint": Color("#f4f4eb"), "stripe": Color("#95e139"), "pin": Color("#d33948"),
+		"engine": Color("#95e139"), "skin": Color("#f4f4eb"), "accent": Color("#7238bd")},
 	# the patrol's black and white (not on the paint row: it comes with the patrol craft)
 	"police": {"name": "Patrol black and white", "paint": Color(0.93, 0.93, 0.92), "stripe": Color(0.035, 0.035, 0.04), "pin": Color(0.05, 0.22, 0.78),
 		"engine": Color(0.93, 0.93, 0.92), "skin": Color(0.05, 0.05, 0.06), "accent": Color(0.06, 0.24, 0.80)},
@@ -62,10 +70,13 @@ static func ids() -> Array:
 
 
 ## The paint row for a pilot craft: [id, name], Factory first. The Phaethon's Factory is Ember orange, so
-## Ember is not on its row twice.
+## Ember is not on its row twice. A craft's own liveries (OWN: the Vesper's Star Command) come next.
 static func choices_for(vehicle: String) -> Array:
-	if Pilot.known(vehicle) == Pilot.STANDARD:
+	var craft := Pilot.known(vehicle)
+	if craft == Pilot.STANDARD:
 		return CHOICES.filter(func(entry): return entry[0] != "ember")
+	if OWN.has(craft):
+		return CHOICES.slice(0, 1) + OWN[craft] + CHOICES.slice(1)
 	return CHOICES
 
 

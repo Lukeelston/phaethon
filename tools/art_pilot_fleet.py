@@ -1655,6 +1655,8 @@ def sight_lens():
 def make(craft):
     ART.mkdir(parents=True, exist_ok=True)
     make_maps(craft)
+    if craft == "vesper":
+        make_maps(craft, star_command=True)
     roof, glass = canopy(craft)
     parts = {
         "Port": engine(craft, -1),
