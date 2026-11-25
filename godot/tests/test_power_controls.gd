@@ -14,7 +14,8 @@
 ##   the flat view     P fires the power (the autopilot is O now)
 ##   the drift reach   the Orrery's cockpit steps out 0.8 as far as the Phaethon's in the same turn (the view's own)
 ## --headless --xr-mode off --audio-driver Dummy -s res://tests/test_power_controls.gd -- --mute
-## Prints POWER CONTROLS PASS. Puts user://vr_prefs.json back as it found it.
+## Prints POWER CONTROLS PASS. Puts user://vr_prefs.json back as it found it, and has its own settings file for the run
+## (a SLIDE throw on the way saves the craft's set-up): the default one is left as it was.
 extends SceneTree
 
 const View := preload("res://view/craft_view.gd")
@@ -23,12 +24,16 @@ const Console := preload("res://vr/console_switches.gd")
 const Switch := preload("res://vr/mode_switch.gd")
 const PowerButton := preload("res://vr/power_button.gd")
 const Drift := preload("res://vr/drift_slider.gd")
+const Settings := preload("res://release/game_settings.gd")
 const FRAME := 1.0 / 90.0
 var v
 var hl: XRController3D
 var hr: XRController3D
 var failures := 0
 var checks := 0
+var _settings_before := ""                      # the settings file in use before the run (the default: the player's)
+var _default_existed := false
+var _default_settings := PackedByteArray()
 
 
 func _initialize() -> void:
@@ -55,6 +60,24 @@ func _check(label: String, passed: bool) -> void:
 	checks += 1
 	print(("PASS " if passed else "FAIL ") + label)
 	failures += int(not passed)
+
+
+## Its own settings file for the run, as tests/test_fly_last_used.gd has: a MODE or SLIDE throw saves the craft's set-up
+## (release/game_settings.gd set_craft_setup), and the default file is the player's.
+func _own_settings(file_name: String) -> void:
+	_settings_before = Settings.prefs_path
+	_default_existed = FileAccess.file_exists(_settings_before)
+	_default_settings = FileAccess.get_file_as_bytes(_settings_before) if _default_existed else PackedByteArray()
+	Settings.prefs_path = "user://%s-%d.cfg" % [file_name, OS.get_process_id()]
+
+
+## The run's own settings file removed and the path put back. Is the default file as it was?
+func _settings_back() -> bool:
+	if Settings.prefs_path != _settings_before and FileAccess.file_exists(Settings.prefs_path):      # (never the file it found in use)
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(Settings.prefs_path))
+	Settings.prefs_path = _settings_before
+	return FileAccess.file_exists(_settings_before) == _default_existed \
+		and (not _default_existed or FileAccess.get_file_as_bytes(_settings_before) == _default_settings)
 
 
 func _saved() -> Dictionary:
@@ -116,6 +139,7 @@ func _on_button(p: Vector3) -> Vector3:
 
 
 func _run() -> void:
+	_own_settings("test-power-controls")
 	var prefs_existed := FileAccess.file_exists(Cockpit.PREFS)
 	var prefs_before := FileAccess.get_file_as_bytes(Cockpit.PREFS) if prefs_existed else PackedByteArray()
 	if prefs_existed:
@@ -344,5 +368,6 @@ func _run() -> void:
 	elif FileAccess.file_exists(Cockpit.PREFS):
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(Cockpit.PREFS))
 	View.vehicle_override = ""
+	_check("the default settings file is as it was (the run had its own)", _settings_back())
 	print("POWER CONTROLS %s (%d checks, %d failures)" % ["PASS" if failures == 0 else "FAIL", checks, failures])
 	quit(0 if failures == 0 else 1)

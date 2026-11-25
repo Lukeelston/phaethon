@@ -19,6 +19,8 @@
 ##                detent at 1, the stops; a jump in the roll moves nothing; let go they are saved; the next cockpit
 ##                reads them
 ##   cost         the hands loop's console work a frame, two hands, in microseconds
+##   settings     the run has its own settings file (a MODE or SLIDE throw saves the craft's set-up): the default one is
+##                left as it was
 ## --headless --xr-mode off --audio-driver Dummy -s res://tests/test_console_switches.gd -- --mute
 ## Prints CONSOLE SWITCHES PASS.
 extends SceneTree
@@ -30,6 +32,7 @@ const Switch := preload("res://vr/mode_switch.gd")
 const Drift := preload("res://vr/drift_slider.gd")
 const Tactical := preload("res://view/tactical_display.gd")
 const Startup := preload("res://vr/startup_sequence.gd")
+const Settings := preload("res://release/game_settings.gd")
 const FRAME := 1.0 / 90.0
 const PREF_KEY := {"tactical": "tactical", "field": "field", "powerups": "powerups", "consumables": "consumables", "rush": "rush"}
 var v
@@ -37,6 +40,9 @@ var hl: XRController3D
 var hr: XRController3D
 var failures := 0
 var checks := 0
+var _settings_before := ""                      # the settings file in use before the run (the default: the player's)
+var _default_existed := false
+var _default_settings := PackedByteArray()
 
 
 func _initialize() -> void:
@@ -63,6 +69,24 @@ func _check(label: String, passed: bool) -> void:
 	checks += 1
 	print(("PASS " if passed else "FAIL ") + label)
 	failures += int(not passed)
+
+
+## Its own settings file for the run, as tests/test_fly_last_used.gd has: a MODE or SLIDE throw saves the craft's set-up
+## (release/game_settings.gd set_craft_setup), and the default file is the player's.
+func _own_settings(file_name: String) -> void:
+	_settings_before = Settings.prefs_path
+	_default_existed = FileAccess.file_exists(_settings_before)
+	_default_settings = FileAccess.get_file_as_bytes(_settings_before) if _default_existed else PackedByteArray()
+	Settings.prefs_path = "user://%s-%d.cfg" % [file_name, OS.get_process_id()]
+
+
+## The run's own settings file removed and the path put back. Is the default file as it was?
+func _settings_back() -> bool:
+	if Settings.prefs_path != _settings_before and FileAccess.file_exists(Settings.prefs_path):      # (never the file it found in use)
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(Settings.prefs_path))
+	Settings.prefs_path = _settings_before
+	return FileAccess.file_exists(_settings_before) == _default_existed \
+		and (not _default_existed or FileAccess.get_file_as_bytes(_settings_before) == _default_settings)
 
 
 func _saved() -> Dictionary:
@@ -193,6 +217,7 @@ func _changed(a: Dictionary, b: Dictionary) -> Array:
 
 
 func _run() -> void:
+	_own_settings("test-console-switches")
 	var prefs_before := FileAccess.get_file_as_string(Cockpit.PREFS) if FileAccess.file_exists(Cockpit.PREFS) else ""
 	if prefs_before != "":      # a pilot with nothing saved: what he gets
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(Cockpit.PREFS))
@@ -204,6 +229,7 @@ func _run() -> void:
 	_check("the cockpit has its consoles' switches, a child of the interior", c != null and c.get_script() == Console and c.get_parent() == v.interior)
 	if c == null:
 		print("CONSOLE SWITCHES FAIL (no switches)")
+		_settings_back()
 		quit(1)
 		return
 	hl = XRController3D.new()
@@ -657,6 +683,7 @@ func _run() -> void:
 	Tactical.wanted = false
 	Tactical.pace = 1.0      # (the knobs reach the display now: put its settings back for whatever runs next in this process)
 	Tactical.dim = 1.0
+	_check("the default settings file is as it was (the run had its own)", _settings_back())
 	print("CONSOLE SWITCHES %s (%d checks, %d failures)" % ["PASS" if failures == 0 else "FAIL", checks, failures])
 	quit(0 if failures == 0 else 1)
 

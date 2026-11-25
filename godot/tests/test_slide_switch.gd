@@ -1,13 +1,18 @@
 ## The slide's switch (Luke: "can you make the slide a physical thing in the cockpit?"): the same
 ## guarded toggle as the handling switch, on the front of the left console. A controller's tip
-## pushed down through it throws it to GRIP (no slide), up to SLIDE; the choice is remembered.
+## pushed down through it throws it to GRIP (no slide), up to SLIDE; the choice is remembered. Its own settings file for
+## the run (a throw saves the craft's set-up): the default one is left as it was.
 extends SceneTree
 
 const View := preload("res://view/craft_view.gd")
 const Cockpit := preload("res://vr/vr_cockpit.gd")
 const Switch := preload("res://vr/mode_switch.gd")
+const Settings := preload("res://release/game_settings.gd")
 var v
 var failures := 0
+var _settings_before := ""                      # the settings file in use before the run (the default: the player's)
+var _default_existed := false
+var _default_settings := PackedByteArray()
 
 
 func _initialize() -> void:
@@ -27,6 +32,24 @@ func _check(label: String, passed: bool) -> void:
 	failures += int(not passed)
 
 
+## Its own settings file for the run, as tests/test_fly_last_used.gd has: a MODE or SLIDE throw saves the craft's set-up
+## (release/game_settings.gd set_craft_setup), and the default file is the player's.
+func _own_settings(file_name: String) -> void:
+	_settings_before = Settings.prefs_path
+	_default_existed = FileAccess.file_exists(_settings_before)
+	_default_settings = FileAccess.get_file_as_bytes(_settings_before) if _default_existed else PackedByteArray()
+	Settings.prefs_path = "user://%s-%d.cfg" % [file_name, OS.get_process_id()]
+
+
+## The run's own settings file removed and the path put back. Is the default file as it was?
+func _settings_back() -> bool:
+	if Settings.prefs_path != _settings_before and FileAccess.file_exists(Settings.prefs_path):      # (never the file it found in use)
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(Settings.prefs_path))
+	Settings.prefs_path = _settings_before
+	return FileAccess.file_exists(_settings_before) == _default_existed \
+		and (not _default_existed or FileAccess.get_file_as_bytes(_settings_before) == _default_settings)
+
+
 ## A controller's tip moved through the lever's zone from one height to another (panel metres), a
 ## sixtieth of a second apart: what the switch answers.
 func _push(sw: Node3D, hand: Node3D, from_y: float, to_y: float) -> String:
@@ -38,6 +61,7 @@ func _push(sw: Node3D, hand: Node3D, from_y: float, to_y: float) -> String:
 
 
 func _run() -> void:
+	_own_settings("test-slide-switch")
 	v = Cockpit.new()
 	root.add_child(v)
 	await process_frame
@@ -45,6 +69,7 @@ func _run() -> void:
 	var sw = v.slide_switch
 	_check("the cockpit has a slide switch", sw != null and sw.get_script() == Switch)
 	if sw == null:
+		_settings_back()
 		quit(1)
 		return
 	var other: Node3D = v.mode_switch
@@ -78,5 +103,6 @@ func _run() -> void:
 	hand.queue_free()
 	v.queue_free()
 	await process_frame
+	_check("the default settings file is as it was (the run had its own)", _settings_back())
 	print("SLIDE SWITCH %s (%d failures)" % ["PASS" if failures == 0 else "FAIL", failures])
 	quit(0 if failures == 0 else 1)

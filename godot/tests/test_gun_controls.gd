@@ -23,13 +23,15 @@
 ## X is faked with an XRControllerTracker for the left hand (as tests/test_partner_menu.gd); the hands that throw the
 ## switches are the test's own controllers, worked through the cockpit's own _work_controls (as test_power_controls).
 ## --headless --xr-mode off --audio-driver Dummy -s res://tests/test_gun_controls.gd -- --mute
-## Prints GUN CONTROLS PASS. Puts user://vr_prefs.json back as it found it.
+## Prints GUN CONTROLS PASS. Puts user://vr_prefs.json back as it found it, and has its own settings file for the run (a
+## MODE throw saves the craft's set-up): the default one is left as it was.
 extends SceneTree
 
 const View := preload("res://view/craft_view.gd")
 const Cockpit := preload("res://vr/vr_cockpit.gd")
 const Craft := preload("res://sim/pilot_craft.gd")
 const Switch := preload("res://vr/mode_switch.gd")
+const Settings := preload("res://release/game_settings.gd")
 const DT := 1.0 / 90.0
 const ZONES_APART := 0.010    # m: the GUN switch's box and the MODE switch's, at the least
 const SECTIONS := 9           # built; X and the boxes in the Phaethon and in the Talon; the menu; not by accident; the overshoot; the flat view
@@ -40,6 +42,9 @@ var v
 var hl: XRController3D        # the hands that reach for the switches
 var hr: XRController3D
 var pad: XRControllerTracker  # the left controller's buttons: X
+var _settings_before := ""                      # the settings file in use before the run (the default: the player's)
+var _default_existed := false
+var _default_settings := PackedByteArray()
 
 
 func _initialize() -> void:
@@ -68,7 +73,26 @@ func check(label: String, ok: bool) -> void:
 	print(("  ok   " if ok else "  FAIL ") + label)
 
 
+## Its own settings file for the run, as tests/test_fly_last_used.gd has: a MODE or SLIDE throw saves the craft's set-up
+## (release/game_settings.gd set_craft_setup), and the default file is the player's.
+func _own_settings(file_name: String) -> void:
+	_settings_before = Settings.prefs_path
+	_default_existed = FileAccess.file_exists(_settings_before)
+	_default_settings = FileAccess.get_file_as_bytes(_settings_before) if _default_existed else PackedByteArray()
+	Settings.prefs_path = "user://%s-%d.cfg" % [file_name, OS.get_process_id()]
+
+
+## The run's own settings file removed and the path put back. Is the default file as it was?
+func _settings_back() -> bool:
+	if Settings.prefs_path != _settings_before and FileAccess.file_exists(Settings.prefs_path):      # (never the file it found in use)
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(Settings.prefs_path))
+	Settings.prefs_path = _settings_before
+	return FileAccess.file_exists(_settings_before) == _default_existed \
+		and (not _default_existed or FileAccess.get_file_as_bytes(_settings_before) == _default_settings)
+
+
 func _run() -> void:
+	_own_settings("test-gun-controls")
 	var prefs_existed := FileAccess.file_exists(Cockpit.PREFS)
 	var prefs := FileAccess.get_file_as_bytes(Cockpit.PREFS) if prefs_existed else PackedByteArray()
 	pad = XRControllerTracker.new()
@@ -105,6 +129,7 @@ func _run() -> void:
 		f.close()
 	elif FileAccess.file_exists(Cockpit.PREFS):
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(Cockpit.PREFS))
+	check("the default settings file is as it was (the run had its own)", _settings_back())
 	check("every section ran to its end (%d of %d)" % [sections, SECTIONS], sections == SECTIONS)
 	print("GUN CONTROLS %s (%d checks, %d failed)" % ["PASS" if failures == 0 else "FAIL", checks, failures])
 	quit(0 if failures == 0 else 1)
