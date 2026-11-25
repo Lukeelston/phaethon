@@ -4,6 +4,7 @@
 ##   garage-aisle          on foot in the aisle at the first row, looking along the bays
 ##   garage-vesper         at the Vesper's boarding gate (its paint pinned to Star Command)
 ##   garage-kiln           at the Kiln's boarding gate (its paint pinned to cobalt)
+##   garage-basilisk       at the Basilisk's boarding gate (Factory; its hull rebuilt in the merge from both sides' tool)
 ##   garage-seat-<craft>   boarded, from the seat, looking ahead: phaethon, vesper, basilisk, kiln
 ##   garage-seat-basilisk-gun   boarded in the Basilisk, the head turned to its GUN switch on the starboard sill
 ## The paints are set in a profile of this run's own (game_settings.gd prefs_path), and nothing is written to the pilot's.
@@ -68,7 +69,7 @@ func _pictures(garage) -> void:
 	walker.camera.rotation = Vector3(deg_to_rad(-4.0), 0.0, 0.0)
 	await _settle()
 	await _save("garage-aisle")
-	for id: String in ["vesper", "kiln"]:
+	for id: String in ["vesper", "kiln", "basilisk"]:
 		walker.set_seated(false, hall.boarding_transform(id))
 		walker.camera.rotation = Vector3(deg_to_rad(-12.0), 0.0, 0.0)
 		await _settle()
