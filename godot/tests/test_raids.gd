@@ -494,10 +494,12 @@ func _run() -> void:
 	in_on = R.state == "on"
 	var had: int = T.hostiles().size()
 	var tally_before: Dictionary = R.tally.duplicate()
+	v.flash_msg = ""
 	v._respawn()
-	_check("arrived (%s, %d hostiles), then a restart: none left (%d), the floor free (\"%s\"), no result (\"%s\") and nothing tallied (%s), waiting again (\"%s\")" % [
-			in_on, had, T.hostiles().size(), T.race_state, R.result, R.tally, R.state],
-		in_on and had > 0 and T.hostiles().is_empty() and T.race_state == "" and R.result == "" and R.tally == tally_before and R.state == "")
+	var told_restart: String = v.flash_msg
+	_check("arrived (%s, %d hostiles), then a restart: none left (%d), the floor free (\"%s\"), no result (\"%s\") and nothing tallied (%s), waiting again (\"%s\"), \"%s\" flashed" % [
+			in_on, had, T.hostiles().size(), T.race_state, R.result, R.tally, R.state, told_restart],
+		in_on and had > 0 and T.hostiles().is_empty() and T.race_state == "" and R.result == "" and R.tally == tally_before and R.state == "" and told_restart == "RAID ABANDONED")
 
 	# crash mid-raid: the pod's health gone, the sim's own wreck ("wreck", crash_t), and its respawn when that runs out
 	_put_pilot(v, e3[0], e3[1], e3[2])
@@ -512,12 +514,15 @@ func _run() -> void:
 	await _fly(v, 0.25)
 	var down: bool = sim.crash_t > 0.0
 	var stood: bool = R.state == "on"      # (the raid stands while the craft is down)
+	var aside_told := []
+	R.abandoned.connect(func(why): aside_told.append([why, v.flash_msg]), CONNECT_ONE_SHOT)
 	await _fly(v, 1.6)
 	var moved: float = Vector2(sim.pod.x, sim.pod.y).distance_to(crash_at)
 	var back: bool = sim.crash_t <= 0.0 and sim.pod.health > 0.0 and moved > 2000.0
-	_check("arrived (%s, %d hostiles), then wrecked (%s, the raid on meanwhile %s) and respawned by the sim %.1f km off (%s): none left (%d), the floor free (\"%s\"), no result (\"%s\") and nothing tallied (%s), waiting again (\"%s\")" % [
-			in_on, had, down, stood, moved / 1000.0, back, T.hostiles().size(), T.race_state, R.result, R.tally, R.state],
-		in_on and had > 0 and down and stood and back and T.hostiles().is_empty() and T.race_state == "" and R.result == "" and R.tally == tally_before and R.state == "")
+	_check("arrived (%s, %d hostiles), then wrecked (%s, the raid on meanwhile %s) and respawned by the sim %.1f km off (%s): none left (%d), the floor free (\"%s\"), no result (\"%s\") and nothing tallied (%s), waiting again (\"%s\"); set aside as %s" % [
+			in_on, had, down, stood, moved / 1000.0, back, T.hostiles().size(), T.race_state, R.result, R.tally, R.state, aside_told],
+		in_on and had > 0 and down and stood and back and T.hostiles().is_empty() and T.race_state == "" and R.result == "" and R.tally == tally_before and R.state == ""
+			and aside_told.size() == 1 and aside_told[0][0] == "crash")
 
 	# pause: the cockpit's FLIGHT HOLD menu; the desktop pause
 	_put_pilot(v, e3[0], e3[1], e3[2])

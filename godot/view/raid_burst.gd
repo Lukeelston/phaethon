@@ -2,9 +2,10 @@
 ## craft, armed or not (the gun's effects are its own, and a craft may have no gun, or never arm it). A white-hot core,
 ## gone by half its life, and a red ring going out from it; DUR s in all. SIDE m across and never less than MIN_ANG to
 ## the eye, so one kilometres off still shows; its middle LIFT of its side over the deck, so most of it stands over the
-## road. One batch of quads turned to the eye, with its own shader, made at the first loss: with raids off, or none
-## lost, there is none. In the world, so the cockpit's frame hides it as it hides the road (nothing on the glass, and
-## nothing moves the camera).
+## road. One batch of quads turned to the eye, with its own shader, made in the director's build (view/network_raids.gd
+## build, which only raids on reach: its shader compiled at load, not at the first loss) and hidden until one is lost:
+## with raids off there is none. In the world, so the cockpit's frame hides it as it hides the road (nothing on the
+## glass, and nothing moves the camera).
 ##   var b := RaidBurst.new(); director.add_child(b); b.build(view)
 ##   b.add(Vector3(x, y, deck))     a burst there (the sims' frame: x, y and the deck's height)
 ##   b.sync(delta)                  every frame (the director's update): their ages, sizes and places (after the origin)

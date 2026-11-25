@@ -49,6 +49,10 @@ signal commuter_lost(x: float, y: float)
 ## A raider rammed the craft: one hit taken (at most one a GRACE). `source` names what hit it.
 signal hit_taken(source: String)
 
+## A raid called or on was set aside (a restart, or a crash and the sim's respawn after it): `why` ("restart", "crash").
+## The view flashes RAID ABANDONED.
+signal abandoned(why: String)
+
 const Settings := preload("res://release/game_settings.gd")
 const Traffic := preload("res://view/network_traffic.gd")
 const Synth := preload("res://audio/course_audio.gd")
@@ -678,8 +682,9 @@ func _disband() -> void:
 
 
 func reset(why := "restart") -> void:
+	var aside := state == "called" or state == "on"
 	if traffic != null:
-		if state == "called" or state == "on":
+		if aside:
 			print("RAID: set aside (%s)" % why)
 		_disband()
 	result = ""
@@ -696,6 +701,8 @@ func reset(why := "restart") -> void:
 	_grace = 0.0
 	if _count > 0:
 		_lull_len = _rng.randf_range(lull.x, lull.y)
+	if aside:
+		abandoned.emit(why)
 
 
 ## The dash's line (traffic's race_text() gives it while the raid holds the floor). Called: the city, how far (a

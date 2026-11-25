@@ -54,8 +54,7 @@ const MARCH_FAR := 200.0          # m: beyond this the ground search steps on by
 const SPREAD := deg_to_rad(0.12)  # each shot's scatter about the aim
 const LOCK_S := 0.35              # s a vehicle holds under the sight to be locked (the brackets close)
 const LOCK_EASE := 3.0            # ... and the lock lost a second with none under it
-const HP := {0: 3, 1: 5, 2: 3, 3: 8, 4: 4}   # hits a vehicle takes, by traffic kind: car, slow, demon, transport, racer (a COMMUTER takes none: no weapon knocks one out)
-const HOSTILE_HP := 6                         # hits a hostile raider (Raids) takes, whatever its kind
+const HOSTILE_HP := 6                         # hits a hostile raider (Raids) takes, whatever its kind (a commuter takes none: no weapon knocks one out)
 
 signal killed(car)                 # a hostile raider shot down (before traffic.knock_out takes it out of traffic): the raid counts it
 signal struck_commuter(car)        # a bolt struck a commuter: sparks only
@@ -88,9 +87,11 @@ var kills := 0
 var commuter_strikes := 0          # bolts that struck a commuter (spared: sparks and the impact sound only)
 var _struck_id := -1
 var march_ms := 0.0                # the ground search's cost this frame
-# Heat (the Basilisk's power's figures, sim/pilot_craft.gd TRAITS: fireS, coolS; Luke's sheet, 2026-11-24): fire held
-# on for fireS s on end overheats the gun, and it will not fire again until it has cooled coolS s. A pause in the
-# fire starts the count again. In the log as its power: "POWER: Basilisk Gaze Turret fired|active|ended|ready".
+# Heat (the craft's weapon row's fireS and coolS, sim/pilot_craft.gd TRAITS[..].weapon; where the row has none, its
+# power's: the Basilisk's, Luke's sheet, 2026-11-24): fire held on for fireS s on end overheats the gun, and it will not
+# fire again until it has cooled coolS s. A pause in the fire starts the count again. In the log the Basilisk's is told
+# as its power ("POWER: Basilisk Gaze Turret fired|active|ended|ready"), another craft's as its gun ("GUN: Phaethon
+# cannons fired ...").
 var firing := false                # firing this frame
 var fire_s := 0.0                  # s of fire on end
 var hot := 0.0                     # s of cooling left (0: it fires)
@@ -565,6 +566,8 @@ func _bolt_speed(dir: Vector3) -> float:
 
 func _fire(target: Vector3) -> void:
 	var muzzles := mount.muzzles()
+	if muzzles.is_empty():
+		return          # (a mount with no muzzles, as art lands: nothing fires)
 	var m: Vector3 = muzzles[_barrel % muzzles.size()]
 	_barrel += 1
 	var a := to_sim(m)
@@ -707,6 +710,8 @@ func _draw(cam: Camera3D) -> void:
 			"muzzle":
 				if mouths.is_empty():
 					mouths = mount.muzzles()
+				if mouths.is_empty():
+					continue
 				p = mouths[posmod(_barrel - 1, mouths.size())]      # (the barrel that fired last)
 				_flash_mm.set_instance_transform(nf, Transform3D(Basis().scaled(Vector3.ONE * 0.35 * (1.0 - u)), p))
 				_flash_mm.set_instance_color(nf, Color(1.0, 0.7, 0.35) * (1.0 - u))

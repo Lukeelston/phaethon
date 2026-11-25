@@ -113,6 +113,7 @@ func _run() -> void:
 		check_bore(v, g, "talon")
 		check_talon_rate(v, g)
 		check_slide(v, g, "talon")
+		check_no_muzzles(v, g)
 		sections += 1
 	v.queue_free()
 	await process_frame
@@ -488,6 +489,47 @@ func check_talon_rate(v, g) -> void:
 	var frames := _fire(g, 2.0)
 	var rate: float = (g.shots - shots) / (frames * DT)
 	check("the Talon's wing guns fire %.1f shots a second (18, within 10%%)" % rate, absf(rate - 18.0) <= 1.8)
+	_clear(v, g)
+
+
+## A mount that is out and on its aim but has no muzzles (art as it lands): the fire control steps on, fires nothing,
+## and the last shot's muzzle flash is drawn from none.
+class NoMuzzles extends "res://view/weapons/weapon_mount.gd":
+	func is_out() -> bool:
+		return true
+
+	func ready_to_fire() -> bool:
+		return true
+
+	func deploy_t() -> float:
+		return 1.0
+
+	func on_aim(_target_render: Vector3) -> bool:
+		return true
+
+	func boresight() -> bool:
+		return true
+
+	func bore() -> Vector3:
+		return Vector3(0.0, 0.0, -1.0)
+
+
+func check_no_muzzles(v, g) -> void:
+	var real = g.mount
+	g.want_out = true
+	g.hold_fire = true
+	for i in 4:
+		g.step(DT)
+	var flashes: int = g._fx.filter(func(f): return f.kind == "muzzle").size()
+	g.mount = NoMuzzles.new()
+	var shots: int = g.shots
+	for i in 6:
+		g.step(DT)
+	var fired: int = g.shots - shots
+	g.mount = real
+	g.hold_fire = false
+	check("a mount with no muzzles: the fire control steps on (a muzzle flash of the last shot pending: %d), fires nothing (%d shots)" % [flashes, fired],
+		flashes > 0 and fired == 0)
 	_clear(v, g)
 
 
