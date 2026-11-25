@@ -66,6 +66,7 @@ func _garage_visit() -> bool:
 	var enter := title.find_child("Garage", true, false) as Button
 	if not check("desktop title offers the pilot garage", enter != null and enter.is_visible_in_tree()):
 		return false
+	(title.find_child("Course_network", true, false) as Button).pressed.emit()      # (the garage is bound for the map chosen on the menu)
 	enter.pressed.emit()
 	await frames(3)
 	var garage = get_tree().current_scene
@@ -159,10 +160,8 @@ func _run() -> void:
 		var collisions := case_index % 2 == 1
 		var partner_enabled := case_index % 2 == 0
 		var pilot_craft: String = Settings.Craft.ORDER[(case_index + 1) % Settings.Craft.ORDER.size()]
-		for press in menu.craft_selector.Craft.ORDER.size():
-			if menu.craft_selector.selected == pilot_craft:
-				break
-			menu.craft_selector.button.pressed.emit()
+		Settings.set_selected_craft(pilot_craft)      # (the menu has no craft row: the garage, or the craft last flown, chooses it)
+		menu._showcase_changed()
 		case_index += 1
 		menu.collision_checkbox.button_pressed = collisions
 		menu.partner_checkbox.button_pressed = partner_enabled
@@ -171,11 +170,14 @@ func _run() -> void:
 		if case_index <= 2:
 			await shot("menu-obstacles-" + ("on" if collisions else "off"))
 		var button := menu.find_child("Course_" + course, true, false) as Button
-		if not check(course + " launch button is available", button != null):
+		var fly := menu.find_child("Fly", true, false) as Button
+		if not check(course + " course and Fly buttons are available", button != null and fly != null):
 			_finish()
 			return
-		capture.clear_buffer()
 		button.pressed.emit()
+		check(course + " is chosen and named on Fly", menu.selected_course == course and fly.text == "Fly — " + UI.COURSES[UI.course_index(course)].name)
+		capture.clear_buffer()
+		fly.pressed.emit()
 		await get_tree().scene_changed
 		var view = get_tree().current_scene
 		if not check(course + " opens CraftView", view is View):

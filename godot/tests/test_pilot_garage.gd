@@ -66,6 +66,7 @@ func _enter_menu(xr: bool) -> bool:
 		menu.consume_controller(0.0, false, true)
 		menu.consume_controller(0.0, true, true)
 	else:
+		menu.choose_course("network")      # (the garage is bound for the map chosen on the menu)
 		button.pressed.emit()
 	if not await _scene(GARAGE):
 		return false
@@ -446,7 +447,7 @@ func _fly_and_return(garage, xr: bool) -> void:
 		"Leave the parked flight on foot alongside the same craft")
 	_key(KEY_ESCAPE)
 	if await _scene(UI.MENU_SCENE):
-		check(current_scene is Control, "Walking back returns to the desktop title")
+		check(current_scene is Control and current_scene.selected_course == "network", "Walking back returns to the desktop title, its course still chosen")
 
 
 func _hull_finishes(bay) -> Array:

@@ -21,7 +21,8 @@
 ##   --set=menus   the menus as a player sees them (run at 1280x720, the window the desktop menu is laid out for):
 ##                 menu-desktop (over the title), menu-desktop-plain (the title off), menu-vr (the headset's menu from
 ##                 the pilot's standing eye, 96 degrees), menu-vr-board (its board close). Runs on the base too. Each
-##                 menu's Raids, Pilot craft and Time buttons are measured against every label they can show (_measure).
+##                 menu's buttons are measured against every label they can show (_measure): the courses (marked and
+##                 not), the option rows, Fly for every course, Pilot garage and Quit; and the room left in its column.
 ## Needs a window: --xr-mode off --resolution 1600x900 --fixed-fps 120 --audio-driver Dummy
 ##   -s res://tests/render_raids.gd -- --mute --out=ABSOLUTE_DIRECTORY --set=raid|struck|off|menus [--vehicle=phaethon]
 extends SceneTree
@@ -32,6 +33,7 @@ const Outlook := preload("res://view/outlook.gd")
 const Chase := preload("res://view/network_chase.gd")
 const Tactical := preload("res://view/tactical_display.gd")
 const Title := preload("res://release/title_stage.gd")
+const UI := preload("res://release/release_config.gd")
 const DT := 1.0 / 120.0
 const MPH := 2.236936
 const RAIDS_PATH := "res://view/network_raids.gd"
@@ -556,46 +558,73 @@ func _menus_set() -> bool:
 	return true
 
 
-## Does each option row's label fit its button? For the Raids, Pilot craft, Time, Role, Chase and Pilot garage buttons, every label
-## they can show (each craft's name, each hour) against the room inside the button (its width less its style's
-## margins); and where the menu's last control (Quit, or the headset's Start and Quit) stands against the window. Prints
-## "fits" or "CUT" with the widths in pixels of the window. (The saved choices differ between checkouts' profiles: this
-## measures every choice, so the head and the base are compared like for like.)
+## Does each button's label fit it? Every button the menus have, against every label it can show (each course marked
+## and not, each start point, hour and weather, each craft's name, Fly for each course) and the room inside it (its
+## width less its style's margins), with its height; where the menu's last control (Quit, or the headset's Start and
+## Quit) stands against the window; and the room left in the column Fly or Start stands in (a column with none
+## pushes its foot down). Prints "fits" or "CUT" with the widths in pixels of the window. (The saved choices differ
+## between checkouts' profiles: this measures every choice, so the head and the base are compared like for like.)
 func _measure(view: String, menu: Node) -> void:
 	var crafts: Dictionary = (load("res://sim/pilot_craft.gd") as GDScript).get_script_constant_map().get("NAMES", {})
-	var times: Array = (Outlook as GDScript).get_script_constant_map().get("TIMES", [])
+	var named := func(title: String, choices: Array) -> Array: return choices.map(func(c): return "%s:  %s" % [title, c[1]])
 	var asks := {
+		"Start": named.call("Start", UI.INSERTIONS),
+		"Time": named.call("Time", Outlook.TIMES),
+		"Weather": named.call("Weather", Outlook.WEATHERS),
+		"Chase": named.call("Chase", Chase.MODES),
+		"Role": named.call("Role", Chase.CRAFTS),
 		"Raids": ["Raids:  Off", "Raids:  On"],
 		"Pilot craft": crafts.values().map(func(n): return "Pilot craft   ·   %s   ›" % n),
-		"Time": times.map(func(t): return "Time:  %s" % t[1]),
-		"Role": ["Role:  Racer", "Role:  Patrol"],
-		"Chase": ["Chase:  Off", "Chase:  On"],
 		"Pilot garage": ["Pilot garage"],      # (Codex's garage, beside Quit)
+		"Quit to desktop": ["Quit to desktop"],
 	}
 	for title in asks:
 		var b := _find_button(menu, title)
 		if b == null:
 			print("RAIDS RENDER %s: no %s button" % [view, title])
 			continue
-		var style := b.get_theme_stylebox("normal")
-		var room := b.size.x - style.get_margin(SIDE_LEFT) - style.get_margin(SIDE_RIGHT)
-		var font := b.get_theme_font("font")
-		var fs := b.get_theme_font_size("font_size")
-		var said := []
-		for text: String in asks[title]:
-			var w := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
-			said.append("%s %s (%d)" % ["fits" if w <= room else "CUT", text.replace("   ", " ").replace("  ", " "), roundi(w)])
-		print("RAIDS RENDER %s: %s button %d px across, %d inside; showing \"%s\": %s" % [view, title, roundi(b.size.x), roundi(room), b.text, "; ".join(said)])
-	for last in ["Quit to desktop", "Start flight"]:
+		_fit(view, title, b, asks[title])
+	var rows = menu.get("buttons")
+	for i in UI.COURSES.size():
+		var course: Dictionary = UI.COURSES[i]
+		var b := menu.find_child("Course_" + course.id, true, false) as Button
+		if b == null and rows is Array and (rows as Array).size() > i:
+			b = rows[i]
+		if b != null:
+			_fit(view, "course " + course.id, b, ["●  " + course.name, "    " + course.name])
+	var fly := menu.find_child("Fly", true, false) as Button
+	if fly == null:
+		fly = menu.get("start_button") as Button
+	if fly != null:
+		_fit(view, "Fly", fly, UI.COURSES.map(func(c): return "%s — %s" % [fly.text.get_slice(" —", 0), c.name]))
+		var column := fly.get_parent() as Control
+		print("RAIDS RENDER %s: the column Fly stands in is %d px tall and needs %d: %d px to spare" % [view, roundi(column.size.y), roundi(column.get_combined_minimum_size().y),
+			roundi(column.size.y - column.get_combined_minimum_size().y)])
+	for last in ["Quit to desktop", "Start flight", "Fly"]:
 		var q := _find_text(menu, last)
 		if q != null:
 			var r := q.get_global_rect()
 			var seen := q.get_viewport().get_visible_rect().size
 			print("RAIDS RENDER %s: \"%s\" at y %d..%d of the %d px it is drawn in: %s" % [view, q.text.get_slice(" —", 0), roundi(r.position.y), roundi(r.end.y), roundi(seen.y),
 				"on screen" if r.end.y <= seen.y + 0.5 else "OFF SCREEN"])
-	var order = menu.get("buttons")
-	if order is Array:
-		print("RAIDS RENDER %s: the stick's order: %s" % [view, " | ".join((order as Array).map(func(b): return (b as Button).text.get_slice("  ", 0).get_slice(":", 0).strip_edges()))])
+	if rows is Array:
+		print("RAIDS RENDER %s: the stick's order: %s" % [view, " | ".join((rows as Array).map(func(b): return (b as Button).text.get_slice("  ", 0).get_slice(":", 0).strip_edges()))])
+
+
+## One button against the labels it can show: "fits" or "CUT", each with its width; the button's own size.
+func _fit(view: String, title: String, b: Button, texts: Array) -> void:
+	var style := b.get_theme_stylebox("normal")
+	var room := b.size.x - style.get_margin(SIDE_LEFT) - style.get_margin(SIDE_RIGHT)
+	var font := b.get_theme_font("font")
+	var fs := b.get_theme_font_size("font_size")
+	var said := []
+	var cut := 0
+	for text: String in texts:
+		var w := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+		cut += int(w > room)
+		said.append("%s %s (%d)" % ["fits" if w <= room else "CUT", text.strip_edges().replace("   ", " ").replace("  ", " "), roundi(w)])
+	print("RAIDS RENDER %s: %s button %d x %d px, %d inside%s; showing \"%s\": %s" % [view, title, roundi(b.size.x), roundi(b.size.y), roundi(room),
+		", %d CUT" % cut if cut > 0 else "", b.text.strip_edges(), "; ".join(said)])
 
 
 func _find_text(node: Node, text: String) -> Button:

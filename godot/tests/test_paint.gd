@@ -5,7 +5,8 @@
 ##              Ember); each craft is saved under its own key, the Phaethon's the "paint" it always had
 ##   carried    a paint saved before is the Phaethon's still; the others start at Factory
 ##   menus      the paint row steps the chosen craft's own paint, round and back, for every craft, leaving the
-##              others' alone; in both menus it shows each craft's own as the pilot craft changes
+##              others' alone; as a row with no menu (the desktop menu has none since the garage took the craft and
+##              its paint, 2026-11-25) and in the headset's menu it shows each craft's own as the pilot craft changes
 ##   colours    the fleet's own colours, as fleet_airframe.gd has them, are what their atlases are painted in;
 ##              the Shrike's too
 ##   built      every craft in Factory, Ember, Cobalt and Sunflower: Factory as it was built before (its own
@@ -17,8 +18,8 @@
 ##              Factory finish changes painted regions only, and keeps its material profile in a livery; in a
 ##              livery its enamel takes the paint's hue with its own light and dark (not a flat fill), and
 ##              its metal, rubber, ceramic, cloth, vent and printed tiles do not move a step
-##   turntable  the title's turntable shows a fleet craft in its own paint, and a press of the paint row
-##              re-dresses it
+##   turntable  the title's turntable shows a fleet craft in its own paint, and in a paint saved for it since (as
+##              the garage saves one) when the menu is next built
 ## Uses its own prefs file; puts the game's and the cockpit's back as it found them.
 ## Run windowed: --xr-mode off -s res://tests/test_paint.gd -- --mute. Prints PAINT PASS.
 extends SceneTree
@@ -192,9 +193,30 @@ func _menus() -> void:
 		now[craft] = Livery.saved_for(craft)
 	check("the paint row steps the chosen craft's paints and round to Factory, showing and saving each, for every craft (wrong: %s)" % [trips], trips.is_empty())
 	check("... and each craft keeps its own choice while the others are chosen (%s)" % [now], now == kept)
-	# the menus (title off: they are as they were before it): the row follows the pilot craft
+	# a row with no menu, as the desktop's was (its menu has none since the garage took the craft and its paint): it
+	# shows each pilot craft's own paint as the craft changes, and a press is that craft's alone
+	var loose := UI.paint_button()
+	root.add_child(loose)
+	var followed := []
+	for craft: String in Pilot.ORDER:
+		Settings.set_selected_craft(craft)
+		UI.refresh_paint(loose)
+		followed.append(loose.text.ends_with(Livery.choices_for(craft)[Livery.ids_for(craft).find(kept[craft])][1]))
+	Settings.set_selected_craft(Pilot.BASILISK)
+	UI.refresh_paint(loose)
+	loose.pressed.emit()
+	var pressed := Livery.saved_for(Pilot.BASILISK)
+	var untouched := true
+	for craft: String in Pilot.ORDER:
+		untouched = untouched and (craft == Pilot.BASILISK or Livery.saved_for(craft) == kept[craft])
+	var basilisk_ids := Livery.ids_for(Pilot.BASILISK)
+	check("a row with no menu: it shows each pilot craft's own paint as the craft changes (%s); a press there is that craft's alone (%s to %s)" % [followed, kept[Pilot.BASILISK], pressed],
+		not followed.has(false) and pressed == basilisk_ids[(basilisk_ids.find(kept[Pilot.BASILISK]) + 1) % basilisk_ids.size()] and untouched)
+	Settings.set_choice(Livery.key_for(Pilot.BASILISK), kept[Pilot.BASILISK])
+	loose.queue_free()
+	# the headset's menu (title off: it is as it was before it): the row follows the pilot craft
 	Stage.enabled = false
-	for scene in [UI.MENU_SCENE, UI.VR_MENU_SCENE]:
+	for scene in [UI.VR_MENU_SCENE]:
 		Settings.set_selected_craft(Pilot.STANDARD)
 		change_scene_to_file(scene)
 		await scene_changed
@@ -555,14 +577,21 @@ func _turntable() -> void:
 	if not check("the desktop menu stands in the title", stage != null):
 		return
 	var first: bool = await _shown(stage, "kiln/factory")
-	var paint: Button = menu.look_buttons[1]
 	var factory_finish: ShaderMaterial = _finish_of(stage.showcase.model.fleet.part(&"Cab")) if first else null
-	paint.pressed.emit()
-	var second: bool = await _shown(stage, "kiln/ember")
+	# (the menu has no paint row since the garage took the craft and its paint: Ember saved for the Kiln, as the garage
+	# saves it, and the menu built again)
+	Settings.set_choice(Livery.key_for(Pilot.KILN), "ember")
+	change_scene_to_file(UI.MENU_SCENE)
+	await scene_changed
+	await process_frame
+	stage = current_scene.stage
+	var second := false
+	if stage != null:
+		second = await _shown(stage, "kiln/ember")
 	var finish: ShaderMaterial = _finish_of(stage.showcase.model.fleet.part(&"Cab")) if second else null
-	check("the turntable shows the Kiln in its own paint (Factory: %s, nothing repainted %s), and a press of the paint row (\"%s\") re-dresses it (Ember: %s, its enamel in Ember's paint %s)" % [
-			first, factory_finish != null and not (factory_finish.get_shader_parameter("repaint") == true), paint.text, second, finish != null and finish.get_shader_parameter("to_r") == Livery.coat("paint", "ember")],
+	check("the turntable shows the Kiln in its own paint (Factory: %s, nothing repainted %s), and with Ember saved for it the next menu's shows it in that (Ember: %s, its enamel in Ember's paint %s)" % [
+			first, factory_finish != null and not (factory_finish.get_shader_parameter("repaint") == true), second, finish != null and finish.get_shader_parameter("to_r") == Livery.coat("paint", "ember")],
 		first and factory_finish != null and not (factory_finish.get_shader_parameter("repaint") == true) and second and finish != null
-			and (finish.get_shader_parameter("repaint") == true) and finish.get_shader_parameter("to_r") == Livery.coat("paint", "ember") and paint.text.ends_with("Ember orange")
+			and (finish.get_shader_parameter("repaint") == true) and finish.get_shader_parameter("to_r") == Livery.coat("paint", "ember") and Livery.saved_for(Pilot.KILN) == "ember"
 			and Livery.saved_for(Pilot.STANDARD) == Livery.FACTORY)
 	Livery.pinned = true

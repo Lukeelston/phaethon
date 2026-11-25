@@ -126,12 +126,14 @@ func _garage(garage) -> void:
 
 func _talon_flight() -> void:
 	var menu = current_scene
-	check(menu.craft_selector.selected == Pilot.TALON, "The desktop menu still offers the Talon as the pilot craft")
-	menu.start_course("network")
+	check(Settings.selected_craft() == Pilot.TALON and menu.stage != null and menu.stage.show_vehicle == Pilot.TALON,
+		"The desktop menu's Fly is still for the Talon: its turntable shows it")
+	menu.choose_course("network")
+	(menu.find_child("Fly", true, false) as Button).pressed.emit()
 	if not await _scene(UI.GAME_SCENE):
 		return
 	var flight = current_scene
-	check(flight is Flat and flight.sim.P.vehicle == Pilot.TALON, "The menu's Start flies the Talon")
+	check(flight is Flat and flight.sim.P.vehicle == Pilot.TALON, "The menu's Fly flies the Talon")
 	for tick in 10:
 		await process_frame
 	check(not _scripted(root, "res://view/network_raids.gd").is_empty(),

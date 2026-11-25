@@ -98,7 +98,7 @@ static func start_flight(tree: SceneTree, xr: bool, craft_id: String, route: Arr
 static func return_to_menu(tree: SceneTree) -> void:
 	arrival_craft = ""
 	_bays = {}
-	if is_xr:
-		var menu = load("res://release/vr_menu.gd")
-		menu.remembered_course = _destination if UI.course_index(_destination) >= 0 else "network"
+	# (each menu chooses the course the visit was bound for again: the headset's, and the desktop's)
+	var menu = load("res://release/vr_menu.gd" if is_xr else "res://release/menu.gd")
+	menu.remembered_course = _destination if UI.course_index(_destination) >= 0 else "network"
 	tree.call_deferred("change_scene_to_file", UI.VR_MENU_SCENE if is_xr else UI.MENU_SCENE)

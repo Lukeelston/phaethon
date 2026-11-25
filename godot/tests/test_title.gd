@@ -416,8 +416,8 @@ func _desktop() -> void:
 		return
 	var window := Vector2(1280, 720)
 	check("the menu's labels and buttons fit the 1280 x 720 window", _fits(menu, Rect2(Vector2.ZERO, window)))
-	check("the menu works at once: a course has the keyboard's focus, every course has its button",
-		menu.get_viewport().gui_get_focus_owner() == menu.find_child("Course_range", true, false) and menu.find_children("Course_*", "Button", true, false).size() == UI.COURSES.size())
+	check("the menu works at once: the chosen course has the keyboard's focus, every course has its button",
+		menu.get_viewport().gui_get_focus_owner() == menu.find_child("Course_" + menu.selected_course, true, false) and menu.find_children("Course_*", "Button", true, false).size() == UI.COURSES.size())
 	check("the picture is the title's own camera, one that does not move", menu.get_viewport().get_camera_3d() == stage.camera and stage.camera.projection == Camera3D.PROJECTION_FRUSTUM and stage.get_script() == Stage)
 	var art: Rect2 = menu.art
 	var spine := menu.get_node("Spine") as Control
@@ -460,7 +460,7 @@ func _desktop() -> void:
 			if not stage.camera.is_position_behind(p) and art.has_point(stage.camera.unproject_position(p)):
 				in_view += 1
 	check("the turntable is out of the cover's picture (%d of its points in it)" % in_view, in_view == 0 and not stage.showcase.is_empty())
-	(menu.craft_selector.button as Button).grab_focus()
+	(menu.look_buttons[0] as Button).grab_focus()      # (Role: the craft itself is chosen in the garage)
 	await create_timer(Stage.SHOW_TURN_S + 0.6).timeout
 	var on_screen: Vector2 = stage.camera.unproject_position(middle + Vector3.UP * 1.4)
 	var show_box := Rect2(on_screen, Vector2.ZERO)
@@ -475,7 +475,7 @@ func _desktop() -> void:
 			for z in [-2.3, 2.3]:
 				show_box = show_box.expand(stage.camera.unproject_position((stage.showcase.model.pod as Node3D).global_transform * Vector3(x, 0.0, z)))
 	stage.turntable.rotation.y = turned_was
-	check("with the pilot craft button focused the turntable comes up and the camera turns to it: its middle in the middle of the picture, the craft inside it all the way round (%s, craft %s, picture %s)" % [on_screen, show_box, art],
+	check("with the Role button focused the turntable comes up and the camera turns to it: its middle in the middle of the picture, the craft inside it all the way round (%s, craft %s, picture %s)" % [on_screen, show_box, art],
 		stage.attention == 1.0 and stage.reveal == 1.0 and (stage.showcase.holder as Node3D).is_visible_in_tree() and on_screen.distance_to(art.get_center()) < 0.12 * art.size.x
 		and art.encloses(show_box) and show_box.size.x > 0.4 * art.size.x)
 	(menu.find_child("Course_range", true, false) as Button).grab_focus()
@@ -488,12 +488,13 @@ func _desktop() -> void:
 	spine = null
 	strip = null
 	strap = null
-	menu.start_course("range")
+	(menu.find_child("Course_range", true, false) as Button).pressed.emit()
+	(menu.find_child("Fly", true, false) as Button).pressed.emit()
 	menu = null
 	await scene_changed
 	await frames(2)
 	var flight = current_scene
-	check("a course's button starts its flight", flight is View and flight.sim.kind == "range")
+	check("a course's button and Fly start its flight", flight is View and flight.sim.kind == "range")
 	check("in flight the title is gone and its camera is not the flight's", old_stage.get_ref() == null and _count(root, "TitleStage") == 0 and flight.get_viewport().get_camera_3d() == flight.cam)
 	check("... and its hour is out of the shaders", Outlook.shader_globals.get("sky_sun") == Outlook.GLOBALS.sky_sun)
 	if overlay != null:
