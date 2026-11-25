@@ -10,6 +10,10 @@
 ##               gone, the clock runs and the raid is lost ("away")
 ##   run down    in the zone, a commuter 600 m ahead in the raider's lane at SF_V - 100 mph, and one at SF_V (the
 ##               zone's cap, which a hunting raider may pass by HUNT_DV): each is run down
+##   cases       (the prey looked for in traffic's bucket, every PREY_EVERY frames): a raider going down the samples
+##               (dir -1) runs down a commuter 600 m ahead of it; contact is within CONTACT_LAT across (a commuter
+##               13.5 m across is missed, one 9.5 m across run down); a nearer commuter put between a raider and its
+##               prey is its prey within PREY_EVERY frames
 ## Run with --fixed-fps 120 (traffic and the director run on the engine's frame time; a frame is let pass for every
 ## step). Prints RAID HUNT PASS.
 extends SceneTree
@@ -148,11 +152,12 @@ func _run() -> void:
 		_check("raids pinned on: the cockpit has a director", false)
 	else:
 		v.traffic_net._hw_time = -1.0e9      # (no street racer drops in: it would hold traffic's floor)
+		await _hunt_cases(v)
 		await _bounce(v)
 		await _hold_far_end(v)
 		await _away_net(v)
 		await _run_downs(v)
-	_check("every section ran to its end (%d of 4)" % sections, sections == 4)
+	_check("every section ran to its end (%d of 5)" % sections, sections == 5)
 	v.queue_free()
 	await process_frame
 	Raids.pinned = false
@@ -165,6 +170,92 @@ func _run() -> void:
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(PREFS))
 	print("RAID HUNT %s (%d failures)" % ["PASS" if failures == 0 else "FAIL", failures])
 	quit(0 if failures == 0 else 1)
+
+
+## A raid held "on" at city k with none of traffic's cars: the test's own are put down after.
+func _on_scene(v, k: int) -> void:
+	var R = v.raids
+	var T = v.traffic_net
+	R.reset()
+	T.cars.clear()
+	R.state = "on"
+	R.city = k
+	T.race_state = "raid"
+	R.time_limit = 1.0e9
+	R.away_t = 1.0e9
+
+
+## Fly frames with the craft still, only the cars of `keep` in traffic, until `seconds` are gone or `until` says so.
+func _keep_only(v, keep: Array, seconds: float, until := Callable()) -> float:
+	var T = v.traffic_net
+	var t := 0.0
+	while t < seconds - 1.0e-6:
+		await _frame(v)
+		t += STEP
+		for c in T.cars.duplicate():
+			if not keep.has(c):
+				T.cars.erase(c)
+		if until.is_valid() and until.call():
+			break
+	return t
+
+
+## Hunting's own cases (the prey looked for in traffic's bucket): dir -1; contact across the road; a nearer prey.
+func _hunt_cases(v) -> void:
+	var R = v.raids
+	var T = v.traffic_net
+	var sim = v.sim
+	var k := _city(v)
+	var zone: Dictionary = R._zone(k)
+	var road: int = zone.road
+	var z: Vector2i = zone.z
+	sim.respawn_on(road, (z.x + z.y) / 2, 1)
+	for i in 30:
+		await _frame(v)
+	var free_way: bool = not T.oneway.has(road)
+	var mid := float((z.x + z.y) / 2)
+	# down the samples: dir -1, a commuter 600 m ahead of it
+	_on_scene(v, k)
+	var r1 = _car(T, road, mid + 100.0, -1, 0, 80.0, true)
+	var p1 = _car(T, road, mid + 100.0 - 600.0 / 24.0, -1, 0, 80.0, false)
+	R.pack = [r1]
+	var prey1: bool = R.prey_of(r1) == p1
+	var lost0: int = R.lost
+	var t1: float = await _keep_only(v, [r1, p1], 15.0, func(): return not T.cars.has(p1))
+	var down1: bool = not T.cars.has(p1) and R.lost == lost0 + 1
+	# across the road: 13.5 m across (after the frame's own 0.5 m toward its lane) is missed, 9.5 m run down
+	_on_scene(v, k)
+	var r2 = _car(T, road, mid, 1, 1, 0.0, true)
+	var p2 = _car(T, road, mid + 20.0 / 24.0, 1, 1, 0.0, false)
+	r2.lat = p2.lat + 14.0
+	R.pack = [r2]
+	lost0 = R.lost
+	await _keep_only(v, [r2, p2], STEP)
+	var missed: bool = T.cars.has(p2) and R.lost == lost0
+	var across_missed: float = absf(r2.lat - p2.lat)
+	r2.lat = p2.lat + 10.0
+	r2.v = 0.0
+	await _keep_only(v, [r2, p2], STEP)
+	var across_hit: float = absf(r2.lat - p2.lat)
+	var hit: bool = not T.cars.has(p2) and R.lost == lost0 + 1
+	# a nearer commuter put between a raider and its prey
+	_on_scene(v, k)
+	var r3 = _car(T, road, mid, 1, 0, 80.0, true)
+	var far3 = _car(T, road, mid + 1500.0 / 24.0, 1, 0, 80.0, false)
+	R.pack = [r3]
+	await _keep_only(v, [r3, far3], 0.25)
+	var had_far: bool = R._prey.get(r3) == far3
+	var near3 = _car(T, road, r3.f + 600.0 / 24.0, 1, 0, 80.0, false)
+	var frames := 0
+	while R._prey.get(r3) != near3 and frames < 10:
+		await _keep_only(v, [r3, far3, near3], STEP)
+		frames += 1
+	sections += 1
+	_check("cases (the road not one-way: %s): dir -1, the commuter 600 m ahead its prey (%s) and run down after %.1f s (%s); a commuter %.1f m across missed (%s), %.1f m across run down (%s); its prey 1.5 km on (%s), a nearer one put 600 m on is its prey %d frames later (within %d)" % [
+			free_way, prey1, t1, down1, across_missed, missed, across_hit, hit, had_far, frames, R.PREY_EVERY],
+		free_way and prey1 and down1 and missed and across_missed > R.CONTACT_LAT and hit and had_far and R._prey.get(r3) == near3 and frames <= R.PREY_EVERY)
+	R.reset()
+	T.cars.clear()
 
 
 ## The pilot still in the middle of the zone, the city's road not its own: the pack turns round short of the zone's ends.

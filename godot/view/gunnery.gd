@@ -4,9 +4,11 @@
 ##   1. the aim's ray: the mount's (the turret's is the gaze: down the middle of the pilot's view, the headset's
 ##      or the flat view's camera; fixed guns' is their bore, the craft's way)
 ##   2. what it is on: the first vehicle it meets (view/network_traffic.gd ray_pick); else, for fixed guns when that
-##      is no raider, the assist's raider (_assist: the nearest whose lead lies within the craft's assist cone of the
-##      bore, in sight); else the ground (the Network's land and the craft's own road; elsewhere the course's
-##      surface), else the sky (fixed guns: their reach)
+##      is no raider, the assist's raider (_assist: the nearest of the raid's pack whose lead lies within the craft's
+##      assist cone of the bore, in sight); else the ground (the Network's land and the craft's own road; elsewhere the
+##      course's surface), else the sky (fixed guns: their reach). The ground along the aim is searched again every
+##      REMARCH_EVERY frames, or sooner when the aim has turned or moved (_aim_ground); a raider's line of sight is kept
+##      LOS_S s, and one line at most is searched a frame
 ##   3. the sight is drawn there, at that distance and a fixed size over everything (view/gun_sight.gdshader). Fixed
 ##      guns' is a small boresight ring BORESIGHT m out along the bore, and a lead pip where the bolts are laid on a raider
 ##   4. the mount is laid on it, leading a vehicle by the bolt's time of flight, and fires while the
@@ -40,6 +42,11 @@ const BORESIGHT := 600.0          # m: fixed guns' boresight ring stands this fa
 const BORE_DEG := 1.6             # ... this wide, degrees of view
 const PIP_DEG := 1.3              # ... and the lead pip on a raider, this wide
 const ASSIST_LOOKS := 2           # the assist looks for a clear line to at most this many raiders a frame, nearest first
+const LOS_S := 0.15               # s a raider's line of sight is kept; at most one line is searched a frame, the stalest first
+const REMARCH_EVERY := 3          # frames: the ground along the aim is searched again this often, ...
+const REMARCH_DEG := 0.5          # ... or sooner once the aim has turned this many degrees ...
+const REMARCH_M := 50.0           # ... or moved this many metres
+const MARCH_FAR := 200.0          # m: beyond this the ground search steps on by 12% of its distance (7% nearer)
 const SPREAD := deg_to_rad(0.12)  # each shot's scatter about the aim
 const LOCK_S := 0.35              # s a vehicle holds under the sight to be locked (the brackets close)
 const LOCK_EASE := 3.0            # ... and the lock lost a second with none under it
@@ -104,6 +111,12 @@ var _gun_audio: Array = []
 var _world_audio: Array = []
 var _was_out := false
 var _was_moving := false
+var _aim_from := Vector3.INF       # the aim's last ground search: from, along, and where it met the ground (INF: nowhere)
+var _aim_along := Vector3.ZERO
+var _aim_hit := Vector3.INF
+var _aim_age := 0                  # frames since it
+var _los := {}                     # raider -> [when its line was searched (_now), clear]
+var _now := 0.0                    # s of this fire control's frames (step)
 
 
 ## Once per frame. Creates itself, if the craft has a weapon, the first time its GUN is armed (`gun_wanted`): a
@@ -215,6 +228,7 @@ static func dir_to_sim(d: Vector3) -> Vector3:
 
 func step(delta: float) -> void:
 	delta = minf(delta, 0.05)
+	_now += delta
 	var cam: Camera3D = view.cam
 	var out_ok := want_out and power > 0.5
 	# The aim's ray (the turret's is the gaze), in the sims' frame for the search; and the gaze, for the mount
@@ -319,7 +333,7 @@ func _find(o: Vector3, d: Vector3, delta: float) -> void:
 				picked = {"car": _lock_car, "t": held}
 				car_t = held
 	var t0 := Time.get_ticks_usec()
-	var ground_t := march(o, d, minf(reach, car_t))
+	var ground_t := _aim_ground(o, d)
 	march_ms = (Time.get_ticks_usec() - t0) / 1000.0
 	if car_t < INF and (ground_t < 0.0 or car_t <= ground_t):
 		aim_car = picked.car
@@ -352,36 +366,79 @@ func _find(o: Vector3, d: Vector3, delta: float) -> void:
 			_lock_car = null
 
 
-## Fixed guns' assist (the search along the bore found no raider): the nearest raider (traffic.hostiles()) whose lead
-## lies within the mount's assist_deg of the bore (o, d: sims' frame, d a unit vector), within `reach`, the line to
-## its lead clear of the ground (the ground search's march, for the nearest ASSIST_LOOKS so placed). On it, the aim is
-## its middle and the bolts are laid on its lead (step). With none, the aim stays where the search left it.
+## The ground along the aim (o, d: sims' frame, d a unit vector) within `reach`: how far, or -1. The search (march) is
+## made again every REMARCH_EVERY frames, or sooner when the aim has turned more than REMARCH_DEG or moved more than
+## REMARCH_M since the last, or would stand at or behind the craft; between, the last search's ground is kept, its
+## distance read along the aim from where it is now.
+func _aim_ground(o: Vector3, d: Vector3) -> float:
+	_aim_age += 1
+	var again := _aim_age >= REMARCH_EVERY or _aim_from == Vector3.INF or o.distance_squared_to(_aim_from) > REMARCH_M * REMARCH_M \
+		or d.angle_to(_aim_along) > deg_to_rad(REMARCH_DEG)
+	var t := -1.0
+	if not again and _aim_hit != Vector3.INF:
+		t = (_aim_hit - o).dot(d)
+		again = t < 2.0
+	if again:
+		_aim_age = 0
+		_aim_from = o
+		_aim_along = d
+		t = march(o, d, reach)
+		_aim_hit = o + d * t if t >= 0.0 else Vector3.INF
+	elif _aim_hit == Vector3.INF:
+		t = -1.0
+	return t
+
+
+## Fixed guns' assist (the search along the bore found no raider): the nearest raider of the raid's pack (the
+## director's: none with no raid) whose lead lies within the mount's assist_deg of the bore (o, d: sims' frame, d a
+## unit vector), within `reach`, the line to its lead clear of the ground (the ground search's march, for the nearest
+## ASSIST_LOOKS so placed). A raider's line is kept LOS_S s; at most one is searched a frame, the stalest of those
+## looked at first (one never searched is the stalest), and one left unsearched this frame is passed over. On it, the
+## aim is its middle and the bolts are laid on its lead (step). With none, the aim stays where the search left it.
 func _assist(o: Vector3, d: Vector3) -> void:
 	var traffic = view.traffic_net
-	if traffic == null or not traffic.has_method("hostiles"):
+	var raid = view.get("raids")
+	if traffic == null or raid == null or raid.pack.is_empty():
+		_los.clear()
 		return
 	var cone := deg_to_rad(mount.assist_deg())
+	var from := to_sim(mount.origin())
 	var placed := []          # [distance to its lead, the raider, its lead]
-	for c in traffic.hostiles():
+	for c in raid.pack:
 		var dx: float = c.x - o.x
 		var dy: float = c.y - o.y
 		if dx * dx + dy * dy > (reach + 60.0) * (reach + 60.0):
 			continue
-		var lead := _lead_at(c, traffic.body_height(c))
+		var lead := _lead_at(c, traffic.body_height(c), from)
 		var line := lead - o
 		var dist := line.length()
 		if dist > 1.0 and dist <= reach and d.angle_to(line) <= cone:
 			placed.append([dist, c, lead])
+	for c in _los.keys():
+		if not raid.pack.has(c):
+			_los.erase(c)
 	if placed.is_empty():
 		return
 	placed.sort_custom(func(a: Array, b: Array) -> bool: return a[0] < b[0])
-	for k in mini(placed.size(), ASSIST_LOOKS):
-		var dist: float = placed[k][0]
-		var t0 := Time.get_ticks_usec()
-		var blocked := march(o, ((placed[k][2] as Vector3) - o) / dist, dist) >= 0.0
-		march_ms += (Time.get_ticks_usec() - t0) / 1000.0
-		if not blocked:
-			var c = placed[k][1]
+	var looks := mini(placed.size(), ASSIST_LOOKS)
+	var search := -1          # the one whose line is searched this frame: the stalest of those looked at
+	var stalest := -1.0
+	for k in looks:
+		var seen = _los.get(placed[k][1])
+		var age: float = INF if seen == null else _now - float(seen[0])
+		if age >= LOS_S and age > stalest:
+			stalest = age
+			search = k
+	for k in looks:
+		var c = placed[k][1]
+		if k == search:
+			var dist: float = placed[k][0]
+			var t0 := Time.get_ticks_usec()
+			var clear := march(o, ((placed[k][2] as Vector3) - o) / dist, dist) < 0.0
+			march_ms += (Time.get_ticks_usec() - t0) / 1000.0
+			_los[c] = [_now, clear]
+		var known = _los.get(c)
+		if known != null and bool(known[1]):
 			aim_car = c
 			aim_kind = "vehicle"
 			aim_sim = Vector3(c.x, c.y, traffic.body_height(c))
@@ -417,8 +474,10 @@ func _road_at(x: float, y: float) -> float:
 	return sim.road_h(path, f)
 
 
-## How far along the ray (sims' frame, d a unit vector) it meets the ground, or -1 by `reach`.
-func march(o: Vector3, d: Vector3, reach: float) -> float:
+## How far along the ray (sims' frame, d a unit vector) it meets the ground, or -1 by `limit` m. It steps on by 7% of
+## the distance (1.5 to 90 m) out to MARCH_FAR, then by 12% (to 320 m), and finds the ground in a step by halving it
+## seven times.
+func march(o: Vector3, d: Vector3, limit: float) -> float:
 	if d.z > 0.25:
 		return -1.0         # (looking up: the land is behind and below)
 	var t := 2.0
@@ -426,9 +485,9 @@ func march(o: Vector3, d: Vector3, reach: float) -> float:
 	if p.z <= ground_at(p.x, p.y):
 		return t
 	var steps := 0
-	while t < reach and steps < 110:
+	while t < limit and steps < 110:
 		steps += 1
-		var next := minf(reach, t + clampf(t * 0.07, 1.5, 90.0))
+		var next := minf(limit, t + (clampf(t * 0.07, 1.5, 90.0) if t < MARCH_FAR else minf(t * 0.12, 320.0)))
 		p = o + d * next
 		if p.z <= ground_at(p.x, p.y):
 			var lo := t
@@ -450,9 +509,11 @@ func _lead(c) -> Vector3:
 	return _lead_at(c, aim_sim.z)     # (keep the gaze's height on it: the sight sits on its body, not its road)
 
 
-## ... `h` high.
-func _lead_at(c, h: float) -> Vector3:
-	var from := to_sim(mount.origin())
+## ... `h` high, reckoned from `from` (sims' frame: the mount's origin, found here if not given; the assist finds it once
+## for its whole pack).
+func _lead_at(c, h: float, from := Vector3.INF) -> Vector3:
+	if from == Vector3.INF:
+		from = to_sim(mount.origin())
 	var at := Vector3(c.x, c.y, h)
 	var v := Vector3(c.hx * c.v, c.hy * c.v, 0.0)
 	var speed := _bolt_speed((at - from).normalized())

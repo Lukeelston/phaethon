@@ -2,7 +2,9 @@
 ## engine-nose cannons and the Talon's wing guns fire straight ahead, aimed by pointing the craft; an assist bends the
 ## bolts onto a raider within the craft's assistDeg (3 degrees) of the bore. In the VR seat on the Network, the craft
 ## on a straight at 1,500 mph; once the gun is armed the world is held still and the fire control stepped on its own,
-## so each vehicle stands exactly where it is put, at its angle off the bore (its `hold_fire` as if the trigger held):
+## so each vehicle stands exactly where it is put, at its angle off the bore (its `hold_fire` as if the trigger held).
+## Raids are off, so no raid is called; a raider put down is a raid's: the pack of a director of the test's own, made
+## once the gun is armed (the assist looks among the raid's pack):
 ##   lazy                   no fire control until the GUN is first armed; armed, one is made, the craft's own figures
 ##                          on it, and its arms are out in 1 s
 ##   bore                   the aim runs along the craft's way, level with the road, not down the drawn barrels
@@ -184,6 +186,13 @@ func _arm(v, id: String, want: Dictionary):
 		got == want and is_equal_approx(mount.assist_deg(), 3.0))
 	# From here the world is still: the fire control is stepped alone, every vehicle where the test puts it.
 	v.traffic_net.cars.clear()
+	if v.raids == null:      # (its raiders are a raid's pack, as in a flight: a director of the test's own, never updated)
+		var director = Raids.new()
+		v.add_child(director)
+		director.traffic = v.traffic_net
+		director.build(v)
+		v.raids = director
+		v.traffic_net.raids = director
 	_hold_speed(v)
 	g.want_out = true
 	var frames := 0
@@ -232,6 +241,8 @@ func _put(v, g, deg: float, dist: float, hostile: bool):
 	c.y = at.y
 	c.v = 0.0
 	T.cars.append(c)
+	if hostile and v.raids != null:
+		v.raids.pack.append(c)
 	return c
 
 
@@ -257,6 +268,8 @@ static func _clear(v, g) -> void:
 	for i in int(2.0 / DT):
 		g.step(DT)
 	v.traffic_net.cars.clear()
+	if v.raids != null:
+		v.raids.pack.clear()
 	g._damage.clear()
 
 
@@ -316,6 +329,7 @@ func check_assist_cone(v, g) -> void:
 	check("one 800 m out at 6 deg takes no hit in 2 s (%d hits; the guns fired %d down the bore), no pip on it (%s)" % [g.hits - hits, g.shots - shots, wide_seen.pip],
 		g.hits == hits and g.shots - shots > 10 and not wide_seen.pip)
 	T.cars.erase(wide)
+	v.raids.pack.erase(wide)
 
 
 func check_commuter_ahead(v, g) -> void:

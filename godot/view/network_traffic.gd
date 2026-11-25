@@ -1539,13 +1539,23 @@ func _feed() -> void:
 func ray_pick(o: Vector3, d: Vector3, reach: float) -> Dictionary:
 	var best := {}
 	var best_t := reach
+	# In the plane: a vehicle well off the ray's line there, or behind where it starts, cannot be on it (a capsule is at
+	# most a transport's train and 4.8 m about it, 9.6 m tall at its widest: `far` takes it all).
+	var flat := Vector2(d.x, d.y)
+	var lean := flat.length()
+	var steep := lean < 0.05      # (looking almost straight up or down: no line in the plane to keep to)
+	if not steep:
+		flat /= lean
 	for c in cars:
-		if c.craft or c == racer:
-			continue
 		var tail_len := (TRAIN - 1) * TRAIN_GAP if c.kind == TRANSPORT else 0.0
 		var dx := c.x - o.x
 		var dy := c.y - o.y
-		if dx * dx + dy * dy > (reach + tail_len + 40.0) * (reach + tail_len + 40.0):
+		var far := tail_len + 40.0
+		if dx * dx + dy * dy > (reach + far) * (reach + far):
+			continue
+		if not steep and (absf(dx * flat.y - dy * flat.x) > far or dx * flat.x + dy * flat.y < -far):
+			continue
+		if c.craft or c == racer:
 			continue
 		var t := ray_car(c, o, d)
 		if t >= 0.0 and t < best_t:
@@ -1655,6 +1665,20 @@ func marks(x: float, y: float, r: float) -> Array:
 		if absf(c.x - x) < r and absf(c.y - y) < r:
 			out.append([c.x, c.y, HOSTILE_MARK if c.hostile else c.kind])
 	return out
+
+
+const _NO_CARS: Array = []
+
+
+## The vehicles on `road` going `dir`: its bucket as the frame's update left it (mostly in order along the way, f x
+## dir). The pod's own stand-in (id 0) is among them, and one that has since changed road or way, or gone, may linger
+## there until the next regroup: a reader checks. null when the fleet has grown or shrunk since that regroup (a car
+## added or taken out after it): the reader then reads `cars`. For what would otherwise scan every car (Raids: a
+## raider's prey).
+func same_way(road: int, dir: int):
+	if cars.size() != _grouped_count:
+		return null
+	return _groups.get(road * 2 + int(dir > 0), _NO_CARS)
 
 
 ## The hostile cars kept (Raids): the raiders, wherever they are.

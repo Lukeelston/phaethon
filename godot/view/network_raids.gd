@@ -18,14 +18,17 @@
 ##   var raids := Raids.new(); view.add_child(raids); raids.traffic = view.traffic_net; raids.build(view)
 ##   raids.update(delta)            every frame, after traffic's own update and chase's
 ##   raids.on_kill(car)             a raider shot (the gun's, before traffic.knock_out)
-##   raids.prey_of(car)             a raider's prey: the nearest commuter ahead on its road and way, within 3 km (or null)
+##   raids.prey_of(car)             a raider's prey: the nearest commuter ahead on its road and way, within 3 km (or null),
+##                                  looked for in traffic's bucket of that road and way (traffic.same_way), not every car
 ##   raids.reset()                  on a restart (a crash's respawn it sees for itself: sim.crash_t)
 ##   raids.text()                   the dash's line while one is called or on ("" otherwise): traffic's race_text() gives it
 ##   raids.result                   "cleared" | "lost", once, for the view to take
 ## Hunting: each frame a raider takes its prey's lane and the speed of it plus HUNT_DV (no headway: it comes onto its
 ## prey's tail, and traffic lets a hostile car pass a zone's cap by HUNT_DV, so it closes on one at the cap too), and on
 ## contact (CONTACT_ALONG, CONTACT_LAT) the commuter is knocked out and lost; with no prey it cruises at the town limit.
-## A raider gone from traffic without on_kill is fled: no award, kills unchanged.
+## Its prey is looked for again every PREY_EVERY frames (staggered by its id), and at once when the one it has is gone
+## or no longer ahead; contact is tried every frame. A raider gone from traffic without on_kill is fled: no award,
+## kills unchanged.
 ## Contact: a raider within CONTACT_CRAFT of the pod or either engine is one hit taken a GRACE s (signal hit_taken: the
 ## view jolts, and the score takes its points; never health).
 ## Log lines (the flight log): RAID: alarm <CITY> <km> | arrived | kill | commuter lost | hit taken | raider fled | cleared | lost (<why>)
@@ -57,6 +60,7 @@ const CONTACT_ALONG := 48.0              # m along the road (traffic's own 40 m 
 const CONTACT_LAT := 12.0                # ... across it: contact with its prey, which is lost
 const RAIDER_HEADWAY := 0.45              # s: a raider's headway with no prey
 const PREY_REACH := 3000.0               # m: the farthest ahead a commuter is its prey
+const PREY_EVERY := 4                    # frames between a raider's looks for its prey (staggered by its id)
 const HEADING_BELOW := 30.0              # m/s: slower, the pick looks the way the craft points, not the way it goes
 const GRACE := 1.0                       # s: a raider in contact is one hit taken, then none for this long
 const SAVED_START := 60                  # commuters a raid starts with: the clearing pays for each one not lost
@@ -106,6 +110,8 @@ var _why := ""                   # why the last was lost: "away" | "time" | "fle
 var _last_city := -1             # the last raid's city: not picked for the next
 var _wrecked := false            # the craft is down (sim.crash_t): the sim respawns it when that runs out
 var _killed := {}                # Car -> true: this raid's raiders shot (on_kill), before traffic loses them
+var _prey := {}                  # raider -> its prey (a commuter) or null, as last looked for (_hunt)
+var _frame_n := 0                # frames on (the prey's looks are staggered by it)
 var _zones := {}                 # city -> {"road", "z": Vector2i(first, last sample of its town zone), "pts"}
 var _rng := RandomNumberGenerator.new()
 
@@ -186,11 +192,13 @@ func update(delta: float) -> void:
 				_end("lost", "not reached")
 		"on":
 			_t += delta
+			_frame_n += 1
 			for k in range(pack.size() - 1, -1, -1):
 				if not traffic.cars.has(pack[k]):      # shot (on_kill, then knock_out) or gone
 					if not _killed.has(pack[k]):       # gone and not shot: a safety net (traffic never drops one itself)
 						fled += 1
 						print("RAID: raider fled")
+					_prey.erase(pack[k])
 					pack.remove_at(k)
 			if pack.is_empty():
 				_end("cleared" if kills > 0 else "lost", "fled" if fled > 0 else "")
@@ -225,6 +233,7 @@ func _alarm() -> bool:
 	fled = 0
 	pack.clear()
 	_killed.clear()
+	_prey.clear()
 	_tick_t = 0.0
 	_t = 0.0
 	_away = 0.0
@@ -395,6 +404,7 @@ func _keep_in_zone(c) -> void:
 	c.decided = -1
 	c.vcap_road = -1
 	traffic._place(c)
+	_prey.erase(c)      # (what it was after is behind it now: it looks again)
 
 
 ## m from the pilot to city k's town zone (to its nearest point read).
@@ -467,28 +477,72 @@ func _arrive() -> void:
 
 
 ## The raider's prey: the nearest commuter (not hostile) ahead of it on its road and way, within PREY_REACH m, or null.
-## One it has just passed within contact range still counts (it may yet be run down).
+## One it has just passed within contact range still counts (it may yet be run down). Looked for among the vehicles on
+## that road going that way (traffic.same_way: its bucket, in order along the way, found from where it is by halving,
+## then the first commuter on; every car when the fleet has changed since traffic's update); one gone since then is
+## none.
 func prey_of(c) -> Variant:
 	var R = sim.roads[c.road]
 	var m: float = R.len[clampi(int(c.f), 0, R.N - 1)]
-	var best = null
-	var bd := INF
-	for o in traffic.cars:
-		if o.hostile or o.road != c.road or o.dir != c.dir:
+	var pool = traffic.same_way(c.road, c.dir)
+	if pool == null:      # (the fleet changed since traffic's update: every car, the nearest of them)
+		var best = null
+		var bd := INF
+		for o in traffic.cars:
+			if o.hostile or o.road != c.road or o.dir != c.dir:
+				continue
+			var along: float = (o.f - c.f) * c.dir * m
+			if along < -CONTACT_ALONG or along > PREY_REACH or along >= bd:
+				continue
+			bd = along
+			best = o
+		return best
+	# The bucket runs up its way (f x dir rising; mostly: an overtake since its sort is put right next frame): the first
+	# entry at or past CONTACT_ALONG behind the raider, by halving, then on to the first commuter there.
+	var want: float = c.f * c.dir - CONTACT_ALONG / m
+	var lo := 0
+	var hi: int = pool.size()
+	while lo < hi:
+		var mid := (lo + hi) >> 1
+		var o = pool[mid]
+		if o.f * o.dir < want:
+			lo = mid + 1
+		else:
+			hi = mid
+	for i in range(lo, pool.size()):
+		var o = pool[i]
+		if o.hostile or o.id == 0 or o.road != c.road or o.dir != c.dir:      # (the pod's stand-in; one moved on since)
 			continue
 		var along: float = (o.f - c.f) * c.dir * m
-		if along < -CONTACT_ALONG or along > PREY_REACH or along >= bd:
+		if along > PREY_REACH:
+			break
+		if along < -CONTACT_ALONG:
 			continue
-		bd = along
-		best = o
-	return best
+		if not traffic.cars.has(o):
+			continue      # (gone since traffic's update this frame)
+		return o
+	return null
+
+
+## Is p still raider c's prey: in traffic, on its road and way, and ahead of it (within PREY_REACH; or just passed,
+## within contact)?
+func _still_prey(c, p) -> bool:
+	if p.road != c.road or p.dir != c.dir or not traffic.cars.has(p):
+		return false
+	var R = sim.roads[c.road]
+	var along: float = (p.f - c.f) * c.dir * float(R.len[clampi(int(c.f), 0, R.N - 1)])
+	return along >= -CONTACT_ALONG and along <= PREY_REACH
 
 
 ## One raider's driving: after its prey's lane, at its speed plus HUNT_DV, with no headway (traffic's follower then
 ## sees its prey only inside its 40 m bumper allowance, within CONTACT_ALONG); with no prey, the town's limit. Contact
-## runs the commuter down.
-func _hunt(c, delta: float) -> void:
-	var p = prey_of(c)
+## runs the commuter down. Its prey is the one it had, looked for again every PREY_EVERY frames (staggered by its id),
+## at once when that one is gone or not ahead, and after a run-down on the next frame.
+func _hunt(c, _delta: float) -> void:
+	var p = _prey.get(c)
+	if not _prey.has(c) or (_frame_n + c.id) % PREY_EVERY == 0 or (p != null and not _still_prey(c, p)):
+		p = prey_of(c)
+		_prey[c] = p
 	if p == null:
 		c.vdes = Traffic.SF_V
 		c.headway = RAIDER_HEADWAY
@@ -500,6 +554,7 @@ func _hunt(c, delta: float) -> void:
 	var along: float = (p.f - c.f) * c.dir * float(R.len[clampi(int(c.f), 0, R.N - 1)])
 	if absf(along) <= CONTACT_ALONG and absf(p.lat - c.lat) <= CONTACT_LAT:
 		_run_down(p)
+		_prey.erase(c)
 
 
 ## Is a raider on the craft: the centre of one within CONTACT_CRAFT of the pod's or either engine's?
@@ -580,6 +635,7 @@ func _disband() -> void:
 		traffic.cars.erase(c)
 	pack.clear()
 	_killed.clear()
+	_prey.clear()
 	if traffic.race_state == "raid":
 		traffic.race_state = ""
 
