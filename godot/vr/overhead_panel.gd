@@ -275,19 +275,19 @@ func _lamp(pod: Node3D, at: Vector3, size: Vector2) -> StandardMaterial3D:
 
 
 ## A controller's tip, in a pod's frame.
-func _tip_in(pod: Node3D, ctrl: Node3D) -> Vector3:
-	return pod.global_transform.affine_inverse() * (ctrl.global_transform * TIP)
+func _tip_in(pod: Node3D, ctrl: Node3D, tip_offset := TIP) -> Vector3:
+	return pod.global_transform.affine_inverse() * (ctrl.global_transform * tip_offset)
 
 
 ## What this controller worked this frame: an array of [control, dir] ("batt", "engine" or "park"
 ## flicked up (+1) or down (-1); "start" pressed (0)). Usually empty. (A frame of no length only
 ## notes where the tip is.)
-func poke(ctrl: Node3D, delta: float) -> Array:
+func poke(ctrl: Node3D, delta: float, tip_offset := TIP) -> Array:
 	var worked := []
 	var prev: Dictionary = _prev.get(ctrl, {})
 	for side: float in pods:
 		var pod: Node3D = pods[side]
-		var tip := _tip_in(pod, ctrl)
+		var tip := _tip_in(pod, ctrl, tip_offset)
 		var was: Variant = prev.get(side)
 		prev[side] = tip
 		if was == null or delta <= 0.0:

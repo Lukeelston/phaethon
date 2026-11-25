@@ -11,6 +11,31 @@ entry. The menu stays still in front of you; stick-click recenters it. Flight
 entry recenters your seat. Desktop uses clickable map buttons and Escape to
 return through the pause menu.
 
+Choose **Pilot garage** on the title menu to explore the six full-size airframes on foot.
+Walk up to the side of a cockpit to board it. You can step out again, or launch a
+flight in that craft. From a flight, the garage is accessible at the launch site
+when parked. The desktop garage launches onto the Network by default. In VR it
+uses the course selected on the flight menu.
+
+Board a parked craft to run it on its service stands. In VR, reach up to the
+windscreen header for the battery, guarded engine switch and starter, or press
+left **X** for an assisted start. The left engine catches first. Use the
+throttles independently and watch their dials and the engines ahead of you.
+Stepping out leaves the craft in its current power state. Launching in VR
+carries an operated cockpit's startup and parking-brake state onto the pad.
+
+| Garage control | Keyboard and mouse | Gamepad | VR |
+|---|---|---|---|
+| Walk and look | WASD and mouse | Left and right sticks | Left stick to walk, right stick to turn smoothly |
+| Board or step out | E | A | Right A |
+| Start or shut down | I | X | Left X or overhead controls |
+| Toggle parking brake | P | Left stick click | Left stick click or PARK switch |
+| Work the throttles | W/S left, Up/Down right, X for idle | Left and right sticks forward | Grab and move either lever, or squeeze the opposite trigger |
+| Apply airbrakes | A left, Right arrow right | LT and RT | Squeeze either grip away from its lever |
+| Launch from the seat | F | Y | Left Y |
+| View the pilot on foot | V | Right stick click | Look down to see your suit |
+| Return to menu | Esc | B | Right B |
+
 | Path | What |
 |---|---|
 | `phaethon.html`, `sim-core.js`, `feel-lab.js` | Spec page and the browser feel lab (the JS reference flight model). Move into `web/` next. |

@@ -96,6 +96,8 @@ var _lesson_was := ""
 var cleared := true              # the sequence is behind you (or was never asked for)
 var refusal := ""                # why the last control worked was refused (for the glass), while _refusal_t lasts
 var events: Array[String] = []   # what happened since they were last cleared (the cockpit's sounds and haptics)
+var assisting := false           # the pilot asked for the garage's one-touch start
+var _assist_wait := 0.0
 var _guard_t := 0.0
 var _cleared_t := 0.0
 var _refusal_t := 0.0
@@ -104,6 +106,7 @@ var _gear_seen := -1             # the gear the run-up began in
 
 ## Everything running and the brake off: the craft as it always was. Nothing is held back.
 func hot() -> void:
+	assisting = false
 	batt = true
 	master = true
 	guard_open = false
@@ -126,6 +129,7 @@ func hot() -> void:
 
 ## Parked, cold and dark: the brake set, everything off.
 func cold() -> void:
+	assisting = false
 	batt = false
 	master = false
 	guard_open = false
@@ -271,7 +275,9 @@ func _refuse(why: String) -> String:
 ## A toggle flicked: `control` "batt", "engine" or "park"; `dir` +1 up, -1 down; `mph` the craft's
 ## speed. -> what happened: "batt_on", "batt_off", "guard_open", "guard_close", "master_on",
 ## "master_off", "park_set", "park_release", "refused" (see `refusal`), or "" (nothing to do).
-func flick(control: String, dir: int, mph := 0.0) -> String:
+func flick(control: String, dir: int, mph := 0.0, from_assist := false) -> String:
+	if not from_assist:
+		assisting = false
 	match control:
 		"batt":
 			if dir > 0 and not batt:
@@ -338,6 +344,7 @@ func _did(what: String) -> String:
 ## The start button pressed. -> "start", "refused" (see `refusal`), "dead" (no power: a click and
 ## nothing else) or "" (they are running or already starting).
 func press_start(mph := 0.0) -> String:
+	assisting = false
 	if not batt:
 		return _did("dead")
 	if not master:
@@ -355,10 +362,45 @@ func press_start(mph := 0.0) -> String:
 	return _did("start")
 
 
+## A one-touch start works the same physical controls and interlocks as the pilot.
+## The assist clock travels with this sequence, including during garage/flight transfers.
+func power_shortcut() -> String:
+	if assisting or starting() or running(0) or running(1):
+		assisting = false
+		if master:
+			if not guard_open:
+				flick("engine", 1)
+			flick("engine", -1)
+		flick("batt", -1)
+		return "shutdown"
+	assisting = true
+	_assist_wait = 0.0
+	_advance_assist(0.0)
+	return "power_up"
+
+
+func _advance_assist(delta: float) -> void:
+	_assist_wait -= delta
+	if _assist_wait > 0.0:
+		return
+	if not park:
+		flick("park", 1, 0.0, true)
+	elif not batt:
+		flick("batt", 1, 0.0, true)
+		_assist_wait = POWER_UP_S
+	elif not master:
+		flick("engine", 1, 0.0, true)
+		_assist_wait = CHARGE_S if master else 0.22
+	else:
+		press_start()
+
+
 ## A frame: `thr` is what the pilot's hands ask of each engine, [left, right]; `gear` the gear shown;
 ## `grip` how far each grip is squeezed, [left, right] (the air brakes' own ask: a taught run-up reads it).
 func step(dt: float, thr: Array, gear := 0, grip: Array = [0.0, 0.0]) -> void:
 	dt = clampf(dt, 0.0, 0.1)
+	if assisting:
+		_advance_assist(dt)
 	levers = [float(thr[0]), float(thr[1])]
 	grips = [float(grip[0]), float(grip[1])]
 	power = move_toward(power, 1.0 if batt else 0.0, dt / (POWER_UP_S if batt else POWER_DOWN_S))

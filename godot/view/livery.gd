@@ -120,6 +120,14 @@ static func is_factory(which := "") -> bool:
 static func table_id(which := "") -> String:
 	var id: String = which if known(which) else current
 	return id if TABLE.has(id) else "ember"
+## Build one synchronous piece in its owner's paint. Restore the previous colour
+## before returning so multiple displayed craft and frame-sliced cabins can coexist.
+static func build_in(which: String, build_piece: Callable) -> Variant:
+	var previous := current
+	current = which
+	var piece: Variant = build_piece.call()
+	current = previous
+	return piece
 
 
 ## The colour of a part ("paint", "stripe", "pin", "engine", "skin") in a livery (the current one by default).

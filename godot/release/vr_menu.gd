@@ -3,8 +3,8 @@
 ## craft turns on a turntable behind the board, which swings aside while its rows have the highlight.
 extends Node3D
 
+const Garage := preload("res://release/garage_route.gd")
 const UI := preload("res://release/release_config.gd")
-const View := preload("res://view/craft_view.gd")
 const Title := preload("res://release/title_stage.gd")
 const BOARD_DROP := 0.40      # in the title, the board's middle is this far under the eye and leaned back to face it: the word stands over its top edge
 # In the title the turntable stands straight ahead behind the board (release/title_stage.gd). While a row
@@ -204,10 +204,15 @@ func _build_screen() -> void:
 	layout.add_child(start_button)
 	start_index = buttons.size()
 	buttons.append(start_button)
-	var quit_button := UI.button("Quit to desktop", get_tree().quit, 60)
-	quit_button.add_theme_font_size_override("font_size", 26)
-	layout.add_child(quit_button)
-	buttons.append(quit_button)
+	var exits := HBoxContainer.new()
+	layout.add_child(exits)
+	var garage := UI.button("Pilot garage", _open_garage, 60)
+	garage.name = "Garage"
+	for button: Button in [garage, UI.button("Quit to desktop", get_tree().quit, 60)]:
+		button.add_theme_font_size_override("font_size", 26)
+		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		exits.add_child(button)
+		buttons.append(button)
 	layout.add_child(UI.label("Stick up/down: highlight    A or trigger: select    Stick click: recenter", 25, UI.MUTED))
 
 func choose_course(course: String) -> void:
@@ -241,19 +246,17 @@ func start_selected() -> void:
 	if launching or UI.course_index(selected_course) < 0:
 		return
 	launching = true
-	var overrides := UI.course_overrides(selected_course)
-	View.vehicle_override = craft_selector.selected
-	View.track_override = overrides[0]
-	View.job_override = overrides[1]
-	View.spot_override = overrides[2]
-	var cockpit = load("res://vr/vr_cockpit.gd")
-	cockpit.require_neutral_on_entry = true
-	cockpit.cold_on_entry = true      # a flight chosen here begins parked, cold and dark (unless the pilot has COLD START off)
-	View.pad_start = true             # ... and, on the Network, on its starting pad at the roadside
-	start_button.text = "Loading " + title.text + "…"
+	start_button.text = "Loading " + title.text + "."
 	print("VR MENU: starting ", selected_course)
-	var flight_scene := "res://vr/quest_flight.tscn" if OS.has_feature("questflight") else "res://vr.tscn"
-	get_tree().call_deferred("change_scene_to_file", flight_scene)
+	Garage.start_flight(get_tree(), true, craft_selector.selected, UI.course_overrides(selected_course))
+
+
+func _open_garage() -> void:
+	if launching:
+		return
+	launching = true
+	Garage.enter(get_tree(), true, selected_course)
+
 
 func consume_controller(axis: float, confirm: bool, focused: bool) -> void:
 	if not focused:

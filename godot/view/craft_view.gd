@@ -110,6 +110,7 @@ var flat_camera := "far"
 var handling_ask := ""             # the live handling switch: "speed" / "starfighter" (VR: the console
                                    # toggle or Y-hold; keyboard: M), sent with every step
 static var vehicle_override := ""
+static var garage_on_entry: Dictionary = {}
 static var track_override := ""    # an in-game track switch (VR: hold the menu button) wins over --track;
                                    # static, so it survives the scene reload that does the switch
 static var job_override := ""      # the job to fly ("emergency": the emergency run; "none": no job), wins over --job; static too
@@ -196,6 +197,7 @@ var _jolt_rect: ColorRect
 var _jolt_shown := -1.0      # the vignette's strength its shader was last given (told only when it changes)
 var _jolt_warm := 0          # frames the vignette is still drawn at nothing, so its shader is compiled at load
 var chase: Node3D            # chase mode on the Network (view/network_chase.gd), null when it's off
+var _garage_spawn := Vector3.ZERO
 var pad: Node3D              # the starting pad (view/start_pad.gd), when the flight began on one
 const StartPadScript := preload("res://view/start_pad.gd")
 var light_bars: Array = []   # the pilot's own, in the patrol craft (one on each model of the pod that is built)
@@ -232,6 +234,25 @@ var menu_label: Label             # the flat view's panel
 var _menu_was_muted := false
 
 
+## Opening the garage ends this flight. Offer it at the launch site while the pod
+## and both towed engines are settled; pausing alone never makes a moving craft eligible.
+func can_visit_garage() -> bool:
+	if not sim or sim.run_active or benchmark_flight:
+		return false
+	var position_here := Vector3(sim.pod.x, sim.pod.y, sim.pod.z)
+	if position_here.distance_squared_to(_garage_spawn) > 9.0:
+		return false
+	for body in sim.bodies:
+		if Vector3(body.vx, body.vy, body.vz).length_squared() > 0.25:
+			return false
+	return true
+
+
+func parked_systems() -> Dictionary:
+	# A desktop flight has no battery or starter controls; its engines run from spawn.
+	return {"startup": StartupSequence.new(), "handling": sim.hwant}
+
+
 func _ready() -> void:
 	var opts := {"obstacleCollisions": GameSettings.obstacle_collisions_enabled()}
 	var on_pad := pad_start      # (a menu's word for this flight alone, whatever course it is)
@@ -240,6 +261,10 @@ func _ready() -> void:
 	ChaseScript.load_saved() # ... and the craft, and whether chase mode is on
 	RaidsScript.load_saved() # ... and whether raids are on
 	opts["vehicle"] = CraftSimScript.PilotCraft.resolve(OS.get_cmdline_user_args(), vehicle_override)
+	var workshop := garage_on_entry if vehicle_override == opts.vehicle else {}   # (Codex's garage: the bay's switches this flight leaves with)
+	garage_on_entry = {}
+	if workshop.has("handling"):
+		opts.handling = workshop.handling
 	if not Livery.pinned:    # ... and the paint they chose for this pilot craft (a test or a render that has chosen one keeps it)
 		Livery.current = Livery.built(opts["vehicle"])
 	if ChaseScript.craft == "patrol":
@@ -326,6 +351,7 @@ func _ready() -> void:
 		sim.respawn(-1, start_at)
 	if branch_at >= 0 and not sim.branches.is_empty():
 		_place_on_branch(branch_at)
+	_garage_spawn = Vector3(sim.pod.x, sim.pod.y, sim.pod.z)
 	if sim.kind != "circuit" and not benchmark_flight:
 		replay = []
 	levers = LeverInputScript.new()
@@ -2261,6 +2287,13 @@ func _gun_controls() -> void:
 
 ## Overridable: the flat view's chase camera and 2D HUD.
 func _make_view() -> void:
+	# Only this view owns the desktop player's pod. Showroom models and XR build their own views.
+	var pilot := preload("res://garage/pilot_model.gd").new()
+	pilot.name = "ChasePilot"
+	pilot.set_seat_vehicle(sim.P.vehicle)
+	pilot.set_seated(true)
+	pilot.position = preload("res://garage/garage_seat.gd").EYE - Vector3.UP * CraftModelScript.POD_FRAME_UP - pilot.SEATED_EYE
+	pod_mesh.add_child(pilot)
 	flat_camera = GameSettings.choice("flat_camera", ["far", "near"])
 	CraftModelScript.set_nose_closed(GameSettings.choice("flat_nose", ["open", "closed"]) == "closed", self)
 	if sim.kind == "network":

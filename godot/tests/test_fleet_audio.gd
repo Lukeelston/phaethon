@@ -166,6 +166,7 @@ func _check_twin_rejoin() -> void:
 	root.add_child(right)
 	var weights := PackedFloat64Array([1.0])
 	var configured := left.configure([wav], 0.0) and right.configure([wav], 0.0, left)
+	var format_lifetime: WeakRef = weakref(left.stream)
 	_check("paired tone probe loads", configured)
 	if configured:
 		for player: Glide in [left, right]:
@@ -173,6 +174,8 @@ func _check_twin_rejoin() -> void:
 			player.stream_paused = true
 			# Discard the device-specific prefill. Both offline queues start at sample zero.
 			player._phase = 0.0
+		_check("both engines share one format and keep independent playback rings",
+				left.stream == right.stream and left.get_stream_playback() != right.get_stream_playback())
 		for stage: String in ["matched", "split", "rejoined"]:
 			right.drive(3.17 if stage == "split" else 2.0, 1.0, weights)
 			var left_cycles := 0
@@ -204,6 +207,8 @@ func _check_twin_rejoin() -> void:
 			_check(stage + " twin output phase", power > 1.0 and (residual > .4 if split else residual < .001))
 	left.free()
 	right.free()
+	_check("the generator remains alive for mixer callbacks after the scene releases both voices",
+			format_lifetime != null and format_lifetime.get_ref() != null)
 
 func _run() -> void:
 	_check_glide_waveform()

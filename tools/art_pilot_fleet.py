@@ -83,6 +83,7 @@ def skin_patch(m, rows, start, end, angles, exp, mat, lift=0.012):
         f = np.interp(u * (len(stations) - 1), range(len(stations)), stations)
         az = np.interp(v * (len(azimuths) - 1), range(len(azimuths)), azimuths)
         edge = max(low - f, f - high, -az, az - 1, 0) / 0.012
+        assert edge <= 1.000001, "Stamped panel return exceeds its authored 3 mm inset"
         return at(f, az, lift - (lift + 0.003) * edge**2)
 
     base, first_index = len(m.pos), len(m.indices)
@@ -635,7 +636,18 @@ def basilisk_engine(m, side):
     loft(m, body, "enamel", exp, 36, False)
     for j, (a, b) in enumerate(((1.1, 1.95), (2.05, 2.95), (3.05, 3.95), (4.05, 4.95), (5.05, 6.0))):
         skin_patch(m, body, a, b, (38, 142), exp, "access" if j % 2 == 0 else "stripe")
-    outboard_patch(m, body, 2.15, 2.85, side, 32, exp, "number", 0.024)
+    # The clear flank between the middle armour belt and the aft stripe is
+    # visible from the service floor, including past the folded brake and strake.
+    number_start = len(m.pos)
+    outboard_patch(m, body, 3.68, 4.103, side, 32, exp, "number", 0.024)
+    # Project the stencil in metres. Equal UVs per loft station would squeeze
+    # one of the glyphs because the next chine sits off-centre in this panel.
+    plate = np.asarray(m.pos[number_start:])
+    centre = (plate.min(axis=0) + plate.max(axis=0)) * 0.5
+    x, y, width, height = REGIONS["number"]
+    printed = np.column_stack((-side * (plate[:, 2] - centre[2]), centre[1] - plate[:, 1])) * 156.0
+    tile = np.array((width, height))
+    m.uv[number_start:] = (np.clip(printed + tile * 0.5, 4, tile - 4) + (x, y)) / 1024
     outboard_patch(m, body, 4.15, 5.6, side, 32, exp, "stripe", 0.014)
     hoop(m, -4.44, 0, 0.035, 0.955, 0.555, 0.13, 0.15, "accent", exp)
     loft(m, [(-4.47, 0, 0.035, 0.86, 0.48), (-3.95, 0, 0.04, 0.84, 0.46)], "dark", exp, 28, False)
@@ -703,7 +715,7 @@ def basilisk_engine(m, side):
     for z in (-2.6, -1.6, -0.6, 0.4, 1.4):
         m.pipe((-sx * 0.95, -0.15, z), (-sx * 1.06, -0.13, z + 0.03), 0.062, "dark", 10)
     x, y, w, h = at_rows(body, -1.85)
-    badge(m, -1.85, w + 0.006, 0.03, side, 0.86, 0.17)
+    badge(m, -1.85, w + 0.006, -0.225, side, 0.86, 0.17)
 
 
 DRIVES = {"orrery": orrery_engine, "kiln": kiln_engine, "vesper": vesper_engine, "basilisk": basilisk_engine}

@@ -1,7 +1,7 @@
 extends Control
 
-const View := preload("res://view/craft_view.gd")
 const UI := preload("res://release/release_config.gd")
+const Garage := preload("res://release/garage_route.gd")
 const CraftSelector := preload("res://release/craft_selector.gd")
 const Title := preload("res://release/title_stage.gd")
 const SPINE := 500.0          # in the title, the menu's column down the left edge is this wide (of the window's 1280) ...
@@ -108,7 +108,11 @@ func _ready() -> void:
 	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	left.add_child(spacer)
 	left.add_child(UI.label("A rough, playable physics experiment.\nExpect odd handling, rough edges and spectacular mistakes.", 16, UI.MUTED))
-	left.add_child(UI.button("Quit to desktop", get_tree().quit, 42))
+	var exits := HBoxContainer.new()
+	left.add_child(exits)
+	for button: Button in [_garage_button(42), UI.button("Quit to desktop", get_tree().quit, 42)]:
+		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		exits.add_child(button)
 	var right := VBoxContainer.new()
 	right.alignment = BoxContainer.ALIGNMENT_CENTER
 	columns.add_child(right)
@@ -199,7 +203,14 @@ func _over_title() -> void:
 	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	left.add_child(spacer)
 	left.add_child(UI.label("A rough, playable physics experiment. Expect odd\nhandling, rough edges and spectacular mistakes.", 14, UI.MUTED))
-	left.add_child(UI.button("Quit to desktop", get_tree().quit, 38))
+	# Codex's Pilot garage beside Quit, as on the plain menu and the headset's (her branch had it beside the pilot
+	# craft, whose row the Raids left to the craft's long names)
+	var exits := HBoxContainer.new()
+	exits.add_theme_constant_override("separation", 8)
+	left.add_child(exits)
+	for button: Button in [_garage_button(38), UI.button("Quit to desktop", get_tree().quit, 38)]:
+		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		exits.add_child(button)
 	# the flight controls: a strip along the bottom of the picture's side
 	var strip := UI.controls_strip()
 	strip.name = "Controls"
@@ -273,13 +284,17 @@ func _process(delta: float) -> void:
 	_look_for = _look_for + delta if on else 0.0
 	stage.attend(_look_for >= LOOK_DWELL)
 
+func _garage_button(height: int) -> Button:
+	var button := UI.button("Pilot garage", _open_garage, height)
+	button.name = "Garage"
+	return button
+
+
+func _open_garage() -> void:
+	Garage.enter(get_tree(), false, "network")
+
+
 func start_course(course: String) -> void:
 	if UI.course_index(course) < 0:
 		return
-	var overrides := UI.course_overrides(course)
-	View.vehicle_override = craft_selector.selected
-	View.track_override = overrides[0]
-	View.job_override = overrides[1]
-	View.spot_override = overrides[2]
-	View.pad_start = true      # (the Network: on its starting pad at the roadside)
-	get_tree().change_scene_to_file(UI.GAME_SCENE)
+	Garage.start_flight(get_tree(), false, craft_selector.selected, UI.course_overrides(course))

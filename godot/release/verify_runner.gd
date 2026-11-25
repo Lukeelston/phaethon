@@ -59,6 +59,59 @@ func shot(name: String) -> void:
 	var image := get_viewport().get_texture().get_image()
 	check(name + " screenshot saved", image.save_png(evidence.path_join(name + ".png")) == OK)
 
+## Exercise the public garage controls against exported resources, including the
+## cabin components shared with XR that the desktop preset used to exclude.
+func _garage_visit() -> bool:
+	var title = get_tree().current_scene
+	var enter := title.find_child("Garage", true, false) as Button
+	if not check("desktop title offers the pilot garage", enter != null and enter.is_visible_in_tree()):
+		return false
+	enter.pressed.emit()
+	await frames(3)
+	var garage = get_tree().current_scene
+	if not check("packed garage opens", garage != null and garage.scene_file_path == "res://garage/garage.tscn"):
+		return false
+	var craft := Settings.selected_craft()
+	var alternate := "kiln" if craft == "vesper" else "vesper"
+	garage.walker.global_transform = garage.environment.boarding_transform(alternate)
+	garage.walker.interact_requested.emit()
+	var bay: Node3D = garage.environment.bay_node(alternate)
+	var runup = bay.get_node_or_null("Runup")
+	if not check("alternate service bay boards with its own cold engines", runup != null and not runup.startup.batt and runup.startup.stage == ["off", "off"]):
+		return false
+	var parked_at := bay.global_transform
+	garage.walker.cockpit_control_requested.emit("power")
+	await frames(3)
+	check("occupied bay accepts battery power on the stands", runup.startup.batt and runup.startup.power > 0.0 and bay.global_transform.is_equal_approx(parked_at))
+	garage.walker.cockpit_control_requested.emit("power")
+	check("alternate bay powers back down", not runup.startup.batt and runup.startup.stage == ["off", "off"])
+	garage.walker.interact_requested.emit()
+	garage.walker.global_transform = garage.environment.boarding_transform(craft)
+	garage.interact()
+	if not check("pilot boards the selected craft", garage.seated_craft == craft and garage.walker.seated):
+		return false
+	garage.launch_flight()
+	await frames(3)
+	var flight := get_tree().current_scene as View
+	if not check("garage launches the selected pilot craft on the Network", flight != null and flight.sim.P.vehicle == craft and flight.sim.kind == "network"):
+		return false
+	var pilot := flight.pod_mesh.get_node_or_null("ChasePilot")
+	check("desktop flight carries the seated pilot", pilot != null and pilot.get_child_count() > 0)
+	var overlay = get_tree().root.get_node("ReleasePause")
+	overlay.set_paused(true)
+	var park := overlay.find_child("Garage", true, false) as Button
+	if not check("parked flight can enter the garage", park != null and not park.disabled):
+		return false
+	park.pressed.emit()
+	await frames(3)
+	garage = get_tree().current_scene
+	if not check("parked pilot returns on foot beside the same craft", garage != null and garage.scene_file_path == "res://garage/garage.tscn" and not garage.walker.seated and garage.environment.nearest_bay(garage.walker.global_position) == craft):
+		return false
+	garage.return_to_menu()
+	await frames(3)
+	return check("garage returns to desktop title", get_tree().current_scene != null and get_tree().current_scene.scene_file_path == MENU_SCENE)
+
+
 func _run() -> void:
 	_settings_existed = FileAccess.file_exists(Settings.PREFS)
 	if _settings_existed:
@@ -87,6 +140,9 @@ func _run() -> void:
 		_finish()
 		return
 	await shot("menu")
+	if not await _garage_visit():
+		_finish()
+		return
 	var overlay = get_tree().root.get_node("ReleasePause")
 	capture = AudioEffectCapture.new()
 	capture.buffer_length = 3.0
