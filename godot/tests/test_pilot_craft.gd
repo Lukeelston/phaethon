@@ -408,21 +408,16 @@ func _run() -> void:
 	for vr in [false, true]:
 		var scene := "res://release/vr_menu.tscn" if vr else "res://release/menu.tscn"
 		for id in ["talon", "shrike", "orrery", "kiln", "vesper", "basilisk", "phaethon"]:
-			if not vr:
-				Settings.set_selected_craft(id)      # (the desktop menu has no craft row: the garage, or the craft last flown, chose it)
+			Settings.set_selected_craft(id)      # (neither menu has a craft row: the garage, or the craft last flown, chose it)
 			change_scene_to_file(scene)
 			await scene_changed
 			var menu = current_scene
+			check("the menu's turntable shows the persisted craft", menu.stage != null and menu.stage.show_vehicle == Settings.selected_craft())
+			menu.choose_course("range")
 			if vr:
-				check("menu recalls the persisted craft", menu.craft_selector.selected == Settings.selected_craft())
-				menu.focus_row(menu.buttons.find(menu.craft_selector.button))
-				menu.activate()
-				menu.choose_course("range")
 				menu.focus_row(menu.start_index)
 				menu.activate()
 			else:
-				check("the menu's turntable shows the persisted craft", menu.stage != null and menu.stage.show_vehicle == Settings.selected_craft())
-				menu.choose_course("range")
 				menu.fly()
 			await scene_changed
 			var game = current_scene

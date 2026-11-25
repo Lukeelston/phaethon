@@ -5,8 +5,8 @@
 ##              Ember); each craft is saved under its own key, the Phaethon's the "paint" it always had
 ##   carried    a paint saved before is the Phaethon's still; the others start at Factory
 ##   menus      the paint row steps the chosen craft's own paint, round and back, for every craft, leaving the
-##              others' alone; as a row with no menu (the desktop menu has none since the garage took the craft and
-##              its paint, 2026-11-25) and in the headset's menu it shows each craft's own as the pilot craft changes
+##              others' alone; as a row with no menu (neither menu has one since the garage took the craft and its
+##              paint, 2026-11-25) it shows each craft's own as the pilot craft changes
 ##   colours    the fleet's own colours, as fleet_airframe.gd has them, are what their atlases are painted in;
 ##              the Shrike's too
 ##   built      every craft in Factory, Ember, Cobalt and Sunflower: Factory as it was built before (its own
@@ -33,7 +33,6 @@ const Shrike := preload("res://view/shrike_airframe.gd")
 const CM := preload("res://view/craft_model.gd")
 const View := preload("res://view/craft_view.gd")
 const Cockpit := preload("res://vr/vr_cockpit.gd")
-const Stage := preload("res://release/title_stage.gd")
 const Accent := preload("res://view/accent.gd")
 const Interior := preload("res://vr/cockpit_interior.gd")
 const PREFS := "user://test_paint_prefs.cfg"
@@ -104,7 +103,7 @@ func _run() -> void:
 	View.best_dir = OS.get_user_data_dir().path_join("test_paint_")
 	_rows()
 	_carried()
-	await _menus()
+	_menus()
 	_colours()
 	unload_current_scene()
 	await process_frame
@@ -193,8 +192,8 @@ func _menus() -> void:
 		now[craft] = Livery.saved_for(craft)
 	check("the paint row steps the chosen craft's paints and round to Factory, showing and saving each, for every craft (wrong: %s)" % [trips], trips.is_empty())
 	check("... and each craft keeps its own choice while the others are chosen (%s)" % [now], now == kept)
-	# a row with no menu, as the desktop's was (its menu has none since the garage took the craft and its paint): it
-	# shows each pilot craft's own paint as the craft changes, and a press is that craft's alone
+	# a row with no menu, as the menus' was (they have none since the garage took the craft and its paint): it shows
+	# each pilot craft's own paint as the craft changes, and a press is that craft's alone
 	var loose := UI.paint_button()
 	root.add_child(loose)
 	var followed := []
@@ -214,36 +213,6 @@ func _menus() -> void:
 		not followed.has(false) and pressed == basilisk_ids[(basilisk_ids.find(kept[Pilot.BASILISK]) + 1) % basilisk_ids.size()] and untouched)
 	Settings.set_choice(Livery.key_for(Pilot.BASILISK), kept[Pilot.BASILISK])
 	loose.queue_free()
-	# the headset's menu (title off: it is as it was before it): the row follows the pilot craft
-	Stage.enabled = false
-	for scene in [UI.VR_MENU_SCENE]:
-		Settings.set_selected_craft(Pilot.STANDARD)
-		change_scene_to_file(scene)
-		await scene_changed
-		await process_frame
-		var menu = current_scene
-		var paint: Button = null
-		for b: Button in menu.find_children("*", "Button", true, false):
-			if b.text.begins_with("Paint:"):
-				paint = b
-		var shown := []
-		for i in Pilot.ORDER.size():
-			var craft: String = menu.craft_selector.selected
-			shown.append(paint.text.ends_with(Livery.choices_for(craft)[Livery.ids_for(craft).find(kept[craft])][1]))
-			menu.craft_selector.button.pressed.emit()
-		Settings.set_selected_craft(Pilot.VESPER)
-		menu.craft_selector.selected = Pilot.VESPER
-		menu.craft_selector.button.pressed.emit()      # (the Basilisk)
-		paint.pressed.emit()
-		var basilisk := Livery.saved_for(Pilot.BASILISK)
-		var others_kept := true
-		for craft: String in Pilot.ORDER:
-			others_kept = others_kept and (craft == Pilot.BASILISK or Livery.saved_for(craft) == kept[craft])
-		var ids := Livery.ids_for(Pilot.BASILISK)
-		check("%s: the paint row shows each pilot craft's own paint as the craft changes (%s); a press there is that craft's alone (%s to %s)" % [scene.get_file(), shown, kept[Pilot.BASILISK], basilisk],
-			paint != null and not shown.has(false) and basilisk == ids[(ids.find(kept[Pilot.BASILISK]) + 1) % ids.size()] and others_kept)
-		Settings.set_choice(Livery.key_for(Pilot.BASILISK), kept[Pilot.BASILISK])
-	Stage.enabled = true
 
 
 # ---- the colours the craft are painted in ----

@@ -142,30 +142,27 @@ func _run() -> void:
 	var old := FileAccess.get_file_as_bytes(Settings.PREFS) if old_exists else PackedByteArray()
 	var vr_exists := FileAccess.file_exists(Cockpit.PREFS)      # (the cockpit saves its own choices: put them back too)
 	var vr_old := FileAccess.get_file_as_bytes(Cockpit.PREFS) if vr_exists else PackedByteArray()
-	Settings.set_selected_craft("phaethon")
+	Settings.set_selected_craft("shrike")      # (the board has no craft row since 2026-11-25: the garage, or the craft last flown, chooses it)
 	for entry in [["paint", "ember"], ["paint_shrike", "factory"], ["craft", "racer"], ["network_start", "summit"], ["time", "noon"], ["weather", "fair"]]:
 		Settings.set_choice(entry[0], entry[1])
 	View.best_dir = OS.get_user_data_dir().path_join("test_shrike_preflight_")
 	Cockpit._startup_loaded = true
 	Cockpit.cold_start = true
-	change_scene_to_file("res://release/vr_menu.tscn")
-	await scene_changed
-	var menu = current_scene
-	menu.focus_row(menu.buttons.find(menu.craft_selector.button))
-	for k in 8:      # (step the craft row on to the Shrike: the Phaethon Talon stands between it and the Phaethon)
-		menu.activate()
-		if menu.craft_selector.selected == "shrike":
-			break
-	var paint: Button = menu.option_buttons.filter(func(b): return b.text.begins_with("Paint:"))[0]
-	menu.focus_row(menu.buttons.find(paint))
+	# (nor a paint row: the garage paints the craft. The row itself, with no menu, as the menus had it)
+	var paint := UI.paint_button()
+	root.add_child(paint)
 	var choices := []
 	var row := Livery.ids_for("shrike")      # (the Shrike's own paint: each craft keeps its own)
 	for i in row.size():
 		choices.append(Livery.saved_for("shrike"))
 		if i < row.size()-1:
-			menu.activate()
-	check("the board selects Shrike, cycles Factory and all eight paints and displays Obsidian black, the Phaethon's left as it was (%s)" % Livery.saved_for("phaethon"),
-		menu.craft_selector.selected == "shrike" and choices == row and paint.text.ends_with("Obsidian black") and Livery.saved_for("phaethon") == "factory")
+			paint.pressed.emit()
+	check("the Shrike saved, its paint row cycles Factory and all eight paints and displays Obsidian black, the Phaethon's left as it was (%s)" % Livery.saved_for("phaethon"),
+		Settings.selected_craft() == "shrike" and choices == row and paint.text.ends_with("Obsidian black") and Livery.saved_for("phaethon") == "factory")
+	paint.queue_free()
+	change_scene_to_file("res://release/vr_menu.tscn")
+	await scene_changed
+	var menu = current_scene
 	menu.choose_course("network")
 	menu.focus_row(menu.start_index)
 	menu.activate()

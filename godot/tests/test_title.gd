@@ -17,7 +17,6 @@ const Outlook := preload("res://view/outlook.gd")
 const Shrike := preload("res://view/shrike_airframe.gd")
 const CraftModel := preload("res://view/craft_model.gd")
 const Pilot := preload("res://sim/pilot_craft.gd")
-const Livery := preload("res://view/livery.gd")
 
 var checks := 0
 var failures := 0
@@ -227,12 +226,12 @@ func _headset() -> void:
 	check("a recentre turns the board and the scene together", (board.global_position - eye).normalized().dot(turned) > 0.98 and (-stage.global_basis.z).dot(turned) > 0.999)
 	menu.camera.rotation.y = 0.0
 	menu.recenter_panel()
-	# a flight starts as it did: highlight, select, Start. Two presses, no step added.
+	# a flight starts as it did: highlight, select, Fly. Two presses, no step added.
 	menu.choose_course("gp")
 	menu.focus_row(UI.course_index("range"))
 	menu.consume_controller(0.0, false, true)
 	menu.consume_controller(0.0, true, true)
-	check("the first press chooses the highlighted map and moves to Start", menu.selected_course == "range" and menu.focus_index == menu.start_index and not menu.launching)
+	check("the first press chooses the highlighted map and moves to Fly", menu.selected_course == "range" and menu.focus_index == menu.start_index and not menu.launching)
 	menu.consume_controller(0.0, false, true)
 	menu.consume_controller(0.0, true, true)
 	check("the second press launches", menu.launching)
@@ -305,9 +304,10 @@ func _shown(stage, key: String) -> bool:
 
 
 ## The turntable (Luke, 2026-11-23: "when you choose a vehicle, it rotates in front of the player"): the
-## chosen craft on it in its flight's paint, turning, straight ahead behind the board; the board swinging
-## aside, clear of its sweep, while a row that changes it has the highlight, and back after; each of the
-## five craft coming onto it as it is chosen; a new paint coming onto it.
+## craft Fly will use on it in its flight's paint, turning, straight ahead behind the board; the board swinging
+## aside, clear of its sweep, while Role (since 2026-11-25 the one row that changes it: the garage chooses the
+## craft and its paint) has the highlight, and back after; each pilot craft coming onto it as it is saved; Role's
+## patrol paint coming onto it.
 func _turntable(menu, stage, eye: Vector3, forward: Vector3) -> void:
 	var on_show: Dictionary = stage.showcase
 	if not check("a turntable is built in the title with the chosen pilot craft on it, in the next flight's paint (%s)" % [on_show.get("key", "none")],
@@ -324,10 +324,10 @@ func _turntable(menu, stage, eye: Vector3, forward: Vector3) -> void:
 	var board: MeshInstance3D = menu.board
 	var half: Vector2 = (board.mesh as QuadMesh).size / 2.0
 	var home: Transform3D = board.global_transform
-	var row: int = menu.buttons.find(menu.craft_selector.button)
+	var row: int = menu.buttons.find(menu.look_buttons[0])
 	menu.focus_row(row)
 	menu.update_swing(0.1)
-	check("the highlight passing over the pilot craft row leaves the board where it is, the turntable away", board.global_transform.is_equal_approx(home) and not stage.attend_wanted)
+	check("the highlight passing over the Role row leaves the board where it is, the turntable away", board.global_transform.is_equal_approx(home) and not stage.attend_wanted)
 	for i in 12:
 		menu.update_swing(0.1)
 	check("held there, the board swings aside", menu.swing == 1.0 and not board.global_transform.is_equal_approx(home))
@@ -339,14 +339,16 @@ func _turntable(menu, stage, eye: Vector3, forward: Vector3) -> void:
 	var spun: float = stage.turntable.rotation.y
 	await create_timer(0.3).timeout
 	check("... and it turns", absf(wrapf(stage.turntable.rotation.y - spun, -PI, PI)) > deg_to_rad(Stage.SHOW_SPIN * 0.15))
-	# each of the five, chosen in turn on that row (A or the trigger), comes onto the deck; the board stays clear of its sweep
+	# each pilot craft, saved in turn (as the garage saves it) and the board told, comes onto the deck; the board stays
+	# clear of its sweep
 	var seen := []
 	var reaches := []
 	var clear := INF
 	var arrived := true
 	for i in Pilot.ORDER.size():
-		menu.activate()
 		var want: String = Pilot.ORDER[(Pilot.ORDER.find(Pilot.STANDARD) + i + 1) % Pilot.ORDER.size()]
+		Settings.set_selected_craft(want)
+		menu._showcase_changed()
 		if not await _shown(stage, want + "/" + Stage.flight_livery()):
 			seen.append(want + " NOT SHOWN")
 			continue
@@ -362,7 +364,7 @@ func _turntable(menu, stage, eye: Vector3, forward: Vector3) -> void:
 		clear = minf(clear, -edge - sweep)
 		seen.append("%s%s" % [want, "" if visible == 1 and (stage.plate.get_node("board/name") as Label3D).text == String(Pilot.NAMES[want]).to_upper() and reach < Stage.SHOW_R - 0.5 else " (WRONG)"])
 		await frames(3)
-	check("each pilot craft chosen comes onto the turntable, alone, named on its board, on the deck (%s; reach %s)" % [seen, reaches], seen.size() == Pilot.ORDER.size() and not str(seen).contains("NOT") and not str(seen).contains("WRONG"))
+	check("each pilot craft saved comes onto the turntable, alone, named on its board, on the deck (%s; reach %s)" % [seen, reaches], seen.size() == Pilot.ORDER.size() and not str(seen).contains("NOT") and not str(seen).contains("WRONG"))
 	check("... coming down onto it and swung round as it arrives", arrived)
 	check("... and the swung board is clear of each one's sweep (by %.1f degrees at the least)" % clear, clear > 1.0)
 	# ... and so are the two craft standing either side (their engines and pods)
@@ -382,26 +384,21 @@ func _turntable(menu, stage, eye: Vector3, forward: Vector3) -> void:
 		for p: Vector3 in points:
 			gap = minf(gap, Vector2(p.x - middle.x, p.z - middle.z).length() - widest)
 	check("the longest craft's sweep (%.1f m) passes the two craft either side with room (%.1f m at the closest)" % [widest, gap], gap > 0.5)
-	# a new paint comes onto the turntable (the paint row also swings the board aside)
-	var paint_row := -1
-	for i in menu.buttons.size():
-		if menu.buttons[i] is Button and String(menu.buttons[i].text).begins_with("Paint:"):
-			paint_row = i
+	# a press of Role (A or the trigger: it has the highlight) puts the craft on show in the patrol's own paint, or
+	# out of it, and another puts it back
 	var was_paint := Stage.flight_livery()
-	menu.focus_row(paint_row)
 	menu.activate()
 	var now_paint := Stage.flight_livery()
 	var repainted: bool = await _shown(stage, Pilot.STANDARD + "/" + now_paint)
-	check("choosing a paint puts the craft on show in it (%s to %s)" % [was_paint, now_paint], now_paint != was_paint and repainted)
-	for i in Livery.ids_for(Pilot.STANDARD).size() - 1:      # (round to the paint it had: the Phaethon's row)
-		menu.activate()
+	check("a press of Role puts the craft on show in the patrol's paint or out of it (%s to %s)" % [was_paint, now_paint], now_paint != was_paint and "police" in [was_paint, now_paint] and repainted)
+	menu.activate()
 	var back: bool = await _shown(stage, Pilot.STANDARD + "/" + was_paint)
-	check("... and back (%s)" % Stage.flight_livery(), Stage.flight_livery() == was_paint and back)
+	check("... and another back (%s)" % Stage.flight_livery(), Stage.flight_livery() == was_paint and back)
 	menu.focus_row(menu.start_index)
 	for i in 12:
 		menu.update_swing(0.1)
 	await create_timer(Stage.SHOW_DOWN_S + 0.3).timeout
-	check("with the highlight off those rows the board swings back to where it was, and the turntable is put away", menu.swing == 0.0 and board.global_transform.is_equal_approx(home)
+	check("with the highlight off Role the board swings back to where it was, and the turntable is put away", menu.swing == 0.0 and board.global_transform.is_equal_approx(home)
 		and stage.reveal == 0.0 and not stage.turntable_base.visible)
 
 

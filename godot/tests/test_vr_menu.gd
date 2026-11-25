@@ -51,7 +51,7 @@ func _run() -> void:
 	check("held stick moves only one row", menu.focus_index == 1)
 	menu.consume_controller(0.0, false, true)
 	menu.consume_controller(0.0, true, true)
-	check("confirm chooses Grand Prix and focuses Start", menu.selected_course == "gp" and menu.focus_index == menu.start_index)
+	check("confirm chooses Grand Prix and focuses Fly", menu.selected_course == "gp" and menu.focus_index == menu.start_index)
 	menu.consume_controller(0.0, true, true)
 	check("same held confirm cannot launch", current_scene == menu and not menu.launching)
 	menu.consume_controller(0.0, false, false)
@@ -82,7 +82,7 @@ func _run() -> void:
 		check(course + " starts at idle in its handling's first gear", craft.quest.gear == (0 if craft.sim.P.handling == "starfighter" else 1) and craft.inp.thrL == 0.0 and craft.inp.thrR == 0.0)
 		for i in 6:
 			await process_frame
-		check(course + " Start trigger cannot propel the craft", craft.inp.thrL == 0.0 and craft.inp.thrR == 0.0)
+		check(course + " Fly trigger cannot propel the craft", craft.inp.thrL == 0.0 and craft.inp.thrR == 0.0)
 		tracker.set_input("trigger", 0.0)
 		await process_frame
 		await process_frame

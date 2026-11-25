@@ -8,7 +8,14 @@
 ##             the chosen course, and back at the menu that course chosen again; Fly flies the saved craft with its
 ##             saved switches on the chosen course, once, and Pilot garage after it does nothing; over the title, the
 ##             turntable shows the saved craft and only Role turns the camera to it
-## Uses its own prefs file; puts View's statics, the menu's remembered course, Title.enabled and vr_prefs.json back.
+##   headset   the board (release/vr_menu.gd): no Pilot craft or Paint row and no craft selector; the stick's order is
+##             the courses, the two switches, the six option rows, Fly, Pilot garage, Quit; the remembered course chosen
+##             on entry and named on Fly; choose_course names another on Fly; A on a course row chooses it (no flight)
+##             and moves the highlight to Fly; the turntable shows the saved craft, and Role, the one row that changes
+##             it, re-dresses it and swings the board aside, every other row bringing the board back; Pilot garage bound
+##             for the chosen course, and back at the board that course chosen again; Fly flies the saved craft with its
+##             saved switches, cold, once, and Pilot garage after it does nothing
+## Uses its own prefs file; puts View's statics, both menus' remembered courses, Title.enabled and vr_prefs.json back.
 ## Run headless with --xr-mode off -s res://tests/test_menu_split.gd -- --mute. Prints MENU SPLIT PASS.
 extends SceneTree
 
@@ -18,6 +25,7 @@ const View := preload("res://view/craft_view.gd")
 const Cockpit := preload("res://vr/vr_cockpit.gd")
 const Garage := preload("res://release/garage_route.gd")
 const Menu := preload("res://release/menu.gd")
+const VrMenu := preload("res://release/vr_menu.gd")
 const Title := preload("res://release/title_stage.gd")
 const GARAGE_SCENE := "res://garage/garage.tscn"
 const OPTIONS := ["Start:", "Time:", "Weather:", "Chase:", "Role:", "Raids:"]
@@ -75,6 +83,23 @@ func _chosen(menu: Node, course: String) -> bool:
 
 func _counted() -> void:
 	changes += 1
+
+
+## Is `course` the chosen one on the headset's board: its row marked, the others not, Fly naming it?
+func _board_chosen(menu: Node, course: String) -> bool:
+	if menu.selected_course != course or menu.start_button.text != "Fly — " + _name(course):
+		return false
+	for i in UI.COURSES.size():
+		if menu.buttons[i].text != ("●  " if UI.COURSES[i].id == course else "    ") + UI.COURSES[i].name:
+			return false
+	return true
+
+
+## A row of the headset's board as the stick's order names it: Fly and Garage by their node names, the rest by their text's head.
+func _row(b: Button) -> String:
+	if String(b.name) in ["Fly", "Garage"]:
+		return String(b.name)
+	return b.text.strip_edges().get_slice(":", 0).trim_prefix("●").strip_edges()
 
 
 func _layout(titled: bool) -> void:
@@ -151,11 +176,126 @@ func _layout(titled: bool) -> void:
 		"%s: one scene change, to the chosen course's flight (%d changes, %s)" % [layout, changes, current_scene.scene_file_path if current_scene else "none"])
 
 
+## The headset's board (release/vr_menu.gd), as the desktop's: choose a map, then Fly or Pilot garage.
+func _headset() -> void:
+	Title.enabled = true
+	Settings.set_selected_craft("vesper")
+	Settings.set_craft_setup("vesper", {"slide": false})
+	VrMenu.remembered_course = "eridanus"
+	change_scene_to_file(UI.VR_MENU_SCENE)
+	if not await _scene(UI.VR_MENU_SCENE):
+		return
+	var menu = current_scene
+	menu.set_process(false)      # (no headset: this test is its controller)
+	# what the board holds, in the stick's order
+	var every: Array = []
+	every.append_array(menu.buttons)
+	every.append_array(menu.find_children("*", "Button", true, false))
+	var unwanted := []
+	for b: Button in every:
+		if (b.text.contains("Pilot craft") or b.text.contains("Paint")) and not unwanted.has(b.text):
+			unwanted.append(b.text)
+	check(unwanted.is_empty() and menu.get("craft_selector") == null, "headset: no Pilot craft or Paint row and no craft selector (%s)" % [unwanted])
+	var n: int = UI.COURSES.size()
+	var rows: Array = menu.buttons
+	var named: Array = rows.map(_row)
+	var fly: Button = menu.start_button
+	var at := n + 2 + OPTIONS.size()      # (where Fly stands in the stick's order)
+	var ordered := false
+	if rows.size() == at + 3:
+		var options: Array = named.slice(n + 2, at)
+		options.sort()
+		var wanted: Array = OPTIONS.map(func(o: String) -> String: return o.trim_suffix(":"))
+		wanted.sort()
+		ordered = options == wanted and rows[n] == menu.collision_checkbox and rows[n + 1] == menu.partner_checkbox and rows[at] == fly and menu.start_index == at \
+			and named[at] == "Fly" and named[at + 1] == "Garage" and rows[at + 1].text == "Pilot garage" and named[at + 2] == "Quit to desktop"
+		for i in n:
+			ordered = ordered and rows[i].text.strip_edges().ends_with(UI.COURSES[i].name)
+	check(ordered, "headset: the stick's order is the courses, the two switches, the six option rows, Fly, Pilot garage, Quit (%s)" % " | ".join(named))
+	# on entry the remembered course is chosen; choose_course names another on Fly; A on a course row chooses it and
+	# moves the highlight to Fly (Enter, Enter flies it, as on the desktop)
+	check(_board_chosen(menu, "eridanus"), "headset: on entry the remembered course is chosen, marked and named on Fly (\"%s\")" % fly.text)
+	menu.choose_course("network")
+	check(_board_chosen(menu, "network") and VrMenu.remembered_course == "network", "headset: choose_course marks another course, names it on Fly and is remembered (\"%s\")" % fly.text)
+	menu.focus_row(UI.course_index("carving"))
+	menu.activate()
+	check(current_scene == menu and not menu.launching and _board_chosen(menu, "carving") and menu.focus_index == menu.start_index and menu.buttons[menu.focus_index] == fly,
+		"headset: A on a course row chooses it (no flight) and moves the highlight to Fly (row %d of Fly's %d, \"%s\")" % [menu.focus_index, menu.start_index, fly.text])
+	# the turntable: the saved craft on it; Role, the one row that changes it, re-dresses it (the patrol's own paint) and
+	# swings the board aside while it has the highlight; every other row brings the board back
+	check(menu.stage != null and menu.stage.show_vehicle == "vesper", "headset: the turntable shows the saved craft (%s)" % (menu.stage.show_vehicle if menu.stage != null else "no title"))
+	var role: Button = null
+	for b: Button in menu.buttons:
+		if b.text.begins_with("Role:"):
+			role = b
+	check(role != null and menu.look_buttons.size() == 1 and menu.look_buttons[0] == role, "headset: Role is the one row that changes the turntable (%s)" % [menu.look_buttons.map(func(b): return b.text)])
+	if role == null or menu.stage == null:
+		return
+	var dressed: String = menu.stage.show_livery
+	role.pressed.emit()
+	var patrol: String = menu.stage.show_livery
+	role.pressed.emit()
+	check(dressed != "police" and patrol == "police" and menu.stage.show_livery == dressed, "headset: a press of Role re-dresses the craft on show in the patrol's paint, and another back (%s, %s, %s)" % [dressed, patrol, menu.stage.show_livery])
+	var role_row: int = menu.buttons.find(role)
+	menu.focus_row(role_row)
+	menu.update_swing(VrMenu.SWING_DWELL * 0.5)
+	var passing: float = menu.swing
+	menu.update_swing(VrMenu.SWING_DWELL)
+	check(passing == 0.0 and menu.swing > 0.0, "headset: with the highlight on Role longer than SWING_DWELL the board swings aside (%.2f, then %.2f)" % [passing, menu.swing])
+	var stayed := []
+	for i in menu.buttons.size():
+		if i == role_row:
+			continue
+		menu.focus_row(role_row)
+		menu.update_swing(VrMenu.SWING_DWELL + VrMenu.SWING_S)
+		var out: float = menu.swing
+		menu.focus_row(i)
+		menu.update_swing(VrMenu.SWING_S)
+		var back: float = menu.swing
+		menu.update_swing(1.0)
+		if out != 1.0 or back != 0.0 or menu.swing != 0.0:
+			stayed.append("%s (%.2f, %.2f, %.2f)" % [_row(menu.buttons[i]), out, back, menu.swing])
+	check(stayed.is_empty(), "headset: on every other row the board swings back and stays (wrong: %s)" % [stayed])
+	# Pilot garage: bound for the chosen course, and back at the board that course is chosen
+	menu.choose_course("range")
+	(menu.find_child("Garage", true, false) as Button).pressed.emit()
+	check(Garage.destination_label() == _name("range"), "headset: Pilot garage enters bound for the chosen course (%s)" % Garage.destination_label())
+	if not await _scene(GARAGE_SCENE):
+		return
+	VrMenu.remembered_course = "gp"      # (as if forgotten: the way back must hand the board its course)
+	Garage.return_to_menu(self)
+	if not await _scene(UI.VR_MENU_SCENE):
+		return
+	menu = current_scene
+	menu.set_process(false)
+	check(_board_chosen(menu, "range"), "headset: back from the garage the course chosen before the visit is chosen (%s)" % menu.selected_course)
+	# Fly: the saved craft with its saved switches, on the chosen course, cold, once; Pilot garage after it does nothing
+	menu.choose_course("network")
+	changes = 0
+	scene_changed.connect(_counted)
+	menu.start_selected()
+	var flown: String = View.vehicle_override
+	var entry: Dictionary = View.garage_on_entry
+	check(flown == "vesper" and entry == {"slide": false} and View.track_override == "network" and Cockpit.cold_on_entry and Cockpit.require_neutral_on_entry,
+		"headset: Fly flies the saved craft (%s) with its saved switches (%s) on the chosen course (%s), from cold (%s)" % [flown, entry, View.track_override, Cockpit.cold_on_entry])
+	View.vehicle_override = "marker"
+	menu.start_selected()
+	check(View.vehicle_override == "marker", "headset: Fly pressed again does nothing")
+	menu._open_garage()
+	check(Garage.destination_label() == _name("range"), "headset: Pilot garage after Fly does nothing (%s)" % Garage.destination_label())
+	View.vehicle_override = flown
+	await _frames(12)
+	scene_changed.disconnect(_counted)
+	check(changes == 1 and current_scene is Cockpit and current_scene.sim.kind == "network",
+		"headset: one scene change, to the chosen course's flight in the headset's cockpit (%d changes, %s)" % [changes, current_scene.scene_file_path if current_scene else "none"])
+
+
 func _run() -> void:
 	var settings_before := Settings.prefs_path
 	var had_vr_prefs := FileAccess.file_exists(Cockpit.PREFS)
 	var vr_prefs := FileAccess.get_file_as_bytes(Cockpit.PREFS) if had_vr_prefs else PackedByteArray()
 	var remembered_before: String = Menu.remembered_course
+	var board_remembered_before: String = VrMenu.remembered_course
 	var vehicle_before: String = View.vehicle_override
 	var track_before: String = View.track_override
 	var job_before: String = View.job_override
@@ -168,9 +308,11 @@ func _run() -> void:
 
 	await _layout(true)
 	await _layout(false)
+	await _headset()
 
 	Title.enabled = true
 	Menu.remembered_course = remembered_before
+	VrMenu.remembered_course = board_remembered_before
 	View.vehicle_override = vehicle_before
 	View.track_override = track_before
 	View.job_override = job_before

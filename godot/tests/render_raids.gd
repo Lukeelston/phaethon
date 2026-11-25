@@ -22,7 +22,8 @@
 ##                 menu-desktop (over the title), menu-desktop-plain (the title off), menu-vr (the headset's menu from
 ##                 the pilot's standing eye, 96 degrees), menu-vr-board (its board close). Runs on the base too. Each
 ##                 menu's buttons are measured against every label they can show (_measure): the courses (marked and
-##                 not), the option rows, Fly for every course, Pilot garage and Quit; and the room left in its column.
+##                 not), the option rows, Fly for every course, Pilot garage and Quit; and the room left in its column;
+##                 and the headset board's two hint lines (under its option rows, and at its foot) against the board.
 ## Needs a window: --xr-mode off --resolution 1600x900 --fixed-fps 120 --audio-driver Dummy
 ##   -s res://tests/render_raids.gd -- --mute --out=ABSOLUTE_DIRECTORY --set=raid|struck|off|menus [--vehicle=phaethon]
 extends SceneTree
@@ -609,6 +610,19 @@ func _measure(view: String, menu: Node) -> void:
 				"on screen" if r.end.y <= seen.y + 0.5 else "OFF SCREEN"])
 	if rows is Array:
 		print("RAIDS RENDER %s: the stick's order: %s" % [view, " | ".join((rows as Array).map(func(b): return (b as Button).text.get_slice("  ", 0).get_slice(":", 0).strip_edges()))])
+	var panel = menu.get("panel_view")
+	if panel is SubViewport:
+		var board := Rect2(Vector2.ZERO, Vector2((panel as SubViewport).size))
+		for hint in ["Release controls", "Stick up/down"]:
+			for l: Label in menu.find_children("*", "Label", true, false):
+				if not l.text.begins_with(hint):
+					continue
+				var r := l.get_global_rect()
+				var widest := 0.0
+				for line in l.text.split("\n"):
+					widest = maxf(widest, l.get_theme_font("font").get_string_size(line, HORIZONTAL_ALIGNMENT_LEFT, -1, l.get_theme_font_size("font_size")).x)
+				print("RAIDS RENDER %s: the hint \"%s\" at x %d..%d, y %d..%d of the %d x %d board, its longest line %d px in %d: %s" % [view, hint, roundi(r.position.x), roundi(r.end.x),
+					roundi(r.position.y), roundi(r.end.y), roundi(board.size.x), roundi(board.size.y), roundi(widest), roundi(r.size.x), "fits" if board.encloses(r) and widest <= r.size.x + 0.5 else "CUT"])
 
 
 ## One button against the labels it can show: "fits" or "CUT", each with its width; the button's own size.

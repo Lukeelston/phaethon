@@ -6,6 +6,7 @@ const Cockpit := preload("res://vr/vr_cockpit.gd")
 const Boot := preload("res://release/vr_boot.gd")
 const Paint := preload("res://view/livery.gd")
 const Settings := preload("res://release/game_settings.gd")
+const UI := preload("res://release/release_config.gd")
 const Stops := ["range", "gp", "eridanus", "emergency", "network", "carving", "network", "aurora", "range"]
 
 var checks := 0
@@ -203,11 +204,8 @@ func _run() -> void:
 		var collisions := index % 2 == 1
 		var partner_enabled := index % 2 == 0
 		var pilot_craft: String = Settings.Craft.ORDER[index % Settings.Craft.ORDER.size()]
-		for press in menu.craft_selector.Craft.ORDER.size():
-			if menu.craft_selector.selected == pilot_craft:
-				break
-			menu.focus_row(menu.buttons.find(menu.craft_selector.button))
-			menu.activate()
+		Settings.set_selected_craft(pilot_craft)      # (the board has no craft row: the garage, or the craft last flown, chooses it)
+		menu._showcase_changed()
 		menu.collision_checkbox.button_pressed = collisions
 		menu.partner_checkbox.button_pressed = partner_enabled
 		check(stop + " obstacle checkbox persists", Settings.obstacle_collisions_enabled() == collisions)
@@ -218,6 +216,7 @@ func _run() -> void:
 			await RenderingServer.frame_post_draw
 			check("six-course VR panel captured", menu.panel_view.get_texture().get_image().save_png(evidence.path_join("carving-menu-panel.png")) == OK)
 		check(stop + " selection keeps menu open", get_tree().current_scene == menu and menu.selected_course == stop)
+		check(stop + " is chosen and named on Fly", menu.start_button.name == &"Fly" and menu.start_button.text == "Fly — " + UI.COURSES[UI.course_index(stop)].name)
 		menu.focus_row(menu.start_index)
 		menu.consume_controller(0.0, true, true)
 		check(stop + " held entry trigger cannot launch", not menu.launching)

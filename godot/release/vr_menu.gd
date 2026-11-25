@@ -1,6 +1,10 @@
 ## Stationary, headset-visible course menu. No flight and no flight audio is loaded: the title's two
-## craft (release/title_stage.gd) stand round it, silent, and go when a flight starts. The chosen pilot
-## craft turns on a turntable behind the board, which swings aside while its rows have the highlight.
+## craft (release/title_stage.gd) stand round it, silent, and go when a flight starts. The craft Fly will
+## use turns on a turntable behind the board, which swings aside while Role has the highlight.
+## Luke, 2026-11-25: "the main menu should hold the map/game mode, but then any vehicle or additional adjustments
+## should be made in codex's new garage", and "Keep quick Fly". So, as on the desktop: choose a map, then Fly (at
+## once, in the craft last used) or Pilot garage (Codex's workshop, bound for that map). The craft and its paint are
+## chosen in the garage.
 extends Node3D
 
 const Garage := preload("res://release/garage_route.gd")
@@ -8,7 +12,7 @@ const UI := preload("res://release/release_config.gd")
 const Title := preload("res://release/title_stage.gd")
 const BOARD_DROP := 0.40      # in the title, the board's middle is this far under the eye and leaned back to face it: the word stands over its top edge
 # In the title the turntable stands straight ahead behind the board (release/title_stage.gd). While a row
-# that changes what is on it (the pilot craft, its paint, its role) has had the highlight a moment, it is
+# that changes what is on it (Role: the patrol's own paint) has had the highlight a moment, it is
 # brought up and the board swings this far to the left about the pilot, and shrinks, clear of the longest
 # craft's sweep (36 degrees either side of ahead, the turntable 26.5 m out); it swings back, and the
 # turntable is put away, when the highlight leaves.
@@ -31,12 +35,11 @@ var strap: Node3D             # ... and its strap line, hung under the board
 var buttons: Array[Button] = []
 var title: Label
 var description: Label
-var start_button: Button
+var start_button: Button      # Fly, named for the chosen map
 var collision_checkbox: CheckBox
 var partner_checkbox: CheckBox
 var option_buttons: Array[Button] = []   # the rows that step through choices: where the Network begins, ...
-var craft_selector := preload("res://release/craft_selector.gd").new()
-var look_buttons: Array[Button] = []     # the rows that change the craft on the turntable: pilot craft, paint, role
+var look_buttons: Array[Button] = []     # the rows that change the craft on the turntable: Role (the patrol's own paint)
 var swing := 0.0              # 0 the board in front of the pilot, 1 swung aside to show the turntable
 var start_index := 0
 var _dwell := 0.0
@@ -99,13 +102,13 @@ func _ready() -> void:
 	focus_row(maxi(0, UI.course_index(selected_course)))
 	_showcase_changed()
 	recenter_panel()
-	print("VR MENU: ready; select a map, then Start flight")
+	print("VR MENU: ready; select a map, then Fly or Pilot garage")
 
 
-## Put the chosen pilot craft on the title's turntable, in the paint its flight will wear.
+## Put the craft Fly will use on the title's turntable, in the paint its flight will wear.
 func _showcase_changed() -> void:
 	if stage != null:
-		stage.show_craft(craft_selector.selected)
+		stage.show_craft(UI.Settings.selected_craft())
 
 func _build_screen() -> void:
 	screen = Control.new()
@@ -168,22 +171,13 @@ func _build_screen() -> void:
 	switches.add_child(partner_checkbox)
 	buttons.append(partner_checkbox)
 	details.add_child(UI.label("Collisions: pillars and traffic. Guardrails stay on.", 20, UI.MUTED))
-	# Codex's pilot-craft selector gives its button to the rows below: its own two lines do not fit under them.
-	details.add_child(craft_selector)
-	craft_selector.build(true)
-	craft_selector.remove_child(craft_selector.button)
-	craft_selector.visible = false
-	craft_selector.button.add_theme_font_size_override("font_size", 22)
-	craft_selector.button.clip_text = true
-	var paint := UI.paint_button(22)
-	craft_selector.button.pressed.connect(UI.refresh_paint.bind(paint))      # (each craft has its own paint: after the selector's own handler)
 	var role := UI.craft_button(22)
-	look_buttons = [craft_selector.button, paint, role]
+	look_buttons = [role]
 	for look in look_buttons:
 		look.pressed.connect(_showcase_changed)      # (after the row's own handler: the choice is saved by then)
-	# A or the trigger takes the next choice. Two abreast: the pilot craft's button holds the longest names (a third
-	# beside it, Raids, cut every craft's to "Pilot craft · Pha"), so Chase and Raids share a row of their own.
-	var rows: Array = [[UI.insertion_button(22), paint], [UI.time_button(22), UI.weather_button(22)], [UI.chase_button(22), UI.raids_button(22)], [craft_selector.button, role]]
+	# A or the trigger takes the next choice. Two abreast, as over the desktop's title: where on the Network and its
+	# Raids, the sky, and the chase with its Role (pursuit or getaway is a chase choice).
+	var rows: Array = [[UI.insertion_button(22), UI.raids_button(22)], [UI.time_button(22), UI.weather_button(22)], [UI.chase_button(22), role]]
 	for row: Array in rows:
 		var line := HBoxContainer.new()
 		line.add_theme_constant_override("separation", 12)
@@ -193,13 +187,13 @@ func _build_screen() -> void:
 			option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			line.add_child(option)
 			buttons.append(option)
-			if option != craft_selector.button:
-				option_buttons.append(option)
+			option_buttons.append(option)
 	var spacer := Control.new()
 	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	details.add_child(spacer)
-	details.add_child(UI.label("Release controls after Start.  In flight, tap Menu: options.\nHold Menu: back to this board; ends the run.", 20, UI.MUTED))
-	start_button = UI.button("Start flight", start_selected, 72)
+	details.add_child(UI.label("Release controls after Fly.  In flight, tap Menu: options.\nHold Menu: back to this board; ends the run.", 20, UI.MUTED))
+	start_button = UI.button("Fly", start_selected, 72)
+	start_button.name = "Fly"
 	start_button.add_theme_font_size_override("font_size", 30)
 	layout.add_child(start_button)
 	start_index = buttons.size()
@@ -223,7 +217,7 @@ func choose_course(course: String) -> void:
 	remembered_course = course
 	title.text = UI.COURSES[index].name
 	description.text = UI.COURSES[index].detail
-	start_button.text = "Start flight — " + UI.COURSES[index].name
+	start_button.text = "Fly — " + UI.COURSES[index].name
 	for i in UI.COURSES.size():
 		buttons[i].text = ("●  " if i == index else "    ") + UI.COURSES[i].name
 
@@ -242,15 +236,19 @@ func activate() -> void:
 	if focus_index < UI.COURSES.size():
 		focus_row(start_index)
 
+## Fly: at once, the chosen map in the craft last used, with its saved switches and paint (release/garage_route.gd
+## fly), from cold as any start from this board. Once: a second press, or Pilot garage, before the scene changes does
+## nothing.
 func start_selected() -> void:
 	if launching or UI.course_index(selected_course) < 0:
 		return
 	launching = true
 	start_button.text = "Loading " + title.text + "."
 	print("VR MENU: starting ", selected_course)
-	Garage.start_flight(get_tree(), true, craft_selector.selected, UI.course_overrides(selected_course))
+	Garage.fly(get_tree(), true, selected_course)
 
 
+## Codex's Pilot garage, bound for the chosen map: departing it starts the flight there.
 func _open_garage() -> void:
 	if launching:
 		return
