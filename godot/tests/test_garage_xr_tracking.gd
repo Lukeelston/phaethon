@@ -309,11 +309,13 @@ func _boarding_cards(hall: Node3D) -> void:
 		await _tick_input()
 		var eye := _eye()
 		var mount: Transform3D = hall.marker_guide(id, eye)
-		card.show_controls(hall.Pilot.NAMES[id], false, "Range", false, mount)
+		# (with the bay's paint line under them, and at the Phaethon's bay its body line: tests/test_garage_paint.gd)
+		card.show_controls(hall.Pilot.NAMES[id], false, "Range", false, mount, "Factory", "",
+			hall.Pilot.NAMES[id] if id == hall.Pilot.STANDARD else "")
 		await process_frame
 		await process_frame
-		var clear := mount.basis.z.dot(mount.origin.direction_to(eye)) > .45
-		for line: Label3D in [card._vr_title,card._vr_hint]:
+		var clear := mount.basis.z.dot(mount.origin.direction_to(eye)) > .45 and card._vr_bay.visible
+		for line: Label3D in [card._vr_title,card._vr_hint,card._vr_bay]:
 			var ink := line.get_aabb()
 			clear = clear and ink.size.x > .07
 			for x in [0.0, 1.0]:
@@ -322,7 +324,7 @@ func _boarding_cards(hall: Node3D) -> void:
 					var toward := eye.direction_to(corner)
 					var ray := PhysicsRayQueryParameters3D.create(eye,corner - .01*toward,1,omit)
 					clear = clear and hall.get_world_3d().direct_space_state.intersect_ray(ray).is_empty()
-		check(clear and card._mount_clips.visible, "The " + id + " boarding gate has a clear view of both instruction lines")
+		check(clear and card._mount_clips.visible, "The " + id + " boarding gate has a clear view of its instruction lines, the bay's paint line too")
 	card.free()
 
 
@@ -520,6 +522,23 @@ func _run() -> void:
 		await _tick_input()
 		check(walker.cockpit_input() == walker.CockpitControls.IDLE and walker.cockpit_hands().is_empty(),
 				"Dismount removes all cockpit input")
+		var bay_controls: Array[String] = []
+		var cab_controls: Array[String] = []
+		var at_bay := func(action: String) -> void: bay_controls.append(action)
+		var in_cab := func(action: String) -> void: cab_controls.append(action)
+		walker.bay_control_requested.connect(at_bay)
+		walker.cockpit_control_requested.connect(in_cab)
+		pads.left.set_input(&"ax_button", true)
+		await _tick_input()
+		pads.left.set_input(&"ax_button", false)
+		pads.left.set_input(&"primary_click", true)
+		await _tick_input()
+		pads.left.set_input(&"primary_click", false)
+		await _tick_input()
+		check(bay_controls == ["paint", "body"] and cab_controls.is_empty(),
+			"On foot, left X and the left stick's click work the bay (%s), not the cockpit (%s)" % [bay_controls, cab_controls])
+		walker.bay_control_requested.disconnect(at_bay)
+		walker.cockpit_control_requested.disconnect(in_cab)
 		check(_eye().distance_to(_visor()) < .012 and absf(_eye().y-Pilot.STANDING_EYE.y) < .006,
 			"Dismount in local reference space restores one standing eye height")
 		check(driver.mode_changes == 0, "The garage leaves the runtime's incoming reference space in place")

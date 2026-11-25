@@ -120,8 +120,8 @@ func build() -> void:
 	var gate_centers := PackedVector2Array()
 	for i in Pilot.GARAGE_BAYS.size():
 		var id: String = Pilot.GARAGE_BAYS[i]
-		# Each craft in the paint the menus chose for it, as its flight wears it (view/livery.gd: the Phaethon's
-		# "paint", each other craft's "paint_<id>"; Factory is each as designed, the Vesper's Star Command its own).
+		# Each craft in its own saved paint, as its flight wears it, chosen at its bay (garage.gd _work_bay; view/livery.gd:
+		# the Phaethon's "paint", each other craft's "paint_<id>"; Factory is each as designed, the Vesper's Star Command its own).
 		# The Phaethon's bay holds the body last chosen there (the Phaethon, or the Talon: Settings.phaethon_body).
 		var craft: String = Settings.phaethon_body() if id == Pilot.STANDARD else id
 		_berth(id, i, Livery.built(craft), craft)

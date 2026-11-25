@@ -209,6 +209,12 @@ func _talon(garage) -> void:
 		"It arrives at the Phaethon's bay, the Talon standing there with its switches as it parked")
 	# ---- a run-up bay refuses the swap (a desktop flight's engines run from its spawn: it arrives with them running)
 	check(returned != null and returned.startup.batt and returned.startup.all_running(), "The parked desktop Talon's engines arrive running in its bay")
+	# heard from outside, as a garage that is not muted plays them: the Phaethon's own idle (the Talon's sound bank)
+	returned._muted = false
+	returned._exterior_sound()
+	returned._muted = true
+	check(returned._outside.size() == 2 and returned._outside.all(func(e): return e.stream != null),
+		"Heard from the floor, the Talon's running engines play the Phaethon's own idle (%d emitters)" % returned._outside.size())
 	_key(KEY_P)
 	await _frames(1)
 	check(hall.bay_craft(Pilot.STANDARD) == Pilot.TALON and Settings.phaethon_body() == Pilot.TALON and garage._prompts._status.visible

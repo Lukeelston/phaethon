@@ -320,7 +320,8 @@ func _exterior_sound() -> void:
 	if _outside.is_empty():
 		if not startup.running(0) and not startup.running(1):
 			return
-		var bank_dir := EngineVoice.DIR if _vehicle == Fleet.STANDARD else EngineVoice.FLEET_DIR % Fleet.sound_bank(_vehicle)
+		var bank := Fleet.sound_bank(_vehicle)      # (the Talon plays the Phaethon's own bank)
+		var bank_dir := EngineVoice.DIR if bank == Fleet.STANDARD else EngineVoice.FLEET_DIR % bank
 		var wav := (load(bank_dir + "v8_mip0.wav") as AudioStreamWAV).duplicate() as AudioStreamWAV
 		wav.loop_mode = AudioStreamWAV.LOOP_FORWARD
 		wav.loop_end = wav.get_length() * wav.mix_rate
