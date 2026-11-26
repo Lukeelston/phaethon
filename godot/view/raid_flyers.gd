@@ -917,8 +917,8 @@ func _gunship_step(g: Gunship, delta: float) -> void:
 	if g.state == "station":
 		_face_run(g)      # (come from its flight there, its way was the flight's: its hull turns to its run's)
 	g.face += clampf(angle_difference(g.face, atan2(-g.hx, g.hy)), -FACE_RATE * delta, FACE_RATE * delta)
-	if g.warn >= 0.0:
-		_lead_of(g, Vector3(g.x, g.y, g.z))      # (where what it is after is now: its turret follows it)
+	if g.at_pod or g.prey != null:
+		_lead_of(g, Vector3(g.x, g.y, g.z))      # (where what it is after would meet a shot now: its turret follows it, between shots too)
 	_turn_turret(g, delta)
 	_pose_ship(g)
 	_fire_control(g, delta)
