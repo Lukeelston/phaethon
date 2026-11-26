@@ -89,7 +89,7 @@
 ##   flyers.ray_pick(o, d, reach)              the fire control's aim: {"car": Flyer, "t": m along the ray} or {}
 ##   flyers.ray_flyer(f, o, d, pad)            ... one flyer's sphere (its pick radius r, fattened by pad): t, or -1
 ##   flyers.hit(f, n) / destroy(f)             the fire control's damage
-##   flyers.marks(x, y, r)                     the maps: [[x, y, Traffic.HOSTILE_MARK], ...] within r of (x, y)
+##   flyers.marks(x, y, r)                     the maps: [[x, y, Traffic.HOSTILE_MARK], ...], under r from (x, y) on each axis
 extends Node3D
 
 const Traffic := preload("res://view/network_traffic.gd")
@@ -1434,7 +1434,8 @@ func destroy(f) -> void:
 		ship.visible = false
 
 
-## The flyers on the map: [[x, y, Traffic.HOSTILE_MARK], ...] within r of (x, y).
+## The flyers on the map: [[x, y, Traffic.HOSTILE_MARK], ...], those under r from (x, y) on each axis (|dx| < r and
+## |dy| < r: a square 2r across, traffic.marks's own rule). The gunship's shots are not on it.
 func marks(x: float, y: float, r: float) -> Array:
 	var out := []
 	for f: Flyer in _list:

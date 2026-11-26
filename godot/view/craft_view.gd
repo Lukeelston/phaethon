@@ -184,7 +184,7 @@ var partner: Node3D          # the driving partner (view/driving_partner.gd), nu
 var partner_on := false      # common release preference, overridden by launch flags
 var race: Node3D             # Eridanus: the racing pilots (view/race_pilots.gd), null when there are none
 var raids: Node3D            # raids on the Network (view/network_raids.gd), null when they are off
-var _raid_kills_paid := 0    # of raids.kills, the raiders the score has paid for
+var _raid_kills_paid := {"raider": 0, "drone": 0, "gunship": 0}   # of raids.kills_by, the kills of each kind the score has paid for
 var _raid_lost_paid := 0     # of the commuters the raiders ran down (raids.lost less raids.lost_off), those the score has charged for
 var _raid_off_paid := 0      # of raids.lost_off (lost off-screen), those it has charged for (together, at the arrival or the end)
 var _raid_results_taken := 0 # of the director's results (its tally's cleared + lost), the ones the score has taken
@@ -959,26 +959,30 @@ func _chase_result() -> void:
 				skill_score._award("chase", "PATROL ESCAPED", 2000)
 
 
-## The raid's score, after the director's frame: each raider shot since the last frame pays RAIDER DOWN; each commuter
-## the raiders run down costs COMMUTER LOST; the commuters lost off-screen (ticks with no signal: the director's
-## lost_off is read) cost one charge for them all, COMMUTERS LOST xN, once the raid is no longer called (at the arrival
-## or at its end: the dash shows the count meanwhile), not one chime and flash each. None of these breaks the chain
-## (a hit taken does). A new raid (the director's counts back at 0) starts the counts again.
+## The raid's score, after the director's frame: each kill since the last frame pays by its kind (the director's
+## kills_by, RAID_POINTS of that kind): a raider RAIDER DOWN, a drone DRONE DOWN, the gunship GUNSHIP DOWN (a frame's
+## kills paid raiders first, then drones, then the gunship); each commuter the raiders run down costs COMMUTER LOST;
+## the commuters lost off-screen (ticks with no signal: the director's lost_off is read) cost one charge for them all,
+## COMMUTERS LOST xN, once the raid is no longer called (at the arrival or at its end: the dash shows the count
+## meanwhile), not one chime and flash each. None of these breaks the chain (a hit taken does). A new raid (the
+## director's counts back at 0) starts the counts again.
 func _raid_sync() -> void:
 	if raids == null or skill_score == null:
 		return
 	var P: Dictionary = RaidsScript.RAID_POINTS
 	var off: int = raids.lost_off
 	var run_down: int = raids.lost - off
-	if raids.kills < _raid_kills_paid:
-		_raid_kills_paid = 0
+	for kind: String in _raid_kills_paid:
+		var n := int(raids.kills_by[kind])
+		if n < int(_raid_kills_paid[kind]):
+			_raid_kills_paid[kind] = 0
+		while int(_raid_kills_paid[kind]) < n:
+			_raid_kills_paid[kind] = int(_raid_kills_paid[kind]) + 1
+			skill_score._award("raid", "%s DOWN" % kind.to_upper(), int(P[kind]))
 	if off < _raid_off_paid:
 		_raid_off_paid = 0
 	if run_down < _raid_lost_paid:
 		_raid_lost_paid = 0
-	while _raid_kills_paid < raids.kills:
-		_raid_kills_paid += 1
-		skill_score._award("raid", "RAIDER DOWN", int(P.raider))
 	if raids.state != "called" and off > _raid_off_paid:
 		var n := off - _raid_off_paid
 		_raid_off_paid = off
@@ -990,12 +994,13 @@ func _raid_sync() -> void:
 		_raid_struck_ids.clear()
 
 
-## A restart. The DIRECTOR's raids.reset() is the authoritative reset (it zeroes kills and lost and sets the state back
-## to ""; so does the one a crash's respawn makes inside raids.update). This only re-bases the score's paid counts on
-## whatever the director now reports, so that the next _raid_sync never pays or charges again for what the score
-## has already settled, whether or not the director's counts were zeroed.
+## A restart. The DIRECTOR's raids.reset() is the authoritative reset (it zeroes kills, kills_by and lost and sets the
+## state back to ""; so does the one a crash's respawn makes inside raids.update). This only re-bases the score's paid
+## counts on whatever the director now reports, so that the next _raid_sync never pays or charges again for what the
+## score has already settled, whether or not the director's counts were zeroed.
 func _raid_reset_score() -> void:
-	_raid_kills_paid = raids.kills if raids else 0
+	for kind in _raid_kills_paid:
+		_raid_kills_paid[kind] = int(raids.kills_by[kind]) if raids else 0
 	_raid_off_paid = raids.lost_off if raids else 0
 	_raid_lost_paid = (raids.lost - raids.lost_off) if raids else 0
 	_raid_struck_ids.clear()
@@ -2110,7 +2115,10 @@ func _sync_world() -> void:
 			_raid_target()
 		_patrol_lights()
 		if minimap:
-			minimap.marks = traffic_net.marks(sim.pod.x, sim.pod.y, 40000.0)
+			var mk: Array = traffic_net.marks(sim.pod.x, sim.pod.y, 40000.0)
+			if raids and raids.flyers != null and not raids.flyers.all().is_empty():      # (a raid's flyers up: theirs join traffic's, the hostile mark)
+				mk.append_array(raids.flyers.marks(sim.pod.x, sim.pod.y, 40000.0))
+			minimap.marks = mk
 	if verdant_world:
 		verdant_world.sync(org_x, org_y)
 	if gp_skyline:

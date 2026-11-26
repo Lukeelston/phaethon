@@ -26,7 +26,10 @@
 ##                    car) has a mark of its own wherever it is in the rails' reach, gaining on it or not: corner
 ##                    brackets round it (HOSTILE_BOX), the stem standing over them, in the hostile red whatever its
 ##                    seconds, and it is never the one left out. By its shape, not its red, it is not a commuter he
-##                    is about to hit (whose line is a red as near as makes no odds).
+##                    is about to hit (whose line is a red as near as makes no odds). A raid's flyers (its drones and
+##                    the gunship) are listed with the raiders, marked as they are, whatever their closing time: one
+##                    over her road (within FLYER_SIDE of its edge) in the rails' reach, its mark standing on the road
+##                    at its x, y (its height is not drawn).
 ##   the exits        over an exit's lane, a row of upright chevrons pointing the way the lane leaves, a wave of
 ##                    light running along them into the ramp, and a gate standing across the lane at its mouth,
 ##                    the row's end. Begun seven seconds before the mouth (never less than 8 km, where the lane's
@@ -157,6 +160,7 @@ const LINE_FADE := 0.3                      # s
 const SIDE_LINE := Vector2(0.6, 0.5)        # a vehicle not in her way: its line this much of the height, and of the strength
 const SOON := Vector3(5.0, 2.5, 1.2)        # s to reach it: calm from the first, amber at the second, red by the third
 const NEAR_REACH := 2500.0                  # m: a vehicle on another road is looked at inside this (a ramp running into hers)
+const FLYER_SIDE := 250.0                   # m: a raid's flyer this far beyond her road's edge is still over it (a drone circles up to 220 m round a point of the road's middle)
 const ALONG := 0.8                          # ... and counts if it is going along her road (the cosine: within 37 degrees) ...
 const SAME_DECK := 12.0                     # ... on her road's own level, to this many metres (not on a road crossing overhead)
 
@@ -270,12 +274,14 @@ var _w := 0.0
 ## A vehicle's line.
 class Mark:
 	var id := 0
-	var car: Traffic.Car
+	var car: Traffic.Car     # the vehicle it marks (null for a flyer's)
+	var flyer = null         # ... or a raid's flyer (Raids: view/raid_flyers.gd), standing at its x, y on her road ...
+	var deck := 0.0          # ... whose height there this is, as the last pass found it (the flyer's own is not drawn)
 	var a := 0.0             # its strength now, 0..1 ...
 	var to := 1.0            # ... and where that is going
 	var seconds := 0.0       # till she reaches it, as the last pass through the traffic found
 	var way := false         # in her way
-	var hostile := false     # a raider (Raids): its brackets, not a line
+	var hostile := false     # a raider or a flyer (Raids): its brackets, not a line
 	var tint := Color.WHITE  # its colour, for those seconds
 
 
@@ -1059,11 +1065,45 @@ func worst_load(speed: float, seconds: float) -> float:
 ## running along it at its own level, close by), closing, and reached within LOOK_T at the speed she is
 ## closing now. [{car, along (m ahead by the road), left (m left of her), seconds, way (in her way)}].
 ## Not a vehicle she is not gaining on, one going across her road, or one on a road over or under it. A raider (Raids:
-## hostile) is, wherever it is in reach, gaining on it or not ({..., hostile: true}; seconds INF if she is not).
-func pick(cars: Array, speed: float) -> Array:
+## hostile) is, wherever it is in reach, gaining on it or not ({..., hostile: true}; seconds INF if she is not). Then a
+## raid's flyers, of `flyers` (_pick_flyers).
+func pick(cars: Array, speed: float, flyers: Array = []) -> Array:
 	var out: Array = []
 	_pick_into(out, cars, 0, cars.size(), speed)
+	_pick_flyers(out, flyers, speed)
 	return out
+
+
+## A raid's flyers (Raids: view/raid_flyers.gd's drones and gunship), added to `out` as a raider is: each one over her
+## road (within FLYER_SIDE of its edge) and in reach ahead, gaining on it or not ({..., hostile: true, flyer: true,
+## deck: the road's height there}; seconds INF if she is not). Placed by its x, y alone, at the route's station
+## nearest it (a guess from her own station along the way the route runs there, put right from the station it lands
+## on, twice): its height is not drawn, nor asked to be her deck's.
+func _pick_flyers(out: Array, flyers: Array, speed: float) -> void:
+	var m := st_s.size()
+	if m < 2 or speed < 1.0:
+		return
+	var reach := reach_at(speed)
+	var start := clampi(at, 0, m - 1)
+	for c in flyers:
+		var j := start
+		for k in 3:
+			j = _station_near(st_s[j] + (c.x - st_x[j]) * st_tx[j] + (c.y - st_y[j]) * st_ty[j])
+		var ex: float = c.x - st_x[j]
+		var ey: float = c.y - st_y[j]
+		var along: float = st_s[j] - pod_s + ex * st_tx[j] + ey * st_ty[j]
+		var left: float = -ex * st_ty[j] + ey * st_tx[j]
+		if along <= CAR_NEAR.x or along > reach or absf(left) > st_half[j] + FLYER_SIDE:
+			continue
+		var closing: float = speed - (c.vx * st_tx[j] + c.vy * st_ty[j])
+		out.append({"car": c, "along": along, "left": left - pod_left, "seconds": along / closing if closing > 1.0 else INF,
+			"way": absf(left - pod_left) <= CORRIDOR, "hostile": true, "flyer": true, "deck": st_h[j]})
+
+
+## The route's station nearest `s` m along it.
+func _station_near(s: float) -> int:
+	var j := clampi(st_s.bsearch(s), 1, st_s.size() - 1)
+	return j - 1 if s - st_s[j - 1] < st_s[j] - s else j
 
 
 ## ... of cars[first] to cars[last - 1], added to `out`.
@@ -1161,6 +1201,8 @@ func _lines_frame(dt: float, speed: float, shown: bool, strength: float) -> void
 	_scan_at = upto
 	if pass_done:      # a pass is done: what it found is what there is
 		var raiding: bool = traffic.raids != null      # (raids off: as it was)
+		if raiding and traffic.raids.flyers != null and not traffic.raids.flyers.all().is_empty():
+			_pick_flyers(found, traffic.raids.flyers.all(), speed)      # (the raid's flyers, where they are now: listed with its raiders)
 		var crowd := found.size()
 		if raiding:      # raiders are not the busy road thinning is for: a raid must not strip the lines off the commuters out of her way
 			for f in found:
@@ -1187,12 +1229,17 @@ func _lines_frame(dt: float, speed: float, shown: bool, strength: float) -> void
 				elif marks.size() < MAX_LINES and (pass_way or (not thinned and float(f.seconds) >= BEGIN_T)):
 					mark = Mark.new()
 					mark.id = id
-					mark.car = f.car
+					if hostile and f.has("flyer"):
+						mark.flyer = f.car
+					else:
+						mark.car = f.car
 					marks[id] = mark
 				if mark != null:
 					mark.seconds = f.seconds
 					mark.way = pass_way
 					mark.hostile = hostile
+					if hostile and mark.flyer != null:
+						mark.deck = float(f.deck)
 					mark.tint = Traffic.HOSTILE_COL if hostile else (soon_tint(mark.seconds) if pass_way else CALM)
 	var mm := lines.multimesh
 	var k := 0
@@ -1205,7 +1252,8 @@ func _lines_frame(dt: float, speed: float, shown: bool, strength: float) -> void
 		var in_way := mark.way
 		var colour := mark.tint
 		colour.a = mark.a * (1.0 if in_way else SIDE_LINE.y)
-		mm.set_instance_transform(k, Transform3D(Basis.IDENTITY, mark.car.lamp_position))
+		var place: Vector3 = mark.car.lamp_position if mark.flyer == null else Vector3(float(mark.flyer.x) - float(view.org_x), mark.deck, -(float(mark.flyer.y) - float(view.org_y)))
+		mm.set_instance_transform(k, Transform3D(Basis.IDENTITY, place))
 		var shape := 2 if mark.hostile else int(in_way)
 		if line_tints[k] != colour or line_shape[k] != shape:
 			mm.set_instance_color(k, colour)

@@ -1,6 +1,10 @@
 ## Raid score (the stage 1 plan, task 11): the raid on the skill score. "Jolt and points": a hit costs points,
 ## never health. Raids pinned on, the Network.
-##   kill       each raider shot: RAIDER DOWN +250 (x the chain's multiplier), the chain grows
+##   kill       each raider shot: RAIDER DOWN +250 (x the chain's multiplier), the chain grows. Each kind is paid from the
+##              director's kills_by (on_kill counts a kill by its kind; kills is their sum, and this test sets both so)
+##   flyers     check_flyer_awards (the stage 2 plan, task 4): a drone shot DRONE DOWN +100, the gunship GUNSHIP DOWN
+##              +1500, neither paid as a raider; a frame's kills of all three kinds each paid as its own; a re-basing
+##              and a restart mid-raid pay none of them twice, and the next raid's drones are each paid
 ##   cleared    RAID CLEARED +2000 and +20 for each of the 60 commuters not lost (x the multiplier)
 ##   lost       "RAID LOST" flashed, no award
 ##   deduct     a commuter run down -40, a hit taken -100, a commuter struck by your fire during a raid -150 (once
@@ -41,6 +45,61 @@ func _end(R, how: String) -> void:
 	R.tally[how] = int(R.tally[how]) + 1
 
 
+## The director's kills as on_kill leaves them: this raid's kills by kind (kills_by), and kills their sum.
+func _set_kills(R, raider: int, drone := 0, gunship := 0) -> void:
+	R.kills_by.raider = raider
+	R.kills_by.drone = drone
+	R.kills_by.gunship = gunship
+	R.kills = raider + drone + gunship
+
+
+## Drones and the gunship on the score: each paid as its own kind, from kills_by; none paid twice.
+func check_flyer_awards(v) -> void:
+	var S = v.skill_score
+	var R = v.raids
+	var P: Dictionary = Raids.RAID_POINTS
+	_fresh(v)
+	R.state = "on"
+	_set_kills(R, 0, 1)
+	v._raid_sync()
+	var drone_pays: int = S.total
+	var drone_said: String = S.award_text
+	v._raid_sync()
+	var drone_once: bool = S.total == drone_pays
+	_fresh(v)
+	R.state = "on"
+	_set_kills(R, 0, 0, 1)
+	v._raid_sync()
+	var gunship_pays: int = S.total
+	var gunship_said: String = S.award_text
+	_check("a drone shot: +%d \"%s\" (want 100, DRONE DOWN; paid once: %s); the gunship: +%d \"%s\" (want 1500, GUNSHIP DOWN); RAID_POINTS drone %s, gunship %s" % [drone_pays, drone_said, drone_once, gunship_pays, gunship_said, P.get("drone"), P.get("gunship")],
+		drone_pays == 100 and drone_said.begins_with("DRONE DOWN") and drone_once and gunship_pays == 1500 and gunship_said.begins_with("GUNSHIP DOWN")
+		and P.get("drone") == 100 and P.get("gunship") == 1500)
+	# a frame's kills of all three kinds: a raider, two drones, the gunship (the chain 1, 2, 3, 4: x1, x1, x1.5, x1.5)
+	_fresh(v)
+	R.state = "on"
+	_set_kills(R, 1, 2, 1)
+	v._raid_sync()
+	var points: Array = S.feedback.map(func(f): return int(f.points))
+	var mixed: int = S.total
+	_check("one frame's kills, a raider, two drones and the gunship: each paid as its own kind, %s (want [250, 100, 150, 2250]), %d in all" % [points, mixed],
+		points == [250, 100, 150, 2250] and mixed == 2750 and S.award_text.begins_with("GUNSHIP DOWN"))
+	# a re-basing with the director's counts standing pays none of them again; nor the restart path
+	v._raid_reset_score()
+	v._raid_sync()
+	var rebased: int = S.total
+	v._respawn()
+	v._raid_sync()
+	var restarted: int = S.total
+	var zeroed: bool = R.kills == 0 and int(R.kills_by.raider) == 0 and int(R.kills_by.drone) == 0 and int(R.kills_by.gunship) == 0
+	R.state = "on"
+	_set_kills(R, 0, 3)      # (more drones than the old raid's two: each paid, the paid counts re-based by kind)
+	v._raid_sync()
+	var next_raid: Array = S.feedback.map(func(f): return int(f.points))
+	_check("a re-basing mid-raid pays none again (%d, was %d); the restart (v._respawn) clears the run's total with none re-paid (%d; the director's kills by kind zeroed: %s), and the next raid's three drones pay %s (want [100, 100, 150]), %d" % [rebased, mixed, restarted, zeroed, next_raid, S.total],
+		rebased == mixed and restarted == 0 and zeroed and next_raid == [100, 100, 150] and S.total == 350 and S.award_text.begins_with("DRONE DOWN"))
+
+
 func _fresh(v) -> void:
 	v.skill_score.reset_run()
 	v.skill_score.feedback.clear()
@@ -66,10 +125,10 @@ func _run() -> void:
 	# kill: 250 each, the chain grows and the multiplier with it (1.0, 1.0, 1.5 on the third)
 	_fresh(v)
 	R.state = "on"
-	R.kills = 1
+	_set_kills(R, 1)
 	v._raid_sync()
 	var one: int = S.total
-	R.kills = 3
+	_set_kills(R, 3)
 	v._raid_sync()
 	var kinds: Array = S.feedback.map(func(f): return f.kind)
 	_check("a raider shot: +250 (%d), three shot 250+250+375 = 875 (%d), chain %d, \"%s\", feedback %s" % [one, S.total, S.chain, S.award_text, kinds],
@@ -183,7 +242,7 @@ func _run() -> void:
 	# it from paying or charging again. First the pairing alone, with the run's total kept.
 	_fresh(v)
 	R.state = "on"
-	R.kills = 3
+	_set_kills(R, 3)
 	R.lost = 2
 	v._raid_sync()
 	var settled: int = S.total
@@ -195,7 +254,7 @@ func _run() -> void:
 	# ... and a wrong pairing cannot double-charge: the director's counts NOT zeroed, the re-basing keeps them settled
 	_fresh(v)
 	R.state = "on"
-	R.kills = 3
+	_set_kills(R, 3)
 	R.lost = 2
 	v._raid_sync()
 	var kept: int = S.total
@@ -205,14 +264,14 @@ func _run() -> void:
 	# the real restart path, with a raid on
 	_fresh(v)
 	R.state = "on"
-	R.kills = 3
+	_set_kills(R, 3)
 	R.lost = 2
 	v._raid_sync()
 	v._respawn()
 	v._raid_sync()
 	var after_restart: int = S.total
 	R.state = "on"
-	R.kills = 1
+	_set_kills(R, 1)
 	v._raid_sync()
 	_check("the restart (v._respawn) clears the run's total with nothing re-paid or re-charged for the old raid (%d), and a new raid's kill pays 250 (%d)" % [after_restart, S.total],
 		after_restart == 0 and S.total == 250 and R.lost == 0)
@@ -222,7 +281,7 @@ func _run() -> void:
 	R.city = 0
 	R.arrive_r = 0.0
 	R.tick_every = 1.0e9
-	R.kills = 3
+	_set_kills(R, 3)
 	R.lost = 2
 	v._raid_sync()
 	var before_crash: int = S.total
@@ -235,10 +294,12 @@ func _run() -> void:
 	var after_crash: int = S.total
 	# (the losses no longer break the chain: the kill is paid at the chain's multiplier, the three kills' chain and one more)
 	var pays := roundi(250.0 * minf(5.0, 1.0 + floorf((S.chain + 1) / 3.0) * 0.5))
-	R.kills = 1
+	_set_kills(R, 1)
 	v._raid_sync()
 	_check("a crash mid-raid: the director sets it aside (%s), the sync pays and charges nothing more (%d, was %d), and the next raid's kill pays 250 at the chain's multiplier, %d (%d)" % [reset_by_crash, after_crash, before_crash, pays, S.total],
 		reset_by_crash and after_crash == before_crash and S.total == before_crash + pays)
+
+	check_flyer_awards(v)
 
 	# the display: a deduction reads "-40", never "+-40", on the desktop HUD's label and in the display's own text
 	_fresh(v)

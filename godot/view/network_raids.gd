@@ -87,9 +87,9 @@ const PREY_EVERY := 4                    # frames between a raider's looks for i
 const HEADING_BELOW := 30.0              # m/s: slower, the pick looks the way the craft points, not the way it goes
 const GRACE := 1.0                       # s: a raider in contact is one hit taken, then none for this long
 const SAVED_START := 60                  # commuters a raid starts with: the clearing pays for each one not lost
-## The score (view/skill_score.gd): raiders shot and raids cleared are awards; commuters lost, hits taken and
-## commuters struck by the pilot's own fire are deductions (never health).
-const RAID_POINTS := {"raider": 250, "cleared": 2000, "saved_each": 20, "commuter_lost": 40, "hit": 100, "struck": 150}
+## The score (view/skill_score.gd): raiders, drones and the gunship shot (each by its kind: kills_by) and raids cleared
+## are awards; commuters lost, hits taken and commuters struck by the pilot's own fire are deductions (never health).
+const RAID_POINTS := {"raider": 250, "drone": 100, "gunship": 1500, "cleared": 2000, "saved_each": 20, "commuter_lost": 40, "hit": 100, "struck": 150}
 const CONTACT_CRAFT := 14.0              # m from the pod or either engine's centre to a raider's centre, in three dimensions: a ram
 const TURN_SHORT := 500.0                # m short of either end of its town zone a raider turns round (or is held, one-way)
 
@@ -779,8 +779,10 @@ func reset(why := "restart") -> void:
 
 
 ## The dash's line (traffic's race_text() gives it while the raid holds the floor). Called: the city, how far (a
-## straight line to its centre, as the dash reads a distance) and the commuters lost so far. On: the raiders left (with
-## none, the drones left; with none of those, the gunship) and the time left. Otherwise "".
+## straight line to its centre, as the dash reads a distance) and the commuters lost so far. On: what is left of it,
+## the raiders, the drones and the gunship, a kind with none left out ("RAID  5 RAIDERS  8 DRONES  GUNSHIP  0:47";
+## every raider gone, "RAID  3 DRONES  0:12"), and the time left. Its parts two spaces apart, as the called line's.
+## Otherwise "".
 func text() -> String:
 	match state:
 		"called":
@@ -788,8 +790,14 @@ func text() -> String:
 			return "RAID  %s  %s  %d LOST" % [c.name, view._far(Vector2(float(c.cx) - sim.pod.x, float(c.cy) - sim.pod.y).length()), lost]
 		"on":
 			var left := int(maxf(time_limit - _t, 0.0))
-			if pack.is_empty() and flyers != null and not flyers.all().is_empty():
+			var line := "RAID"
+			if not pack.is_empty():
+				line += "  %d RAIDERS" % pack.size()
+			if flyers != null:
 				var n: int = flyers.count("drone")
-				return "RAID  %s  %d:%02d" % ["%d DRONES" % n if n > 0 else "GUNSHIP", left / 60, left % 60]
-			return "RAID  %d RAIDERS  %d:%02d" % [pack.size(), left / 60, left % 60]
+				if n > 0:
+					line += "  %d DRONES" % n
+				if flyers.gunship() != null:
+					line += "  GUNSHIP"
+			return line + "  %d:%02d" % [left / 60, left % 60]
 	return ""

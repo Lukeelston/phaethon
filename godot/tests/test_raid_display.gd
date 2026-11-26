@@ -29,6 +29,20 @@
 ##                  plain diamond, static, as it ever was
 ##   never left out every line taken by commuters in her way, a raider still gets its mark (the furthest-off
 ##                  commuter's line gives way); three raiders among six commuters off her way do not thin them away
+## The flyers (the stage 2 plan, task 4: view/raid_flyers.gd's drones and gunship). The stage 1 checks above are of a
+## raid of raiders alone (this test's raids bring no flyers); these put flyers up by hand:
+##   dash flyers    check_dash_counts_flyers: on, the raiders, then the drones, then GUNSHIP, a kind at none left out, then
+##                  the clock, two spaces between them as between stage 1's parts: "RAID  5 RAIDERS  8 DRONES  GUNSHIP
+##                  0:47", "RAID  5 RAIDERS  GUNSHIP  0:47"; every raider gone "RAID  3 DRONES  0:12", the gunship alone
+##                  "RAID  GUNSHIP  0:12"; the dash shows each
+##   map flyers     check_maps_mark_flyers: flyers.marks(x, y, r) marks by traffic.marks's own rule (|dx| and |dy| under
+##                  r), each with the hostile mark; through the view's frame a drone 600 m ahead joins traffic's marks and
+##                  is in both maps' dots with the hostile mark, drawn in the hostile red on the headset's map; the
+##                  gunship's shots are not on the maps; raids off, the maps' marks are traffic's alone, as ever
+##   tactical flyers check_tactical_lists_flyers: a drone 2 km on over her road, opening (going away faster than she
+##                  closes), is picked as a raider is (hostile, seconds INF); none off her road, behind her or past the
+##                  reach; through the display's frame its mark is brackets in the hostile red, standing at its x, y on
+##                  the road (its height not drawn)
 ## --headless --xr-mode off --audio-driver Dummy -s res://tests/test_raid_display.gd -- --mute
 ## Prints RAID DISPLAY PASS.
 extends SceneTree
@@ -45,9 +59,11 @@ const Livery := preload("res://view/livery.gd")
 const Outlook := preload("res://view/outlook.gd")
 const Pilot := preload("res://sim/pilot_craft.gd")
 const MiniMap := preload("res://view/minimap.gd")
+const Flyers := preload("res://view/raid_flyers.gd")
 const MPH := 2.236936
 var failures := 0
 var checks := 0
+var _flyer_ids := 0
 
 
 func _initialize() -> void:
@@ -202,6 +218,194 @@ func _target(v) -> void:
 		v._raid_target()
 
 
+## How many arguments a script's method takes (-1: no such method).
+func _arity(script: Script, method: String) -> int:
+	for m in script.get_script_method_list():
+		if String(m.name) == method:
+			return (m.args as Array).size()
+	return -1
+
+
+## A flyer of the raid's (view/raid_flyers.gd) put up by hand, not flown (nothing steps it here): `kind` at (x, y), z m
+## up, going (vx, vy) m/s. The gunship is the module's own (its gunship()).
+func _flyer(F, kind: String, x := 0.0, y := 0.0, z := 0.0, vx := 0.0, vy := 0.0):
+	var f = Flyers.Gunship.new() if kind == "gunship" else Flyers.Flyer.new()
+	f.id = Flyers.ID_BASE + 5000 + _flyer_ids
+	_flyer_ids += 1
+	f.kind = kind
+	f.x = x
+	f.y = y
+	f.z = z
+	f.vx = vx
+	f.vy = vy
+	f.v = Vector2(vx, vy).length()
+	if f.v > 0.0:
+		f.hx = vx / f.v
+		f.hy = vy / f.v
+	F._list.append(f)
+	if kind == "gunship":
+		F._gunship = f
+	return f
+
+
+## A road's place `lat` m left of its middle at sample f (the sims' frame), and its deck's height there.
+func _road_at(sim, road: int, f: float, lat := 0.0) -> Vector3:
+	var R = sim.roads[road]
+	var i := clampi(int(f), 0, int(R.N) - 1)
+	return Vector3(R.px[i] + R.nx[i] * lat, R.py[i] + R.ny[i] * lat, sim.net_height(road, float(i)))
+
+
+## The dash's line with flyers up: the director's own text(), from a director set to these counts by hand (its pack's
+## size, its flyers' kinds, its clock): the raiders, the drones, GUNSHIP, a kind at none left out, the clock.
+func check_dash_counts_flyers(v) -> void:
+	var R = v.raids
+	var F = R.flyers
+	var pack_was: Array = R.pack.duplicate()
+	var t_was: float = R._t
+	var lines := []
+	var ok := true
+	# [raiders, drones, the gunship, s left, the line wanted]
+	for case in [[5, 8, true, 47.5, "RAID  5 RAIDERS  8 DRONES  GUNSHIP  0:47"], [5, 0, true, 47.5, "RAID  5 RAIDERS  GUNSHIP  0:47"],
+			[0, 3, false, 12.5, "RAID  3 DRONES  0:12"], [0, 0, true, 12.5, "RAID  GUNSHIP  0:12"]]:
+		R.pack.clear()
+		for k in int(case[0]):
+			R.pack.append(Traffic.Car.new())
+		F.clear()
+		for k in int(case[1]):
+			_flyer(F, "drone")
+		if case[2]:
+			_flyer(F, "gunship")
+		R._t = R.time_limit - float(case[3])
+		v.flash_until = 0.0
+		var line: String = R.text()
+		var dash: String = v._net_text()
+		lines.append(line)
+		ok = ok and line == String(case[4]) and dash == line
+	R.pack.clear()
+	R.pack.append_array(pack_was)
+	F.clear()
+	R._t = t_was
+	_check("on with flyers up: raiders, drones, the gunship, a kind at none left out, the clock: %s (want \"RAID  5 RAIDERS  8 DRONES  GUNSHIP  0:47\", \"RAID  5 RAIDERS  GUNSHIP  0:47\", \"RAID  3 DRONES  0:12\", \"RAID  GUNSHIP  0:12\"), each on the dash" % [lines],
+		ok and R.state == "on")
+
+
+## The maps: flyers.marks's rule is traffic.marks's; a drone joins traffic's marks through the view's frame and is on
+## both maps in the hostile style; the gunship's shots are not.
+func check_maps_mark_flyers(v) -> void:
+	var R = v.raids
+	var F = R.flyers
+	var T = v.traffic_net
+	var sim = v.sim
+	var P = v.minimap_panel
+	# the rule, against traffic's: the same places about a point, a hostile car and a drone at each
+	var c0 := Vector2(sim.pod.x, sim.pod.y)
+	var r := 1000.0
+	var probes := [Vector2(0.9, 0.9), Vector2(0.999, 0.0), Vector2(0.0, -0.999), Vector2(1.001, 0.0), Vector2(-0.7, 0.7), Vector2(0.5, -1.2), Vector2(-1.3, -1.3)]
+	var cars_were: Array = T.cars.duplicate()
+	T.cars.clear()
+	F.clear()
+	var inside := 0
+	for k in probes.size():
+		var at: Vector2 = c0 + (probes[k] as Vector2) * r
+		var c := Traffic.Car.new()
+		c.id = 990200 + k
+		c.x = at.x
+		c.y = at.y
+		c.hostile = true
+		T.cars.append(c)
+		_flyer(F, "drone", at.x, at.y, 90.0)
+		inside += int(absf((probes[k] as Vector2).x) < 1.0 and absf((probes[k] as Vector2).y) < 1.0)
+	var by_traffic: Array = T.marks(c0.x, c0.y, r)
+	var by_flyers: Array = F.marks(c0.x, c0.y, r)
+	T.cars.clear()
+	T.cars.append_array(cars_were)
+	F.clear()
+	var all_hostile := true
+	for m in by_flyers:
+		all_hostile = all_hostile and int(m[2]) == Traffic.HOSTILE_MARK
+	_check("flyers.marks(x, y, r) marks by traffic.marks's own rule: of %d places about a point, %d within r on each axis; traffic's marks %d, the flyers' %d, the same places (%s), each the hostile mark (%s)" % [probes.size(), inside, by_traffic.size(), by_flyers.size(), by_flyers == by_traffic, all_hostile],
+		by_flyers == by_traffic and by_flyers.size() == inside and inside == 4 and all_hostile)
+	# through the view's frame: a drone 600 m ahead, and a gunship's shot in flight beside it
+	var fwd := Vector2(cos(sim.pod.th), sin(sim.pod.th))
+	var at := c0 + fwd * 600.0
+	var drone = _flyer(F, "drone", at.x, at.y, float(sim.pod.z) + 90.0)
+	F.shots.append({"p": Vector3(at.x + 80.0, at.y, float(sim.pod.z) + 40.0), "v": Vector3.ZERO, "t": 0.0})
+	var whole_was: bool = v.minimap.whole
+	v.minimap.whole = false
+	v._sync_world()      # (the view's own frame: the maps' marks)
+	var mk: Array = v.minimap.marks
+	var its := mk.filter(func(m): return is_equal_approx(float(m[0]), drone.x) and is_equal_approx(float(m[1]), drone.y))
+	var hostiles := mk.filter(func(m): return int(m[2]) == Traffic.HOSTILE_MARK).size()
+	var f: Dictionary = v.minimap.update(sim.pod.th, 1.0 / 60.0)
+	var flat: Dictionary = MiniMap.layout(f, Map2D.SIDE, Map2D.SIDE, Map2D.MARGIN, Map2D.TOP)
+	var head: Dictionary = MiniMap.layout(f, MapPanel.W, MapPanel.H, MapPanel.MARGIN, MapPanel.TOP)
+	var flat_h := (flat.dots as Array).filter(func(d): return int(d[1]) == Traffic.HOSTILE_MARK and (d[0] as Vector2).y > (flat.craft as Vector2).y)
+	var head_h := (head.dots as Array).filter(func(d): return int(d[1]) == Traffic.HOSTILE_MARK and (d[0] as Vector2).y > (head.craft as Vector2).y)
+	P.show_frame(f)
+	var red: int = _painted(P, Traffic.HOSTILE_COL.srgb_to_linear())
+	F.clear()
+	v.minimap.whole = whole_was
+	v.minimap.marks = []
+	_check("a drone 600 m ahead (and a gunship's shot in flight beside it): through the view's frame it joins traffic's marks (%d marks, %d hostile; the drone's %s), the shot is none of them; in both maps' dots with the hostile mark, ahead of the craft (the flat map's %d, the headset's %d), drawn in the hostile red on the headset's map (%d vertices: one mark)" % [mk.size(), hostiles, its, flat_h.size(), head_h.size(), red],
+		its.size() == 1 and int(its[0][2]) == Traffic.HOSTILE_MARK and hostiles == 1 and flat_h.size() == 1 and head_h.size() == 1 and red == 3)
+
+
+## The tactical display: a drone over her road in reach is listed as a raider is, whatever its closing time; placed by
+## its x, y on the road, its height not drawn.
+func check_tactical_lists_flyers(v, t, road: int, here: float, speed: float) -> void:
+	var R = v.raids
+	var F = R.flyers
+	var T = v.traffic_net
+	var sim = v.sim
+	var Rd = sim.roads[road]
+	var i_on := clampi(int(here + 2000.0 / 24.0), 0, int(Rd.N) - 1)
+	var away := 5500.0 / MPH                         # (opening: going away at 5,500 mph against her 5,000)
+	F.clear()
+	var p := _road_at(sim, road, here + 2000.0 / 24.0, 22.5)
+	var opening = _flyer(F, "drone", p.x, p.y, p.z + 100.0, Rd.tx[i_on] * away, Rd.ty[i_on] * away)
+	var q := _road_at(sim, road, here + 2000.0 / 24.0, 1500.0)
+	var aside = _flyer(F, "drone", q.x, q.y, q.z + 100.0)          # 1.5 km to her side: off her road
+	q = _road_at(sim, road, here - 300.0 / 24.0, 22.5)
+	var behind = _flyer(F, "drone", q.x, q.y, q.z + 100.0)
+	q = _road_at(sim, road, here + 30000.0 / 24.0, 22.5)
+	var beyond = _flyer(F, "drone", q.x, q.y, q.z + 100.0)         # past the display's reach
+	var arity := _arity(Tactical, "pick")
+	var got: Array = t.pick([], speed, [opening, aside, behind, beyond]) if arity >= 3 else []
+	var its := got.filter(func(g): return g.car == opening)
+	var said := "none"
+	if its.size() == 1:
+		said = "hostile %s, %.0f m on, seconds %s" % [its[0].get("hostile"), float(its[0].along), its[0].seconds]
+	_check("a drone 2 km on over her road, going away at 5,500 mph against her 5,000, is picked as a raider is (%s); none 1.5 km to her side, behind her or past the reach (%d picked of 4; pick takes the flyers: %d arguments)" % [said, got.size(), arity],
+		arity >= 3 and got.size() == 1 and its.size() == 1 and bool(its[0].get("hostile", false)) and float(its[0].seconds) == INF and absf(float(its[0].along) - 2000.0) < 60.0)
+	# through the display's frame: the director's flyers, the drone alone, no traffic
+	var cars_were: Array = T.cars.duplicate()
+	T.cars.clear()
+	F.clear()
+	F._list.append(opening)
+	for k in 80:
+		t.sync(1.0 / 120.0, v._rush_flow, true)
+	var mark = t.marks.get(opening.id)
+	var shape := -1
+	var tint := Color.BLACK
+	var kk := 0
+	for m in t.marks.values():
+		if m.id == opening.id:
+			shape = t.line_shape[kk]
+			tint = t.line_tints[kk]
+		kk += 1
+	var deck: float = sim.net_height(road, here + 2000.0 / 24.0)
+	if mark != null and mark.get("deck") != null:
+		mark.deck = -999.0      # (each pass sets it again from the road under the flyer: here 0 m, as a mark's own start)
+		for k in 2 * Tactical.SCAN_FRAMES:
+			t.sync(1.0 / 120.0, v._rush_flow, true)
+	var stands = mark.get("deck") if mark != null else null
+	_check("... and through the display's frame, the director's flyer: its mark (%s), brackets (shape %d) in the hostile red (%s) though she is not gaining on it; the drone's own (%s), standing at %s m on the road under it (the road's %.0f m; the drone %.0f m up: its height not drawn)" % [mark != null, shape, tint.to_html(), mark.get("flyer") == opening if mark != null else null, stands, deck, opening.z],
+		mark != null and shape == 2 and tint.is_equal_approx(Color(Traffic.HOSTILE_COL, 1.0)) and mark.get("flyer") == opening and stands != null and absf(float(stands) - deck) < 5.0)
+	F.clear()
+	T.cars.clear()
+	T.cars.append_array(cars_were)
+
+
 func _run() -> void:
 	var prefs_before := FileAccess.get_file_as_string(Cockpit.PREFS) if FileAccess.file_exists(Cockpit.PREFS) else ""
 	Tactical.wanted = false
@@ -219,6 +423,8 @@ func _run() -> void:
 		return
 	R.tick_every = 1.0e9        # (no commuters lost off-screen while this looks: the counts are this test's)
 	R.arrive_r = 0.0            # (nor an arrival but the one it makes)
+	R.drones = Vector2i(0, 0)   # (the stage 1 checks: a raid of raiders alone; the flyers' checks put up their own)
+	R.gunship_from = 1000000
 	v.flash_until = 0.0
 
 	# ---- made at build (raids on only), not at first use mid-flight ----
@@ -304,6 +510,7 @@ func _run() -> void:
 	T.knock_out(shot)
 	R.update(0.0)
 	_check("a raider shot: \"%s\"" % R.text(), R.text() == "RAID  %d RAIDERS  1:26" % (n - 1))
+	check_dash_counts_flyers(v)
 
 	# ---- a commuter lost: its burst, for a Phaethon that never armed its gun ----
 	# (raids on, its fire control is made at load, dormant until the GUN is first armed: view/gunnery.gd)
@@ -418,6 +625,7 @@ func _run() -> void:
 	_check("the headset's map draws a raider 600 m ahead in the hostile red (%d vertices) and a commuter beside it as ever (%d)" % [red, grey], red == 3 and grey == 3)
 	v.minimap.marks = []
 	v.minimap.whole = was_whole
+	check_maps_mark_flyers(v)
 
 	# ---- the tactical display ----
 	var e1 := _road(sim, "E1")
@@ -520,6 +728,8 @@ func _run() -> void:
 			"gone" if not t.marks.has(951) else "still there", t.marks.size(), t.line_count],
 		full_before == Tactical.MAX_LINES and t.marks.has(960) and late_shape == 2 and not t.marks.has(951) and t.marks.size() == Tactical.MAX_LINES and t.line_count == Tactical.MAX_LINES)
 	T.cars.clear()
+	check_tactical_lists_flyers(v, t, e1, here, speed)
+	T.cars.clear()
 	Tactical.wanted = false
 	t = Tactical.frame(v, t, 1.0 / 120.0, v._rush_flow, true)
 	await _finish(v, prefs_before)
@@ -540,6 +750,11 @@ func _finish(v, prefs_before: String) -> void:
 		o.raids == null and o.traffic_net != null and o.traffic_net.raids == null and o.find_children("network_raids", "", true, false).is_empty()
 		and o.find_children("*", "MultiMeshInstance3D", true, false).filter(func(n): return n.name == "RaidBurst").is_empty()
 		and o.traffic_net.race_text() == "" and not line.begins_with("RAID") and o.minimap.target == o.net_target)
+	o._sync_world()      # (the view's own frame: the maps' marks)
+	var off_marks: Array = o.minimap.marks
+	var traffic_only: Array = o.traffic_net.marks(o.sim.pod.x, o.sim.pod.y, 40000.0)
+	_check("raids off: the maps' marks are traffic's alone, as ever (%d marks, traffic's %d)" % [off_marks.size(), traffic_only.size()],
+		off_marks == traffic_only and not traffic_only.is_empty())
 	var of: Dictionary = o.minimap.update(o.sim.pod.th, 0.1)
 	var mini: Script = MiniMap
 	var osw: Vector2 = mini.call("target_swell", 9.0, of) if _has(mini, "target_swell") else Vector2(-1.0, -1.0)

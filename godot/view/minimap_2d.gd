@@ -108,8 +108,8 @@ func _draw_whole() -> void:
 		draw_string(ThemeDB.fallback_font, Vector2(0, MARGIN + 14.0), "%s  %.0f mi" % [_f.target.name, float(_f.target.dist) / 1609.344], HORIZONTAL_ALIGNMENT_CENTER, SIDE, 15, MiniMap.TARGET_COL)
 
 
-## A vehicle's dot on the Network's map: [radius px, colour]. A raider (Raids: Traffic.HOSTILE_MARK) the biggest, in the
-## hostile red; the racer (kind 4) a bigger magenta one; every other kind a small grey one.
+## A vehicle's dot on the Network's map: [radius px, colour]. A raider or a raid's flyer (Raids: Traffic.HOSTILE_MARK) the
+## biggest, in the hostile red; the racer (kind 4) a bigger magenta one; every other kind a small grey one.
 static func dot_style(kind: int) -> Array:
 	if kind == Traffic.HOSTILE_MARK:
 		return [5.5, Traffic.HOSTILE_COL]

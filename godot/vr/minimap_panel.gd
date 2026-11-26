@@ -112,9 +112,9 @@ func tone(key: String) -> Color:
 	return SCHEMES[scheme][key]
 
 
-## A vehicle's dot on the map, in scheme k: [half size (panel m), colour]. A raider (Raids: Traffic.HOSTILE_MARK) the
-## biggest, in the hostile red whatever the scheme (hostile_tone); the racer (kind 4) a bigger one in the scheme's
-## STARFIGHTER colour; every other kind a small one in its craft colour.
+## A vehicle's dot on the map, in scheme k: [half size (panel m), colour]. A raider or a raid's flyer (Raids:
+## Traffic.HOSTILE_MARK) the biggest, in the hostile red whatever the scheme (hostile_tone); the racer (kind 4) a
+## bigger one in the scheme's STARFIGHTER colour; every other kind a small one in its craft colour.
 static func dot_style(kind: int, k := 0) -> Array:
 	var sc: Dictionary = SCHEMES[k]
 	if kind == Traffic.HOSTILE_MARK:
