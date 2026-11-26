@@ -120,19 +120,19 @@ func _visit_garage() -> bool:
 	if not check("controller confirm opens the garage on foot", garage.scene_file_path == "res://garage/garage.tscn" and garage.get("walker") != null and not garage.walker.seated):
 		return false
 	garage.walker.set_seated(false, garage.environment.boarding_transform("vesper"))
-	garage.walker.interact_requested.emit()
+	await _press_board(garage)
 	if not check("the packaged Vesper cockpit can be boarded", garage.walker.seated and garage.seated_craft == "vesper"):
 		return false
 	var vesper: Node3D = garage.environment.bay_node("vesper")
 	check("Vesper carries its own saved cobalt paint inside and outside",
 		_garage_atlas_matches(vesper, true, Paint.coat("paint", "cobalt")))
-	garage.walker.interact_requested.emit()
+	await _press_board(garage)
 	check("dismount returns to Vesper's boarding point", not garage.walker.seated and garage.environment.nearest_bay(garage.walker.global_position) == "vesper")
 	garage.walker.set_seated(false, garage.environment.boarding_transform("kiln"))
-	garage.walker.interact_requested.emit()
+	await _press_board(garage)
 	var kiln: Node3D = garage.environment.bay_node("kiln")
 	check("adjacent Kiln keeps its own factory atlas inside and outside", _garage_atlas_matches(kiln, false))
-	garage.walker.interact_requested.emit()
+	await _press_board(garage)
 	check("boarding both bays restores incoming global paint", Paint.current == "crimson")
 	Paint.current = previous_live
 	for k in paint_keys.size():
@@ -375,3 +375,11 @@ func _finish() -> void:
 	print("EXPORTED VR RELEASE %s (%d checks, %d failures)" % ["PASS" if failures == 0 else "FAIL", checks, failures])
 	print("PHYSICAL VR UNVERIFIED: headset tracking, stereo rendering, controller feel and comfort still need a headset session.")
 	get_tree().quit(0 if failures == 0 else 1)
+
+## The board button (garage.gd _board_button): it plays a climb in or out (garage/boarding.gd); wait for the climb to
+## land him, as a player does, so the packaged build is checked climbing, not only seated.
+func _press_board(garage) -> void:
+	garage.walker.interact_requested.emit()
+	var until := Time.get_ticks_msec() + 15000
+	while garage.has_method("_climbing") and garage._climbing() and Time.get_ticks_msec() < until:
+		await get_tree().process_frame

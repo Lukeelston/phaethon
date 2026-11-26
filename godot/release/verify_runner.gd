@@ -83,7 +83,7 @@ func _garage_visit() -> bool:
 	var craft: String = garage.environment.bay_craft(at)
 	var alternate := "kiln" if at == "vesper" else "vesper"
 	garage.walker.global_transform = garage.environment.boarding_transform(alternate)
-	garage.walker.interact_requested.emit()
+	await _press_board(garage)
 	var bay: Node3D = garage.environment.bay_node(alternate)
 	var runup = bay.get_node_or_null("Runup")
 	if not check("alternate service bay boards with its own cold engines", runup != null and not runup.startup.batt and runup.startup.stage == ["off", "off"]):
@@ -94,7 +94,7 @@ func _garage_visit() -> bool:
 	check("occupied bay accepts battery power on the stands", runup.startup.batt and runup.startup.power > 0.0 and bay.global_transform.is_equal_approx(parked_at))
 	garage.walker.cockpit_control_requested.emit("power")
 	check("alternate bay powers back down", not runup.startup.batt and runup.startup.stage == ["off", "off"])
-	garage.walker.interact_requested.emit()
+	await _press_board(garage)
 	garage.walker.global_transform = garage.environment.boarding_transform(at)
 	garage.interact()
 	if not check("pilot boards the craft in the selected craft's bay", garage.seated_craft == craft and garage.walker.seated):
@@ -340,3 +340,11 @@ func _finish() -> void:
 		check("diagnostic removes only game settings it created", DirAccess.remove_absolute(ProjectSettings.globalize_path(Settings.PREFS)) == OK)
 	print("EXPORTED RELEASE %s (%d checks, %d failures)" % ["PASS" if failures == 0 else "FAIL", checks, failures])
 	get_tree().quit(0 if failures == 0 else 1)
+
+## The board button (garage.gd _board_button): it plays a climb in or out (garage/boarding.gd); wait for the climb to
+## land him, as a player does, so the packaged build is checked climbing, not only seated.
+func _press_board(garage) -> void:
+	garage.walker.interact_requested.emit()
+	var until := Time.get_ticks_msec() + 15000
+	while garage.has_method("_climbing") and garage._climbing() and Time.get_ticks_msec() < until:
+		await get_tree().process_frame
