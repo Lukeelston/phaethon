@@ -414,6 +414,7 @@ func _run() -> void:
 
 	# arrive at once: the next is called with the pilot already near its city
 	R.lull = Vector2(0.5, 0.5)
+	R.drones = Vector2i(0, 0)            # (this raid's end is its raiders all killed: no drones to clear as well; the next bring theirs)
 	R.reset()
 	var aside: bool = R.state == "" and T.race_state == "" and T.hostiles().is_empty()
 	var X := -1
@@ -448,6 +449,7 @@ func _run() -> void:
 	await _fly(v, STEP)
 	_check("every raider killed (%d of %d): \"%s\" (tally %s), the floor free (\"%s\"), no hostiles left (%d), the lull (\"%s\")" % [R.kills, raiders.size(), R.result, R.tally, T.race_state, T.hostiles().size(), R.state],
 		R.result == "cleared" and int(R.tally.cleared) == 1 and int(R.tally.lost) == 1 and R.kills == raiders.size() and T.race_state == "" and T.hostiles().is_empty() and R.state == "over")
+	R.drones = Vector2i(6, 10)
 	await _fly(v, 3.5)
 	var quiet: bool = R.state == "over"
 	var more: float = await _fly_until(v, "called", 3.0)

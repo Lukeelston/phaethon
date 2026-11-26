@@ -132,6 +132,7 @@ func _clear_one(id: String) -> void:
 	T.collide = false
 	T._hw_time = -1.0e9                   # (no street racer: it would hold traffic's floor)
 	R.first_after = 1.0
+	R.drones = Vector2i(0, 0)             # (the bot shoots raiders: a raid of raiders alone, which it clears; task 9 adds the flyers)
 	# the alarm: railed along E3 at speed
 	var t := 0.0
 	while R.state != "called" and t < 5.0:

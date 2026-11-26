@@ -3,9 +3,10 @@
 ## guns, view/weapons/fixed_guns_mount.gd on view/arms/<craft>_arms.gd, aimed by pointing the craft). Each frame:
 ##   1. the aim's ray: the mount's (the turret's is the gaze: down the middle of the pilot's view, the headset's
 ##      or the flat view's camera; fixed guns' is their bore, the craft's way)
-##   2. what it is on: the first vehicle it meets (view/network_traffic.gd ray_pick); else, for fixed guns when that
-##      is no raider, the assist's raider (_assist: the nearest of the raid's pack whose lead lies within the craft's
-##      assist cone of the bore, in sight); else the ground (the Network's land and the craft's own road; elsewhere the
+##   2. what it is on: the first vehicle or flyer it meets (view/network_traffic.gd ray_pick, and the raid's flyers'
+##      own, view/raid_flyers.gd: the nearer); else, for fixed guns when that is no hostile, the assist's (_assist: the
+##      nearest of the raid's threats, raiders and flyers, whose lead lies within the craft's assist cone of the bore,
+##      in sight); else the ground (the Network's land and the craft's own road; elsewhere the
 ##      course's surface), else the sky (fixed guns: their reach). The ground along the aim is searched again every
 ##      REMARCH_EVERY frames, or sooner when the aim has turned or moved (_aim_ground); a raider's line of sight is kept
 ##      LOS_S s, and one line at most is searched a frame
@@ -372,8 +373,9 @@ func _tell(what: String) -> void:
 	print("GUN: %s %s %s" % [PilotCraft.NAMES.get(id, id.capitalize()), PilotCraft.weapon_of(id).replace("_", " "), what])
 
 
-## What the aim is on: the first vehicle, else (fixed guns, when that is no raider) the assist's raider, else the
-## ground, else the sky (a turret's sight stands SKY out; fixed guns' bolts fly on to their reach).
+## What the aim is on: the first vehicle or flyer (the nearer of traffic's pick and the raid's flyers'), else (fixed
+## guns, when that is no hostile) the assist's threat, else the ground, else the sky (a turret's sight stands SKY out;
+## fixed guns' bolts fly on to their reach).
 func _find(o: Vector3, d: Vector3, delta: float) -> void:
 	var car_t := INF
 	var picked := {}
@@ -382,14 +384,24 @@ func _find(o: Vector3, d: Vector3, delta: float) -> void:
 		picked = traffic.ray_pick(o, d, reach)
 		if not picked.is_empty():
 			car_t = float(picked.t)
-		# A locked vehicle keeps the sight while the gaze stays inside the sight's ring of it, though
-		# another crosses in front: the tracker holds its target in its gate.
-		if _lock_car != null and (picked.is_empty() or picked.car != _lock_car) and traffic.cars.has(_lock_car):
-			var gate := maxf(2.0, aim_dist * tan(deg_to_rad(SIGHT_DEG) * 0.3))
-			var held: float = traffic.ray_car(_lock_car, o, d, gate)
-			if held >= 0.0 and held < reach:
-				picked = {"car": _lock_car, "t": held}
-				car_t = held
+	var flyers = _flyers()
+	if flyers != null and flyers.has_method("ray_pick"):
+		var up: Dictionary = flyers.ray_pick(o, d, reach)
+		if not up.is_empty() and float(up.t) < car_t:
+			picked = up
+			car_t = float(up.t)
+	# A locked target keeps the sight while the gaze stays inside the sight's ring of it, though another crosses in
+	# front: the tracker holds its target in its gate (a vehicle's capsule, or a flyer's sphere, fattened by it).
+	if _lock_car != null and (picked.is_empty() or picked.car != _lock_car) and alive(_lock_car):
+		var gate := maxf(2.0, aim_dist * tan(deg_to_rad(SIGHT_DEG) * 0.3))
+		var held := -1.0
+		if not _is_flyer(_lock_car):
+			held = traffic.ray_car(_lock_car, o, d, gate)
+		elif flyers.has_method("ray_flyer"):
+			held = flyers.ray_flyer(_lock_car, o, d, gate)
+		if held >= 0.0 and held < reach:
+			picked = {"car": _lock_car, "t": held}
+			car_t = held
 	var t0 := Time.get_ticks_usec()
 	var ground_t := _aim_ground(o, d)
 	march_ms = (Time.get_ticks_usec() - t0) / 1000.0
@@ -447,33 +459,35 @@ func _aim_ground(o: Vector3, d: Vector3) -> float:
 	return t
 
 
-## Fixed guns' assist (the search along the bore found no raider): the nearest raider of the raid's pack (the
-## director's: none with no raid) whose lead lies within the mount's assist_deg of the bore (o, d: sims' frame, d a
-## unit vector), within `reach`, the line to its lead clear of the ground (the ground search's march, for the nearest
-## ASSIST_LOOKS so placed). A raider's line is kept LOS_S s; at most one is searched a frame, the stalest of those
-## looked at first (one never searched is the stalest), and one left unsearched this frame is passed over. On it, the
-## aim is its middle and the bolts are laid on its lead (step). With none, the aim stays where the search left it.
+## Fixed guns' assist (the search along the bore found no hostile): the nearest of the raid's threats (the director's
+## threats(): its raiders and its flyers; none with no raid) whose lead lies within the mount's assist_deg of the bore
+## (o, d: sims' frame, d a unit vector), within `reach`, the line to its lead clear of the ground (the ground search's
+## march, for the nearest ASSIST_LOOKS so placed). A threat's line is kept LOS_S s; at most one is searched a frame, the
+## stalest of those looked at first (one never searched is the stalest), and one left unsearched this frame is passed
+## over. On it, the aim is its middle (a flyer's own height) and the bolts are laid on its lead (step). With none, the
+## aim stays where the search left it.
 func _assist(o: Vector3, d: Vector3) -> void:
 	var traffic = view.traffic_net
 	var raid = view.get("raids")
-	if traffic == null or raid == null or raid.pack.is_empty():
+	var hostile: Array = threats() if raid != null else []
+	if traffic == null or hostile.is_empty():
 		_los.clear()
 		return
 	var cone := deg_to_rad(mount.assist_deg())
 	var from := to_sim(mount.origin())
-	var placed := []          # [distance to its lead, the raider, its lead]
-	for c in raid.pack:
+	var placed := []          # [distance to its lead, the threat, its lead]
+	for c in hostile:
 		var dx: float = c.x - o.x
 		var dy: float = c.y - o.y
 		if dx * dx + dy * dy > (reach + 60.0) * (reach + 60.0):
 			continue
-		var lead := _lead_at(c, traffic.body_height(c), from)
+		var lead := _lead_at(c, _middle(c), from)
 		var line := lead - o
 		var dist := line.length()
 		if dist > 1.0 and dist <= reach and d.angle_to(line) <= cone:
 			placed.append([dist, c, lead])
 	for c in _los.keys():
-		if not raid.pack.has(c):
+		if not hostile.has(c):
 			_los.erase(c)
 	if placed.is_empty():
 		return
@@ -499,9 +513,14 @@ func _assist(o: Vector3, d: Vector3) -> void:
 		if known != null and bool(known[1]):
 			aim_car = c
 			aim_kind = "vehicle"
-			aim_sim = Vector3(c.x, c.y, traffic.body_height(c))
+			aim_sim = Vector3(c.x, c.y, _middle(c))
 			aim_dist = o.distance_to(aim_sim)
 			return
+
+
+## A threat's middle, sims' frame height: a flyer's own; a vehicle's body, halfway up it (traffic's body_height).
+func _middle(c) -> float:
+	return float(c.z) if _is_flyer(c) else view.traffic_net.body_height(c)
 
 
 ## The ground's height at (x, y), sims' frame: the craft's own road where it runs, and the land.
