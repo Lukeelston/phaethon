@@ -5,7 +5,8 @@
 ##                      GUNSHIP  m:ss"
 ##   flyers-dash        ... the instrument strip close (the eye's own place, a narrow lens): does the whole line fit?
 ##   flyers-map         ... the map's screen close: the raiders', the drones' and the gunship's marks, all the hostile red
-##   flyers-tactical    ... toward the nearest drone: its brackets standing on the road under it
+##   flyers-tactical    ... toward the nearest drone: its brackets standing on the road under it (the display's lines
+##                      logged: the raiders', the commuters' in her way, the flyers' (FLYER_LINES at most), the rest)
 ##   drones-dash, drones-map   every raider shot down (the world on two frames): "RAID  10 DRONES  GUNSHIP  m:ss", and
 ##                      the map's red marks the flyers' alone
 ## Needs a window: --xr-mode off --fixed-fps 120 -s res://tests/render_raid_flyers_display.gd -- --mute --out=ABSOLUTE_DIRECTORY
@@ -104,11 +105,20 @@ func _run() -> void:
 		_hold_speed(game)
 		game._process(DT)
 		frames += 1
+	var F = R.flyers
+	var t = game.tactical
+	var flyer_lines := []      # (each frame's: the flyers' lines on the tactical display)
 	for i in 420:      # (3.5 s on, into the town: flyers on the map and the tactical display, ahead and about)
 		_hold_speed(game)
 		game._process(DT)
-	var F = R.flyers
-	var t = game.tactical
+		t = game.tactical
+		var n := 0
+		if t:
+			for m in t.marks.values():
+				n += int(m.flyer != null and float(m.to) > 0.0)
+		flyer_lines.append(n)
+	var with_flyers := flyer_lines.filter(func(n): return n > 0).size()
+	print("FLYERS RENDER: the flyers' lines on the tactical display over the 420 frames into the town: %d to %d, in %d frames of 420" % [flyer_lines.min(), flyer_lines.max(), with_flyers])
 	print("FLYERS RENDER: on after %d frames: %d raiders, %d drones, gunship %s; dash \"%s\" (%d characters); tactical %d lines" % [frames, R.pack.size(), F.count("drone"),
 		F.gunship() != null, game._net_text(), game._net_text().length(), t.line_count if t else -1])
 	_look_seat(game, cam)
@@ -119,18 +129,28 @@ func _run() -> void:
 	_look_at(game, cam, (game.minimap_panel as Node3D).global_position)
 	await _snap(game, "flyers-map", 24)
 	_marks(game, "flyers-map")
-	var nearest = null
+	var nearest = null      # (the nearest flyer marked on the tactical display; with none, the nearest drone ahead of her)
+	var ahead = null
+	var fwd := Vector2(sim.pod.vx, sim.pod.vy).normalized()
 	for f in F.all():
-		if f.kind == "drone" and t and t.marks.has(f.id) and (nearest == null or Vector2(f.x - sim.pod.x, f.y - sim.pod.y).length() < Vector2(nearest.x - sim.pod.x, nearest.y - sim.pod.y).length()):
+		var d := Vector2(f.x - sim.pod.x, f.y - sim.pod.y)
+		if t and t.marks.has(f.id) and float(t.marks[f.id].to) > 0.0 and (nearest == null or d.length() < Vector2(nearest.x - sim.pod.x, nearest.y - sim.pod.y).length()):
 			nearest = f
+		if f.kind == "drone" and d.dot(fwd) > 300.0 and (ahead == null or d.length() < Vector2(ahead.x - sim.pod.x, ahead.y - sim.pod.y).length()):
+			ahead = f
+	_lines(game)
 	if nearest:
 		var m = t.marks[nearest.id]
-		print("FLYERS RENDER: the nearest marked drone %.0f m off, %.0f m up; its mark stands at %.0f m (the road there), %.2f s off, its strength %.2f" % [
-			Vector2(nearest.x - sim.pod.x, nearest.y - sim.pod.y).length(), nearest.z, m.deck, m.seconds, m.a])
+		print("FLYERS RENDER: the nearest marked flyer, the %s %.0f m off, %.0f m up; its mark stands at %.0f m (the road there), %.2f s off, its strength %.2f" % [
+			nearest.kind, Vector2(nearest.x - sim.pod.x, nearest.y - sim.pod.y).length(), nearest.z, m.deck, m.seconds, m.a])
 		_look_at(game, cam, Vector3(nearest.x - game.org_x, m.deck + 40.0, -(nearest.y - game.org_y)))
-		await _snap(game, "flyers-tactical", 30)
+	elif ahead:
+		print("FLYERS RENDER: no flyer marked on the tactical display; looking at the nearest drone ahead, %.0f m off, %.0f m up" % [
+			Vector2(ahead.x - sim.pod.x, ahead.y - sim.pod.y).length(), ahead.z])
+		_look_at(game, cam, Vector3(ahead.x - game.org_x, float(sim.pod.z) + 40.0, -(ahead.y - game.org_y)))
 	else:
-		print("FLYERS RENDER: no drone marked on the tactical display")
+		_look_seat(game, cam)
+	await _snap(game, "flyers-tactical", 30)
 	# every raider shot down: the dash and the map the flyers' alone
 	var T = game.traffic_net
 	for c in R.pack.duplicate():
@@ -150,6 +170,29 @@ func _run() -> void:
 	game.free()
 	await process_frame
 	quit()
+
+
+## The tactical display's lines now (marks drawn and not going): the raiders', the flyers' (the gunship's, the drones'
+## and how far on), the commuters' in her way and the rest.
+func _lines(game) -> void:
+	var t = game.tactical
+	var raiders := 0
+	var in_way := 0
+	var rest := 0
+	var flyers := []
+	for m in t.marks.values():
+		if float(m.to) <= 0.0:
+			continue
+		if m.flyer != null:
+			flyers.append("%s %.1f km" % [m.flyer.kind, float(m.along) / 1000.0])
+		elif m.hostile:
+			raiders += 1
+		elif m.way:
+			in_way += 1
+		else:
+			rest += 1
+	print("FLYERS RENDER tactical: %d lines drawn: %d raiders, %d flyers %s, %d commuters in her way, %d others; %d flyers up" % [t.line_count, raiders, flyers.size(), flyers, in_way, rest,
+		game.raids.flyers.all().size()])
 
 
 ## What the map's frame marks: its hostile dots (the raiders', the drones', the gunship's) and the rest.

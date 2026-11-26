@@ -43,6 +43,12 @@
 ##                  closes), is picked as a raider is (hostile, seconds INF); none off her road, behind her or past the
 ##                  reach; through the display's frame its mark is brackets in the hostile red, standing at its x, y on
 ##                  the road (its height not drawn)
+##   full raid      check_tactical_full_raid (fix round 1, Ruling Q): six raiders, ten drones and the gunship in reach and
+##                  a commuter in her way: every raider marked, the commuter keeps its line, the flyers hold FLYER_LINES
+##                  (4) lines, the gunship and the nearest drones; a drone not 500 m nearer (FLYER_KEEP) than one holding a
+##                  line does not take it, one that is does (the farthest held drone's goes); every line taken, a late
+##                  raider takes a commuter's off her way first, then the farthest drone's, never the gunship's nor the
+##                  commuter's in her way; and a commuter coming into her way then takes the farthest drone's line
 ## --headless --xr-mode off --audio-driver Dummy -s res://tests/test_raid_display.gd -- --mute
 ## Prints RAID DISPLAY PASS.
 extends SceneTree
@@ -406,6 +412,114 @@ func check_tactical_lists_flyers(v, t, road: int, here: float, speed: float) -> 
 	T.cars.append_array(cars_were)
 
 
+## The display's lines live now (marks drawn and not going): of `ids`, those with one.
+func _held(t, ids: Array) -> Array:
+	return ids.filter(func(id): return t.marks.has(id) and float(t.marks[id].to) > 0.0)
+
+
+func _settle_lines(v, t) -> void:
+	for k in 80:
+		t.sync(1.0 / 120.0, v._rush_flow, true)
+
+
+## A full raid on the tactical display (Ruling Q): raiders first, never left out; then the commuters in her way (no flyer
+## takes such a line); then the flyers, the gunship and the nearest drones, FLYER_LINES in all; then the rest.
+func check_tactical_full_raid(v, t, road: int, here: float) -> void:
+	var F = v.raids.flyers
+	var T = v.traffic_net
+	var sim = v.sim
+	var cars_were: Array = T.cars.duplicate()
+	T.cars.clear()
+	F.clear()
+	_settle_lines(v, t)      # (the last check's lines gone)
+	var cap := int((Tactical as Script).get_script_constant_map().get("FLYER_LINES", 4))
+	var keep := float((Tactical as Script).get_script_constant_map().get("FLYER_KEEP", 500.0))
+	# six raiders 2.5 to 15 km on (off her way), ten drones 3 to 21 km on over her road, the gunship 20 km on, and a
+	# commuter in her way 4 km on, reached in 3.6 s
+	var raiders := []
+	for k in 6:
+		raiders.append(_car(sim, 970100 + k, road, here + (2500.0 + 2500.0 * k) / 24.0, 1, -67.5, 4400.0, true))
+	var drones := []
+	for k in 10:
+		var p := _road_at(sim, road, here + (3000.0 + 2000.0 * k) / 24.0, -150.0 + 30.0 * k)
+		drones.append(_flyer(F, "drone", p.x, p.y, p.z + 100.0))
+	var gp := _road_at(sim, road, here + 20000.0 / 24.0, 0.0)
+	var gunship = _flyer(F, "gunship", gp.x, gp.y, gp.z + 200.0)
+	var in_way := _car(sim, 970200, road, here + 4000.0 / 24.0, 1, 22.5, 2500.0)
+	T.cars.append_array(raiders)
+	T.cars.append(in_way)
+	_settle_lines(v, t)
+	var raider_ids: Array = raiders.map(func(c): return c.id)
+	var drone_ids: Array = drones.map(func(f): return f.id)
+	var flyer_ids: Array = drone_ids + [gunship.id]
+	var r_held := _held(t, raider_ids)
+	var f_held := _held(t, flyer_ids)
+	var c_mark = t.marks.get(in_way.id)
+	var c_ok: bool = c_mark != null and float(c_mark.to) > 0.0 and bool(c_mark.way) and not bool(c_mark.hostile) and (c_mark.tint as Color).is_equal_approx(Tactical.soon_tint(float(c_mark.seconds)))
+	_check("a full raid, six raiders and eleven flyers in reach, a commuter in her way %.1f s off: every raider marked (%d of 6), the commuter keeps its line (%s); the flyers hold %d lines (want %d): the gunship (%s) and the nearest drones (%s, want %s); %d lines in all" % [
+			float(c_mark.seconds) if c_mark != null else -1.0, r_held.size(), c_ok, f_held.size(), cap, f_held.has(gunship.id), f_held.filter(func(id): return id != gunship.id), drone_ids.slice(0, cap - 1), t.line_count],
+		r_held.size() == 6 and c_ok and cap == 4 and f_held.size() == cap and f_held.has(gunship.id) and _held(t, drone_ids.slice(0, cap - 1)).size() == cap - 1
+		and t.line_count == 6 + 1 + cap)
+	# a drone coming nearer: a little (300 m nearer than the farthest held, under FLYER_KEEP) takes nothing; well nearer
+	# (1.5 km) takes the farthest held drone's line
+	var d2 = drones[2]
+	var d3 = drones[3]
+	var at3 := Vector2(d3.x, d3.y)
+	var p := _road_at(sim, road, here + 6700.0 / 24.0, 0.0)
+	d3.x = p.x
+	d3.y = p.y
+	_settle_lines(v, t)
+	var steady: bool = _held(t, [d2.id]).size() == 1 and _held(t, [d3.id]).is_empty() and _held(t, flyer_ids).size() == cap
+	p = _road_at(sim, road, here + 5500.0 / 24.0, 0.0)
+	d3.x = p.x
+	d3.y = p.y
+	_settle_lines(v, t)
+	var swapped: bool = _held(t, [d3.id]).size() == 1 and _held(t, [d2.id]).is_empty() and _held(t, flyer_ids).size() == cap and _held(t, [gunship.id]).size() == 1
+	d3.x = at3.x
+	d3.y = at3.y
+	_settle_lines(v, t)
+	var back: bool = _held(t, [d2.id]).size() == 1 and _held(t, [d3.id]).is_empty()
+	_check("a drone 300 m nearer than the farthest held one (under FLYER_KEEP, %.0f m) takes no line (%s); 1.5 km nearer, it takes the farthest held drone's (%s); back where it was, that drone has its line again (%s)" % [keep, steady, swapped, back],
+		steady and swapped and back)
+	# every line taken (a commuter off her way 6 km on takes the last), and raiders come into reach late
+	var off_way := _car(sim, 970201, road, here + 6000.0 / 24.0, 1, -112.5, 2500.0)
+	T.cars.append(off_way)
+	_settle_lines(v, t)
+	var full: int = t.line_count
+	var had_off: bool = _held(t, [off_way.id]).size() == 1
+	var late := _car(sim, 970106, road, here + 17500.0 / 24.0, 1, -67.5, 4400.0, true)
+	T.cars.append(late)
+	_settle_lines(v, t)
+	var late_marked: bool = _held(t, [late.id]).size() == 1
+	var off_gone: bool = not t.marks.has(off_way.id)
+	var flyers_after_one: int = _held(t, flyer_ids).size()
+	var later := _car(sim, 970107, road, here + 18000.0 / 24.0, 1, -67.5, 4400.0, true)
+	T.cars.append(later)
+	_settle_lines(v, t)
+	var later_marked: bool = _held(t, [later.id]).size() == 1
+	var f_after := _held(t, flyer_ids)
+	var in_way_kept: bool = _held(t, [in_way.id]).size() == 1
+	_check("every line taken (%d, the commuter off her way's among them: %s): a raider coming into reach takes that commuter's line (marked %s, the commuter's gone %s, the flyers' %d kept); another takes the farthest held drone's (marked %s; the flyers' now %s: the gunship's kept %s, drone %d's gone %s); the commuter in her way keeps its line throughout (%s); every raider marked (%d of 8)" % [
+			full, had_off, late_marked, off_gone, flyers_after_one, later_marked, f_after, f_after.has(gunship.id), d2.id, not f_after.has(d2.id), in_way_kept, _held(t, raider_ids + [late.id, later.id]).size()],
+		full == Tactical.MAX_LINES and had_off and late_marked and off_gone and flyers_after_one == cap and later_marked and f_after.size() == cap - 1
+		and f_after.has(gunship.id) and not f_after.has(d2.id) and in_way_kept and _held(t, raider_ids + [late.id, later.id]).size() == 8)
+	# every line still taken, a second commuter comes into her way (the next lane, 3 km on): it takes the farthest held
+	# drone's line, not a raider's nor the first commuter's
+	var second := _car(sim, 970202, road, here + 3000.0 / 24.0, 1, -22.5, 2500.0)
+	T.cars.append(second)
+	_settle_lines(v, t)
+	var f_last := _held(t, flyer_ids)
+	_check("every line taken, a second commuter in her way (%s s off) takes the farthest held drone's line (marked %s; the flyers' now %s: the gunship's kept %s, drone %d's gone %s); the first keeps its line (%s), every raider its mark (%d of 8); %d lines" % [
+			t.marks[second.id].seconds if t.marks.has(second.id) else "-", _held(t, [second.id]).size() == 1, f_last, f_last.has(gunship.id), drones[1].id, not f_last.has(drones[1].id),
+			_held(t, [in_way.id]).size() == 1, _held(t, raider_ids + [late.id, later.id]).size(), t.line_count],
+		_held(t, [second.id]).size() == 1 and bool(t.marks[second.id].way) and f_last.size() == cap - 2 and f_last.has(gunship.id) and not f_last.has(drones[1].id)
+		and _held(t, [in_way.id]).size() == 1 and _held(t, raider_ids + [late.id, later.id]).size() == 8 and t.line_count == Tactical.MAX_LINES)
+	T.cars.clear()
+	F.clear()
+	_settle_lines(v, t)
+	T.cars.append_array(cars_were)
+
+
 func _run() -> void:
 	var prefs_before := FileAccess.get_file_as_string(Cockpit.PREFS) if FileAccess.file_exists(Cockpit.PREFS) else ""
 	Tactical.wanted = false
@@ -729,6 +843,7 @@ func _run() -> void:
 		full_before == Tactical.MAX_LINES and t.marks.has(960) and late_shape == 2 and not t.marks.has(951) and t.marks.size() == Tactical.MAX_LINES and t.line_count == Tactical.MAX_LINES)
 	T.cars.clear()
 	check_tactical_lists_flyers(v, t, e1, here, speed)
+	check_tactical_full_raid(v, t, e1, here)
 	T.cars.clear()
 	Tactical.wanted = false
 	t = Tactical.frame(v, t, 1.0 / 120.0, v._rush_flow, true)

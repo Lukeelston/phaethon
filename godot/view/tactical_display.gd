@@ -27,9 +27,15 @@
 ##                    brackets round it (HOSTILE_BOX), the stem standing over them, in the hostile red whatever its
 ##                    seconds, and it is never the one left out. By its shape, not its red, it is not a commuter he
 ##                    is about to hit (whose line is a red as near as makes no odds). A raid's flyers (its drones and
-##                    the gunship) are listed with the raiders, marked as they are, whatever their closing time: one
-##                    over her road (within FLYER_SIDE of its edge) in the rails' reach, its mark standing on the road
-##                    at its x, y (its height is not drawn).
+##                    the gunship) are marked as the raiders are, whatever their closing time: one over her road
+##                    (within FLYER_SIDE of its edge) in the rails' reach, its mark standing on the road at its x, y
+##                    (its height is not drawn). The lines go, in order (Ruling Q): to the raiders, never left out; to
+##                    the commuters in her way, whose lines no flyer takes; to the flyers, the gunship and then the
+##                    nearest drones, FLYER_LINES of them at most (a drone holding a line keeps it unless another is
+##                    FLYER_KEEP nearer: none flickers between two); to the rest. Every line taken, a raider coming into
+##                    reach takes a commuter's off her way, then the farthest drone's, then (only then) one in her way;
+##                    with flyers up, a commuter in her way takes one off her way, then the farthest drone's; a flyer
+##                    only one off her way. (No flyer up, the commuters' lines are as they were.)
 ##   the exits        over an exit's lane, a row of upright chevrons pointing the way the lane leaves, a wave of
 ##                    light running along them into the ramp, and a gate standing across the lane at its mouth,
 ##                    the row's end. Begun seven seconds before the mouth (never less than 8 km, where the lane's
@@ -161,6 +167,10 @@ const SIDE_LINE := Vector2(0.6, 0.5)        # a vehicle not in her way: its line
 const SOON := Vector3(5.0, 2.5, 1.2)        # s to reach it: calm from the first, amber at the second, red by the third
 const NEAR_REACH := 2500.0                  # m: a vehicle on another road is looked at inside this (a ramp running into hers)
 const FLYER_SIDE := 250.0                   # m: a raid's flyer this far beyond her road's edge is still over it (a drone circles up to 220 m round a point of the road's middle)
+const FLYER_LINES := 4                      # the most lines the raid's flyers hold: the gunship's and the nearest drones'
+const FLYER_KEEP := 500.0                   # m: a drone holding a line keeps it unless another is this much nearer (more than a group's circle across, 440 m)
+const RANKS := [1, 3]                       # the lines' order with no raid: the vehicles in her way, then the rest ...
+const RANKS_RAID := [0, 1, 2, 3]            # ... and in one: the raiders, those in her way, the flyers, the rest
 const ALONG := 0.8                          # ... and counts if it is going along her road (the cosine: within 37 degrees) ...
 const SAME_DECK := 12.0                     # ... on her road's own level, to this many metres (not on a road crossing overhead)
 
@@ -276,7 +286,8 @@ class Mark:
 	var id := 0
 	var car: Traffic.Car     # the vehicle it marks (null for a flyer's)
 	var flyer = null         # ... or a raid's flyer (Raids: view/raid_flyers.gd), standing at its x, y on her road ...
-	var deck := 0.0          # ... whose height there this is, as the last pass found it (the flyer's own is not drawn)
+	var deck := 0.0          # ... whose height there this is, as the last pass found it (the flyer's own is not drawn) ...
+	var along := 0.0         # ... and how far ahead of her it is (the farthest drone's line goes first)
 	var a := 0.0             # its strength now, 0..1 ...
 	var to := 1.0            # ... and where that is going
 	var seconds := 0.0       # till she reaches it, as the last pass through the traffic found
@@ -1166,17 +1177,57 @@ func _pick_into(out: Array, cars: Array, first: int, last: int, speed: float) ->
 		out.append({"car": c, "along": along, "left": left - pod_left, "seconds": seconds, "way": absf(left - pod_left) <= CORRIDOR})
 
 
-## Every line taken and a raider without one: the lowest-ranked commuter's line goes at once (one off her way before one
-## in it; of those, the furthest off in time).
-func _make_room() -> void:
+## Every line taken and one that outranks a line held without one: the lowest-ranked line it may take goes at once, of
+## those up to `upto` (_room_rank: 1 a commuter off her way, 2 a raid's flyer, 3 a commuter in her way; a raider's
+## never); of the lowest, the furthest off (a commuter in time, a flyer along the road, the gunship's last). A raider may
+## take any of them (3); with flyers up, a commuter in her way one off her way or a flyer's (2); a flyer only one off
+## her way (1).
+func _make_room(upto: int) -> void:
 	var worst: Mark = null
+	var worst_rank := 0
 	for m: Mark in marks.values():
-		if m.hostile:
+		var r := _room_rank(m)
+		if r > upto or (worst != null and r > worst_rank):
 			continue
-		if worst == null or (worst.way and not m.way) or (worst.way == m.way and m.seconds > worst.seconds):
+		if worst == null or r < worst_rank or _further(m, worst):
 			worst = m
+			worst_rank = r
 	if worst != null:
 		marks.erase(worst.id)
+
+
+## A line's rank when room is made: 1 a commuter off her way, 2 a raid's flyer, 3 a commuter in her way, 9 a raider.
+static func _room_rank(m: Mark) -> int:
+	if m.flyer != null:
+		return 2
+	if m.hostile:
+		return 9
+	return 3 if m.way else 1
+
+
+## Of two lines of one rank, is a's the further off (the one to go): a commuter by its seconds, a flyer by the road (the
+## gunship's never before a drone's)?
+static func _further(a: Mark, b: Mark) -> bool:
+	if a.flyer != null:
+		if String(a.flyer.kind) == "gunship":
+			return false
+		return String(b.flyer.kind) == "gunship" or a.along > b.along
+	return a.seconds > b.seconds
+
+
+## Of a pass's finds, the raid's flyers that hold lines: the gunship, then the nearest drones, FLYER_LINES in all, each
+## told so ("listed"). A drone holding a line counts FLYER_KEEP nearer than it is, so another takes its line only if
+## that much nearer: none flickers between two.
+func _choose_flyers(found: Array) -> void:
+	var fl: Array = []
+	for f in found:
+		if f.has("flyer"):
+			var held: Mark = marks.get(f.car.id)
+			var near: float = -INF if String(f.car.kind) == "gunship" else float(f.along) - (FLYER_KEEP if held != null and held.to > 0.0 else 0.0)
+			fl.append([near, f])
+	fl.sort_custom(func(a, b): return a[0] < b[0])
+	for k in mini(FLYER_LINES, fl.size()):
+		fl[k][1]["listed"] = true
 
 
 func _lines_frame(dt: float, speed: float, shown: bool, strength: float) -> void:
@@ -1201,8 +1252,11 @@ func _lines_frame(dt: float, speed: float, shown: bool, strength: float) -> void
 	_scan_at = upto
 	if pass_done:      # a pass is done: what it found is what there is
 		var raiding: bool = traffic.raids != null      # (raids off: as it was)
+		var flying := false                            # (a raid's flyers up)
 		if raiding and traffic.raids.flyers != null and not traffic.raids.flyers.all().is_empty():
-			_pick_flyers(found, traffic.raids.flyers.all(), speed)      # (the raid's flyers, where they are now: listed with its raiders)
+			_pick_flyers(found, traffic.raids.flyers.all(), speed)      # (the raid's flyers, where they are now ...)
+			_choose_flyers(found)                                       # (... and those of them that hold lines)
+			flying = true
 		var crowd := found.size()
 		if raiding:      # raiders are not the busy road thinning is for: a raid must not strip the lines off the commuters out of her way
 			for f in found:
@@ -1213,17 +1267,24 @@ func _lines_frame(dt: float, speed: float, shown: bool, strength: float) -> void
 			thinned = false
 		for old: Mark in marks.values():
 			old.to = 0.0
-		# raiders first (Raids: never the ones left out, nor thinned), then those in her way (nor they), then the rest
-		for rank in range(0 if raiding else 1, 3):
+		# raiders first (Raids: never the ones left out, nor thinned), then those in her way (nor they), then the raid's
+		# flyers that hold lines (nor they: FLYER_LINES at most), then the rest
+		for rank: int in (RANKS_RAID if raiding else RANKS):
 			for f in found:
 				var hostile: bool = raiding and bool(f.get("hostile", false))
-				if (0 if hostile else (1 if bool(f.way) else 2)) != rank:
+				var flyer: bool = hostile and f.has("flyer")
+				if ((2 if flyer else 0) if hostile else (1 if bool(f.way) else 3)) != rank or (flyer and not f.has("listed")):
 					continue
-				var pass_way := rank < 2
+				var pass_way := rank < 3
 				var id: int = f.car.id
 				var mark: Mark = marks.get(id)
-				if mark == null and hostile and marks.size() >= MAX_LINES:
-					_make_room()      # (every line taken: a raider is never the one left out)
+				if mark == null and marks.size() >= MAX_LINES:      # (every line taken)
+					if rank == 0:
+						_make_room(3)      # (a raider is never the one left out)
+					elif rank == 1 and flying:
+						_make_room(2)      # (nor, with flyers up, a commuter in her way for a flyer's sake)
+					elif rank == 2:
+						_make_room(1)      # (a flyer takes only a line off her way)
 				if mark != null:
 					mark.to = 0.0 if (thinned and not pass_way) else 1.0
 				elif marks.size() < MAX_LINES and (pass_way or (not thinned and float(f.seconds) >= BEGIN_T)):
@@ -1240,6 +1301,7 @@ func _lines_frame(dt: float, speed: float, shown: bool, strength: float) -> void
 					mark.hostile = hostile
 					if hostile and mark.flyer != null:
 						mark.deck = float(f.deck)
+						mark.along = float(f.along)
 					mark.tint = Traffic.HOSTILE_COL if hostile else (soon_tint(mark.seconds) if pass_way else CALM)
 	var mm := lines.multimesh
 	var k := 0
