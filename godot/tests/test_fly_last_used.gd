@@ -99,6 +99,8 @@ func _seed_vr_prefs(prefs: Dictionary) -> void:
 func _board(garage: Node, craft: String) -> bool:
 	garage.walker.set_seated(false, garage.environment.boarding_transform(craft))
 	garage.walker.interact_requested.emit()
+	if garage._climbing():      # (the climb in plays: pressed again, it finishes at once)
+		garage.walker.interact_requested.emit()
 	return check(garage.walker.seated and garage.seated_craft == craft, "The pilot boards the %s (%s)" % [craft, garage.seated_craft])
 
 

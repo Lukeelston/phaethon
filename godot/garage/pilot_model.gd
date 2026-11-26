@@ -31,6 +31,8 @@ var _tracked := false
 var _moving := false
 var _distance := 0.0
 var _grip_targets := PackedVector3Array()
+var _free := false      # posed by pose_free() (a climb in or out: garage/boarding.gd); the stock poses wait till release_free()
+var _hips: Array[Vector3] = []
 
 
 func _init() -> void:
@@ -41,6 +43,7 @@ func _init() -> void:
 	_head = _torso.get_node("Head")
 	for side in ["L","R"]:
 		var thigh: Node3D = _pelvis.get_node("Thigh"+side)
+		_hips.append(thigh.position)
 		var shin: Node3D = thigh.get_node("Shin"+side)
 		var arm: Node3D = _torso.get_node("Arm"+side)
 		var forearm: Node3D = arm.get_node("Forearm"+side)
@@ -84,8 +87,130 @@ func set_stride(distance: float, moving: bool) -> void:
 		return
 	_distance = distance
 	_moving = moving
-	if not _seated:
+	if not _seated and not _free:
 		_pose()
+
+
+## A free pose (garage/boarding.gd: climbing in or out), pilot-local, every value given:
+##   pelvis, pelvis_basis           the Pelvis joint and its turn
+##   torso_at, torso_basis          the Torso joint (pelvis-local) and its turn, with its stretch along Y in it
+##   head_basis                     the head's turn (pilot-local: as the eye looks)
+##   ankles, feet, knees            [left, right]: each ankle's point, each boot's turn (pilot-local), each knee's hint
+##                                  (a direction: the knee bends toward it)
+##   grips, elbows                  [left, right]: each glove's grip point and each elbow's hint (a direction)
+## A limb asked past its reach is laid straight toward its target. The stock poses (set_seated, set_stride,
+## set_grip_targets) do nothing until release_free().
+func pose_free(p: Dictionary) -> void:
+	_free = true
+	_grip_targets.clear()
+	_pelvis.position = p.pelvis
+	_pelvis.basis = p.pelvis_basis
+	_torso.position = p.torso_at
+	_torso.basis = p.torso_basis
+	var body: Basis = _pelvis.basis * _torso.basis
+	_head.basis = body.inverse() * p.head_basis
+	for i in 2:
+		_leg(i, p.ankles[i], p.knees[i], p.feet[i])
+		_arm(i, p.grips[i], p.elbows[i])
+
+
+## Back to the stock poses: seated or standing as set_seated last said.
+func release_free() -> void:
+	if not _free:
+		return
+	_free = false
+	_pose()
+
+
+func is_free() -> bool:
+	return _free
+
+
+## The pose as it stands, in pose_free's terms (pilot-local), with each knee's and elbow's hint taken from where it is:
+## pose_free(snapshot()) puts every joint back where it was. Also "eye" (the helmet's eye) and "hips", "shoulders".
+func snapshot() -> Dictionary:
+	var me := global_transform.affine_inverse()
+	var shot := {"pelvis": _pelvis.position, "pelvis_basis": _pelvis.basis, "torso_at": _torso.position, "torso_basis": _torso.basis,
+			"head_basis": (me * _head.global_transform).basis.orthonormalized(), "eye": me * _head.global_transform * HELMET_EYE,
+			"ankles": [], "feet": [], "knees": [], "grips": [], "elbows": [], "hips": [], "shoulders": []}
+	for i in 2:
+		var hip: Vector3 = (me * _thighs[i].global_transform).origin
+		var knee: Vector3 = (me * _shins[i].global_transform).origin
+		var boot: Transform3D = me * _boots[i].global_transform
+		var shoulder: Vector3 = (me * _arms[i].global_transform).origin
+		var forearm: Transform3D = me * _forearms[i].global_transform
+		var grip: Vector3 = forearm * Vector3(0, -_lower_arm(), 0)
+		shot.ankles.append(boot.origin)
+		shot.feet.append(boot.basis.orthonormalized())
+		shot.knees.append(knee - (hip + boot.origin) * .5)
+		shot.grips.append(grip)
+		shot.elbows.append(forearm.origin - (shoulder + grip) * .5)
+		shot.hips.append(hip)
+		shot.shoulders.append(shoulder)
+	return shot
+
+
+## The helmet's eye where the pose has put it, pilot-local.
+func eye_point() -> Vector3:
+	return global_transform.affine_inverse() * _head.global_transform * HELMET_EYE
+
+
+func head_node() -> Node3D:
+	return _head
+
+
+func _lower_arm() -> float:
+	return .247 + .081
+
+
+## Two-bone leg to an ankle point, bending toward `pole`; the boot turned to `foot` (pilot-local).
+func _leg(i: int, ankle: Vector3, pole: Vector3, foot: Basis) -> void:
+	var hip := _pelvis.position + _pelvis.basis * _hips[i]
+	var to := ankle - hip
+	var reach := clampf(to.length(), .02, THIGH + SHIN - .0005)
+	var dir := to.normalized() if to.length() > .0001 else Vector3.DOWN
+	var bend := pole - dir * dir.dot(pole)
+	bend = bend.normalized() if bend.length() > .0001 else Vector3.FORWARD
+	var along := (reach * reach + THIGH * THIGH - SHIN * SHIN) / (2.0 * reach)
+	var knee := hip + dir * along + bend * sqrt(maxf(0.0, THIGH * THIGH - along * along))
+	var foot_at := hip + dir * reach
+	var axis := dir.cross(bend).normalized()
+	var thigh := _bone(axis, (knee - hip).normalized())
+	var shin := _bone(axis, (foot_at - knee).normalized())
+	_thighs[i].basis = _pelvis.basis.inverse() * thigh
+	_shins[i].basis = thigh.inverse() * shin
+	_boots[i].basis = shin.inverse() * foot
+
+
+## A bone's turn: its length runs down its -Y, its hinge is X.
+static func _bone(axis: Vector3, along: Vector3) -> Basis:
+	var up := -along
+	var x := (axis - up * up.dot(axis)).normalized()
+	return Basis(x, up, x.cross(up))
+
+
+## Two-bone arm to a grip point, the elbow toward `pole`; the shoulder rolls forward for the last few centimetres
+## (as _reach_grip does seated).
+func _arm(i: int, grip: Vector3, pole: Vector3) -> void:
+	var body := _pelvis.basis * _torso.basis
+	var shoulder := _pelvis.position + _pelvis.basis * (_torso.position + _torso.basis * _shoulders[i])
+	var offset := grip - shoulder
+	var axis := offset.normalized() if offset.length() > .0001 else Vector3.DOWN
+	var upper_length := .286
+	var lower_length := _lower_arm()
+	var protraction := clampf(offset.length() - upper_length - lower_length + .006, 0.0, .075)
+	_arms[i].position = _shoulders[i] + body.inverse() * (axis * protraction)
+	shoulder += axis * protraction
+	offset = grip - shoulder
+	var distance := clampf(offset.length(), absf(lower_length - upper_length) + .001, lower_length + upper_length - .001)
+	var bend := pole - axis * axis.dot(pole)
+	bend = bend.normalized() if bend.length() > .0001 else Vector3.DOWN
+	var along := (distance * distance + upper_length ** 2 - lower_length ** 2) / (2.0 * distance)
+	var elbow := shoulder + axis * along + bend * sqrt(maxf(0.0, upper_length ** 2 - along ** 2))
+	var upper := Basis(Quaternion(Vector3.DOWN, (elbow - shoulder).normalized()))
+	var lower := Basis(Quaternion(Vector3.DOWN, (shoulder + axis * distance - elbow).normalized()))
+	_arms[i].basis = body.inverse() * upper
+	_forearms[i].basis = upper.inverse() * lower
 
 
 func planted_sole(side: int) -> Vector3:
@@ -117,7 +242,7 @@ func _update_arms() -> void:
 
 ## Desktop gloves follow the moving grips. XR gloves remain on the two tracked controllers.
 func set_grip_targets(left_world: Vector3, right_world: Vector3) -> void:
-	if not _seated or _tracked:
+	if not _seated or _tracked or _free:
 		return
 	var left := to_local(left_world)
 	var right := to_local(right_world)
@@ -151,6 +276,8 @@ func make_glove(side: String) -> Node3D:
 ## Fit a tucked racing posture to the measured pan and throttle heads. The helmet,
 ## arms and legs keep their standing dimensions as the waist folds into the bucket.
 func _seat_pose() -> void:
+	if _free:
+		return
 	_seat_spine()
 	for i in 2:
 		var side := -1.0 if i == 0 else 1.0
@@ -202,6 +329,8 @@ func _reach_grip(i: int, grip: Vector3) -> void:
 
 
 func _pose() -> void:
+	if _free:
+		return
 	if _seated:
 		_seat_pose()
 		return

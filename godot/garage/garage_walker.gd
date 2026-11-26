@@ -28,6 +28,7 @@ var xr_live := false
 var seated := false
 var third_person := false
 var using_gamepad := false
+var scripted := false       # a climb in or out is playing (garage/boarding.gd): no walking, looking or cockpit controls
 var camera: Camera3D
 var hands := {}
 
@@ -190,6 +191,34 @@ func eye_transform() -> Transform3D:
 	return camera.get_camera_transform()
 
 
+## Hold the walker while a climb plays (garage/boarding.gd): it walks, looks and works no controls; the headset's
+## gloves go and the pilot's own arms show (the climb puts his hands on the craft); its capsule stands aside.
+func begin_scripted() -> void:
+	scripted = true
+	velocity = Vector3.ZERO
+	_controls.reset()
+	_shape.disabled = true
+	for glove: Node3D in _gloves.values():
+		glove.hide()
+	if _avatar:
+		_tracking_hands = false
+		_avatar.set_tracked_hands(false)
+
+
+## Let go again (set_seated has already put the walker where the climb ended).
+func end_scripted() -> void:
+	scripted = false
+	_shape.disabled = seated
+	_controls.reset()
+	if not xr_live:
+		camera.make_current()
+
+
+## Move the headset's view by `by` (world): the climb carries the player's eye along the pilot's.
+func nudge_view(by: Vector3) -> void:
+	_origin.global_position += by
+
+
 func cockpit_input() -> Dictionary:
 	return _controls.axes.duplicate()
 
@@ -267,6 +296,8 @@ func _inspect(on: bool) -> void:
 
 
 func _look(yaw: float, pitch: float) -> void:
+	if scripted:
+		return
 	if third_person:
 		_boom.rotation.y += yaw
 		_boom.rotation.x = clampf(_boom.rotation.x + pitch,-1.08,.38)
@@ -316,7 +347,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		KEY_E: interact_requested.emit()
 		KEY_F: launch_requested.emit()
 		KEY_ESCAPE: back_requested.emit()
-		KEY_V: _inspect(not third_person)
+		KEY_V:
+			if not scripted: _inspect(not third_person)
 		KEY_I, KEY_P:
 			if xr_live: return
 			if seated:
@@ -372,6 +404,8 @@ func _desktop_input(delta: float) -> Vector2:
 			if _is_gamepad(device):
 				_joy = device
 				break
+	if scripted:
+		return Vector2.ZERO
 	if seated:
 		_seated_desktop_input(delta)
 		return Vector2.ZERO
@@ -420,9 +454,9 @@ func _xr_input(delta := 1.0 / 60.0) -> Vector2:
 	var have_left := focus and left.get_has_tracking_data()
 	var have_right := focus and right.get_has_tracking_data()
 	if _gloves.has("left"):
-		_gloves.left.visible = have_left
-		_gloves.right.visible = have_right
-	var show_tracked := have_left or have_right
+		_gloves.left.visible = have_left and not scripted
+		_gloves.right.visible = have_right and not scripted
+	var show_tracked := (have_left or have_right) and not scripted
 	if show_tracked != _tracking_hands:
 		_tracking_hands = show_tracked
 		if _avatar:
@@ -437,7 +471,8 @@ func _xr_input(delta := 1.0 / 60.0) -> Vector2:
 		_right_live = false
 		return Vector2.ZERO
 	var was_aligned := not _align_tracking
-	_align_head()
+	if not scripted:
+		_align_head()
 	if seated and _align_tracking and was_aligned:
 		_controls.reset()
 	var down := Vector3i(int(have_right and right.is_button_pressed("ax_button")),
@@ -457,7 +492,7 @@ func _xr_input(delta := 1.0 / 60.0) -> Vector2:
 	_left_live = have_left
 	_right_live = have_right
 	_xr_focused = true
-	if seated and not _align_tracking:
+	if seated and not _align_tracking and not scripted:
 		var palms: Array[Node3D] = [left if have_left else null, right if have_right else null]
 		var triggers := Vector2(left.get_float("trigger") if have_left else 0.0, right.get_float("trigger") if have_right else 0.0)
 		var grips := Vector2(left.get_float("grip") if have_left else 0.0, right.get_float("grip") if have_right else 0.0)
@@ -476,7 +511,7 @@ func _xr_input(delta := 1.0 / 60.0) -> Vector2:
 
 
 func _process(delta: float) -> void:
-	if not xr_live or not _xr_focused or _align_tracking or seated:
+	if not xr_live or not _xr_focused or _align_tracking or seated or scripted:
 		return
 	var right: XRController3D = hands.right
 	if right.get_has_tracking_data():
@@ -509,7 +544,7 @@ func _physics_process(delta: float) -> void:
 ## Walking input is +X right, -Y forward. Only actual distance after wall
 ## contact drives the pilot's stride.
 func step_locomotion(intent: Vector2, delta: float) -> void:
-	if seated:
+	if seated or scripted:
 		velocity = Vector3.ZERO
 		return
 	var start := global_position

@@ -12,6 +12,8 @@ const WheelGrip := preload("res://garage/inspection_wheel_grip.gd")
 const ShopAudio := preload("res://garage/workshop_audio.gd")
 const Livery := preload("res://view/livery.gd")
 const Settings := preload("res://release/game_settings.gd")
+const Climb := preload("res://garage/boarding.gd")
+const CanopyRig := preload("res://garage/canopy_rig.gd")
 const REFUSED_RUNNING := "Shut the engines down first"      # (a run-up bay keeps its paint)
 
 var environment: Workshop
@@ -32,6 +34,9 @@ var _boarding := false
 var _refused := ""          # why the last change at the bay in front of the pilot was refused ("" none) ...
 var _refused_bay := ""      # ... and at which bay
 var _bay_names := {}        # bay -> {paint, body}: what the prompt names there, read on entry and when the bay is worked (_name_bay)
+var _climb: Climb           # a climb in or out playing, or its canopy still shutting after him (garage/boarding.gd)
+var _canopy_rigs := {}      # bay -> the mechanism moving its occupied cab's roof (garage/canopy_rig.gd)
+var _lent := {}             # bay -> what its display pod gave up while a climb shows the cab in its place (_lend_pod)
 
 
 func _ready() -> void:
@@ -69,7 +74,7 @@ func _ready() -> void:
 		add_child(sound)
 		sound.exterior_screening_changed.connect(_screen_parked_engines)
 		sound.setup(walker, environment.get_node("ServiceEntry"), environment.inspection)
-	walker.interact_requested.connect(interact)
+	walker.interact_requested.connect(_board_button)
 	walker.launch_requested.connect(launch_flight)
 	walker.back_requested.connect(return_to_menu)
 	walker.cockpit_control_requested.connect(_work_control)
@@ -82,7 +87,7 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
-	if _departing:
+	if _departing or _climbing():
 		return
 	if not seated_craft.is_empty():
 		_operate_cockpit(delta)
@@ -140,7 +145,7 @@ func _work_control(control: String) -> void:
 ## (the Phaethon or the Talon, saved: Settings.phaethon_body), in its own saved paint. Either is refused, and the
 ## prompt says why, while that bay's engines run.
 func _work_bay(control: String) -> void:
-	if _departing or _boarding or not seated_craft.is_empty() or _at_rotor():
+	if _departing or _boarding or _climb != null or not seated_craft.is_empty() or _at_rotor():
 		return
 	var bay := environment.nearest_bay(walker.global_position)
 	if not Fleet.GARAGE_BAYS.has(bay):
@@ -237,6 +242,13 @@ func interact() -> void:
 	if not Fleet.GARAGE_BAYS.has(at):
 		return
 	var craft := environment.bay_craft(at)      # (in the Phaethon's bay, the Phaethon or the Talon)
+	if await _ready_cab(at, craft):
+		_seat(at, craft)
+
+
+## The bay's occupied cab built (in the headset over several frames, the sign saying so) and standing hidden there.
+## False if the pilot walked off, or the garage is going, while it was built.
+func _ready_cab(at: String, craft: String) -> bool:
 	var bay := environment.bay_node(at) as Workshop.Parked
 	if _cockpit == null or _cockpit.get_parent() != bay:
 		if _cockpit != null:
@@ -251,12 +263,16 @@ func interact() -> void:
 			await _cockpit.build(craft, _next_frame, bay.paint)
 			_boarding = false
 			if _departing or not is_inside_tree():
-				return
+				return false
 			if environment.nearest_bay(walker.global_position) != at:
 				_update_prompt()
-				return
+				return false
 		else:
 			_cockpit.build(craft, Callable(), bay.paint)
+	return true
+
+
+func _seat(at: String, craft: String) -> void:
 	_cockpit.show()
 	environment.set_cockpit_visible(at, false)
 	seated_craft = craft
@@ -282,6 +298,131 @@ func leave_seat() -> void:
 	# Keep one cab warm so the pilot can check a detail from inside and outside.
 	_cockpit.hide()
 	_update_prompt()
+
+
+## The board button (E, pad A, right A in the headset): climbs in or out, played (garage/boarding.gd); pressed again
+## while a climb plays, it finishes it at once. interact() and leave_seat() stay instant (tests, the release checks).
+func _board_button() -> void:
+	if _departing or _boarding:
+		return
+	if _climbing():
+		_climb.finish_now()
+		return
+	if not seated_craft.is_empty():
+		_climb_out()
+		return
+	if _at_rotor():
+		environment.inspection.spin_rotor()
+		return
+	_climb_in()
+
+
+## Is the pilot climbing in or out (not just a canopy shutting after him)?
+func _climbing() -> bool:
+	return _climb != null and not _climb.pilot_done
+
+
+func _climb_in() -> void:
+	var at := environment.nearest_bay(walker.global_position)
+	if not Fleet.GARAGE_BAYS.has(at):
+		return
+	var craft := environment.bay_craft(at)
+	if not await _ready_cab(at, craft) or _climbing():
+		return
+	_start_climb(at, craft, true)
+
+
+func _climb_out() -> void:
+	var at := Fleet.bay_of(seated_craft)
+	var craft := seated_craft
+	_runups[at].set_seated(false)
+	_cockpit.reset_overhead_hands()
+	_touching_hands.clear()
+	seated_craft = ""      # (nothing launches, nothing in the cab is worked, while he climbs out)
+	_start_climb(at, craft, false)
+
+
+func _start_climb(at: String, craft: String, climbing_in: bool) -> void:
+	if _climb != null:      # (the last one's canopy still shutting: this one takes it from where it is)
+		_climb.release()
+		_climb.queue_free()
+		_climb = null
+	_lend_pod(at, true)
+	var gate := environment.boarding_transform(at)
+	var grips: Array = []
+	for grip: Node3D in _cockpit.throttle_grips():
+		grips.append(grip.global_position)
+	var climb := Climb.new()
+	climb.name = "Climb"
+	add_child(climb)
+	_climb = climb
+	climb.arrived.connect(_climb_arrived.bind(climb, at, craft, climbing_in))
+	climb.finished.connect(_climb_finished.bind(climb, at, climbing_in))
+	_prompts.hold(true)
+	climb.setup(craft, climbing_in, environment.bay_node(at), walker, pilot, _canopy_rig(at, gate), gate, environment.seat_transform(at), grips)
+
+
+func _climb_arrived(climb: Climb, at: String, craft: String, climbed_in: bool) -> void:
+	if climb != _climb:
+		return
+	pilot.release_free()
+	if climbed_in:
+		_lend_pod(at, false)
+		_seat(at, craft)
+	else:
+		walker.set_seated(false, climb.end_transform)
+	_prompts.hold(false)
+	_update_prompt()
+
+
+func _climb_finished(climb: Climb, at: String, climbed_in: bool) -> void:
+	if climb != _climb:
+		return
+	_climb = null
+	climb.queue_free()
+	if not climbed_in:
+		_lend_pod(at, false)
+		environment.set_cockpit_visible(at, true)
+		_cockpit.hide()
+
+
+## The mechanism for the bay's cab's roof, made again when the cab is.
+func _canopy_rig(at: String, gate: Transform3D) -> CanopyRig:
+	var roof := _cockpit.shell.get_node("canopy") as Node3D
+	var rig: CanopyRig = _canopy_rigs.get(at)
+	if rig == null or rig.roof != roof:
+		var bay := environment.bay_node(at)
+		var side := signf((bay.global_transform.affine_inverse() * gate.origin).x)
+		rig = CanopyRig.new(environment.bay_craft(at), roof, side)
+		_canopy_rigs[at] = rig
+	return rig
+
+
+## While a climb shows the occupied cab (its interior, its moving roof), the bay's display pod stays up only for what
+## the cab has not got: the pod's air brakes and its brake lights. Its hull and everything else on it are put away, and
+## given back when `lend` is false.
+func _lend_pod(at: String, lend: bool) -> void:
+	var bay := environment.bay_node(at) as Workshop.Parked
+	var pod := bay.model.pod
+	if lend:
+		_cockpit.show()
+		if _lent.has(at):
+			return
+		var hidden: Array[Node3D] = []
+		for child in pod.get_children():
+			if child is Node3D and child.visible and not bay.model.pod_flaps.has(child) and child != bay.model.tail_lights:
+				child.hide()
+				hidden.append(child)
+		_lent[at] = {"mesh": pod.mesh, "hidden": hidden}
+		pod.mesh = null
+		pod.show()
+	elif _lent.has(at):
+		var lent: Dictionary = _lent[at]
+		_lent.erase(at)
+		pod.mesh = lent.mesh
+		for child: Node3D in lent.hidden:
+			if is_instance_valid(child):
+				child.show()
 
 
 func launch_flight() -> void:
@@ -312,6 +453,8 @@ func _next_frame(_stage: String) -> void:
 
 
 func _update_prompt() -> void:
+	if _climbing():
+		return
 	_nearby = environment.nearest_bay(walker.global_position) if seated_craft.is_empty() else ""
 	_using_pad = walker.using_gamepad
 	_near_rotor = _at_rotor()

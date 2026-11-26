@@ -29,6 +29,11 @@ func check(ok: bool, label: String) -> bool:
 func _key(code: Key) -> void:
 	for down in [true, false]:
 		_key_state(code, down)
+	# The board key plays a climb in or out (garage/boarding.gd); pressed again it finishes at once, as a player in a
+	# hurry does: these checks are of where it leaves him (tests/test_garage_climbs.gd plays the climbs through).
+	if code == KEY_E and current_scene and current_scene.has_method("_climbing") and current_scene._climbing():
+		for down in [true, false]:
+			_key_state(code, down)
 
 
 func _key_state(code: Key, down: bool) -> void:

@@ -229,3 +229,12 @@ func show_controls(craft: String, seated: bool, destination: String, pad: bool, 
 		if not seated:
 			_status.text = refused
 			_status.visible = not refused.is_empty()
+
+
+## Put the prompts away while a climb plays (garage/boarding.gd), and back.
+func hold(on: bool) -> void:
+	for child in get_children():
+		if child is CanvasLayer:
+			child.visible = not on
+		elif child is Node3D:
+			child.visible = not on
