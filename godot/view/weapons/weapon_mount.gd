@@ -7,6 +7,8 @@
 ##                  forward and aimed by pointing the craft, with an assist cone
 ## The bodies here are the defaults: a mount that never comes out and never fires.
 ##   g.mount = craft.weapon; g.mount.power = power; g.mount.step(delta, want_out, aim_render, gaze_dir_render)
+## A weapon that fires for itself (missiles, a beam, a pulse, orbs) answers own_fire() true: then the fire control runs
+## no bolts and no heat for it, and calls fire(g, delta, pulling) each frame once the aim is found and the mount stepped.
 class_name WeaponMount
 extends RefCounted
 
@@ -79,6 +81,27 @@ func node() -> Node3D:
 ## the first time the GUN is armed (view/gunnery.gd frame), so a flight that never arms it builds none of it.
 func steps_stowed() -> bool:
 	return false
+
+
+# --- a weapon that fires for itself ------------------------------------------------------------------------
+
+## Does it fire for itself? Then the fire control (view/gunnery.gd step) fires no bolts and keeps no heat for it, and
+## calls fire() each frame instead.
+func own_fire() -> bool:
+	return false
+
+
+## Each frame, for a mount that fires for itself, after the aim is found and the mount stepped: `g` the fire control
+## (its aim, aim_car and lock, and its targets: alive, hp_of, damage, threats, add_fx, play); `pulling` the trigger held
+## with the mount out and asked out (ready_to_fire).
+func fire(_g, _delta: float, _pulling: bool) -> void:
+	pass
+
+
+## A word for the pilot ("LOCK 3", "RELOAD", "PULSE READY"), or "": the fire control says it on the strip
+## (view._power_say) when it changes to a word.
+func status() -> String:
+	return ""
 
 
 # --- for the sights (view/gunnery.gd _draw): what a mount without them answers ------------------------------

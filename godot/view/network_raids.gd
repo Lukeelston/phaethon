@@ -100,6 +100,7 @@ var pack: Array = []             # this raid's raiders still in traffic
 var called_m := 0.0              # m to the city (a straight line to its centre) when the alarm went
 var alarm: AlarmPlayer = null    # the alarm's player (made at build; none in a flight without sound)
 var burst = null                 # the lost commuters' bursts (view/raid_burst.gd; made at build)
+var flyers = null                # the raid's flyers (drones, the gunship), null with none: the fire control asks it has(f) and hit(f, n)
 # tunables (tests shorten them)
 var first_after := 60.0          # s of waiting before a flight's first
 var lull := Vector2(60.0, 90.0)  # s of waiting after one, drawn between these

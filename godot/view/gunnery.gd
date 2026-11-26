@@ -14,6 +14,12 @@
 ##   4. the mount is laid on it, leading a vehicle by the bolt's time of flight, and fires while the
 ##      trigger is held, the mount is on the aim, and its line is clear of the craft (the turret's: its cab and engines)
 ##   5. bolts fly; where they land, a flash and a puff of dust; a raider takes HOSTILE_HP hits and is gone
+## A weapon that fires for itself (its mount's own_fire(): missiles, a beam, a pulse, orbs) is given, in place of 4's
+## firing and 5, the trigger each frame (mount.fire(g, delta, pulling)), and fires through this fire control's targets:
+##   g.alive(t)  g.hp_of(t)  g.damage(t, n, at, quiet)  g.threats()  g.add_fx(p, kind, dur, size)  g.play(pool, sound, at, pitch)
+## A target is a traffic Car (a commuter, or a raider: hostile) or a flyer of the raid's (its `flyer` true, which a Car
+## has not; the raid's flyers module, view.raids.flyers, has it and counts its hits). The mount's word for the pilot
+## (status()) is said on the strip when it changes.
 ## The weapon's figures are the craft's (sim/pilot_craft.gd TRAITS[..].weapon: rate, boltV, hits, reach, fireS, coolS);
 ## where it has none of them, RATE, BOLT_V, one hit a bolt, REACH, and its power's heat (the Basilisk's).
 ## Bolts and bursts are kept in the sims' frame (x, y, height) and drawn about the floating origin.
@@ -55,8 +61,9 @@ const SPREAD := deg_to_rad(0.12)  # each shot's scatter about the aim
 const LOCK_S := 0.35              # s a vehicle holds under the sight to be locked (the brackets close)
 const LOCK_EASE := 3.0            # ... and the lock lost a second with none under it
 const HOSTILE_HP := 6                         # hits a hostile raider (Raids) takes, whatever its kind (a commuter takes none: no weapon knocks one out)
+const GUNSHIP_BURST := 3.0        # a gunship shot down bursts this many times a raider's size
 
-signal killed(car)                 # a hostile raider shot down (before traffic.knock_out takes it out of traffic): the raid counts it
+signal killed(car)                 # a hostile shot down, the raid counts it: a raider before traffic.knock_out takes it out of traffic, a flyer once its module has destroyed it
 signal struck_commuter(car)        # a bolt struck a commuter: sparks only
 const MAX_BOLTS := 48
 const BOLT_WIDTH := 0.0105        # a bolt's least width for its distance from the eye: about six tenths of a degree
@@ -125,6 +132,7 @@ var _aim_hit := Vector3.INF
 var _aim_age := 0                  # frames since it
 var _los := {}                     # raider -> [when its line was searched (_now), clear]
 var _now := 0.0                    # s of this fire control's frames (step)
+var _status := ""                  # the mount's last word for the pilot (status())
 
 
 ## Once per frame. Creates itself, if the craft has a weapon, the first time its GUN is armed (`gun_wanted`): a
@@ -288,17 +296,33 @@ func step(delta: float) -> void:
 	# Is it on, and the line clear?
 	on_aim = mount.on_aim(target_r)
 	fouled = mount.fouled(target_r)
-	_cool = maxf(0.0, _cool - delta)
-	var was_firing := firing
-	firing = (trigger or hold_fire) and mount.ready_to_fire() and on_aim and not fouled and hot <= 0.0
-	if firing:
-		while _cool <= 0.0:
-			_fire(target)
-			_cool += 1.0 / rate
-	_heat_step(delta, was_firing)
+	if mount.own_fire():
+		# A weapon that fires for itself: given the trigger (held, the mount out and asked out); no bolts, no heat here.
+		mount.fire(self, delta, (trigger or hold_fire) and mount.ready_to_fire())
+	else:
+		_cool = maxf(0.0, _cool - delta)
+		var was_firing := firing
+		firing = (trigger or hold_fire) and mount.ready_to_fire() and on_aim and not fouled and hot <= 0.0
+		if firing:
+			while _cool <= 0.0:
+				_fire(target)
+				_cool += 1.0 / rate
+		_heat_step(delta, was_firing)
+	_status_step()
 	_sounds_step(out_ok)
 	_fly(delta)
 	_draw(cam)
+
+
+## The mount's word for the pilot (status(): "LOCK 3", "RELOAD", "PULSE READY"), said on the strip (view._power_say)
+## when it changes to a word.
+func _status_step() -> void:
+	var word: String = mount.status()
+	if word == _status:
+		return
+	_status = word
+	if word != "" and view.has_method("_power_say"):
+		view._power_say(word)
 
 
 ## The gun's heat, a frame: fire on end counted (and told a second at a time), overheated at fireS, cooled coolS
@@ -537,18 +561,21 @@ func march(o: Vector3, d: Vector3, limit: float) -> float:
 	return -1.0
 
 
-## Where a vehicle will be when a bolt fired now reaches it (sims' frame), at the aim's height.
+## Where a vehicle will be when a bolt fired now reaches it (sims' frame), at the aim's height (a flyer: at its own).
 func _lead(c) -> Vector3:
 	return _lead_at(c, aim_sim.z)     # (keep the gaze's height on it: the sight sits on its body, not its road)
 
 
-## ... `h` high, reckoned from `from` (sims' frame: the mount's origin, found here if not given; the assist finds it once
-## for its whole pack).
+## ... `h` high (a flyer: from its own height, its climb led too), reckoned from `from` (sims' frame: the mount's origin,
+## found here if not given; the assist finds it once for its whole pack).
 func _lead_at(c, h: float, from := Vector3.INF) -> Vector3:
 	if from == Vector3.INF:
 		from = to_sim(mount.origin())
+	var flyer := _is_flyer(c)
+	if flyer:
+		h = c.z
 	var at := Vector3(c.x, c.y, h)
-	var v := Vector3(c.hx * c.v, c.hy * c.v, 0.0)
+	var v := Vector3(c.hx * c.v, c.hy * c.v, c.vz if flyer else 0.0)
 	var speed := _bolt_speed((at - from).normalized())
 	for k in 2:
 		var tof := from.distance_to(at) / speed
@@ -606,32 +633,8 @@ func _fly(delta: float) -> void:
 func _land(bolt: Dictionary) -> void:
 	var at: Vector3 = bolt.b
 	var c = bolt.car
-	var traffic = view.traffic_net
-	if c != null and traffic and traffic.cars.has(c):
-		hits += 1
-		var id: int = c.id
-		var body := Vector3(c.x, c.y, at.z)
-		_add_fx(body + Vector3(_rng.randf_range(-3, 3), _rng.randf_range(-3, 3), _rng.randf_range(-1, 2)), "spark", 0.18, 9.0)
-		_play(_world_audio, "impact", to_render(body), 1.25)
-		if not c.hostile:
-			# No shooting commuters: no weapon knocks one out. The bolt sparks and that is all (no damage entry).
-			commuter_strikes += 1
-			if _struck_id != id:
-				_struck_id = id
-				print("GUN: commuter struck")
-			struck_commuter.emit(c)
-			return
-		_damage[id] = int(_damage.get(id, 0)) + bolt_hits
-		if _damage[id] >= HOSTILE_HP:
-			_damage.erase(id)
-			kills += 1
-			killed.emit(c)          # (the raid counts it first: knock_out takes the car out of traffic)
-			traffic.knock_out(c)
-			_add_fx(body, "fireball", 0.9, 34.0)
-			_add_fx(body + Vector3(0, 0, 4), "smoke", 3.2, 46.0)
-			_add_fx(body, "flash", 0.12, 90.0)
-			_play(_world_audio, "burst", to_render(body))
-			print("GUN: raider %d knocked out at %d m (%d shots, %d hits, %d out)" % [id, int(aim_dist), shots, hits, kills])
+	if c != null and alive(c):
+		damage(c, bolt_hits, at)
 		return
 	if bolt.kind == "sky":
 		_add_fx(at, "spark", 0.25, 6.0)      # (spent: it fizzes out at the end of its reach)
@@ -646,6 +649,112 @@ func _add_fx(p: Vector3, kind: String, dur: float, size: float) -> void:
 	if _fx.size() >= MAX_FX:
 		_fx.pop_front()
 	_fx.append({"p": p, "kind": kind, "t": 0.0, "dur": dur, "size": size})
+
+
+## (_add_fx, for a weapon that fires for itself.)
+func add_fx(p: Vector3, kind: String, dur: float, size: float) -> void:
+	_add_fx(p, kind, dur, size)
+
+
+## A sound from the fire control's players: `pool_name` "gun" (at the mount's node) or "world" (put at `at`, render
+## frame). (_play, for a weapon that fires for itself.)
+func play(pool_name: String, sound: String, at := Vector3.INF, pitch := 1.0) -> void:
+	if pool_name == "gun":
+		_play(_gun_audio, sound, at, pitch)
+	elif pool_name == "world":
+		_play(_world_audio, sound, at, pitch)
+
+
+# --- the targets: what any weapon fires at ---------------------------------------------------------------------
+
+## Is `t` still there to be fired at: a Car still in traffic, or a flyer the raid's flyers module still has?
+func alive(t) -> bool:
+	if t == null:
+		return false
+	if _is_flyer(t):
+		var flyers = _flyers()
+		return flyers != null and flyers.has(t)
+	var traffic = view.traffic_net
+	return traffic != null and traffic.cars.has(t)
+
+
+## `t`'s full HP: a raider's HOSTILE_HP, a flyer's own hp_max.
+func hp_of(t) -> int:
+	return int(t.hp_max) if _is_flyer(t) else HOSTILE_HP
+
+
+## `n` hits on `t` (a traffic Car, or a flyer of the raid's) at `at` (sims' frame), from whatever weapon: true when it
+## killed. One gone already: nothing. A commuter is spared (no weapon knocks one out): a spark, the impact sound, a
+## strike counted (commuter_strikes) and told (struck_commuter); with `quiet`, nothing at all. A hostile: a spark and the
+## impact sound, and its hits counted: a raider's here, to HOSTILE_HP, then killed told and traffic.knock_out; a flyer's
+## by the raid's flyers module (hit(t, n): it destroys one at its HP and says so), then killed told. Either way the burst
+## where it was (a gunship's GUNSHIP_BURST times a raider's).
+func damage(t, n: int, at: Vector3, quiet := false) -> bool:
+	if not alive(t) or (quiet and not t.hostile):
+		return false
+	var flyer := _is_flyer(t)
+	hits += 1
+	var id: int = t.id
+	var body := Vector3(t.x, t.y, t.z if flyer else at.z)
+	_add_fx(body + Vector3(_rng.randf_range(-3, 3), _rng.randf_range(-3, 3), _rng.randf_range(-1, 2)), "spark", 0.18, 9.0)
+	_play(_world_audio, "impact", to_render(body), 1.25)
+	if not t.hostile:
+		# No shooting commuters: no weapon knocks one out. It sparks and that is all (no damage entry).
+		commuter_strikes += 1
+		if _struck_id != id:
+			_struck_id = id
+			print("GUN: commuter struck")
+		struck_commuter.emit(t)
+		return false
+	if flyer:
+		if not _flyers().hit(t, n):
+			return false
+		kills += 1
+		killed.emit(t)
+		_burst(body, GUNSHIP_BURST if String(t.kind) == "gunship" else 1.0)
+		print("GUN: %s %d shot down at %d m (%d shots, %d hits, %d out)" % [t.kind, id, int(aim_dist), shots, hits, kills])
+		return true
+	_damage[id] = int(_damage.get(id, 0)) + n
+	if _damage[id] < HOSTILE_HP:
+		return false
+	_damage.erase(id)
+	kills += 1
+	killed.emit(t)          # (the raid counts it first: knock_out takes the car out of traffic)
+	view.traffic_net.knock_out(t)
+	_burst(body)
+	print("GUN: raider %d knocked out at %d m (%d shots, %d hits, %d out)" % [id, int(aim_dist), shots, hits, kills])
+	return true
+
+
+## Every hostile the raid has, raiders and flyers: the director's threats() where it has one, else traffic's
+## hostiles(), else none.
+func threats() -> Array:
+	var raid = view.get("raids")
+	if raid != null and raid.has_method("threats"):
+		return raid.threats()
+	var traffic = view.traffic_net
+	if traffic != null:
+		return traffic.hostiles()
+	return []
+
+
+## A hostile shot down: fire, smoke and a flash where it was, and the burst's sound; `grow` times a raider's size.
+func _burst(body: Vector3, grow := 1.0) -> void:
+	_add_fx(body, "fireball", 0.9, 34.0 * grow)
+	_add_fx(body + Vector3(0, 0, 4), "smoke", 3.2, 46.0 * grow)
+	_add_fx(body, "flash", 0.12, 90.0 * grow)
+	_play(_world_audio, "burst", to_render(body))
+
+
+## Is `t` a flyer of the raid's (its `flyer` true), not a traffic Car (which has no `flyer`)?
+static func _is_flyer(t) -> bool:
+	return t != null and "flyer" in t and bool(t.flyer)
+
+
+## The raid's flyers module (view.raids.flyers), or null.
+func _flyers():
+	var raid = view.get("raids")
+	return raid.get("flyers") if raid != null else null
 
 
 ## asked_out: what the mount was asked this frame (the switch, with power).
