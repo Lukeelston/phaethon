@@ -12,6 +12,13 @@
 ##            the director's prey_of looks), the one whose meeting place is nearest. Either only when that meeting place
 ##            (where it will be DIVE_S on, as it goes now) is within DIVE_V_MAX x DIVE_S of the drone: a pilot at speed
 ##            outruns them, and one with nothing in reach circles on and looks again.
+##   cover    Nothing is dived on through a structure. The pilot only when the drone sees a clear line to its meeting
+##            place (_clear_line: no point every LINE_STEP m along it, nor the meeting place, under cover); a commuter
+##            not under a roof; and a dive on the pilot already under way takes no hit if the craft is under cover when
+##            it ends (the pilot who ducks under a deck or into a hall has dodged it). Cover (_covered): a road's deck
+##            over the point, under the drone (any road at the point: the sim's own net_near; COVER_CLEAR and more over
+##            it, within the road's width), or a hall's roof or the Aurora tube (the world's roofs: network_world.roofed,
+##            to HALL_H over the road). Groups are put down clear of the halls by more than their circles.
 ##            It dives from where it is to its prey's height over DIVE_S, nose first (its red lamp leading), led to where
 ##            its prey will be at the dive's end: a commuter's all the way down; the pilot's until DIVE_COMMIT s from it,
 ##            and then straight on to that point, so a dive on the craft seen coming can be dodged (a commuter braking into
@@ -62,6 +69,9 @@ const CIRCLE_R := Vector2(120.0, 220.0)   # m: a group's circle (each its own)
 const CIRCLE_V := 80.0                    # m/s round it
 const BANK := 0.35                        # rad: a circling drone's bank into its turn
 const CLEAR_OF_PILOT := 1500.0            # m: no group is put down nearer the pilot than this (where the zone has room)
+const COVER_CLEAR := 4.0                  # m: a road's deck this far or more over a point covers it from a drone above
+const LINE_STEP := 60.0                   # m between the points a pilot dive's line is looked along for cover
+const ROOF_PAD := 300.0                   # m: a group's point is put down at least this far from a hall's (or the tube's) end
 const ID_BASE := 970000                   # flyers' ids (the raiders' are 960000 on)
 const NONE := {}                          # (ray_pick's miss: read only)
 
@@ -92,6 +102,7 @@ class Flyer:
 	var dive_t := 0.0           # s into its dive, or its climb
 	var prey = null             # the commuter it dives on (a traffic Car), or null
 	var at_pod := false         # its dive is the pilot's (before it: its next dive is to be, if the craft is near)
+	var top := 0.0              # m: the height its dive began at (the cover at its end is what it looked over)
 	var ax := 0.0               # where its dive (or its climb) ends, the sims' frame
 	var ay := 0.0
 	var az := 0.0
@@ -112,6 +123,7 @@ var view
 var director
 var sim
 var traffic
+var world                                 # the Network's world (view/network_world.gd): its roofs (halls, the tube)
 var batch: MultiMeshInstance3D = null     # the drones' batch (Codex's model), made when the first drones are put down
 var pilot_share := PILOT_SHARE            # (tests set it)
 var update_ms := 0.0                      # what the last update took (tests read it)
@@ -128,6 +140,7 @@ func build(v, d) -> void:
 	director = d
 	sim = v.sim
 	traffic = d.traffic
+	world = v.get("network_world")
 	name = "raid_flyers"
 	_rng.seed = 20261126
 
@@ -146,16 +159,23 @@ func spawn_drones(zone: Dictionary, n: int) -> void:
 	var ng := maxi(1, ceili(n / 3.0))     # (groups of three, two or four: 6 is 3 + 3, 7 is 3 + 2 + 2, 10 is 3 + 3 + 2 + 2)
 	var at := Vector2(sim.pod.x, sim.pod.y)
 	var stations := []
+	var open := []        # (clear of every roof by ROOF_PAD: no group circles into a hall's roof, 110 m up)
 	var room := []
 	var m := ng * 4
+	var pad: float = ROOF_PAD / float(R.len[clampi((z.x + z.y) / 2, 0, R.N - 1)])
 	for s in m:
 		var f := lerpf(float(z.x) + 2.0, float(z.y) - 2.0, (s + 0.5) / m)
 		var i := clampi(int(f), 0, R.N - 1)
 		stations.append(f)
+		if world != null and (world.roofed(road, f - pad) > 0.0 or world.roofed(road, f) > 0.0 or world.roofed(road, f + pad) > 0.0):
+			continue
+		open.append(f)
 		if at.distance_to(Vector2(R.px[i], R.py[i])) >= CLEAR_OF_PILOT:
 			room.append(f)
 	if room.size() < ng:
-		room = stations      # (the pilot is in the middle of it: anywhere in the zone)
+		room = open          # (the pilot is in the middle of it: anywhere in the zone in the open)
+	if room.size() < ng:
+		room = stations
 	for k in ng:
 		var G := Group.new()
 		G.road = road
@@ -250,8 +270,9 @@ static func _moving(f: Flyer, vx: float, vy: float, vz: float) -> void:
 
 
 ## A drone off its rest looks for its prey: the pilot, when this dive is to be the pilot's and the craft is within
-## PILOT_REACH of it over the ground (and not down) and its meeting place is in reach; else the commuter under its group
-## whose meeting place is nearest, in reach. With none it circles on and looks again LOOK_EVERY frames later.
+## PILOT_REACH of it over the ground (and not down) and its meeting place is in reach, along a clear line; else the
+## commuter under its group whose meeting place is nearest, in reach. With none it circles on and looks again
+## LOOK_EVERY frames later.
 func _look(f: Flyer, G: Group) -> void:
 	var P = sim.pod
 	if f.at_pod and sim.crash_t <= 0.0:
@@ -261,7 +282,8 @@ func _look(f: Flyer, G: Group) -> void:
 		var my: float = P.y + P.vy * DIVE_S - f.y
 		var mz: float = P.z + P.vz * DIVE_S - f.z
 		var reach := DIVE_V_MAX * DIVE_S + DIVE_SHORT
-		if dx * dx + dy * dy <= PILOT_REACH * PILOT_REACH and mx * mx + my * my + mz * mz <= reach * reach:
+		if dx * dx + dy * dy <= PILOT_REACH * PILOT_REACH and mx * mx + my * my + mz * mz <= reach * reach \
+				and _clear_line(f, P.x + P.vx * DIVE_S, P.y + P.vy * DIVE_S, P.z + P.vz * DIVE_S):
 			_dive(f, null, true)
 			return
 	var c = _prey_for(f, G)
@@ -334,8 +356,49 @@ func _meet2(f: Flyer, o, under: float) -> float:
 	var d2 := mx * mx + my * my
 	if d2 >= under or _dived_on(o):
 		return INF
+	if world != null:      # (none under a roof: a hall, the tube)
+		var R = sim.roads[o.road]
+		var fm: float = o.f + float(o.dir) * o.v * DIVE_S / float(R.len[clampi(int(o.f), 0, R.N - 1)])
+		if world.roofed(o.road, o.f) > 0.0 or world.roofed(o.road, fm) > 0.0:
+			return INF
 	var mz: float = traffic.body_height(o) - f.z
 	return d2 + mz * mz
+
+
+## Can drone f see (x, y, z), a pilot dive's meeting place, along a straight line: the point not under cover, nor any
+## of the points every LINE_STEP m along the line to it? Asked only at a look that would otherwise take the pilot (some
+## 14 us of the sim's net_near a point: never in a frame of its own).
+func _clear_line(f: Flyer, x: float, y: float, z: float) -> bool:
+	if _covered(x, y, z, f.z):
+		return false
+	var dx := x - f.x
+	var dy := y - f.y
+	var dz := z - f.z
+	var n := int(sqrt(dx * dx + dy * dy + dz * dz) / LINE_STEP)
+	for k in range(1, n + 1):
+		var u := float(k) / float(n + 1)
+		if _covered(f.x + dx * u, f.y + dy * u, f.z + dz * u, f.z):
+			return false
+	return true
+
+
+## Is the point (x, y, z) under cover from a drone `top` m up: under a road's deck (any road at (x, y), the sim's own
+## net_near: within its width, its deck COVER_CLEAR or more over the point and under `top`), or inside a hall or the
+## Aurora tube (the world's roofs, network_world.roofed: within its road's width, from its deck to HALL_H over it)?
+func _covered(x: float, y: float, z: float, top: float) -> bool:
+	for n: Array in sim.net_near(x, y):
+		if n[6] or absf(float(n[2])) > float(n[3]) * 0.5:
+			continue
+		var r: int = n[0]
+		var R = sim.roads[r]
+		var i: int = n[1]
+		var u := clampf(((x - R.px[i]) * R.tx[i] + (y - R.py[i]) * R.ty[i]) / R.len[i], 0.0, 1.0)
+		var h: float = sim.road_h(r, float(i) + u) + sim.net_bank_lift(R, i, u, float(n[2]))
+		if h >= z + COVER_CLEAR and h < top:
+			return true      # (a deck over it, under the drone)
+		if world != null and z >= h - COVER_CLEAR and z < h + world.HALL_H and world.roofed(r, float(i) + u) > 0.0:
+			return true      # (inside a hall, or the tube)
+	return false
 
 
 ## Is a drone diving on commuter c already?
@@ -352,6 +415,7 @@ func _dive(f: Flyer, prey, pilot: bool) -> void:
 	f.dive_t = 0.0
 	f.prey = null if pilot else prey
 	f.at_pod = pilot
+	f.top = f.z
 	_aim(f, DIVE_S)
 	if pilot:
 		print("RAID: drone dives on you")
@@ -415,12 +479,13 @@ func _toward(f: Flyer, tx: float, ty: float, tz: float, within: float, step: flo
 	f.z += vz * step
 
 
-## A dive's end: on the pilot, within DIVE_HIT of the pod or an engine, a hit taken (under the director's one grace);
-## on a commuter still in traffic, within DIVE_HIT of its middle, it is knocked out and lost. Then the climb back, its
-## rest begun, and whether its next dive is to be the pilot's drawn.
+## A dive's end: on the pilot, within DIVE_HIT of the pod or an engine, a hit taken (under the director's one grace),
+## unless the craft is under cover now (it ducked under a deck or into a hall: dodged); on a commuter still in traffic,
+## within DIVE_HIT of its middle, it is knocked out and lost. Then the climb back, its rest begun, and whether its next
+## dive is to be the pilot's drawn.
 func _dive_end(f: Flyer) -> void:
 	var r2 := DIVE_HIT * DIVE_HIT
-	if f.at_pod:
+	if f.at_pod and not _covered(sim.pod.x, sim.pod.y, sim.pod.z, f.top):
 		for b in sim.bodies:
 			var dx: float = b.x - f.x
 			var dy: float = b.y - f.y

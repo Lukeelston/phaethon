@@ -37,6 +37,16 @@
 ##                              going away (its meeting place 1 km on, out of DIVE_V_MAX x DIVE_S): for 1 s every drone
 ##                              of the group circles on, looking; the same commuter 0.9 km short of the point (its meeting
 ##                              place 0.1 km past it): one dives on it within LOOK_EVERY frames
+##   check_cover                every drone's dive the pilot's (pilot_share 1), one group's ready, no commuter about:
+##                              the craft parked in the zone's hall (the terminal's, 110 m high: a real covered place,
+##                              every city has one) 140 m in from its mouth, the group 300 m outside it: no dive on the
+##                              pilot and no hit in 3 s; on the open road the other side of the group, one dives within a
+##                              look. No road crosses over or under a zone within 600 m on the Network, so a deck is built
+##                              as test_raid_jolt's other deck is (the craft's bodies dropped 30 m, the director stepped
+##                              alone): under the zone road's deck at the group's point, no dive and no hit in 3 s; on the
+##                              deck there, a dive within a look. A dive under way when the craft drops under the deck
+##                              0.5 s in ends on it (within DIVE_HIT) and takes no hit; the same dive with the craft
+##                              left on the deck takes one
 ##   (and at the end: over every frame of the test, scripted dives too, no drone flew faster than DIVE_V_MAX)
 ## Run with --fixed-fps 120 (traffic and the director run on the engine's frame time; a frame is let pass for every
 ## step). Prints RAID FLYERS PASS. Puts user://vr_prefs.json back as it found it.
@@ -53,7 +63,7 @@ const PREFS := "user://vr_prefs.json"
 const STEP := 1.0 / 120.0
 const KEEP_M := 1000.0           # m: a drone stays within its town zone by this
 const COST_MS := 0.1             # ms a frame: ten drones' update, mean (the plan's 0.5 ms is the director, flyers and weapons together)
-const SECTIONS := 11
+const SECTIONS := 12
 const SPEED_MARGIN := 0.5        # m/s: the cap's numeric margin (a drone's speed is read from its place frame to frame)
 var failures := 0
 var sections := 0                # (a section that dies on a script error never counts itself: the verdict then fails)
@@ -112,6 +122,7 @@ func _run() -> void:
 		await check_cleared_needs_all(v)
 		await check_cost(v)              # (while traffic is about the zone: the drones dive)
 		await check_speed_cap(v)
+		await check_cover(v)
 		await check_far_origin(v)
 		await check_away_counts_flyers(v)
 		R.reset()
@@ -747,6 +758,152 @@ func check_cost(v) -> void:
 			F.count("drone"), states, mean, COST_MS, worst, R.lost, fastest_since, F.DIVE_V_MAX],
 		F.count("drone") == 10 and mean < COST_MS and R.lost > 0 and fastest_since > F.CIRCLE_V + 1.0 and fastest_since <= F.DIVE_V_MAX + SPEED_MARGIN)
 	R.drones = Vector2i(6, 10)
+
+
+## Group G's point moved to sample gf of `road`, its drones circling there again.
+static func _move_group(sim, F, G, road: int, gf: float) -> void:
+	var Rd = sim.roads[road]
+	var i := clampi(int(gf), 0, Rd.N - 1)
+	G.f = gf
+	G.x = Rd.px[i]
+	G.y = Rd.py[i]
+	G.deck = sim.net_height(road, gf)
+	for f in F.all():
+		if f.group == F._groups.find(G):
+			f.state = "circle"
+			f.prey = null
+			F._circle(f, G, 0.0)
+
+
+## The craft's three bodies moved together so the pod stands at (x, y), `dz` m over the deck height `deck` (plus its
+## ride height), still.
+static func _put_bodies(sim, x: float, y: float, deck: float, dz: float) -> void:
+	var ox: float = x - sim.pod.x
+	var oy: float = y - sim.pod.y
+	for b in sim.bodies:
+		b.x += ox
+		b.y += oy
+		b.z = deck + sim.P.rideH + dz
+		b.vx = 0.0
+		b.vy = 0.0
+		b.vz = 0.0
+
+
+## `frames` frames with `group` ready to dive (off their rest, every dive the pilot's) and no commuter about: through the
+## view's own frames (`alone` false), or the director stepped alone with the craft's bodies held where they are (`alone`
+## true: the sim would put them back on its road). Stops at the first dive on the pilot when `until_dive`.
+## -> {dives: begun on the pilot, hits, near: m from the nearest of the group to the pod, frames}
+func _pilot_watch(v, group: Array, frames: int, alone: bool, until_dive: bool) -> Dictionary:
+	var R = v.raids
+	var T = v.traffic_net
+	var sim = v.sim
+	var hits := [0]
+	var on_hit := func(_s: String): hits[0] += 1
+	R.hit_taken.connect(on_hit)
+	var dives := 0
+	var near := INF
+	var n := 0
+	while n < frames:
+		T.cars.clear()
+		for f in group:
+			if f.state == "circle":
+				f.rest = 0.0
+				f.at_pod = true
+		var was := group.map(func(f): return f.state)
+		if alone:
+			R.update(STEP)
+		else:
+			await _frame(v)
+		n += 1
+		for j in group.size():
+			var f = group[j]
+			near = minf(near, Vector3(f.x, f.y, f.z).distance_to(Vector3(sim.pod.x, sim.pod.y, sim.pod.z)))
+			if was[j] != "dive" and f.state == "dive" and f.at_pod:
+				dives += 1
+		if until_dive and dives > 0:
+			break
+	R.hit_taken.disconnect(on_hit)
+	return {"dives": dives, "hits": hits[0], "near": near, "frames": n}
+
+
+func check_cover(v) -> void:
+	var R = v.raids
+	var sim = v.sim
+	var W = v.network_world
+	var k := _city(v)
+	R.pack_size = Vector2i(0, 0)
+	await _in_zone(v, k, 0)
+	await _raid_on(v, k)
+	track_speed = false                # (the test moves the group and the craft about)
+	var F = R.flyers
+	var zone: Dictionary = R._zone(k)
+	var road: int = zone.road
+	var Rd = sim.roads[road]
+	var hall: Array = W.halls.get(road, []) if W != null else []
+	var G = F._groups[0]
+	var group := []
+	for f in F.all():
+		f.rest = 1.0e9                 # (only the group acts)
+		if f.group == 0:
+			group.append(f)
+	F.pilot_share = 1.0
+	if hall.is_empty() or group.size() < 2:
+		sections += 1
+		_check("a hall on the zone's road (%s) and a group of two or more (%d)" % [hall, group.size()], false)
+		return
+	# A: the terminal's hall (real cover): the group 300 m outside its mouth, the craft 6 samples (some 140 m) inside it
+	var per: float = float(Rd.len[int(hall[0])])
+	var gf: float = float(hall[0]) - 300.0 / per
+	_move_group(sim, F, G, road, gf)
+	var in_hall := int(hall[0]) + 6
+	sim.respawn_on(road, in_hall, 1)
+	var roofed: float = W.roofed(road, float(in_hall))
+	var a: Dictionary = await _pilot_watch(v, group, 360, false, false)
+	_move_group(sim, F, G, road, gf)
+	sim.respawn_on(road, roundi(gf) - 13, 1)       # (the open road the other side of the group, some 310 m from its point)
+	var a_open: Dictionary = await _pilot_watch(v, group, F.LOOK_EVERY + 2, false, true)
+	# B: a deck built (as test_raid_jolt's other deck): the craft 30 m under the zone road's deck at the group's point
+	_move_group(sim, F, G, road, gf)
+	_put_bodies(sim, G.x, G.y, G.deck, -30.0)
+	var b: Dictionary = await _pilot_watch(v, group, 360, true, false)
+	_move_group(sim, F, G, road, gf)
+	_put_bodies(sim, G.x, G.y, G.deck, 0.0)
+	var b_open: Dictionary = await _pilot_watch(v, group, F.LOOK_EVERY + 2, true, true)
+	# C: a dive under way, the craft dropped under the deck 0.5 s in; and the same dive with it left on the deck
+	var ends := []
+	for drop in [true, false]:
+		_move_group(sim, F, G, road, gf)
+		_put_bodies(sim, G.x, G.y, G.deck, 0.0)
+		R._grace = 0.0
+		for f in group:
+			f.rest = 1.0e9             # (none of the group but the one made to dive)
+		var d = group[0]
+		var hit := [0]
+		var on_hit := func(_s: String): hit[0] += 1
+		R.hit_taken.connect(on_hit)
+		F._dive(d, null, true)
+		var gap := INF
+		for i in roundi(F.DIVE_S / STEP) + 4:
+			if drop and i == roundi(0.5 / STEP):
+				_put_bodies(sim, sim.pod.x, sim.pod.y, G.deck, -30.0)
+			var was: String = d.state
+			R.update(STEP)
+			if was == "dive" and d.state != "dive":
+				gap = Vector3(d.x, d.y, d.z).distance_to(Vector3(sim.pod.x, sim.pod.y, sim.pod.z))
+		R.hit_taken.disconnect(on_hit)
+		ends.append([hit[0], snappedf(gap, 0.1)])
+	_put_bodies(sim, G.x, G.y, G.deck, 0.0)
+	R.reset()
+	F.pilot_share = F.PILOT_SHARE
+	track_speed = true
+	var reach: float = F.DIVE_V_MAX * F.DIVE_S
+	sections += 1
+	_check("the hall (samples %d..%d, roofed %.2f where the craft is): the group 300 m outside, its nearest %.0f m from the pod (reach %.0f): %d dives on the pilot, %d hits in %d frames; on the open road beyond the group: a dive after %d frame(s) (%d); a deck built, the craft 30 m under the zone road's deck at the group's point (nearest %.0f m): %d dives, %d hits in %d frames; on the deck there: a dive after %d frame(s) (%d); a dive under way, the craft under the deck from 0.5 s: %s hit(s), ending %s m from the pod; left on the deck: %s hit(s), ending %s m from it (DIVE_HIT %.0f)" % [
+			hall[0], hall[1], roofed, a.near, reach, a.dives, a.hits, a.frames, a_open.frames, a_open.dives, b.near, b.dives, b.hits, b.frames,
+			b_open.frames, b_open.dives, ends[0][0], ends[0][1], ends[1][0], ends[1][1], F.DIVE_HIT],
+		roofed > 0.0 and a.near < reach and a.dives == 0 and a.hits == 0 and a.frames == 360 and a_open.dives == 1 and a_open.frames <= F.LOOK_EVERY + 1
+			and b.near < reach and b.dives == 0 and b.hits == 0 and b.frames == 360 and b_open.dives == 1 and b_open.frames <= F.LOOK_EVERY + 1
+			and ends[0][0] == 0 and ends[0][1] <= F.DIVE_HIT and ends[1][0] == 1 and ends[1][1] <= F.DIVE_HIT)
 
 
 func check_speed_cap(v) -> void:
