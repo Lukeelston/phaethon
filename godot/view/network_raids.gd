@@ -14,10 +14,12 @@
 ##             zone: TURN_SHORT m short of either end a raider turns round (_keep_in_zone), or on a one-way road (the
 ##             pilot's, traffic.oneway) is held there. And the drones (view/raid_flyers.gd, the director's `flyers`):
 ##             `drones` of them (6 the first raid, one more each raid, up to 10), circling over the zone's road and
-##             diving on its commuters and on the pilot. It ends when no raider and no flyer is left (cleared if any
-##             was killed, else lost), or lost: the pilot away_t s beyond R_KEEP of the town and of every raider and
-##             flyer, or time_limit s gone. Surviving raiders flee: taken out of traffic; surviving flyers go. The
-##             floor is released
+##             diving on its commuters and on the pilot; and with a flight's gunship_from'th raid and every
+##             gunship_every'th after (has_gunship: the 3rd, 5th, 7th), the gunship, holding station over the road ahead
+##             of the pack, strafing low along it, and firing slow shots at the pilot and the commuters. It ends when
+##             no raider and no flyer is left (cleared if any was killed, else lost), or lost: the pilot away_t s
+##             beyond R_KEEP of the town and of every raider and flyer, or time_limit s gone. Surviving raiders flee:
+##             taken out of traffic; surviving flyers go (and the gunship's shots with them). The floor is released
 ##   over      the lull after one, lull s (the same clock as the first wait) until the next is called
 ## A restart (reset), or a crash and the sim's respawn after it, sets a raid aside: no award, the pack gone, the
 ## floor free.
@@ -26,7 +28,8 @@
 ##   raids.on_kill(t)               a hostile shot (the gun's): a raider before traffic.knock_out, a flyer once its module
 ##                                  has destroyed it (counted from its own kind: kills_by, and kills their sum)
 ##   raids.threats()                every hostile of the raid's: its raiders and its flyers (the fire control's targets)
-##   raids.hit_by(source)           a hit taken from `source` ("raider", "drone"), under the one GRACE clock
+##   raids.hit_by(source)           a hit taken from `source` ("raider", "drone", "gunship"), under the one GRACE clock
+##   raids.has_gunship(n)           does a flight's raid number n (1, its first) bring the gunship?
 ##   raids.prey_of(car)             a raider's prey: the nearest commuter ahead on its road and way, within 3 km (or null),
 ##                                  looked for in traffic's bucket of that road and way (traffic.same_way), not every car
 ##   raids.reset()                  on a restart (a crash's respawn it sees for itself: sim.crash_t)
@@ -39,10 +42,11 @@
 ## or no longer ahead; contact is tried every frame. A raider gone from traffic without on_kill is fled: no award,
 ## kills unchanged.
 ## Contact: a raider within CONTACT_CRAFT of the pod or either engine is one hit taken a GRACE s (signal hit_taken: the
-## view jolts, and the score takes its points; never health); so is a drone's dive that ends on the craft (hit_by):
-## one clock for both, one second, one hit, whatever hit.
-## Log lines (the flight log): RAID: alarm <CITY> <km> | arrived | <n> drones over <road> in <g> groups | kill | kill (drone) |
-## commuter lost | drone dives on you | hit taken | hit taken (drone) | raider fled | cleared | lost (<why>)
+## view jolts, and the score takes its points; never health); so is a drone's dive that ends on the craft, and a
+## gunship's shot that reaches it (hit_by): one clock for all, one second, one hit, whatever hit.
+## Log lines (the flight log): RAID: alarm <CITY> <km> | arrived | <n> drones over <road> in <g> groups | gunship over
+## <road> | kill | kill (drone) | kill (gunship) | commuter lost | drone dives on you | gunship fires on you | hit taken |
+## hit taken (drone) | hit taken (gunship) | raider fled | cleared | lost (<why>)
 ## The alarm: a tone made in code (alarm_tone: no recording), played once at each call on the director's own player (none
 ## in a flight without sound: --mute, a shot). A commuter run down: a burst where it was (view/raid_burst.gd), drawn from
 ## commuter_lost for whatever craft, armed or not. The tone, its player and the bursts' batch and shader are made at
@@ -124,6 +128,8 @@ var expire_min := 200.0          # s: the hard cap's least, ...
 var expire_speed := 1500.0       # ... and the speed (m/s) its 1.5 x the distance at the alarm is reckoned at
 var pack_size := Vector2i(4, 6)  # the first raid brings x, each later one 1 more, up to y
 var drones := Vector2i(6, 10)    # ... and x drones, each later one 1 more, up to y
+var gunship_from := 3            # the raid of a flight the gunship first comes with ...
+var gunship_every := 2           # ... and every this many after it (the 5th, the 7th)
 
 var _grace := 0.0                # s before another hit may be taken
 var _clock := 0.0                # s it may start (it falls back while it may not)
@@ -541,6 +547,13 @@ func _arrive() -> void:
 	print("RAID: arrived")
 	if flyers != null:
 		flyers.spawn_drones(zone, maxi(mini(drones.x + _count - 1, drones.y), 0))
+		if has_gunship(_count):
+			flyers.spawn_gunship(zone)
+
+
+## Does a flight's raid number n (1, its first) bring the gunship: the gunship_from'th, then every gunship_every'th?
+func has_gunship(n: int) -> bool:
+	return n >= gunship_from and (n - gunship_from) % gunship_every == 0
 
 
 ## The raider's prey: the nearest commuter (not hostile) ahead of it on its road and way, within PREY_REACH m, or null.
@@ -767,7 +780,7 @@ func reset(why := "restart") -> void:
 
 ## The dash's line (traffic's race_text() gives it while the raid holds the floor). Called: the city, how far (a
 ## straight line to its centre, as the dash reads a distance) and the commuters lost so far. On: the raiders left (with
-## none, the drones left) and the time left. Otherwise "".
+## none, the drones left; with none of those, the gunship) and the time left. Otherwise "".
 func text() -> String:
 	match state:
 		"called":
@@ -776,6 +789,7 @@ func text() -> String:
 		"on":
 			var left := int(maxf(time_limit - _t, 0.0))
 			if pack.is_empty() and flyers != null and not flyers.all().is_empty():
-				return "RAID  %d DRONES  %d:%02d" % [flyers.count("drone"), left / 60, left % 60]
+				var n: int = flyers.count("drone")
+				return "RAID  %s  %d:%02d" % ["%d DRONES" % n if n > 0 else "GUNSHIP", left / 60, left % 60]
 			return "RAID  %d RAIDERS  %d:%02d" % [pack.size(), left / 60, left % 60]
 	return ""
