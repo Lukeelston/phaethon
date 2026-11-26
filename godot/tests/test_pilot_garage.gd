@@ -358,6 +358,15 @@ func _fly_and_return(garage, xr: bool) -> void:
 		var installed: Node = garage.environment.get_node_or_null(NodePath(fixture))
 		if installed != null:
 			fixtures.append(weakref(installed))
+	# The craft leaves through its bay door, which rises once its engines run (garage/bay_doors.gd): this one's have.
+	var doors = garage.environment.doors
+	_key(KEY_F)
+	await process_frame
+	check(current_scene == garage and not doors.is_open(id), "The launch waits for the bay door to rise")
+	var door_deadline := Time.get_ticks_msec() + 8000
+	while not doors.is_open(id) and Time.get_ticks_msec() < door_deadline:
+		await process_frame
+	check(doors.is_open(id), "The running craft's bay door rises ahead of it")
 	_key(KEY_F)
 	if not await _scene("res://vr.tscn" if xr else UI.GAME_SCENE):
 		return

@@ -20,6 +20,9 @@ const WorkshopPanorama := preload("res://garage/workshop_reflections.hdr")
 const Equipment := preload("res://garage/workshop_equipment.glb")
 const BayLettering := preload("res://art/signs/RG2014D.ttf")
 const FloorStencil := preload("res://garage/workshop_direction.png")
+const Doors := preload("res://garage/bay_doors.gd")
+const SkyFinish := preload("res://garage/workshop_sky.gdshader")
+const ApronFinish := preload("res://garage/workshop_apron.gdshader")
 const HALF_X := 35.0
 const HALF_Z := 23.5
 const EAVES := 7.6
@@ -34,6 +37,11 @@ const MARKER_HEIGHT := 1.055
 const DRAIN_X := HALF_X - 1.05
 const DRAIN_HALF_WIDTH := .101
 const DRAIN_HALF_LENGTH := 5.40
+# Each bay door's opening through its side wall, behind the curtain's frame (the jambs stand at ±5.545, the curtain's
+# slats reach ±5.515 and its top rail 4.89 m, at the hood's mouth): the daylight beyond shows only when the door is up.
+const DOOR_HALF_WIDTH := 5.45
+const DOOR_HEAD := 4.90
+const OUTSIDE := 600.0       # how far the ground beyond the side walls runs out
 
 # Fore and aft rubber shoe settings, measured on the underside of the parked
 # meshes. Each pair records the shoe centre (outboard, above floor, fore/aft)
@@ -60,6 +68,9 @@ var _finishes := {}
 var _instances := {}
 var _equipment_meshes: Dictionary[String, Mesh] = {}
 var inspection: Inspection
+var doors: Doors             # the six roller doors, one ahead of each bay (garage/bay_doors.gd)
+var _door_batches := {}      # "ShutterCurtain" and "DoorLamp": the MultiMeshes the doors draw through
+var _door_frames := {}       # bay -> its door's frame in the hall's space: x along the sill, y up, z into the hall
 var _building: StaticBody3D
 var _service_lenses := MultiMesh.new()
 var _lamp_states := PackedByteArray()
@@ -90,6 +101,12 @@ func build() -> void:
 	shutter_coating.set_shader_parameter("numbers", preload("res://garage/workshop_shutter_numbers.png"))
 	shutter_coating.set_shader_parameter("powder", PowderRelief)
 	_finishes["ShutterCurtain"] = shutter_coating
+	# ... as are the lamps on the ends of their hoods, which show each door's state.
+	_instances["DoorLamp"] = []
+	_instances["DoorLamp"].resize(Pilot.GARAGE_BAYS.size())
+	var door_lamp := ShaderMaterial.new()
+	door_lamp.shader = preload("res://garage/bay_door_lamp.gdshader")
+	_finishes["DoorLamp"] = door_lamp
 	var cladding := ShaderMaterial.new()
 	cladding.shader = CladdingFinish
 	_finishes["Wall"] = cladding
@@ -131,6 +148,11 @@ func build() -> void:
 	var floor_finish: ShaderMaterial = $SealedConcrete.material_override
 	floor_finish.set_shader_parameter("gate_centers", gate_centers)
 	_batch_structure()
+	doors = Doors.new()
+	doors.name = "BayDoors"
+	add_child(doors)
+	doors.setup(Pilot.GARAGE_BAYS, _door_batches["ShutterCurtain"], _door_batches["DoorLamp"])
+	_exterior()
 	var back_wall: Transform3D = $ServiceEntry.transform.translated_local(Vector3(0, 0, ServiceEntry.BACK))
 	inspection = Inspection.new()
 	inspection.install(self, back_wall)
@@ -179,6 +201,11 @@ func _name_bay(id: String) -> void:
 
 func _sign_words(index: int, craft: String) -> String:
 	return "%02d   %s" % [index + 1, Pilot.placard_name(craft).to_upper()]
+
+
+## The door ahead of a bay (its own, or the Phaethon's for the Talon): x along the sill, y up, z into the hall; global.
+func door_transform(id: String) -> Transform3D:
+	return global_transform * _door_frames.get(_bay_key(id), Transform3D.IDENTITY)
 
 
 func seat_transform(id: String) -> Transform3D:
@@ -233,8 +260,12 @@ func _lighting() -> void:
 	var sky := Sky.new()
 	# The HDR panorama was captured in this hall, at (0, 3.55, 0). Its strips
 	# and clerestory light the metal without allocating a live reflection atlas.
-	var sky_paint := PanoramaSkyMaterial.new()
-	sky_paint.panorama = WorkshopPanorama
+	# Only the radiance pass draws it: the background, seen only through an open
+	# bay door, is daylight (workshop_sky.gdshader), the sun where the daylight is.
+	var sky_paint := ShaderMaterial.new()
+	sky_paint.shader = SkyFinish
+	sky_paint.set_shader_parameter("panorama", WorkshopPanorama)
+	sky_paint.set_shader_parameter("sun", Basis.from_euler(Vector3(deg_to_rad(-21.0), deg_to_rad(-22.0), 0.0)).z)
 	sky.radiance_size = Sky.RADIANCE_SIZE_128
 	sky.sky_material = sky_paint
 	env.sky = sky
@@ -319,10 +350,13 @@ func _hall() -> void:
 	add_child(floor_node)
 	_block(Vector3(0,-.15,0),Vector3(HALF_X*2+.5,.30,HALF_Z*2+.5))
 	for side in [-1.0,1.0]:
-		_wall(Vector3(side*(HALF_X+.12),EAVES*.5,0),Vector3(.24,EAVES,2*HALF_Z))
+		# A side wall opens behind each of its three bay doors. It still stops a walker whole: a door stands open
+		# only while the pilot sits in a cockpit (garage.gd), and the curtain keeps its own collider.
+		_side_course("Wall", side*(HALF_X+.12), EAVES*.5, Vector2(.24, EAVES))
+		_block(Vector3(side*(HALF_X+.12),EAVES*.5,0),Vector3(.24,EAVES,2*HALF_Z))
 		var portal: bool = side < 0.0
 		_wall(Vector3(0,EAVES*.5,side*(HALF_Z+.12)),Vector3(2*HALF_X+.48,EAVES,.24),portal)
-		_box("Blockwork", Vector3(side*(HALF_X-.07),.67,0), Vector3(.14,1.34,2*HALF_Z))
+		_side_course("Blockwork", side*(HALF_X-.07), .67, Vector2(.14,1.34))
 		_gable_course("Blockwork", Vector3(0,.67,side*(HALF_Z-.07)), Vector3(2*HALF_X,1.34,.14),portal,ServiceEntry.FRONTAGE)
 		_gable_course("Enamel", Vector3(0,2.24,side*(HALF_Z-.11)),Vector3(2*HALF_X,.30,.055),portal,ServiceEntry.FRONTAGE)
 		_box("Rail", Vector3(side*(HALF_X-.22),5.72,0),Vector3(.09,.09,HALF_Z*2))
@@ -445,13 +479,51 @@ func _shutter(side: float, row: float) -> void:
 	var origin := Transform3D(frame,Vector3(x,0,row))
 	_instances["ShutterFrame"].append(origin)
 	_instances["ShutterCurtain"][number] = origin
+	_door_frames[Pilot.GARAGE_BAYS[number]] = origin
 	_instances["TrenchGrate"].append(Transform3D(frame,Vector3(side*DRAIN_X,0,row)))
 	_block(origin * Vector3(0,2.43,.066), Vector3(11.06,4.86,.084),frame)
 	for jamb: float in [-5.545,5.545]:
 		_block(origin * Vector3(jamb,1.0,.157),Vector3(.19,2.0,.150),frame)
-	# A light mounted to the end of the roller hood identifies the closed bay door.
+	# A light mounted to the end of the roller hood identifies the closed bay door (bay_door_lamp.gdshader: amber
+	# while it runs or stands open).
 	_box("Plinth",origin*Vector3(-4.85,4.98,.345),Vector3(.47,.20,.080),frame)
-	_box("Green",origin*Vector3(-4.85,4.98,.390),Vector3(.32,.10,.023),frame)
+	_instances["DoorLamp"][number] = Transform3D(frame.scaled_local(Vector3(.32,.10,.023)),origin*Vector3(-4.85,4.98,.390))
+
+
+## A course along a side wall at `x` (`size`: its depth and height, centred at `y`), from end to end of the hall but
+## broken at each bay door's opening up to the door's head.
+func _side_course(finish: String, x: float, y: float, size: Vector2) -> void:
+	var bottom := y - size.y*.5
+	var top := y + size.y*.5
+	var start := -HALF_Z
+	for row: float in [-ROW_SPACING, 0.0, ROW_SPACING]:
+		var jamb := row - DOOR_HALF_WIDTH
+		_box(finish, Vector3(x,y,(start+jamb)*.5), Vector3(size.x,size.y,jamb-start))
+		if top > DOOR_HEAD:
+			var low := maxf(bottom, DOOR_HEAD)
+			_box(finish, Vector3(x,(low+top)*.5,row), Vector3(size.x,top-low,DOOR_HALF_WIDTH*2.0))
+		start = row + DOOR_HALF_WIDTH
+	_box(finish, Vector3(x,y,(start+HALF_Z)*.5), Vector3(size.x,size.y,HALF_Z-start))
+
+
+## The ground beyond the two side walls, seen only through an open bay door: the apron each door opens onto, grass
+## and a hazy distance (workshop_apron.gdshader) under the daylight background (workshop_sky.gdshader).
+func _exterior() -> void:
+	var finish := ShaderMaterial.new()
+	finish.shader = ApronFinish
+	finish.set_shader_parameter("aggregate", Aggregate)
+	finish.set_shader_parameter("wall", HALF_X)
+	finish.set_shader_parameter("rows", Vector3(-ROW_SPACING, 0.0, ROW_SPACING))
+	for side: float in [-1.0, 1.0]:
+		var ground := MeshInstance3D.new()
+		ground.name = "Apron" + ("West" if side < 0.0 else "East")
+		var plane := PlaneMesh.new()
+		plane.size = Vector2(OUTSIDE, OUTSIDE * 2.0)
+		ground.mesh = plane
+		ground.material_override = finish
+		ground.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		ground.position = Vector3(side * (HALF_X + OUTSIDE * .5), 0.0, 0.0)
+		add_child(ground)
 
 
 func _bench(at: Vector3) -> void:
@@ -795,10 +867,13 @@ func _batch_structure() -> void:
 			continue
 		var batch := MultiMesh.new()
 		batch.transform_format = MultiMesh.TRANSFORM_3D
+		batch.use_custom_data = id in ["ShutterCurtain", "DoorLamp"]      # (each door's lift and lamp: bay_doors.gd)
 		batch.mesh = _equipment_meshes.get(id,unit)
 		batch.instance_count = transforms.size()
 		for i in transforms.size():
 			batch.set_instance_transform(i,transforms[i])
+		if batch.use_custom_data:
+			_door_batches[id] = batch
 		var piece := MultiMeshInstance3D.new()
 		piece.name = id
 		piece.multimesh = batch

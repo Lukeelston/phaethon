@@ -31,9 +31,13 @@ var _bearing: AudioStreamPlayer3D
 var _door_ramp: Tween
 var _random := RandomNumberGenerator.new()
 var _last_take := -1
+var _bay_doors: Node                 # garage/bay_doors.gd: the six roller doors ...
+var _bay_door_at: Callable           # ... and where a bay's door hangs (its hood, in the hall's space)
+var _rollers := {}                   # bay -> [drive, stop]: each door's own voices, made the first time it runs
+var _roller_ramps := {}
 
 
-func setup(walker: Walker, entry: Annex, station: Inspection) -> void:
+func setup(walker: Walker, entry: Annex, station: Inspection, doors: Node = null, door_at := Callable()) -> void:
 	var room := AudioStreamPlayer.new()
 	room.name = "RoomTone"
 	room.stream = RoomAir
@@ -77,6 +81,53 @@ func setup(walker: Walker, entry: Annex, station: Inspection) -> void:
 	entry.motion_finished.connect(_door_finished)
 	_bearing = _emitter("SpindleBearing", Bearing, station.rotor_contact_point(), 1.0, 4.5)
 	station.rotor_speed_changed.connect(_wheel_speed_changed)
+	if doors != null and door_at.is_valid():
+		_bay_doors = doors
+		_bay_door_at = door_at
+		doors.motion_started.connect(_roller_started)
+		doors.motion_finished.connect(_roller_finished)
+
+
+## A bay door's drive, from its hood, and the bottom rail's seal at the sill: the service door's own recordings,
+## pitched down for a curtain eleven metres wide and carried across the hall to the seat at the far end of the bay.
+func _roller(bay: String) -> Array:
+	if not _rollers.has(bay):
+		var hood: Transform3D = _bay_door_at.call(bay)
+		var drive := _emitter("RollerDrive_" + bay, Motor, hood * Vector3(0, 5.05, .20), 5.0, 48.0)
+		var stop := _emitter("RollerStop_" + bay, Seal, hood * Vector3(0, .25, .15), 4.0, 42.0)
+		_rollers[bay] = [drive, stop]
+	return _rollers[bay]
+
+
+func _roller_started(bay: String, opening: bool) -> void:
+	var drive: AudioStreamPlayer3D = _roller(bay)[0]
+	if _roller_ramps.has(bay):
+		(_roller_ramps[bay] as Tween).kill()
+	if not drive.playing:
+		drive.volume_db = -47.0
+		drive.pitch_scale = .55
+		drive.play()
+	var ramp := create_tween().set_parallel(true)
+	ramp.tween_property(drive, "pitch_scale", .80 if opening else .72, .35)
+	ramp.tween_property(drive, "volume_db", -11.0 if opening else -12.5, .20)
+	_roller_ramps[bay] = ramp
+
+
+func _roller_finished(bay: String, opened: bool) -> void:
+	var voices := _roller(bay)
+	var drive: AudioStreamPlayer3D = voices[0]
+	var stop: AudioStreamPlayer3D = voices[1]
+	if _roller_ramps.has(bay):
+		(_roller_ramps[bay] as Tween).kill()
+	var ramp := create_tween().set_parallel(true)
+	ramp.tween_property(drive, "pitch_scale", .52, .16)
+	ramp.tween_property(drive, "volume_db", -47.0, .16)
+	ramp.chain().tween_callback(drive.stop)
+	_roller_ramps[bay] = ramp
+	if not opened:      # (the rail landing on the sill; an opened door stops against its hood, the drive's own stop)
+		stop.pitch_scale = .74
+		stop.volume_db = -9.0
+		stop.play()
 
 
 func _listener_crossed(_body: Node3D, inside: bool) -> void:
