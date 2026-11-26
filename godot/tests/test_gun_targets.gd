@@ -16,7 +16,8 @@
 ##                          pulling following the trigger while it is ready to fire (and not while it is not), and no bolt
 ##                          is made while the trigger is held; the same mount not firing for itself makes bolts. Its
 ##                          status word is said on the strip (view._power_say) when it changes to a word, never twice
-##                          running, never when it goes blank
+##                          running, never when it goes blank; and once it fires for itself again, the fire control's
+##                          own firing flag (left up by its bolts) is down
 ## Headless: --xr-mode off --audio-driver Dummy -s res://tests/test_gun_targets.gd -- --mute
 ## Prints GUN TARGETS PASS. Puts user://vr_prefs.json back as it found it.
 extends SceneTree
@@ -395,6 +396,8 @@ func check_own_fire_hook(v, g) -> void:
 		said.append(v._power_note)
 	check("its status words LOCK 3, LOCK 3, (none), RELOAD, RELOAD are said on the strip as %s (LOCK 3, -, -, RELOAD, -)" % [said],
 		said == ["LOCK 3", "", "", "RELOAD", ""])
+	check("... firing for itself again after its bolts: the fire control's firing flag is down (%s), not left up by them" % [g.firing],
+		not g.firing)
 	g.mount = real
 	for i in int(2.0 / DT):      # (the bolts in flight land)
 		g.step(DT)

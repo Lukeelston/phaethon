@@ -298,6 +298,7 @@ func step(delta: float) -> void:
 	fouled = mount.fouled(target_r)
 	if mount.own_fire():
 		# A weapon that fires for itself: given the trigger (held, the mount out and asked out); no bolts, no heat here.
+		firing = false      # (no bolts of the fire control's this frame: its flag is not left as a bolt-firing mount set it)
 		mount.fire(self, delta, (trigger or hold_fire) and mount.ready_to_fire())
 	else:
 		_cool = maxf(0.0, _cool - delta)
@@ -657,12 +658,14 @@ func add_fx(p: Vector3, kind: String, dur: float, size: float) -> void:
 
 
 ## A sound from the fire control's players: `pool_name` "gun" (at the mount's node) or "world" (put at `at`, render
-## frame). (_play, for a weapon that fires for itself.)
+## frame); any other pool is an error (push_error), not dropped. (_play, for a weapon that fires for itself.)
 func play(pool_name: String, sound: String, at := Vector3.INF, pitch := 1.0) -> void:
 	if pool_name == "gun":
 		_play(_gun_audio, sound, at, pitch)
 	elif pool_name == "world":
 		_play(_world_audio, sound, at, pitch)
+	else:
+		push_error("Gunnery.play: no pool \"%s\" (it has \"gun\" and \"world\")" % pool_name)
 
 
 # --- the targets: what any weapon fires at ---------------------------------------------------------------------

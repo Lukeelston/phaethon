@@ -93,7 +93,8 @@ func own_fire() -> bool:
 
 ## Each frame, for a mount that fires for itself, after the aim is found and the mount stepped: `g` the fire control
 ## (its aim, aim_car and lock, and its targets: alive, hp_of, damage, threats, add_fx, play); `pulling` the trigger held
-## with the mount out and asked out (ready_to_fire).
+## with the mount out and asked out (ready_to_fire). `g.on_aim` and `g.fouled` are this frame's, found before the call,
+## and are not part of `pulling`: a mount whose line can foul on its own craft checks `g.fouled` itself.
 func fire(_g, _delta: float, _pulling: bool) -> void:
 	pass
 
