@@ -50,6 +50,10 @@ func _start() -> void:
 		_show_setup("--verify-vr-release" in args)
 		print("PCVR HANDOFF: setup screen ready")
 		return
+	# the headset's session is up: its sound in the headset from here on, the menu's and the garage's as well as a
+	# flight's (audio/audio_out.gd; Luke, 2026-11-26: "put the audio back in the headset")
+	if xr_ready:
+		preload("res://audio/audio_out.gd").route()
 	if OS.get_environment("PHAETHON_SOURCE_BOOT") == "1" and "--source-direct-flight" in args:
 		print("PCVR STAGE: loading source cockpit")
 		get_tree().change_scene_to_file("res://vr.tscn")

@@ -190,11 +190,11 @@ func show_controls(craft: String, seated: bool, destination: String, pad: bool, 
 	var fly := "Y" if pad or _placard else "F"
 	var back := "B" if pad or _placard else "Esc"
 	var action := "Walk to a cockpit"
-	var hint := "WASD  Walk     Mouse  Look     V  Pilot view     Esc  Menu"
+	var hint := "WASD  Walk     Shift  Sprint     Space  Jump     Mouse  Look     V  Pilot view     Esc  Menu"
 	if _placard:
-		hint = "Left stick  Walk     Right stick  Turn     B  Menu"
+		hint = "Left stick  Walk     Click it  Sprint     A  Jump     Right stick  Turn     B  Menu"
 	elif pad:
-		hint = "Left stick  Walk     Right stick  Look     R3  Pilot view     B  Menu"
+		hint = "Left stick  Walk     L3  Sprint     A  Jump     Right stick  Look     R3  Pilot view     B  Menu"
 	if seated:
 		action = craft + "  /  " + destination
 		if _placard:
@@ -213,7 +213,7 @@ func show_controls(craft: String, seated: bool, destination: String, pad: bool, 
 		_sign_type(not seated)
 		if not seated:
 			action = "A   BOARD" if not craft.is_empty() else "WALK TO A COCKPIT"
-			hint = "B   MENU" if not craft.is_empty() else "LEFT STICK  WALK     RIGHT STICK  TURN"
+			hint = "B   MENU" if not craft.is_empty() else "L STICK  WALK  /  CLICK  SPRINT     A  JUMP"      # (0.82 m of the card's 0.95 at this size)
 		_mount_clips.visible = not seated
 		_placard.global_transform = anchor
 		_face.size = Vector2(.74, .32) if seated else Vector2(.99, .19)

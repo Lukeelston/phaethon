@@ -11,6 +11,10 @@ signal cockpit_control_requested(control: String)
 # own: "body" is refused only while it is pushed BODY_CLICK_MAX_STICK or more, so a brisk walk past the bay swaps
 # nothing, and a deliberate click that tilts the stick a little (a real Touch thumbstick does) still counts.
 signal bay_control_requested(control: String)
+# Sprint and jump (Luke, 2026-11-26: "add sprint with left click, jump with A"). The same stick click, with the stick
+# pushed BODY_CLICK_MAX_STICK or more, sprints (_stick_click): SPRINT_SPEED until the stick is let go. Jumping is
+# jump(): the garage calls it for the board button (right A in the headset) where there is nothing to board
+# (garage.gd _board_button); Space on the keyboard. Shift held while walking sprints too.
 signal boot_planted(side: int, at: Vector3, speed: float)
 
 const Pilot := preload("res://garage/pilot_model.gd")
@@ -18,6 +22,8 @@ const Levers := preload("res://input/lever_input.gd")
 const CockpitControls := preload("res://garage/garage_controls.gd")
 const STANDING_EYE_HEIGHT := Pilot.STANDING_EYE.y
 const WALK_SPEED := 2.35
+const SPRINT_SPEED := 4.6      # (under the stride's own limit of 5 m/s: step_locomotion)
+const JUMP_SPEED := 3.0        # m/s off the floor: 0.46 m up, 0.6 s in the air
 const TURN_SPEED := PI / 2.0  # radians per second at full right-stick travel
 const DEADZONE := .19
 const BODY_CLICK_MAX_STICK := .5   # an on-foot stick click at this deflection or more is walking, not the body control
@@ -28,6 +34,7 @@ var xr_live := false
 var seated := false
 var third_person := false
 var using_gamepad := false
+var sprinting := false      # on foot, from a stick click with the stick pushed until the stick is let go
 var scripted := false       # a climb in or out is playing (garage/boarding.gd): no walking, looking or cockpit controls
 var camera: Camera3D
 var hands := {}
@@ -35,6 +42,7 @@ var hands := {}
 var _shape: CollisionShape3D
 var _avatar: Pilot
 var _distance := 0.0
+var _jump := false          # asked for since the last step (jump())
 var _head_sway := Vector3.ZERO
 var _origin: Node3D
 var _eye: Camera3D
@@ -157,6 +165,8 @@ func set_pilot(pilot: Pilot) -> void:
 
 func set_seated(value: bool, pose: Transform3D) -> void:
 	seated = value
+	sprinting = false
+	_jump = false
 	_head_sway = Vector3.ZERO
 	_controls.reset()
 	_pad_axes = false
@@ -195,6 +205,8 @@ func eye_transform() -> Transform3D:
 ## gloves go and the pilot's own arms show (the climb puts his hands on the craft); its capsule stands aside.
 func begin_scripted() -> void:
 	scripted = true
+	sprinting = false
+	_jump = false
 	velocity = Vector3.ZERO
 	_controls.reset()
 	_shape.disabled = true
@@ -314,7 +326,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not is_node_ready() or not _focused:
 		return
 	var key := KEY_NONE
-	var pushed := false      # (L3 clicked while its stick is pushed: walking, not asking for the body)
+	var click_stick := Vector2.ZERO      # (where L3's stick stood as it clicked: pushed is a sprint, not the body)
 	if event is InputEventKey and event.pressed and not event.echo:
 		key = event.physical_keycode if event.physical_keycode != KEY_NONE else event.keycode
 		using_gamepad = false
@@ -330,7 +342,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			JOY_BUTTON_X: key = KEY_I
 			JOY_BUTTON_LEFT_STICK:
 				key = KEY_P
-				pushed = not _body_click(Vector2(Input.get_joy_axis(event.device, JOY_AXIS_LEFT_X), Input.get_joy_axis(event.device, JOY_AXIS_LEFT_Y)))
+				click_stick = Vector2(Input.get_joy_axis(event.device, JOY_AXIS_LEFT_X), Input.get_joy_axis(event.device, JOY_AXIS_LEFT_Y))
 			JOY_BUTTON_RIGHT_STICK: key = KEY_V
 	elif not xr_live and event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		if event.relative.length_squared() > .01:
@@ -353,8 +365,13 @@ func _unhandled_input(event: InputEvent) -> void:
 			if xr_live: return
 			if seated:
 				cockpit_control_requested.emit("power" if key == KEY_I else "park")
-			elif key == KEY_I or not pushed:
-				bay_control_requested.emit("paint" if key == KEY_I else "body")
+			elif key == KEY_I:
+				bay_control_requested.emit("paint")
+			else:
+				_stick_click(click_stick)
+		KEY_SPACE:
+			if seated or scripted: return
+			jump()
 		_: return
 	if is_inside_tree():
 		get_viewport().set_input_as_handled()
@@ -373,6 +390,23 @@ func _notification(what: int) -> void:
 ## past DEADZONE: a pressed thumbstick tilts.
 func _body_click(v: Vector2) -> bool:
 	return v.length() < BODY_CLICK_MAX_STICK
+
+
+## A stick click on foot, the stick standing at `stick`: near its centre it is the bay's body control, pushed it is
+## the start of a sprint (which step_locomotion ends when the stick is let go).
+func _stick_click(stick: Vector2) -> void:
+	if seated or scripted:
+		return
+	if _body_click(stick):
+		bay_control_requested.emit("body")
+	else:
+		sprinting = true
+
+
+## Jump, if he is on his feet on the floor at the next step (a press in the air is dropped, none is saved up).
+func jump() -> void:
+	if not seated and not scripted:
+		_jump = true
 
 
 func _stick(v: Vector2) -> Vector2:
@@ -416,6 +450,8 @@ func _desktop_input(delta: float) -> Vector2:
 		if move != Vector2.ZERO or look != Vector2.ZERO:
 			using_gamepad = true
 			_look(-look.x*2.4*delta,-look.y*1.7*delta)
+	if arrows != Vector2.ZERO and Input.is_physical_key_pressed(KEY_SHIFT):
+		sprinting = true
 	return (arrows+move).limit_length()
 
 
@@ -506,7 +542,7 @@ func _xr_input(delta := 1.0 / 60.0) -> Vector2:
 		else: bay_control_requested.emit("paint")
 	elif pressed.y > 0:
 		if seated: cockpit_control_requested.emit("park")
-		elif _body_click(stick): bay_control_requested.emit("body")
+		else: _stick_click(stick)
 	return _stick(Vector2(stick.x,-stick.y))
 
 
@@ -546,7 +582,10 @@ func _physics_process(delta: float) -> void:
 func step_locomotion(intent: Vector2, delta: float) -> void:
 	if seated or scripted:
 		velocity = Vector3.ZERO
+		_jump = false
 		return
+	if intent == Vector2.ZERO:
+		sprinting = false
 	var start := global_position
 	var stride_start := start
 	var stride_limit := minf(.22, 5.0 * delta)
@@ -562,10 +601,16 @@ func step_locomotion(intent: Vector2, delta: float) -> void:
 	forward = forward.normalized()
 	var right := forward.cross(Vector3.UP)
 	var direction := (right*intent.x - forward*intent.y).limit_length()
-	var horizontal := Vector2(velocity.x,velocity.z).move_toward(Vector2(direction.x,direction.z)*WALK_SPEED,11.0*delta)
+	var horizontal := Vector2(velocity.x,velocity.z).move_toward(Vector2(direction.x,direction.z)*(SPRINT_SPEED if sprinting else WALK_SPEED),11.0*delta)
 	velocity.x = horizontal.x
 	velocity.z = horizontal.y
-	velocity.y = minf(velocity.y,0.0) - 9.8*delta
+	if _jump and is_on_floor():
+		velocity.y = JUMP_SPEED
+	elif is_on_floor():
+		velocity.y = minf(velocity.y,0.0) - 9.8*delta
+	else:
+		velocity.y -= 9.8*delta
+	_jump = false
 	move_and_slide()
 	var travel := global_position-start
 	travel.y = 0

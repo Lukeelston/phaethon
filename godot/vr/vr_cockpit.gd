@@ -39,6 +39,7 @@
 extends "res://view/craft_view.gd"
 
 const Garage := preload("res://release/garage_route.gd")
+const AudioOut := preload("res://audio/audio_out.gd")
 const SEAT := Vector3(0.0, 0.72, 0.6)  # eye point in pod space (pod forward = -Z): a little above the
                                         # cockpit rim (Luke: "sit a bit lower", then "view higher by default")
 # The cockpit's furniture is laid out round SEAT (the map's pod, the instruments' sight lines). The pilot
@@ -667,17 +668,8 @@ func _make_view() -> void:
 		# Sound in the headset, not on the desk: Windows' default output may be the PC speakers. A flight started
 		# with -- --audio-out=<words of a device's name, joined by +> plays through that device instead (Luke,
 		# 2026-11-22: headphones on the PC's own jack, "so that I can judge the sound by device not code").
-		var asked := ""
-		for a in OS.get_cmdline_user_args():
-			if a.begins_with("--audio-out="):
-				asked = a.trim_prefix("--audio-out=")
-		var devices := AudioServer.get_output_device_list()
-		var dev := audio_out_pick(devices, asked)
-		if dev != "":
-			AudioServer.output_device = dev
-			print("AUDIO: output -> ", dev, "" if asked == "" else "  (asked for: %s)" % asked)
-		if asked != "" and not audio_out_matches(dev, asked):
-			print("AUDIO: no playback device is named like '%s'; the devices are: %s" % [asked, ", ".join(devices)])
+		# (audio/audio_out.gd: the exported game has chosen it already, at its boot, for the menu and the garage)
+		AudioOut.route()
 		print("OPENXR: initialized, MSAA 4x")
 	else:
 		print("OPENXR: NOT initialized, running flat (is the Quest on and in Link mode?)")
@@ -2820,23 +2812,9 @@ func _exit_tree() -> void:
 ## joined by +, any case: "headphones+realtek"), else the headset's own ("Oculus Virtual Audio"), else ""
 ## (leave the driver's default as it is). A real device is never called "Default": that entry is skipped.
 static func audio_out_pick(devices: PackedStringArray, asked: String) -> String:
-	if asked.strip_edges() != "":
-		for d in devices:
-			if d != "Default" and audio_out_matches(d, asked):
-				return d
-	for d in devices:
-		if d.contains("Oculus Virtual Audio"):
-			return d
-	return ""
+	return AudioOut.pick(devices, asked)
 
 
 ## Whether a device's name holds every word asked for.
 static func audio_out_matches(device: String, asked: String) -> bool:
-	var words := 0
-	for w in asked.split("+", false):
-		if w.strip_edges() == "":
-			continue
-		words += 1
-		if not device.containsn(w.strip_edges()):
-			return false
-	return words > 0 and device != ""
+	return AudioOut.matches(device, asked)

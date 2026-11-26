@@ -323,6 +323,7 @@ func leave_seat() -> void:
 	_update_prompt()
 
 
+## On foot with no bay in reach and not at the rotor, the board button is a jump (Luke, 2026-11-26: "jump with A").
 ## The board button (E, pad A, right A in the headset): climbs in or out, played (garage/boarding.gd); pressed again
 ## while a climb plays, it finishes it at once. interact() and leave_seat() stay instant (tests, the release checks).
 func _board_button() -> void:
@@ -336,6 +337,9 @@ func _board_button() -> void:
 		return
 	if _at_rotor():
 		environment.inspection.spin_rotor()
+		return
+	if not Fleet.GARAGE_BAYS.has(environment.nearest_bay(walker.global_position)):
+		walker.jump()
 		return
 	_climb_in()
 
