@@ -40,7 +40,8 @@
 ##            way, so a craft on the road behind has it in front of its fixed guns (on a bend it runs off the road's
 ##            middle, where a craft FOLLOW m behind it there has it on its nose: _sightline; it moves across onto that
 ##            line over its drop and back off it over its climb); climbs back to STATION_ALT over UP_S
-##            (slowing to rest again); then flies on at that height to its next station. Each run is laid along the
+##            (slowing to rest again); then flies on along the road, over its middle, at that height (over any roof) to
+##            its next station, speeding up and slowing as a run's ends do (_transit). Each run is laid along the
 ##            zone's road (_plan) so that its drop and its climb are over open road, GUN_PAD clear of a hall's (or the
 ##            tube's) ends: it never passes through a roof (the run between may go under one, at STRAFE_ALT), and all of
 ##            it ZONE_PAD inside the zone's ends; of the lays that fit, the one going the pack's way (the way most of its
@@ -56,15 +57,17 @@
 ##            within SHOT_LIFE (each where it will be then, as it goes now: one about to pass under is let go). Then its
 ##            muzzle glows SHOT_WARN s and it fires one shot at SHOT_V, led once (to where what it is after will be, as
 ##            that goes then; never steered after). Its cool is SHOT_EVERY from the glow's start at the pilot, and
-##            SHOT_EVERY_COMMUTER at a commuter (alone it takes 8 to 12 commuters a minute). It holds its fire (the glow
-##            goes out, no shot) with the pilot nearer than HOLD_FIRE (a shot from there could not be dodged), with what
+##            SHOT_EVERY_COMMUTER at a commuter (alone it takes 8 to 12 commuters a minute). It holds its fire (no glow
+##            begun, or the glow out at once, and no shot) with the pilot nearer than HOLD_FIRE (a shot from there could
+##            not be dodged, nor a glow so near the eye be welcome), with what
 ##            it is after out of reach or out of the turret's arc, and at the pilot from under a roof, or with no clear
 ##            line from it to where its shot would meet the pilot (the drones' _clear_line, in that frame: the pilot is
 ##            then left alone PILOT_HIDDEN s, and a commuter taken)
 ##   a shot   flies straight on. Within SHOT_HIT of the pod or an engine (the closest the two came over the frame) it is
 ##            a hit taken (the director's hit_by("gunship"): its one GRACE clock), unless the craft is under cover from
-##            the height it was fired at (_covered: the one who ducked under a deck or into a hall has dodged it); gone
-##            either way. Within SHOT_HIT of its commuter's middle, that commuter is knocked out (the director's
+##            the height it was fired at (_covered: the one who ducked under a deck or into a hall has dodged it), or the
+##            craft is down (a wreck: no hit, as hit_by takes none then); gone either way, never through the craft. Within
+##            SHOT_HIT of its commuter's middle, that commuter is knocked out (the director's
 ##            _run_down). SHOT_FLOOR under its aim's height (the ground there), or SHOT_LIFE s old: gone. The shots
 ##            and the muzzle's glow are drawn as one batch of red discs with white-hot middles, laid over what is
 ##            behind them (SHOT_SHADER: added, they were lost on a bright sky), none under SHOT_MIN_ANG to the eye;
@@ -224,8 +227,6 @@ class Gunship extends Flyer:
 	var f := 0.0                # its place along it (a sample)
 	var way := 1                # its run's way along it (0: no run fits, it holds station)
 	var f0 := 0.0               # its station's sample
-	var from_f := 0.0           # the sample its flight to its station began over (its place along the road meanwhile) ...
-	var leg := 0.0              # ... and m of that flight, over the ground
 	var face := 0.0             # rad: its hull's yaw (the render frame's; it turns to its way at FACE_RATE)
 	var yaw := 0.0              # its turret: the pivot's yaw and the cradle's pitch (rad, its model's own)
 	var pitch := -0.6
@@ -895,20 +896,18 @@ func _gunship_step(g: Gunship, delta: float) -> void:
 				_enter(g, "drop")
 		"drop":
 			var u := minf(g.dive_t / DOWN_S, 1.0)
-			_along(g, Traffic.SF_V * u, delta, STRAFE_ALT + lift * (1.0 - smoothstep(0.0, DOWN_S, g.dive_t)), smoothstep(0.0, 1.0, u))
+			_along(g, g.way, Traffic.SF_V * u, delta, STRAFE_ALT + lift * (1.0 - smoothstep(0.0, DOWN_S, g.dive_t)), smoothstep(0.0, 1.0, u))
 			if g.dive_t >= DOWN_S - 1.0e-6:
 				_enter(g, "strafe")
 		"strafe":
-			_along(g, Traffic.SF_V, delta, STRAFE_ALT, 1.0)
+			_along(g, g.way, Traffic.SF_V, delta, STRAFE_ALT, 1.0)
 			if g.dive_t >= STRAFE_S - 1.0e-6:
 				_enter(g, "climb")
 		"climb":
 			var u := minf(g.dive_t / UP_S, 1.0)
-			_along(g, Traffic.SF_V * (1.0 - u), delta, STRAFE_ALT + lift * smoothstep(0.0, UP_S, g.dive_t), 1.0 - smoothstep(0.0, 1.0, u))
+			_along(g, g.way, Traffic.SF_V * (1.0 - u), delta, STRAFE_ALT + lift * smoothstep(0.0, UP_S, g.dive_t), 1.0 - smoothstep(0.0, 1.0, u))
 			if g.dive_t >= UP_S - 1.0e-6:
-				g.from_f = g.f
 				_plan(g)
-				g.leg = Vector2(g.ax - g.x, g.ay - g.y).length()
 				_enter(g, "transit")
 		"transit":
 			_transit(g, delta)
@@ -929,10 +928,10 @@ static func _enter(g: Gunship, state: String) -> void:
 	g.dive_t = 0.0
 
 
-## On along the zone's road at `speed` (its run's way: along the deck, its climb counted), `height` over its deck, and
-## `sight` of the way across from the road's middle to a pursuer's sightline (_sightline); never faster than the town's
-## limit where it is (off the middle, outside a bend, its own line is the longer: 0.65% at 45 m on a 7 km bend).
-func _along(g: Gunship, speed: float, delta: float, height: float, sight: float) -> void:
+## On along the zone's road `way` (+1 up it) at `speed` (along the deck, its climb counted), `height` over its deck,
+## and `sight` of the way across from the road's middle to a pursuer's sightline (_sightline); never faster than the
+## town's limit where it is (off the middle, outside a bend, its own line is the longer: 0.65% at 45 m on a 7 km bend).
+func _along(g: Gunship, way: int, speed: float, delta: float, height: float, sight: float) -> void:
 	var R = sim.roads[g.road]
 	var i := clampi(int(g.f), 0, R.N - 2)
 	var seg := Vector3(R.px[i + 1] - R.px[i], R.py[i + 1] - R.py[i], sim.net_height(g.road, float(i + 1)) - sim.net_height(g.road, float(i))).length()
@@ -940,7 +939,7 @@ func _along(g: Gunship, speed: float, delta: float, height: float, sight: float)
 	var y0 := g.y
 	var z0 := g.z
 	var f0 := g.f
-	_place(g, f0 + float(g.way) * speed * delta / maxf(seg, 1.0), height, sight)
+	_place(g, f0 + float(way) * speed * delta / maxf(seg, 1.0), height, sight)
 	var moved := sqrt((g.x - x0) * (g.x - x0) + (g.y - y0) * (g.y - y0) + (g.z - z0) * (g.z - z0))
 	if moved > Traffic.SF_V * delta:
 		_place(g, f0 + (g.f - f0) * Traffic.SF_V * delta / moved, height, sight)
@@ -991,26 +990,26 @@ static func _across(R, f: float, along: bool) -> Vector2:
 	return Vector2(lerpf(R.nx[i], R.nx[i + 1], u), lerpf(R.ny[i], R.ny[i + 1], u)).normalized()
 
 
-## On to its next station, at STATION_ALT (over any roof): speeding up from the climb's end as fast as the climb slowed
-## it, never faster than the town's limit, slowing into the station; there, it holds station.
+## On to its next station along the zone's road, over its middle, STATION_ALT over it (over any roof): it keeps to the
+## road as a raider keeps to the zone (a straight line between the Network's stations, 6 km apart on a 7 km bend, cut
+## 680 m inside it, over the towers). It speeds up from the climb's end and slows into the station as fast as a run's
+## ends change its speed (SF_V / UP_S), never faster than the town's limit; there, it holds station.
 func _transit(g: Gunship, delta: float) -> void:
-	var dx := g.ax - g.x
-	var dy := g.ay - g.y
-	var dz := g.az - g.z
-	var d := sqrt(dx * dx + dy * dy + dz * dz)
-	var speed := minf(minf(Traffic.SF_V, maxf(20.0, 2.0 * d)), g.v + Traffic.SF_V / UP_S * delta)
-	if d <= speed * delta:
+	var R = sim.roads[g.road]
+	var left := (g.f0 - g.f) * float(R.len[clampi(int(g.f), 0, R.N - 1)])      # m along the road to its station (+: up it)
+	var dv := Traffic.SF_V / UP_S * delta
+	# the most that still leaves it room to stop there, slowing dv a frame (v of it v x delta on, then (v - dv) ... to 0)
+	var stop := -dv + sqrt(dv * dv + 2.0 * dv / maxf(delta, 1.0e-6) * absf(left))
+	var speed := minf(minf(Traffic.SF_V, g.v + dv), stop)
+	var way := 1 if left > 0.0 else -1
+	if absf(left) > 0.01:
+		_along(g, way, speed, delta, STATION_ALT, 0.0)
+	if absf(left) <= 0.01 or (g.f0 - g.f) * float(way) <= 0.0:      # (there, or past it in this step)
 		g.x = g.ax
 		g.y = g.ay
 		g.z = g.az
 		g.f = g.f0
 		_enter(g, "station")
-		return
-	var k := speed * delta / d
-	g.x += dx * k
-	g.y += dy * k
-	g.z += dz * k
-	g.f = lerpf(g.f0, g.from_f, Vector2(g.ax - g.x, g.ay - g.y).length() / g.leg) if g.leg > 1.0 else g.f0
 
 
 ## Its hull's turn in the render frame: its nose (-Z) along `face`, pitched with its climb (half its angle, at most 0.3).
@@ -1039,11 +1038,15 @@ func _pose_ship(g: Gunship) -> void:
 
 
 ## Its gun's frame: off its cool, a look (every LOOK_EVERY frames, staggered by its id) for what to fire on (_choose);
-## at the glow's end, the shot (_fire).
+## during a glow, with the pilot come within HOLD_FIRE of the muzzle, the glow out at once and no shot (no red disc
+## with a white-hot middle a few metres from the eye); at the glow's end, the shot (_fire).
 func _fire_control(g: Gunship, delta: float) -> void:
 	g.hidden = maxf(g.hidden - delta, 0.0)
 	g.cool -= delta
 	if g.warn >= 0.0:
+		if _muzzle_at().distance_to(Vector3(sim.pod.x, sim.pod.y, sim.pod.z)) < HOLD_FIRE:
+			g.warn = -1.0
+			return
 		g.warn += delta
 		if g.warn >= SHOT_WARN - 1.0e-6:
 			_fire(g)
@@ -1138,8 +1141,7 @@ static func _meet_t(d: Vector3, v: Vector3) -> float:
 ## it (the drones' _clear_line: then the pilot is left alone PILOT_HIDDEN s, and a commuter taken; some 14 us a point
 ## of the line, LINE_STEP apart, in this frame alone).
 func _fire(g: Gunship) -> void:
-	var r := _muzzle.global_position
-	var m := Vector3(r.x + view.org_x, -r.z + view.org_y, r.y)
+	var m := _muzzle_at()
 	var P = sim.pod
 	if m.distance_to(Vector3(P.x, P.y, P.z)) < HOLD_FIRE:
 		return
@@ -1151,6 +1153,12 @@ func _fire(g: Gunship) -> void:
 		g.hidden = PILOT_HIDDEN
 		return
 	_shoot(g)
+
+
+## Its muzzle's place, the sims' frame (its model's Muzzle, as posed this frame).
+func _muzzle_at() -> Vector3:
+	var r := _muzzle.global_position
+	return Vector3(r.x + view.org_x, -r.z + view.org_y, r.y)
 
 
 ## One shot from the muzzle at SHOT_V toward g.lead, at what gun g is after (the pilot, or its commuter): never steered
@@ -1256,9 +1264,10 @@ func _roof_clear(fa: float, ha: float, fb: float, hb: float) -> bool:
 
 
 ## The shots' frame: each flies on. On the craft (within SHOT_HIT of the pod or an engine: the closest the two came over
-## the frame) it is a hit taken, unless the craft is under cover from the height it was fired at (_covered), and gone;
-## on its commuter (the same way, to its middle) that commuter is lost (the director's _run_down), and it is gone;
-## SHOT_FLOOR under its aim's height, or SHOT_LIFE s old, it is gone.
+## the frame) it is gone, and a hit taken unless the craft is down (sim.crash_t: gone on the wreck all the same, never
+## through it and the eye) or under cover from the height it was fired at (_covered); on its commuter (the same way, to
+## its middle) that commuter is lost (the director's _run_down), and it is gone; SHOT_FLOOR under its aim's height, or
+## SHOT_LIFE s old, it is gone.
 func _shots_step(delta: float) -> void:
 	if shots.is_empty():
 		return
@@ -1273,13 +1282,12 @@ func _shots_step(delta: float) -> void:
 		var p := Vector3(float(s.ox) + v.x * t, float(s.oy) + v.y * t, float(s.oz) + v.z * t)      # (from where it was fired, in full: a Vector3 summed frame by frame 100 km out drifts off its line)
 		s.p = p
 		var gone := false
-		if up:
-			for b in sim.bodies:
-				if _passed(p, v, Vector3(b.x, b.y, b.z), Vector3(b.vx, b.vy, b.vz), delta, r2):
-					gone = true
-					break
-			if gone and not _covered(P.x, P.y, P.z, float(s.top)):
-				director.hit_by("gunship")
+		for b in sim.bodies:
+			if _passed(p, v, Vector3(b.x, b.y, b.z), Vector3(b.vx, b.vy, b.vz), delta, r2):
+				gone = true
+				break
+		if gone and up and not _covered(P.x, P.y, P.z, float(s.top)):
+			director.hit_by("gunship")
 		var c = s.car
 		if not gone and c != null and absf(c.x - p.x) < 40.0 and absf(c.y - p.y) < 40.0 and not c.hostile and traffic.cars.has(c):
 			if _passed(p, v, Vector3(c.x, c.y, traffic.body_height(c)), Vector3(c.hx * c.v, c.hy * c.v, 0.0), delta, r2):

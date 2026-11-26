@@ -25,6 +25,17 @@
 ##                              the deck takes one. The craft in the open just past the hall's far end, the gunship held
 ##                              200 m over the hall 1 km back (its line to the craft through the roof): no shot at it in
 ##                              4 s, the pilot left alone; held over the open road the other side: a shot within 3 s
+##   check_hold_fire            (ruling C) the director stepped alone, commuters made about it (held where they are): the
+##                              craft 120 m behind the gunship held on its run in the open, and 120 m under it on station:
+##                              no glow begun, no shot, no glow drawn in 4 s each (the craft 5 km off instead: it glows);
+##                              a glow at the craft begun 170 m under it, the craft come to 140 m 0.2 s in: the glow out
+##                              that frame (none drawn), and no shot
+##   check_crash_ends_shots     a shot laid on the craft while it is down (crash_t): it ends on the craft (gone at
+##                              SHOT_HIT, never through it) and takes no hit
+##   check_transit_keeps_to_road  a pack of 6 going one way, the craft out of reach, the director stepped alone (the pack
+##                              held where it is): two runs the pack's way, the flight back between them along the road
+##                              (over 4 km), at STATION_ALT over it, its speed changing no faster than its run's ends do,
+##                              and never past the road's half width by more than 10 m
 ##   check_takes_punishment     119 hits (the fire control's damage) leave it; the 120th kills it: kills_by.gunship 1, its
 ##                              burst's fireball three times a raider's, its model hidden
 ##   check_cleared_and_away     every raider and drone killed, the gunship left: still on, the dash naming it (no
@@ -55,7 +66,7 @@ const STEP := 1.0 / 120.0
 const KEEP_M := 1000.0           # m: the gunship stays within its town zone by this
 const COST_MS := 0.1             # ms a frame: the gunship's and its shots' update, mean
 const FLEET_MS := 0.2            # ... with ten drones too (the plan's 0.5 ms is the director, flyers and weapons together)
-const SECTIONS := 10
+const SECTIONS := 13
 const SPEED_MARGIN := 0.5        # m/s: a speed read from places frame to frame
 var failures := 0
 var sections := 0                # (a section that dies on a script error never counts itself: the verdict then fails)
@@ -122,6 +133,9 @@ func _run() -> void:
 		await check_shot_hits_pilot(v)
 		await check_shot_kills_commuter(v)
 		await check_cover(v)
+		await check_hold_fire(v)
+		await check_crash_ends_shots(v)
+		await check_transit_keeps_to_road(v)
 		await check_takes_punishment(v)
 		await check_cleared_and_away(v)
 		await check_reset_clears_flyers_and_shots(v)
@@ -246,12 +260,36 @@ func _fly(v, seconds: float) -> void:
 		await _frame(v)
 
 
-## One frame of the director alone: the craft's bodies where the test put them (the sim not stepped), no commuters.
-func _alone(v) -> void:
-	v.traffic_net.cars.clear()
+## One frame of the director alone: the craft's bodies where the test put them (the sim not stepped), no commuters (or,
+## `keep_cars`, traffic's cars held where they are: commuters about, and a pack that stays put).
+func _alone(v, keep_cars := false) -> void:
+	if not keep_cars:
+		v.traffic_net.cars.clear()
 	var gun_was := _gun_at(v)
 	v.raids.update(STEP)
 	_watch(v, gun_was)
+
+
+## The gunship's flight fields, to hold it where it is (_put_back) while its gun goes on as it would.
+static func _keep(g) -> Array:
+	return [g.state, g.dive_t, g.f, g.x, g.y, g.z, g.vx, g.vy, g.vz, g.v, g.hx, g.hy, g.face]
+
+
+static func _put_back(F, g, kept: Array) -> void:
+	g.state = kept[0]
+	g.dive_t = kept[1]
+	g.f = kept[2]
+	g.x = kept[3]
+	g.y = kept[4]
+	g.z = kept[5]
+	g.vx = kept[6]
+	g.vy = kept[7]
+	g.vz = kept[8]
+	g.v = kept[9]
+	g.hx = kept[10]
+	g.hy = kept[11]
+	g.face = kept[12]
+	F._pose_ship(g)
 
 
 ## The raid's city: the first ground city that is not the start's.
@@ -959,3 +997,253 @@ func check_cost(v) -> void:
 	sections += 1
 	_check("600 frames each, the module's update: %s (the gunship alone under %.2f, with ten drones under %.2f)" % ["; ".join(said), COST_MS, FLEET_MS],
 		means.size() == 2 and means[0] < COST_MS and means[1] < FLEET_MS)
+
+
+## `frames` frames of the director alone with commuters about (traffic held where it is), the craft put each frame by
+## `place` (a Callable), the gunship held as `kept` says (_keep) while its gun goes on: {glows: glows begun, shots: shots
+## made, drawn: frames its glow was drawn}.
+func _hold_watch(v, frames: int, place: Callable, kept: Array) -> Dictionary:
+	var F = v.raids.flyers
+	var g = F.gunship()
+	var glows := 0
+	var drawn := 0
+	var made0: int = F.shots_made
+	for n in frames:
+		place.call()
+		var was: float = g.warn
+		_alone(v, true)
+		_put_back(F, g, kept)
+		if g.warn >= 0.0 and was < 0.0:
+			glows += 1
+		if F._glow.multimesh.visible_instance_count > F.shots.size():
+			drawn += 1
+	return {"glows": glows, "shots": F.shots_made - made0, "drawn": drawn}
+
+
+## Commuters about sample `at` of `road` (made here, as test_raid_flyers' check_speed_cap makes one): one 30 and one 60
+## samples either side, each coming toward it at 200 m/s. -> them (the caller takes them out of traffic after).
+static func _commuters_about(T, road: int, at: float) -> Array:
+	var made := []
+	for j in 4:
+		var c = T.Car.new()
+		c.id = 951000 + j
+		c.kind = T.CAR
+		c.road = road
+		c.dir = 1 if j % 2 == 0 else -1
+		c.f = at - float(c.dir) * (30.0 if j < 2 else 60.0)
+		c.lane = 1
+		c.lat = T._lane_lat(c, 1)
+		c.turn_p = 0.0
+		c.nsp_road = -1
+		c.v = 200.0
+		c.vdes = 200.0
+		c.cruise = 200.0
+		T._place(c)
+		T.cars.append(c)
+		made.append(c)
+	return made
+
+
+func check_hold_fire(v) -> void:
+	var R = v.raids
+	var sim = v.sim
+	var T = v.traffic_net
+	var k := _city(v)
+	R.pack_size = Vector2i(0, 0)
+	R.drones = Vector2i(0, 0)
+	await _in_zone(v, k, 0)
+	await _raid_on(v, k, true)
+	track = false                    # (the test holds the gunship where it is)
+	var F = R.flyers
+	var g = F.gunship()
+	var Rd = sim.roads[g.road]
+	var about := _commuters_about(T, g.road, g.f0 - float(g.way) * 20.0)      # (what it would fire on: held where they are from here on)
+	var zx: int = R._zone(k).z.x
+	var far := _road_point(sim, g.road, float(clampi(zx - roundi(5000.0 / float(Rd.len[zx])), 2, Rd.N - 3)))
+	var away := func(): _put_bodies(sim, far.x, far.y, far.z, 0.0)      # (the craft 5 km short of the zone: the control)
+	# A: on its run in the open (on its run's line across the road), 40 samples short of its station; the craft 120 m
+	# behind it on the road, going its way
+	var sf: float = g.f0 - float(g.way) * 40.0
+	g.state = "strafe"
+	g.dive_t = 1.0
+	F._place(g, sf, F.STRAFE_ALT, 1.0)
+	var i := clampi(int(sf), 0, Rd.N - 1)
+	F._moving(g, Rd.tx[i] * g.way * Traffic.SF_V, Rd.ty[i] * g.way * Traffic.SF_V, 0.0)
+	g.face = atan2(-g.hx, g.hy)
+	g.cool = 0.0
+	g.warn = -1.0
+	var kept_a := _keep(g)
+	var deck: float = sim.net_height(g.road, sf)
+	var back := sqrt(120.0 * 120.0 - pow(F.STRAFE_ALT - float(sim.P.rideH), 2.0))
+	var behind := func():
+		_put_bodies(sim, g.x - g.hx * back, g.y - g.hy * back, deck, 0.0)
+		for b in sim.bodies:
+			b.vx = g.vx
+			b.vy = g.vy
+	behind.call()
+	var gap_a := Vector3(g.x, g.y, g.z).distance_to(Vector3(sim.pod.x, sim.pod.y, sim.pod.z))
+	var held_a := _hold_watch(v, 480, behind, kept_a)
+	g.cool = 0.0
+	var a_ctrl := _hold_watch(v, 360, away, kept_a)
+	# B: on station, the craft in the air 120 m under it
+	_fresh_station(g)
+	var kept_b := _keep(g)
+	var under := func(): _put_bodies(sim, g.x, g.y, g.z - 120.0 - float(sim.P.rideH), 0.0)
+	under.call()
+	var gap_b := Vector3(g.x, g.y, g.z).distance_to(Vector3(sim.pod.x, sim.pod.y, sim.pod.z))
+	var held_b := _hold_watch(v, 480, under, kept_b)
+	g.cool = 0.0
+	var b_ctrl := _hold_watch(v, 360, away, kept_b)
+	# C: a glow at the craft begun 170 m under it, the craft come up to 140 m 0.2 s into it
+	F.shots.clear()
+	_fresh_station(g)
+	var kept_c := _keep(g)
+	var depth := [170.0]
+	var hang := func(): _put_bodies(sim, g.x, g.y, g.z - float(depth[0]) - float(sim.P.rideH), 0.0)
+	var n := 0
+	while n < 240 and not (g.warn >= 0.2 and g.at_pod):
+		hang.call()
+		_alone(v, true)
+		_put_back(F, g, kept_c)
+		n += 1
+	var glowed: bool = g.warn >= 0.2 and g.at_pod
+	var made0: int = F.shots_made
+	depth[0] = 140.0
+	hang.call()
+	_alone(v, true)
+	_put_back(F, g, kept_c)
+	var gap_c := Vector3(g.x, g.y, g.z).distance_to(Vector3(sim.pod.x, sim.pod.y, sim.pod.z))
+	var out_at_once: bool = g.warn < 0.0 and F._glow.multimesh.visible_instance_count == F.shots.size()
+	var held_c := _hold_watch(v, 120, hang, kept_c)
+	var c_shots: int = F.shots_made - made0
+	for c in about:
+		T.cars.erase(c)
+	R.reset()
+	track = true
+	sections += 1
+	_check("ruling C: the craft %.0f m from the gunship held on its run in the open, commuters about: %d glows begun, %d shots, %d frames drawn in 4 s (the craft 5 km off instead: %d glows, %d shots in 3 s); %.0f m under it on station: %d glows, %d shots, %d frames drawn in 4 s (5 km off: %d glows, %d shots); a glow at the craft begun %s 170 m off, the craft come to %.0f m 0.2 s in: the glow out that frame %s, and in the second after %d shots, %d glows begun, %d frames drawn" % [
+			gap_a, held_a.glows, held_a.shots, held_a.drawn, a_ctrl.glows, a_ctrl.shots, gap_b, held_b.glows, held_b.shots, held_b.drawn, b_ctrl.glows, b_ctrl.shots,
+			"(seen)" if glowed else "(NOT seen)", gap_c, out_at_once, c_shots, held_c.glows, held_c.drawn],
+		gap_a < F.HOLD_FIRE and held_a.glows == 0 and held_a.shots == 0 and held_a.drawn == 0 and a_ctrl.glows > 0
+			and gap_b < F.HOLD_FIRE and held_b.glows == 0 and held_b.shots == 0 and held_b.drawn == 0 and b_ctrl.glows > 0
+			and glowed and gap_c < F.HOLD_FIRE and out_at_once and c_shots == 0 and held_c.glows == 0 and held_c.drawn == 0)
+
+
+func check_crash_ends_shots(v) -> void:
+	var R = v.raids
+	var sim = v.sim
+	var k := _city(v)
+	R.pack_size = Vector2i(0, 0)
+	R.drones = Vector2i(0, 0)
+	await _in_zone(v, k, 0)
+	await _raid_on(v, k, true)
+	track = false
+	var F = R.flyers
+	var g = F.gunship()
+	var Rd = sim.roads[g.road]
+	var spot := _road_point(sim, g.road, float(roundi(g.f0 - g.way * 1000.0 / float(Rd.len[int(g.f0)]))))
+	_put_bodies(sim, spot.x, spot.y, spot.z, 0.0)
+	_fresh_station(g)
+	g.cool = 1.0e9                    # (no shot but the test's)
+	F.shots.clear()
+	var crash0: float = sim.crash_t
+	sim.crash_t = 30.0                # (the craft down; the sim, not stepped here, would count it out)
+	R._grace = 0.0
+	var hit := [0]
+	var on_hit := func(_s: String): hit[0] += 1
+	R.hit_taken.connect(on_hit)
+	g.at_pod = true
+	g.prey = null
+	g.lead = Vector3(sim.pod.x, sim.pod.y, sim.pod.z)
+	forced[F.shots_made + 1] = true
+	F._shoot(g)
+	var n: int = F.shots_made
+	var nearest := INF
+	var last := INF
+	var flown := 0
+	while flown < roundi(F.SHOT_LIFE / STEP) + 2 and F.shots.any(func(s): return s.n == n):
+		for s in F.shots:
+			if s.n == n:
+				last = INF
+				for body in sim.bodies:
+					last = minf(last, (s.p as Vector3).distance_to(Vector3(body.x, body.y, body.z)))
+				nearest = minf(nearest, last)
+		_alone(v)
+		flown += 1
+	R.hit_taken.disconnect(on_hit)
+	sim.crash_t = crash0
+	R._wrecked = false                # (no respawn to set the raid aside for: the test put the crash there)
+	R.reset()
+	track = true
+	var reach: float = F.SHOT_HIT + F.SHOT_V * STEP
+	sections += 1
+	_check("a shot laid on the craft while it is down (crash_t): gone after %.2f s of %.0f, its nearest seen %.1f m from the craft and %.1f m the frame before it went (it ends at SHOT_HIT %.0f: within %.1f, never through it), hits %d" % [
+			flown * STEP, F.SHOT_LIFE, nearest, last, F.SHOT_HIT, reach, hit[0]],
+		flown < roundi(F.SHOT_LIFE / STEP) and nearest >= F.SHOT_HIT - 0.5 and last <= reach and hit[0] == 0)
+
+
+func check_transit_keeps_to_road(v) -> void:
+	var R = v.raids
+	var sim = v.sim
+	var k := _city(v)
+	R.pack_size = Vector2i(6, 6)
+	R.drones = Vector2i(0, 0)
+	await _off_zone(v, k, 5000.0, 120)      # (traffic about, held from here on; the craft out of its reach)
+	await _raid_on(v, k, true)
+	var F = R.flyers
+	var g = F.gunship()
+	var zone: Dictionary = R._zone(k)
+	var Rd = sim.roads[int(zone.road)]
+	var pack_way := 0
+	for c in R.pack:
+		pack_way += int(c.dir)
+	var pack_n: int = R.pack.size()
+	var ways := [g.way]
+	var over := -INF              # m: the farthest it was from the road's middle, past the road's half width there
+	var widest := 0.0             # ... and from its middle, m
+	var widest_transit := 0.0
+	var low_transit := INF        # m: its least height over the road in its flight between stations
+	var transit_m := 0.0
+	var harshest := 0.0           # m/s/s: the most its speed changed, in that flight (its start and its end too)
+	var last_speed := -1.0
+	var states := {}
+	var t := 0.0
+	var arrived := false
+	while t < 75.0 and F.gunship() == g and not arrived:
+		var was: String = g.state
+		var x0: float = g.x
+		var y0: float = g.y
+		var z0: float = g.z
+		_alone(v, true)
+		t += STEP
+		states[g.state] = int(states.get(g.state, 0)) + 1
+		var dx: float = g.x - x0
+		var dy: float = g.y - y0
+		var dz: float = g.z - z0
+		var step := sqrt(dx * dx + dy * dy + dz * dz)
+		var at := _against_zone(v, g.x, g.y, g.z, k)
+		var i: int = at[2]
+		var lat := absf((g.x - Rd.px[i]) * Rd.nx[i] + (g.y - Rd.py[i]) * Rd.ny[i])
+		widest = maxf(widest, lat)
+		over = maxf(over, lat - float(Rd.w[i]) * 0.5)
+		if was == "climb" and g.state == "transit":
+			ways.append(g.way)
+		if was == "transit" or g.state == "transit":
+			transit_m += step
+			widest_transit = maxf(widest_transit, lat)
+			low_transit = minf(low_transit, float(at[1]))
+			var speed := step / STEP
+			if last_speed >= 0.0:
+				harshest = maxf(harshest, absf(speed - last_speed) / STEP)
+			last_speed = speed
+		arrived = was == "transit" and g.state == "station"
+	var ramp: float = Traffic.SF_V / F.UP_S
+	R.reset()
+	R.pack_size = Vector2i(4, 6)
+	R.drones = Vector2i(6, 10)
+	sections += 1
+	_check("a pack of %d going way %d, the gunship's runs %s; in %.1f s (frames in each state %s) it flew %.1f km between stations %s, at least %.0f m over the road, its speed changing at most %.0f m/s/s (its run's ends: %.0f); the farthest from the road's middle %.0f m (in that flight %.0f), past the road's half width by %.1f m at the most (want 10 at most)" % [
+			pack_n, signi(pack_way), ways, t, states, transit_m / 1000.0, "and arrived" if arrived else "and NOT arrived", low_transit, harshest, ramp,
+			widest, widest_transit, over],
+		pack_n == 6 and pack_way > 0 and ways.size() == 2 and ways[0] == ways[1] and ways[0] == signi(pack_way) and arrived and transit_m > 4000.0
+			and low_transit >= F.STATION_ALT - 5.0 and harshest <= ramp * 1.05 and over <= 10.0)
