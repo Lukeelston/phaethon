@@ -7,9 +7,11 @@
 ##            each drone at its own height, DRONE_ALT above the road. One off its rest (DIVE_REST s from its last dive's
 ##            end) looks for its prey every LOOK_EVERY frames (staggered by its id): the pilot, if this dive is to be the
 ##            pilot's (drawn at each dive's end: PILOT_SHARE of them) and the craft is within PILOT_REACH of it over the
-##            ground; else the nearest commuter under its group that no other drone is diving on (on the group's road,
+##            ground; else, of the commuters under its group that no other drone is diving on (on the group's road,
 ##            either way, within PREY_REACH of its point along it: looked for in traffic's buckets, traffic.same_way, as
-##            the director's prey_of looks).
+##            the director's prey_of looks), the one whose meeting place is nearest. Either only when that meeting place
+##            (where it will be DIVE_S on, as it goes now) is within DIVE_V_MAX x DIVE_S of the drone: a pilot at speed
+##            outruns them, and one with nothing in reach circles on and looks again.
 ##            It dives from where it is to its prey's height over DIVE_S, nose first (its red lamp leading), led to where
 ##            its prey will be at the dive's end: a commuter's all the way down; the pilot's until DIVE_COMMIT s from it,
 ##            and then straight on to that point, so a dive on the craft seen coming can be dodged (a commuter braking into
@@ -18,7 +20,9 @@
 ##            that ends within DIVE_HIT of a commuter knocks it out (the director's _run_down: traffic.knock_out, lost,
 ##            commuter_lost); one that ends within DIVE_HIT of the pod or an engine is a hit taken (the director's
 ##            hit_by("drone"): its one GRACE clock, shared with the raiders' rams). Then it climbs back to its place in its
-##            group's circle over CLIMB_S.
+##            group's circle over CLIMB_S. No drone ever flies faster than DIVE_V_MAX: a dive whose prey brakes or turns
+##            out of reach flies on at it and misses; a climb that cannot make its place in CLIMB_S flies on at it until
+##            it does.
 ##   shot     DRONE_HP hits: the fire control's damage calls hit(f, n), which destroys it at none left; the director then
 ##            counts it from its own kind (on_kill: kills_by.drone)
 ## Positions are the sims' frame (x, y, height), as the fire control's bolts are; the drones' batch is drawn about the
@@ -42,13 +46,14 @@ const Art := preload("res://view/raid_flyer_art.gd")
 const DRONE_HP := 2                       # hits a drone takes
 const DRONE_ALT := Vector2(60.0, 120.0)   # m above the road a drone circles at (each its own)
 const DIVE_S := 2.0                       # s a dive takes from its start to its prey's height (never under 1.5 on the pilot)
-const DIVE_REST := 4.0                    # s from a dive's end before that drone may dive again
+const DIVE_REST := 18.0                   # s from a dive's end before that drone may dive again (ten drones then take 25 to 35 commuters a minute, the pack's rate)
 const PILOT_SHARE := 0.25                 # of dives go at the pilot (when it is within PILOT_REACH)
 const DIVE_HIT := 10.0                    # m: a dive that ends this near its prey (the pod or an engine) takes it
 const LOOK_EVERY := 6                     # frames between a drone's looks for prey (staggered by its id)
 const DRONE_R := 6.0                      # m: a drone's pick radius
 const MAX_DRONES := 10                    # the batch's room (the most a raid brings)
 const DIVE_COMMIT := 0.75                 # s before a dive's end on the pilot it stops leading the craft: on in a straight line
+const DIVE_V_MAX := 300.0                 # m/s: the fastest a drone flies; a prey's meeting place must be within this x DIVE_S
 const DIVE_SHORT := 6.0                   # m short of the pod (along the drone's way in, over the ground) a dive on the pilot ends
 const CLIMB_S := 3.0                      # s to climb back to its place in its group's circle
 const PILOT_REACH := 1500.0               # m over the ground from a drone to the craft for it to dive on the pilot
@@ -245,14 +250,18 @@ static func _moving(f: Flyer, vx: float, vy: float, vz: float) -> void:
 
 
 ## A drone off its rest looks for its prey: the pilot, when this dive is to be the pilot's and the craft is within
-## PILOT_REACH of it over the ground (and not down); else the nearest commuter under its group. With none it circles on
-## and looks again LOOK_EVERY frames later.
+## PILOT_REACH of it over the ground (and not down) and its meeting place is in reach; else the commuter under its group
+## whose meeting place is nearest, in reach. With none it circles on and looks again LOOK_EVERY frames later.
 func _look(f: Flyer, G: Group) -> void:
 	var P = sim.pod
 	if f.at_pod and sim.crash_t <= 0.0:
 		var dx: float = P.x - f.x
 		var dy: float = P.y - f.y
-		if dx * dx + dy * dy <= PILOT_REACH * PILOT_REACH:
+		var mx: float = P.x + P.vx * DIVE_S - f.x      # (where the craft will be at the dive's end, as it goes now: DIVE_SHORT short of it)
+		var my: float = P.y + P.vy * DIVE_S - f.y
+		var mz: float = P.z + P.vz * DIVE_S - f.z
+		var reach := DIVE_V_MAX * DIVE_S + DIVE_SHORT
+		if dx * dx + dy * dy <= PILOT_REACH * PILOT_REACH and mx * mx + my * my + mz * mz <= reach * reach:
 			_dive(f, null, true)
 			return
 	var c = _prey_for(f, G)
@@ -260,15 +269,17 @@ func _look(f: Flyer, G: Group) -> void:
 		_dive(f, c, false)
 
 
-## The nearest commuter to drone f under its group that no other drone is diving on: on the group's road, either way,
-## within PREY_REACH of its point along the road. Looked for in traffic's two buckets of that road (traffic.same_way:
-## each in order along its way, mostly, entered by halving), not among every car; when the fleet has changed since
-## traffic's update, among every car. One gone since that update is none (it looks again next time).
+## Drone f's prey under its group: of the commuters on the group's road, either way, within PREY_REACH of its point
+## along the road, that no other drone is diving on, the one whose meeting place (where it will be DIVE_S on, as it goes
+## now, at its body's height) is nearest the drone, and within DIVE_V_MAX x DIVE_S of it; or null. Looked for in
+## traffic's two buckets of that road (traffic.same_way: each in order along its way, mostly, entered by halving), not
+## among every car; when the fleet has changed since traffic's update, among every car. One gone since that update is
+## none (it looks again next time).
 func _prey_for(f: Flyer, G: Group):
 	var R = sim.roads[G.road]
 	var span: float = PREY_REACH / float(R.len[clampi(int(G.f), 0, R.N - 1)])
 	var best = null
-	var bd := INF
+	var bd := (DIVE_V_MAX * DIVE_S) * (DIVE_V_MAX * DIVE_S)
 	for k in 2:
 		var way := 1 - 2 * k
 		var pool = traffic.same_way(G.road, way)
@@ -292,10 +303,8 @@ func _prey_for(f: Flyer, G: Group):
 				break
 			if o.hostile or o.id == 0 or o.craft or o == traffic.racer or o.road != G.road or o.dir != way:      # (the pod's stand-in; one moved on since)
 				continue
-			var dx: float = o.x - f.x
-			var dy: float = o.y - f.y
-			var d2 := dx * dx + dy * dy
-			if d2 < bd and not _dived_on(o):
+			var d2 := _meet2(f, o, bd)
+			if d2 < bd:
 				bd = d2
 				best = o
 	if best != null and not traffic.cars.has(best):
@@ -306,17 +315,27 @@ func _prey_for(f: Flyer, G: Group):
 ## ... among every car (the fleet changed since traffic's update: its buckets are stale).
 func _prey_among_all(f: Flyer, G: Group, span: float):
 	var best = null
-	var bd := INF
+	var bd := (DIVE_V_MAX * DIVE_S) * (DIVE_V_MAX * DIVE_S)
 	for o in traffic.cars:
 		if o.hostile or o.craft or o == traffic.racer or o.road != G.road or absf(o.f - G.f) > span:
 			continue
-		var dx: float = o.x - f.x
-		var dy: float = o.y - f.y
-		var d2 := dx * dx + dy * dy
-		if d2 < bd and not _dived_on(o):
+		var d2 := _meet2(f, o, bd)
+		if d2 < bd:
 			bd = d2
 			best = o
 	return best
+
+
+## The square of the distance from drone f to commuter o's meeting place (where it will be DIVE_S on, as it goes now, at
+## its body's height); INF when that is not under `under` (over the ground first) or another drone is diving on it.
+func _meet2(f: Flyer, o, under: float) -> float:
+	var mx: float = o.x + o.hx * o.v * DIVE_S - f.x
+	var my: float = o.y + o.hy * o.v * DIVE_S - f.y
+	var d2 := mx * mx + my * my
+	if d2 >= under or _dived_on(o):
+		return INF
+	var mz: float = traffic.body_height(o) - f.z
+	return d2 + mz * mz
 
 
 ## Is a drone diving on commuter c already?
@@ -364,29 +383,36 @@ func _aim(f: Flyer, left: float) -> void:
 
 
 ## A dive's frame: led to where its prey will be at the dive's end (the pilot's until DIVE_COMMIT s from it: then on
-## to that point in a straight line), arriving at its end; there, what it ends on. (`left` is from the last frame; its
-## prey's place is this frame's, so the end is left - delta on from it.)
+## to that point in a straight line), arriving at its end, at no more than DIVE_V_MAX (out of reach, it ends short);
+## there, what it ends on. (`left` is from the last frame; its prey's place is this frame's, so the end is left - delta
+## on from it.)
 func _dive_step(f: Flyer, delta: float) -> void:
 	var left := DIVE_S - f.dive_t
 	if left > DIVE_COMMIT or not f.at_pod:
 		_aim(f, maxf(left - delta, 0.0))
-	if left <= delta + 1.0e-6:
-		var last := maxf(left, 1.0e-3)
-		_moving(f, (f.ax - f.x) / last, (f.ay - f.y) / last, (f.az - f.z) / last)
-		f.x = f.ax
-		f.y = f.ay
-		f.z = f.az
+	var step := minf(delta, left)
+	_toward(f, f.ax, f.ay, f.az, maxf(left, 1.0e-3), step)
+	f.dive_t += step
+	if f.dive_t >= DIVE_S - 1.0e-6:
 		f.dive_t = DIVE_S
 		_dive_end(f)
-		return
-	var vx := (f.ax - f.x) / left
-	var vy := (f.ay - f.y) / left
-	var vz := (f.az - f.z) / left
+
+
+## On toward (tx, ty, tz), to be there in `within` s, at no more than DIVE_V_MAX: its velocity set, and `step` s flown.
+func _toward(f: Flyer, tx: float, ty: float, tz: float, within: float, step: float) -> void:
+	var vx := (tx - f.x) / within
+	var vy := (ty - f.y) / within
+	var vz := (tz - f.z) / within
+	var speed := sqrt(vx * vx + vy * vy + vz * vz)
+	if speed > DIVE_V_MAX:
+		var k := DIVE_V_MAX / speed
+		vx *= k
+		vy *= k
+		vz *= k
 	_moving(f, vx, vy, vz)
-	f.x += vx * delta
-	f.y += vy * delta
-	f.z += vz * delta
-	f.dive_t += delta
+	f.x += vx * step
+	f.y += vy * step
+	f.z += vz * step
 
 
 ## A dive's end: on the pilot, within DIVE_HIT of the pod or an engine, a hit taken (under the director's one grace);
@@ -417,24 +443,21 @@ func _dive_end(f: Flyer) -> void:
 	f.at_pod = _rng.randf() < pilot_share
 
 
-## A climb's frame: on to its place in its group's circle as that will be at the climb's end, arriving then; there, it
-## circles again.
+## A climb's frame: on to its place in its group's circle as that will be at the climb's end, arriving then, at no more
+## than DIVE_V_MAX (past CLIMB_S, still short of it: on after its place at that speed); there, it circles again.
 func _climb_step(f: Flyer, G: Group, delta: float) -> void:
 	f.phase = fmod(f.phase + G.spin * delta, TAU)      # (its place in the circle goes on round meanwhile)
 	var left := CLIMB_S - f.dive_t
 	f.dive_t += delta
+	var a := f.phase + G.spin * maxf(left - delta, 0.0)      # (its place at the climb's end, the phase this frame's already; past it, now)
+	_toward(f, G.x + G.radius * cos(a), G.y + G.radius * sin(a), G.deck + f.alt, maxf(left, delta), delta)
 	if left <= delta + 1.0e-6:
-		f.state = "circle"
-		_circle(f, G, 0.0)
-		return
-	var a := f.phase + G.spin * (left - delta)      # (its place at the climb's end: the phase is this frame's already)
-	var vx := (G.x + G.radius * cos(a) - f.x) / left
-	var vy := (G.y + G.radius * sin(a) - f.y) / left
-	var vz := (G.deck + f.alt - f.z) / left
-	_moving(f, vx, vy, vz)
-	f.x += vx * delta
-	f.y += vy * delta
-	f.z += vz * delta
+		var dx := G.x + G.radius * cos(f.phase) - f.x
+		var dy := G.y + G.radius * sin(f.phase) - f.y
+		var dz := G.deck + f.alt - f.z
+		if dx * dx + dy * dy + dz * dz <= 1.0:
+			f.state = "circle"
+			_circle(f, G, 0.0)
 
 
 ## The drones drawn: each one's transform (render frame, about the view's floating origin) into the batch's buffer, in

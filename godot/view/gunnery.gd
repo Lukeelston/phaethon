@@ -47,6 +47,7 @@ const REACH := 2600.0             # m: the sight looks this far for something to
 const SKY := 2000.0               # ... and with nothing there, it stands this far out
 const SIGHT_DEG := 3.2            # the sight's width, degrees of view (a vehicle's brackets are its own size, at the least this)
 const BRACKET := {0: 30.0, 1: 34.0, 2: 30.0, 3: 46.0, 4: 30.0}   # m across a vehicle's brackets, by kind (a transport's round its tractor)
+const FLYER_BRACKET := 2.5        # ... and a flyer's, this many times its pick radius (a drone's 15 m, the gunship's 35)
 const BOLT_V := 1100.0            # m/s: a bolt's speed over the ground (a tracer's: slow enough to be seen going) ...
 const RATE := 12.0                # shots a second, the two emitters turn about (both: a craft's weapon row may have its own)
 const BORESIGHT := 600.0          # m: fixed guns' boresight ring stands this far out along the bore ...
@@ -768,6 +769,14 @@ func _burst(body: Vector3, grow := 1.0) -> void:
 	_play(_world_audio, "burst", to_render(body))
 
 
+## m across target t's brackets on the gaze sight: a vehicle's by its kind (BRACKET), a flyer's from its own pick radius
+## (FLYER_BRACKET x r).
+func bracket_of(t) -> float:
+	if _is_flyer(t):
+		return FLYER_BRACKET * float(t.r)
+	return float(BRACKET.get(t.kind, 30.0))
+
+
 ## Is `t` a flyer of the raid's (its `flyer` true), not a traffic Car (which has no `flyer`)?
 static func _is_flyer(t) -> bool:
 	return t != null and "flyer" in t and bool(t.flyer)
@@ -882,7 +891,7 @@ func _draw_gaze_sight(eye: Vector3, cam: Camera3D) -> void:
 	if aim_kind == "vehicle" and aim_car != null:
 		# Brackets round the vehicle itself (its middle, on its road), not a ring over where the gaze struck it.
 		sight_at = to_render(Vector3(aim_car.x, aim_car.y, aim_sim.z))
-		size = maxf(size, float(BRACKET.get(aim_car.kind, 30.0)))
+		size = maxf(size, bracket_of(aim_car))
 	sight.global_transform = Transform3D(Basis().scaled(Vector3.ONE * size), sight_at)
 	var state := 0
 	if not mount.is_out():

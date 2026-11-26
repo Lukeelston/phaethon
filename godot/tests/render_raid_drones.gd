@@ -227,14 +227,14 @@ func _pictures(raids_on: bool) -> bool:
 	# a dive: the first drone within 1.5 km of the craft to dive on a commuter, a second into it
 	var diver = null
 	n = 0
-	while n < 2400 and diver == null:
+	while n < 4800 and diver == null:      # (DIVE_REST is 18 s: a drone near the craft may be a while off its rest)
 		_step(game)
 		n += 1
 		for f in F.all():
 			if f.state == "dive" and f.prey != null and f.dive_t < 0.05 and Vector2(f.x - sim.pod.x, f.y - sim.pod.y).length() < 1500.0:
 				diver = f
 	if diver == null:
-		push_error("No drone of the group dived in 20 s")
+		push_error("No drone near the craft dived in 40 s")
 		return false
 	_step(game, 120)
 	var prey = diver.prey

@@ -12,15 +12,17 @@
 ##                              least 1.5 s from its start to the pod's height, drawn every frame of it where its figures
 ##                              say and nose first (its model's -Z, the lamp's end, along its way); hit_taken "drone" as
 ##                              it ends, on the craft but short of the pod (DIVE_SHORT: never
-##                              through the cockpit); then three dives (a, b, c) made to land 0.3 s and 1.2 s after the
-##                              first: b's, landing on the craft, adds no hit (the shared grace), c's does
+##                              through the cockpit); then three dives (a, b, c) of the group's own, made to land 0.3 s
+##                              and 1.2 s after the first: b's, landing on the craft, adds no hit (the shared grace), c's
+##                              does
 ##   check_shot_down            a drone takes one hit and is still there; g.damage(drone, 2, at) returns true: it is gone
 ##                              from the module, kills_by.drone 1, kills one more, one fewer drawn
 ##   check_pick_and_lead        a ray down through a drone's centre: ray_pick returns it at its distance less its pick
 ##                              radius (within 1 m); 7 m off its centre, {}; the fire control's _find takes it (over the
 ##                              ground under it), and a locked one 8 m off the ray is held in the lock's gate (ray_flyer);
 ##                              g._lead_at(drone, 0.0) on a diving drone lies ahead of it along its velocity by the bolt's
-##                              flight time, its z included
+##                              flight time, its z included; the gaze sight's brackets round a drone are 2.5 x its pick
+##                              radius (15 m), a vehicle's still its kind's (a car 30 m, a transport 46)
 ##   check_cleared_needs_all    every raider killed, drones left: the raid is still on, and the dash's line is not empty
 ##                              and says no "0 RAIDERS"; the last drone killed: "cleared", nothing left drawn
 ##   check_far_origin           the floating origin moved 30 km and back: each drone drawn within 0.5 m of where its
@@ -29,7 +31,13 @@
 ##   check_away_counts_flyers   the pilot beyond R_KEEP of the town but within it of a drone: the away clock does not
 ##                              run; that drone's group gone, it runs and the raid is lost ("away"): the rest gone, none drawn
 ##   check_cost                 ten drones over 600 frames, diving on the commuters about: the module's update, mean
-##                              and worst (told; the mean under COST_MS), and the commuters they took
+##                              and worst (told; the mean under COST_MS), and the commuters they took; the fastest any
+##                              drone flew (its place frame to frame) at most DIVE_V_MAX
+##   check_speed_cap            a group with one commuter under it, the pilot far off: the commuter at the group's point
+##                              going away (its meeting place 1 km on, out of DIVE_V_MAX x DIVE_S): for 1 s every drone
+##                              of the group circles on, looking; the same commuter 0.9 km short of the point (its meeting
+##                              place 0.1 km past it): one dives on it within LOOK_EVERY frames
+##   (and at the end: over every frame of the test, scripted dives too, no drone flew faster than DIVE_V_MAX)
 ## Run with --fixed-fps 120 (traffic and the director run on the engine's frame time; a frame is let pass for every
 ## step). Prints RAID FLYERS PASS. Puts user://vr_prefs.json back as it found it.
 extends SceneTree
@@ -45,10 +53,14 @@ const PREFS := "user://vr_prefs.json"
 const STEP := 1.0 / 120.0
 const KEEP_M := 1000.0           # m: a drone stays within its town zone by this
 const COST_MS := 0.1             # ms a frame: ten drones' update, mean (the plan's 0.5 ms is the director, flyers and weapons together)
-const SECTIONS := 10
+const SECTIONS := 11
+const SPEED_MARGIN := 0.5        # m/s: the cap's numeric margin (a drone's speed is read from its place frame to frame)
 var failures := 0
 var sections := 0                # (a section that dies on a script error never counts itself: the verdict then fails)
 var last_ms := 0.0               # the view's _process on the last frame (told for the arrivals: the first loads the drone's model)
+var track_speed := true          # each frame, every drone's speed read from its place before and after it (not while the test moves them)
+var fastest := 0.0               # m/s: the fastest any drone flew a frame, the whole test
+var fastest_since := 0.0         # ... since a check set it to 0
 
 
 func _initialize() -> void:
@@ -99,9 +111,13 @@ func _run() -> void:
 		await check_pick_and_lead(v)
 		await check_cleared_needs_all(v)
 		await check_cost(v)              # (while traffic is about the zone: the drones dive)
+		await check_speed_cap(v)
 		await check_far_origin(v)
 		await check_away_counts_flyers(v)
 		R.reset()
+		var cap: float = R.flyers.DIVE_V_MAX
+		_check("over every frame of this test (but those the test moved them on), scripted dives too: the fastest any drone flew %.1f m/s (DIVE_V_MAX %.0f)" % [fastest, cap],
+			fastest > 0.0 and fastest <= cap + SPEED_MARGIN)
 	_check("every section ran to its end (%d of %d)" % [sections, SECTIONS], sections == SECTIONS)
 	v.queue_free()
 	await process_frame
@@ -139,9 +155,23 @@ func _frame(v, speed := 0.0) -> void:
 		b.vy = R.ty[i] * speed
 		b.vz = 0.0
 	v.inp = {"thrL": 0.0, "thrR": 0.0, "brkL": 0.0, "brkR": 0.0, "repair": false, "reignite": true, "burner": false}
+	var F = v.raids.flyers if v.raids != null else null
+	var was := []
+	if F != null and track_speed:
+		for f in F.all():
+			was.append([f, f.x, f.y, f.z])
 	var t0 := Time.get_ticks_usec()
 	v._process(STEP)
 	last_ms = (Time.get_ticks_usec() - t0) / 1000.0
+	for w in was:
+		var f = w[0]
+		if F.has(f):
+			var dx: float = f.x - w[1]
+			var dy: float = f.y - w[2]
+			var dz: float = f.z - w[3]
+			var flown := sqrt(dx * dx + dy * dy + dz * dz) / STEP
+			fastest = maxf(fastest, flown)
+			fastest_since = maxf(fastest_since, flown)
 	await process_frame
 
 
@@ -349,6 +379,7 @@ func check_dive_on_pilot(v) -> void:
 	F.pilot_share = 1.0
 	for f in F.all():
 		f.at_pod = true               # (every drone's next dive at the pilot, as one ready with pilot_share 1 is)
+		f.rest = minf(f.rest, 1.0)    # (off its rest within a second: DIVE_REST's first stagger runs to 18 s)
 	# the pilot parked under a group
 	var G = F._groups[0]
 	sim.respawn_on(int(G.road), int(G.f), 1)
@@ -395,10 +426,14 @@ func check_dive_on_pilot(v) -> void:
 	for f in F.all():
 		f.rest = 1.0e9                # (no other dive)
 	await _fly(v, F.DIVE_S + 1.5)      # (every dive ended; the grace run out)
+	var waited := 0.0
+	while waited < 10.0 and F.all().any(func(f): return f.group == 0 and f.state != "circle"):
+		await _frame(v)                # (the group's back in its circle)
+		waited += STEP
 	hits.clear()
 	var trio := []
 	for f in F.all():
-		if f.state == "circle" and trio.size() < 3:
+		if f.group == 0 and f.state == "circle" and trio.size() < 3:
 			trio.append(f)
 	var gaps := [INF, INF, INF]
 	var when := [0, roundi(0.3 / STEP), roundi(1.2 / STEP)]
@@ -519,10 +554,46 @@ func check_pick_and_lead(v) -> void:
 				led.length(), led.normalized().dot(vel.normalized()), (want - at).length(), lead.distance_to(want), lead.z - e.z, e.vz]
 		else:
 			lead_said = "the dive was over (%s)" % e.state
+	# the gaze sight's brackets (a turret's sight; here drawn through a mount that is out, from 150 m off): a drone's from
+	# its pick radius, a vehicle's by its kind
+	var brackets := {}
+	if F.has(d):
+		var T = v.traffic_net
+		var car = T.Car.new()
+		car.kind = T.CAR
+		var transport = T.Car.new()
+		transport.kind = T.TRANSPORT
+		var real = g.mount
+		var was_out: bool = g.want_out
+		g.mount = OutMount.new()
+		g.want_out = true
+		for t in [["drone", d], ["car", car], ["transport", transport]]:
+			var it = t[1]
+			it.x = d.x
+			it.y = d.y
+			g.aim_kind = "vehicle"
+			g.aim_car = it
+			g.aim_sim = Vector3(d.x, d.y, d.z)
+			g._draw_gaze_sight(g.to_render(g.aim_sim) + Vector3(150.0, 0.0, 0.0), v.cam)
+			brackets[t[0]] = snappedf(g.sight.global_transform.basis.x.length(), 0.01)
+		g.mount = real
+		g.want_out = was_out
+		g.aim_car = null
+		g.sight.visible = false
+	var sized: bool = brackets.get("drone", -1.0) == snappedf(2.5 * d.r, 0.01) and brackets.get("car", -1.0) == 30.0 and brackets.get("transport", -1.0) == 46.0
 	sections += 1
-	_check("a ray down through a drone's centre: picked %s at %.1f m (want %.1f, its pick radius %.0f off); 7 m off its centre %s; the fire control's aim on it (%s, \"%s\", %.1f m); held in the lock's gate 8 m off (%s); %s" % [
-			on_it, float(hit.get("t", -1.0)), 300.0 - d.r, d.r, off, found, g.aim_kind, g.aim_dist, held, lead_said],
-		on_it and off.is_empty() and found and held and lead_ok)
+	_check("a ray down through a drone's centre: picked %s at %.1f m (want %.1f, its pick radius %.0f off); 7 m off its centre %s; the fire control's aim on it (%s, \"%s\", %.1f m); held in the lock's gate 8 m off (%s); %s; the gaze sight's brackets from 150 m: %s m (a drone 2.5 x %.0f, a car 30, a transport 46)" % [
+			on_it, float(hit.get("t", -1.0)), 300.0 - d.r, d.r, off, found, g.aim_kind, g.aim_dist, held, lead_said, brackets, d.r],
+		on_it and off.is_empty() and found and held and lead_ok and sized)
+
+
+## A mount that is out (for the gaze sight's drawing: its brackets), no bore.
+class OutMount extends "res://view/weapons/weapon_mount.gd":
+	func is_out() -> bool:
+		return true
+
+	func deploy_t() -> float:
+		return 1.0
 
 
 func check_cleared_needs_all(v) -> void:
@@ -603,6 +674,7 @@ func check_away_counts_flyers(v) -> void:
 	await _raid_on(v, k)
 	R.away_t = 3.0
 	var F = R.flyers
+	track_speed = false                # (the test carries a group 170 km: not a flight)
 	var e3 := [-1, -1]
 	for r in sim.roads.size():
 		if sim.roads[r].name == "E3":
@@ -643,6 +715,7 @@ func check_away_counts_flyers(v) -> void:
 			far_km, T.R_KEEP / 1000.0, near.size(), nearest, stayed, worst, left, t, R.result, R._why, R.away_t, F.all().size(), F.batch.multimesh.visible_instance_count],
 		far_km * 1000.0 > T.R_KEEP and near.size() > 0 and nearest < T.R_KEEP and stayed and worst == 0.0 and left > 0 and R.result == "lost" and R._why == "away"
 			and t <= R.away_t + 0.25 and F.all().is_empty() and F.batch.multimesh.visible_instance_count == 0)
+	track_speed = true
 
 
 func check_cost(v) -> void:
@@ -654,6 +727,9 @@ func check_cost(v) -> void:
 	await _raid_on(v, k)
 	var F = R.flyers
 	var ms := []
+	fastest_since = 0.0
+	for j in F.all().size():
+		F.all()[j].rest = 0.2 * j      # (all ten off their first rest within 2 s, so the 600 frames have their dives)
 	for i in 600:
 		await _frame(v)
 		ms.append(float(F.update_ms))
@@ -667,7 +743,84 @@ func check_cost(v) -> void:
 	for f in F.all():
 		states[f.state] = int(states.get(f.state, 0)) + 1
 	sections += 1
-	_check("ten drones (%d; %s at the end), 600 frames: their update %.4f ms a frame mean (under %.2f), the worst %.3f ms; %d commuters lost (to them and the raiders)" % [
-			F.count("drone"), states, mean, COST_MS, worst, R.lost],
-		F.count("drone") == 10 and mean < COST_MS and R.lost > 0)
+	_check("ten drones (%d; %s at the end), 600 frames: their update %.4f ms a frame mean (under %.2f), the worst %.3f ms; %d commuters lost (to them and the raiders); the fastest any drone flew %.1f m/s (DIVE_V_MAX %.0f)" % [
+			F.count("drone"), states, mean, COST_MS, worst, R.lost, fastest_since, F.DIVE_V_MAX],
+		F.count("drone") == 10 and mean < COST_MS and R.lost > 0 and fastest_since > F.CIRCLE_V + 1.0 and fastest_since <= F.DIVE_V_MAX + SPEED_MARGIN)
 	R.drones = Vector2i(6, 10)
+
+
+func check_speed_cap(v) -> void:
+	var R = v.raids
+	var T = v.traffic_net
+	var sim = v.sim
+	var k := _city(v)
+	R.pack_size = Vector2i(0, 0)
+	await _in_zone(v, k, 0)
+	await _raid_on(v, k)
+	var F = R.flyers
+	var G = F._groups[0]
+	var group := []
+	for f in F.all():
+		f.rest = 1.0e9                 # (the other groups hold)
+		f.at_pod = false
+		if f.group == 0:
+			group.append(f)
+	# the pilot 5 km along the road from the group's point: beyond PILOT_REACH of every one of it, and traffic's own
+	# spawning (R_SPAWN, 11 km and more from the pilot) at least 6 km from it, so the commuter is the only one under it
+	var Rd = sim.roads[int(G.road)]
+	var per: float = float(Rd.len[clampi(int(G.f), 0, Rd.N - 1)])
+	var off := roundi(5000.0 / per)
+	var at_i: int = int(G.f) + off if int(G.f) + off < Rd.N - 3 else int(G.f) - off
+	sim.respawn_on(int(G.road), clampi(at_i, 2, Rd.N - 3), 1)
+	var pilot_m := INF
+	var c = T.Car.new()
+	c.id = 950901
+	c.kind = T.CAR
+	c.road = int(G.road)
+	c.dir = 1
+	c.lane = 1
+	c.lat = T._lane_lat(c, 1)
+	c.turn_p = 0.0
+	c.nsp_road = -1
+	var away_states := {}
+	var meet_m := INF
+	for phase in 2:
+		# 0: at the group's point going away (its meeting place 2 s on: 1 km past it); 1: 0.9 km short of it (within PREY_REACH; its meeting place 0.1 km past the point)
+		var at_f: float = G.f if phase == 0 else G.f - 900.0 / per
+		var frames := 0
+		var dived := false
+		while frames < (120 if phase == 0 else F.LOOK_EVERY + 2) and not dived:
+			c.f = at_f
+			c.dir = 1
+			c.v = T.SF_V
+			c.vdes = T.SF_V
+			c.cruise = T.SF_V
+			T._place(c)
+			T.cars.clear()
+			T.cars.append(c)
+			for f in group:
+				if f.state == "circle":
+					f.rest = 0.0       # (ready: it looks at its turn)
+			await _frame(v)
+			frames += 1
+			for f in group:
+				pilot_m = minf(pilot_m, Vector2(f.x - sim.pod.x, f.y - sim.pod.y).length())
+				if phase == 0:
+					away_states[f.state] = int(away_states.get(f.state, 0)) + 1
+					var mx: float = c.x + c.hx * c.v * F.DIVE_S - f.x
+					var my: float = c.y + c.hy * c.v * F.DIVE_S - f.y
+					meet_m = minf(meet_m, sqrt(mx * mx + my * my))
+				elif f.state == "dive" and f.prey == c:
+					dived = true
+		if phase == 0:
+			away_states["frames"] = frames
+		else:
+			away_states["dived after"] = frames if dived else -1
+	T.cars.clear()
+	R.reset()
+	var held: bool = away_states.keys().all(func(s): return s in ["circle", "frames", "dived after"])
+	sections += 1
+	_check("a group of %d, the pilot %.1f km off: one commuter at its point going away at the town's limit, its meeting place at least %.0f m from each (reach %.0f): for %s frames every one circles on, looking (%s); the same commuter 0.9 km short of the point: one dives on it after %s frame(s) (within %d)" % [
+			group.size(), pilot_m / 1000.0, meet_m, F.DIVE_V_MAX * F.DIVE_S, away_states.get("frames", 0), away_states, away_states.get("dived after", -1), F.LOOK_EVERY + 1],
+		group.size() >= 2 and pilot_m > F.PILOT_REACH and pilot_m < 7000.0 and meet_m > F.DIVE_V_MAX * F.DIVE_S and held and int(away_states.get("frames", 0)) == 120
+			and int(away_states.get("dived after", -1)) > 0 and int(away_states.get("dived after", -1)) <= F.LOOK_EVERY + 1)
