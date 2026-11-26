@@ -137,7 +137,7 @@ Luke, 2026-11-26, asked whether the crafts had their weapons and, told four did 
 - Produces, the director: `gunship_from := 3` and `gunship_every := 2` (the 3rd raid of a flight, then every other); `has_gunship(n: int) -> bool` for raid number `n`.
 - Behaviour:
   - It holds station `STATION_ALT` over the road, ahead of the pack along the zone, for `STATION_S`; then drops to `STRAFE_ALT` and runs `STRAFE_S` along the road at the town limit, in front of forward guns; then climbs to the next station. It keeps within the town zone as raiders do.
-  - Its turret turns to its target (the pivot's yaw, the cradle's pitch). Every `SHOT_EVERY` it warns `SHOT_WARN` (the muzzle's glow), then fires one shot led once at its target: the pilot when within 2.5 km, else the nearest commuter. Shots are drawn as one glowing batch.
+  - Its turret turns to its target (the pivot's yaw, the cradle's pitch). Every `SHOT_EVERY` it warns `SHOT_WARN` (the muzzle's glow), then fires one shot led once at its target: the pilot when within 2.5 km, else the nearest commuter. It holds its fire at a pilot nearer than 150 m (a shot from there could not be dodged). Shots are drawn as one glowing batch.
   - A shot within `SHOT_HIT` of the pod or an engine is a hit taken (`"gunship"`); of a commuter, that commuter is lost. A shot at its life's end or the ground is gone.
   - Its death is the big burst (Task 1's size rule) and `kills_by.gunship`.
 
@@ -303,7 +303,7 @@ Luke, 2026-11-26, asked whether the crafts had their weapons and, told four did 
 - [ ] **Step 1: Write `test_orbs.gd`, failing:**
   - `check_table`, `check_lazy` for the Orrery.
   - `check_orbit`: armed 2 s: three orbs within 0.2 m of `orbitR` from the craft, 120° apart ±10°, none below her formation height; from the eye none is inside the windscreen's outline for 600 frames (`test_cockpit_clash`'s sight-line helper).
-  - `check_strikes_on_its_own`: a raider 600 m off: within 2 s an orb reaches it; it takes 3; two more strikes kill it (6 HP); three raiders in reach: each orb takes a different one.
+  - `check_strikes_on_its_own`: a raider 600 m off: within 2 s an orb reaches it; it takes 3; a second strike kills it (6 HP); three raiders in reach: each orb takes a different one.
   - `check_out_of_reach`: a raider 1,200 m off is left alone.
   - `check_send`: the gaze on a raider 2,000 m off and the trigger pressed: all three go; it dies at the second arrival.
   - `check_orb_comes_home` (Review Focus 1): the target destroyed with two orbs 300 m short of it: both are back in orbit within 3 s; no error; `kills` rose by one only.
