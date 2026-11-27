@@ -77,7 +77,7 @@ func _geometry() -> void:
 # --- a craft without one ----------------------------------------------------------------------------
 
 func _without_gun() -> void:
-	View.vehicle_override = Pilot.KILN
+	View.vehicle_override = Pilot.ORRERY      # (one not armed yet: the Kiln carries its lance since Raids stage 2)
 	var v = Cockpit.new()
 	root.add_child(v)
 	await process_frame
@@ -86,7 +86,7 @@ func _without_gun() -> void:
 		v._process(DT)
 	_check("another craft carries no gun, no GUN switch and no fire control", v.craft.turret == null and v.gun_switch == null and v.gunnery == null)
 	sections += 1
-	_check("... and X still repairs there (no gun to take it)", not Pilot.armed(Pilot.KILN) and Pilot.armed(Pilot.BASILISK))
+	_check("... and X still repairs there (no gun to take it)", not Pilot.armed(Pilot.ORRERY) and Pilot.armed(Pilot.BASILISK))
 	v.queue_free()
 	await process_frame
 

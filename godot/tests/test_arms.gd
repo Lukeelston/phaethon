@@ -19,7 +19,9 @@
 ##   VR seat      the Talon's on the hull the seat sees, the Phaethon's on its engines; stowed, none drawn
 ## And the table: weapon_of for all seven; the rows (the Basilisk's repeats its power's fireS/coolS); {} for the rest;
 ## the Basilisk's turret built exactly as turret.gd builds it, fired through its own mount, and no arms; the Shrike's
-## missiles' mount (view/weapons/missile_mount.gd), its arms not fitted until its GUN is armed (tests/test_missiles.gd).
+## missiles' mount (view/weapons/missile_mount.gd), its arms not fitted until its GUN is armed (tests/test_missiles.gd);
+## and the Kiln's lance's mount (view/weapons/lance_mount.gd), its arms not fitted until its GUN is armed either
+## (tests/test_lance.gd).
 ## --headless --xr-mode off --audio-driver Dummy -s res://tests/test_arms.gd -- --mute
 ## Prints ARMS PASS.
 extends SceneTree
@@ -37,7 +39,7 @@ const ROWS := {
 	"talon": {"rate": 18.0, "boltV": 1400.0, "hits": 1, "reach": 2200.0, "fireS": 4.0, "coolS": 2.5, "assistDeg": 3.0},
 }
 const RUN := 0.6      # the stand-ins' barrels run this far out
-const SECTIONS := 10  # table, three a craft for two craft, the Basilisk, the Shrike, the VR seat
+const SECTIONS := 11  # table, three a craft for two craft, the Basilisk, the Shrike, the Kiln, the VR seat
 var failures := 0
 var checks := 0
 var sections := 0     # (a section that dies on a script error never counts itself: the verdict then fails)
@@ -74,6 +76,8 @@ func _run() -> void:
 	await check_basilisk_unchanged()
 	print("shrike")
 	await check_shrike_lazy()
+	print("kiln")
+	await check_kiln_lazy()
 	print("VR seat")
 	await check_vr_seat()
 	View.vehicle_override = ""
@@ -296,18 +300,19 @@ func check_deployed(id: String, craft) -> void:
 # --- the table, the Basilisk, the rest of the fleet ----------------------------------------------------------
 
 func check_weapon_rows() -> void:
-	var want := {"phaethon": "cannons", "talon": "wing_guns", "shrike": "missiles", "orrery": "", "kiln": "", "vesper": "", "basilisk": "turret"}
+	var want := {"phaethon": "cannons", "talon": "wing_guns", "shrike": "missiles", "orrery": "", "kiln": "lance", "vesper": "", "basilisk": "turret"}
 	var got := {}
 	for id: String in Pilot.ORDER:
 		got[id] = Pilot.weapon_of(id)
 	check("weapon_of is right for all seven: %s" % [got], Pilot.ORDER.size() == 7 and got == want)
-	check("WEAPONS names the four that carry one", Pilot.WEAPONS == {Pilot.STANDARD: "cannons", Pilot.TALON: "wing_guns", Pilot.BASILISK: "turret", Pilot.SHRIKE: "missiles"})
+	check("WEAPONS names the five that carry one", Pilot.WEAPONS == {Pilot.STANDARD: "cannons", Pilot.TALON: "wing_guns", Pilot.BASILISK: "turret", Pilot.SHRIKE: "missiles",
+		Pilot.KILN: "lance"})
 	var empty := []
-	for id: String in [Pilot.ORRERY, Pilot.KILN, Pilot.VESPER]:
+	for id: String in [Pilot.ORRERY, Pilot.VESPER]:
 		var row = Pilot.traits(id).get("weapon")
 		if row is Dictionary and (row as Dictionary).is_empty():
 			empty.append(id)
-	check("traits(id).weapon is {} for orrery, kiln and vesper (%s)" % [empty], empty.size() == 3)
+	check("traits(id).weapon is {} for orrery and vesper (%s)" % [empty], empty.size() == 2)
 	for id: String in ROWS:
 		var row = Pilot.traits(id).get("weapon")
 		check("%s's weapon row is %s" % [id, row], row is Dictionary and row == ROWS[id])
@@ -360,6 +365,22 @@ func check_shrike_lazy() -> void:
 	check("the shrike's weapon is its missiles' mount (%s), its arms not fitted with the GUN never armed (%s, on its pod %s), nor a turret" % [path,
 		mount.get("arms") if mount != null else null, game.craft.pod.get_node_or_null("Arms")],
 		path.ends_with("missile_mount.gd") and mount.get("arms") == null and game.craft.get("arms") == null and game.craft.pod.get_node_or_null("Arms") == null
+		and game.craft.turret == null)
+	game.free()
+	await process_frame
+	sections += 1
+
+
+## The Kiln's weapon is its lance's mount, and with the GUN never armed its arms are not fitted (the mount fits them on
+## the hull the pilot sees at the first arming: view/fleet_airframe.gd ensure_arms): none in craft.arms, none on its pod;
+## nor a turret.
+func check_kiln_lazy() -> void:
+	var game = await _flat(Pilot.KILN)
+	var mount = game.craft.get("weapon")
+	var path: String = (mount.get_script() as Script).resource_path if mount != null else ""
+	check("the kiln's weapon is its lance's mount (%s), its arms not fitted with the GUN never armed (%s, on its pod %s), nor a turret" % [path,
+		mount.get("arms") if mount != null else null, game.craft.pod.get_node_or_null("Arms")],
+		path.ends_with("lance_mount.gd") and mount.get("arms") == null and game.craft.get("arms") == null and game.craft.pod.get_node_or_null("Arms") == null
 		and game.craft.turret == null)
 	game.free()
 	await process_frame

@@ -1,12 +1,12 @@
 ## The GUN switch in every armed cockpit, and the gun's controls (Raids, 2026-11-24; Luke: "every vehicle should have
 ## their own weapon system like the basilisk's hidden cannon"). Stage 1: the craft with a weapon (sim/pilot_craft.gd
-## WEAPONS, armed) are the Phaethon, the Talon and the Basilisk; stage 2 adds the Shrike; only their cockpits have the
-## switch.
-##   check_switch_built        a GunSwitch (GUN up, SAFE down) in the Phaethon's, the Talon's, the Shrike's and the
-##                             Basilisk's cockpits: the Phaethons' and the Shrike's the same (its consoles are theirs), on
-##                             the starboard console's inboard face up front (vr_cockpit.gd gun_switch_mount), the
-##                             Basilisk's on its sill where it has stood since 2026-11-23; none in the Orrery's, the
-##                             Kiln's or the Vesper's
+## WEAPONS, armed) are the Phaethon, the Talon and the Basilisk; stage 2 adds the Shrike and the Kiln; only their
+## cockpits have the switch.
+##   check_switch_built        a GunSwitch (GUN up, SAFE down) in the Phaethon's, the Talon's, the Shrike's, the Kiln's
+##                             and the Basilisk's cockpits: the Phaethons', the Shrike's and the Kiln's the same (their
+##                             consoles are the Phaethons'), on the starboard console's inboard face up front
+##                             (vr_cockpit.gd gun_switch_mount), the Basilisk's on its sill where it has stood since
+##                             2026-11-23; none in the Orrery's or the Vesper's
 ##   check_x_fires_when_armed  in the Phaethon and the Talon (on the range, at rest): the GUN switch pushed up by hand
 ##                             arms the gun; X held then fires it, and is not the repair; thrown down to SAFE by hand,
 ##                             X held is the repair again and fires nothing
@@ -231,7 +231,7 @@ func check_switch_built() -> void:
 	for id: String in Craft.ORDER:
 		await _cockpit(id)
 		var sw: Node3D = v.gun_switch
-		var want := id in [Craft.STANDARD, Craft.TALON, Craft.SHRIKE, Craft.BASILISK]
+		var want := id in [Craft.STANDARD, Craft.TALON, Craft.SHRIKE, Craft.KILN, Craft.BASILISK]
 		if sw == null:
 			check("%s: no GUN switch in its cockpit (%s wanted)" % [id, "one" if want else "none"], not want)
 		else:
@@ -241,11 +241,12 @@ func check_switch_built() -> void:
 			placed[id] = sw.transform
 		v.free()
 		await process_frame
-	if placed.size() == 4:
+	if placed.size() == 5:
 		var ph: Transform3D = placed[Craft.STANDARD]
 		var b: Transform3D = placed[Craft.BASILISK]
-		check("the Phaethon's, the Talon's and the Shrike's stand alike (%s, %s, %s)" % [ph.origin, (placed[Craft.TALON] as Transform3D).origin,
-			(placed[Craft.SHRIKE] as Transform3D).origin], ph.is_equal_approx(placed[Craft.TALON]) and ph.is_equal_approx(placed[Craft.SHRIKE]))
+		check("the Phaethon's, the Talon's, the Shrike's and the Kiln's stand alike (%s, %s, %s, %s)" % [ph.origin, (placed[Craft.TALON] as Transform3D).origin,
+			(placed[Craft.SHRIKE] as Transform3D).origin, (placed[Craft.KILN] as Transform3D).origin],
+			ph.is_equal_approx(placed[Craft.TALON]) and ph.is_equal_approx(placed[Craft.SHRIKE]) and ph.is_equal_approx(placed[Craft.KILN]))
 		check("... on the starboard console's inboard face up front (%.3f, %.3f, %.3f), its face turned inboard" % [ph.origin.x, ph.origin.y, ph.origin.z],
 			ph.origin.x > 0.5 and ph.origin.x < 0.56 and ph.origin.y < 0.38 and ph.origin.z < 0.2 and ph.basis.z.normalized().x < -0.5)
 		check("the Basilisk's stands where it did, on its starboard sill (%.3f, %.3f, %.3f)" % [b.origin.x, b.origin.y, b.origin.z],

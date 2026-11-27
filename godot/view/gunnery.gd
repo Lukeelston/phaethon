@@ -17,7 +17,8 @@
 ##   5. bolts fly; where they land, a flash and a puff of dust; a raider takes HOSTILE_HP hits and is gone
 ## A weapon that fires for itself (its mount's own_fire(): missiles, a beam, a pulse, orbs) is given, in place of 4's
 ## firing and 5, the trigger each frame (mount.fire(g, delta, pulling)), and fires through this fire control's targets:
-##   g.alive(t)  g.hp_of(t)  g.damage(t, n, at, quiet)  g.threats()  g.add_fx(p, kind, dur, size)  g.play(pool, sound, at, pitch)
+##   g.alive(t)  g.hp_of(t)  g.damage(t, n, at, quiet, bare)  g.threats()  g.add_fx(p, kind, dur, size)  g.play(pool, sound, at, pitch)
+## and reads where the aim met the ground this frame, g.aim_ground (a beam ends there).
 ## A target is a traffic Car (a commuter, or a raider: hostile) or a flyer of the raid's (its `flyer` true, which a Car
 ## has not; the raid's flyers module, view.raids.flyers, has it and counts its hits). The mount's word for the pilot
 ## (status()) is said on the strip when it changes.
@@ -25,11 +26,11 @@
 ## lockS); where it has none of them, RATE, BOLT_V, one hit a bolt, REACH, its power's heat (the Basilisk's) and LOCK_S.
 ## Bolts and bursts are kept in the sims' frame (x, y, height) and drawn about the floating origin.
 ## The switch (deploy) and the trigger are the cockpit's: vr/vr_cockpit.gd, or K and F in the flat view. Fixed guns'
-## (and missiles') fire control: with Raids on, the director makes it at load (network_raids.gd build), dormant: not
-## stepped until the GUN is first armed, and its mount made ready then (prepare: the Shrike's arms, stowed), so arming
-## costs no frame; with Raids off it is made the first time the GUN is armed (a flight that never arms them builds none
-## of it), its sounds read already at the view's build (warm_sounds). A turret's is made at once, as its sight ball and
-## glow are stepped while it is stowed.
+## (and missiles' and the lance's) fire control: with Raids on, the director makes it at load (network_raids.gd build),
+## dormant: not stepped until the GUN is first armed, and its mount made ready then (prepare: the Shrike's and the
+## Kiln's arms, stowed), so arming costs no frame; with Raids off it is made the first time the GUN is armed (a flight
+## that never arms them builds none of it), its sounds read already at the view's build (warm_sounds). A turret's is
+## made at once, as its sight ball and glow are stepped while it is stowed.
 ##   gunnery = Gunnery.frame(view, gunnery, delta)        # once per frame, after the camera and the world
 ##   view.gunnery = Gunnery.make(view, true)              # (the director: fixed guns' made at load, dormant)
 class_name Gunnery
@@ -84,6 +85,7 @@ var aim_dist := SKY
 var aim_kind := "sky"              # "sky", "ground", "vehicle"
 var aim_car = null                 # the vehicle under the sight (fixed guns: or the assist's raider)
 var aim_lead := Vector3.ZERO       # where the bolts are laid (sims' frame): a vehicle's lead, else the aim
+var aim_ground := -1.0             # m along the aim's ray to the ground this frame (within reach), whatever stands before it; -1 none
 var lock := 0.0                    # 0..1: how long it has held there
 var lock_s := LOCK_S               # ... s to build from 0 to 1 (the weapon's lockS: the Shrike's missiles lock on this)
 var rate := RATE                   # the weapon's figures (build: the craft's weapon row, these where it has none)
@@ -166,7 +168,7 @@ static func make(v, asleep := false):
 	v.add_child(g)
 	g.build(v)
 	if asleep:
-		g.mount.prepare()      # (what its first arming would build, built now, stowed: the Shrike's arms)
+		g.mount.prepare()      # (what its first arming would build, built now, stowed: the Shrike's arms, the Kiln's)
 	return g
 
 
@@ -291,6 +293,7 @@ func step(delta: float) -> void:
 	else:
 		aim_kind = "sky"
 		aim_car = null
+		aim_ground = -1.0
 		lock = 0.0
 	# Lead a vehicle by the bolt's flight.
 	var target := aim_sim
@@ -410,6 +413,7 @@ func _find(o: Vector3, d: Vector3, delta: float) -> void:
 			car_t = held
 	var t0 := Time.get_ticks_usec()
 	var ground_t := _aim_ground(o, d)
+	aim_ground = ground_t
 	march_ms = (Time.get_ticks_usec() - t0) / 1000.0
 	if car_t < INF and (ground_t < 0.0 or car_t <= ground_t):
 		aim_car = picked.car
@@ -717,16 +721,19 @@ func hp_of(t) -> int:
 ## strike counted (commuter_strikes) and told (struck_commuter); with `quiet`, nothing at all. A hostile: a spark and the
 ## impact sound, and its hits counted: a raider's here, to HOSTILE_HP, then killed told and traffic.knock_out; a flyer's
 ## by the raid's flyers module (hit(t, n): it destroys one at its HP and says so), then killed told. Either way the burst
-## where it was (a gunship's GUNSHIP_BURST times a raider's).
-func damage(t, n: int, at: Vector3, quiet := false) -> bool:
+## where it was (a gunship's GUNSHIP_BURST times a raider's). With `bare`, the hit makes no spark and no impact sound of
+## its own (a beam's, 30 a second: view/weapons/lance_mount.gd, whose glow and hum are its hits' picture and sound); all
+## else as without it, a kill's burst and its sound too.
+func damage(t, n: int, at: Vector3, quiet := false, bare := false) -> bool:
 	if not alive(t) or (quiet and not t.hostile):
 		return false
 	var flyer := _is_flyer(t)
 	hits += 1
 	var id: int = t.id
 	var body := Vector3(t.x, t.y, t.z if flyer else at.z)
-	_add_fx(body + Vector3(_rng.randf_range(-3, 3), _rng.randf_range(-3, 3), _rng.randf_range(-1, 2)), "spark", 0.18, 9.0)
-	_play(_world_audio, "impact", to_render(body), 1.25)
+	if not bare:
+		_add_fx(body + Vector3(_rng.randf_range(-3, 3), _rng.randf_range(-3, 3), _rng.randf_range(-1, 2)), "spark", 0.18, 9.0)
+		_play(_world_audio, "impact", to_render(body), 1.25)
 	if not t.hostile:
 		# No shooting commuters: no weapon knocks one out. It sparks and that is all (no damage entry).
 		commuter_strikes += 1

@@ -8,8 +8,10 @@
 ##   starboard      the right lever, the console and the dash's right end at once
 ##   sill           the Basilisk's: the head turned right to its sill
 ## --gun=on stands the switch at GUN (else SAFE); --gun=hide takes it away (the cockpit as it was before it: the
-## switch is the only thing it adds). --vehicle=<id> for a craft's own cockpit. --levers=0.87 stands the throttle
-## levers there (else at idle).
+## switch is the only thing it adds); --gun=place builds it at its place in a cockpit whose craft is not armed yet (the
+## Orrery's, the Vesper's: vr_cockpit.gd fit_gun_switch, as tests/test_cockpit_reach.gd does). --vehicle=<id> for a
+## craft's own cockpit. --levers=0.87 stands the throttle levers there (else at idle). --prefix=<p> starts each
+## picture's name (else none).
 ## Run windowed: --xr-mode off --resolution 1600x900 --fixed-fps 120 --audio-driver Dummy
 ## -s res://tests/render_gun_switch.gd -- --mute --out=DIR [--views=gun,gun-close] [--gun=on] [--vehicle=talon]
 extends SceneTree
@@ -62,9 +64,15 @@ func _run() -> void:
 	var only := PackedStringArray()
 	var gun_on := false
 	var gun_hidden := false
+	var gun_placed := false
 	var levers := 0.0
 	var vehicle := ""
+	var name_prefix := ""
 	for arg in OS.get_cmdline_user_args():
+		if arg == "--gun=place":
+			gun_placed = true
+		if arg.begins_with("--prefix="):
+			name_prefix = arg.trim_prefix("--prefix=")
 		if arg.begins_with("--out="):
 			out_dir = arg.trim_prefix("--out=")
 		if arg.begins_with("--views="):
@@ -123,6 +131,8 @@ func _run() -> void:
 	if gun_hidden and seat.gun_switch:
 		seat.gun_switch.free()
 		seat.gun_switch = null
+	if gun_placed and seat.gun_switch == null:
+		seat.fit_gun_switch()      # (at the place its cockpit will have it once the craft is armed)
 	print("GUN_SHOTS %s: the GUN switch %s, at %s" % [seat.sim.P.vehicle, ("at GUN" if gun_on else "at SAFE") if seat.gun_switch else "not fitted",
 		seat.gun_switch.position if seat.gun_switch else Vector3.ZERO])
 	for view in VIEWS:
@@ -136,7 +146,7 @@ func _run() -> void:
 		for i in 30:
 			await _frame()
 		await RenderingServer.frame_post_draw
-		var path := out_dir.path_join(str(view[0]) + ".png")
+		var path := out_dir.path_join(name_prefix + str(view[0]) + ".png")
 		if root.get_texture().get_image().save_png(path) != OK:
 			push_error("Couldn't save " + path)
 			quit(1)

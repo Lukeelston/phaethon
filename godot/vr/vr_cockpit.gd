@@ -1025,18 +1025,7 @@ func _build_cockpit() -> void:
 	slide_switch.transform = ModeSwitchScript.mount(-1.0)
 	slide_switch.build(bespoke_controls)
 	if sim != null and CraftModelScript.PilotCraft.armed(sim.P.vehicle):
-		# The craft's weapon (view/gunnery.gd): up arms it and brings it out; down makes it safe and stows it. The
-		# Phaethon's, the Talon's and the Shrike's (its consoles are the Phaethon's) stands on the starboard console's
-		# inboard face up front, by the right lever; the Basilisk's on its starboard sill by the pilot's right elbow,
-		# under the gun's own sponson (gun_switch_mount).
-		gun_switch = ModeSwitchScript.new()
-		gun_switch.name = "GunSwitch"
-		gun_switch.legends = ["GUN", "SAFE"]
-		gun_switch.colours = [Color(1.0, 0.22, 0.08), Color(0.35, 0.9, 0.45)]
-		gun_switch.throws = ["gun", "safe"]
-		shell.add_child(gun_switch)
-		gun_switch.transform = gun_switch_mount(CraftModelScript.PilotCraft.phaethon_based(sim.P.vehicle) or shrike)
-		gun_switch.build(bespoke_controls)
+		fit_gun_switch()      # (the craft's weapon's GUN switch, where its cockpit has it: gun_switch_mount)
 	# ... and how far it steps out: the drift slider, a fader in a rail on the same console's inboard
 	# shoulder, behind the switch and out of the box where a hand throws it (vr/drift_slider.gd).
 	drift_slider = DriftSliderScript.new()
@@ -2253,7 +2242,8 @@ func set_map_scheme(k: int) -> void:
 
 
 ## The GUN switch thrown: the craft's weapon armed and out (the Basilisk's comes up out of its sponson and lays itself
-## where you look; the Phaethon's and the Talon's run out of their ports, aimed by pointing the craft) or safe and stowed.
+## where you look; the Phaethon's and the Talon's run out of their ports, aimed by pointing the craft; the Shrike's
+## cassettes rise over its cheeks; the Kiln's lance rises out of its foredeck) or safe and stowed.
 func set_gun(on: bool) -> void:
 	gun_wanted = on
 	print("GUN: switch ", "GUN" if on else "SAFE")
@@ -2262,13 +2252,31 @@ func set_gun(on: bool) -> void:
 const GUN_AT := Vector3(0.544, 0.26, 0.06)      # (the Phaethons' GUN switch: gun_switch_mount)
 const GUN_TILT := deg_to_rad(10.0)
 const GUN_SCALE := 0.7
+const FLEET_GUNS := [CraftModelScript.PilotCraft.ORRERY, CraftModelScript.PilotCraft.KILN, CraftModelScript.PilotCraft.VESPER]      # (theirs where the Phaethons' is)
 const GUN_TICKS := 4              # the most ticks a frame's shots are felt as (the Shrike's volley: one a missile) ...
 const GUN_TICK_GAP := 0.08        # ... s apart (the cockpit's double tick's spacing), on the cockpit's own clock
 const GUN_TICK_AMP := 0.22        # a tick: this strong ...
 const GUN_TICK_S := 0.012         # ... and this long
 
 
-## Where the GUN switch stands (cockpit rig).
+## The craft's weapon's GUN switch (view/gunnery.gd): up arms it and brings it out; down makes it safe and stows it. At
+## its place in this cockpit (gun_switch_mount), on the shell, built as the cockpit's other guarded switches are. The
+## cockpit builds it for a craft that carries a weapon (sim/pilot_craft.gd armed); tests/test_cockpit_reach.gd builds it
+## in the Orrery's and the Vesper's too, at the places theirs will have once they are armed, to hold those to its bars.
+func fit_gun_switch() -> Node3D:
+	var id: String = sim.P.vehicle
+	gun_switch = ModeSwitchScript.new()
+	gun_switch.name = "GunSwitch"
+	gun_switch.legends = ["GUN", "SAFE"]
+	gun_switch.colours = [Color(1.0, 0.22, 0.08), Color(0.35, 0.9, 0.45)]
+	gun_switch.throws = ["gun", "safe"]
+	shell.add_child(gun_switch)
+	gun_switch.transform = gun_switch_mount(CraftModelScript.PilotCraft.phaethon_based(id) or id == CraftModelScript.PilotCraft.SHRIKE, id)
+	gun_switch.build(FleetDeck.has_deck(id))      # (the fleet's own switch finish, as the cockpit's others: bespoke_controls)
+	return gun_switch
+
+
+## Where the GUN switch stands (cockpit rig), for the craft `id`.
 ##   phaethon_family (the Phaethon, the Talon: sim/pilot_craft.gd phaethon_based; Raids, 2026-11-24; and the Shrike,
 ##     whose cockpit's consoles are theirs: Raids stage 2, 2026-11-26): on the starboard console's inboard face up front,
 ##     outboard of the right lever, low and forward under the MODE switch: the POWER
@@ -2279,10 +2287,14 @@ const GUN_TICK_S := 0.012         # ... and this long
 ##     right lever keeps about 20 mm off it through its whole travel, the bat up, straight out (mid-throw) or down
 ##     (tests/test_cockpit_reach.gd); and the box before it where a hand throws it is 24 mm clear of the MODE switch's
 ##     (tests/test_gun_controls.gd; review, 2026-11-24: where they met, one push up threw both).
-##   else (the Basilisk, 2026-11-23): on the starboard sill's inner ledge, by the right elbow and inside the canopy's
-##     foot, a hand's reach up from the right lever, its face turned in and up at the seat.
-static func gun_switch_mount(phaethon_family: bool) -> Transform3D:
-	if phaethon_family:
+##   the Orrery, the Kiln, the Vesper (Raids stage 2, 2026-11-26: the Kiln's lance now, the Orrery's orbs and the Vesper's
+##     pulse later): their cabins' consoles, levers, MODE and POWER switches and map stand where the Phaethon's do (the
+##     fleet's own fittings are out on the sills: vr/fleet_flight_deck.gd), so theirs is the Phaethons' place too; its
+##     bars measured in each by tests/test_cockpit_reach.gd.
+##   else (the Basilisk, 2026-11-23: stage 1's place, unchanged): on the starboard sill's inner ledge, by the right
+##     elbow and inside the canopy's foot, a hand's reach up from the right lever, its face turned in and up at the seat.
+static func gun_switch_mount(phaethon_family: bool, id := "") -> Transform3D:
+	if phaethon_family or id in FLEET_GUNS:
 		var x := Vector3(0.0, 0.0, 1.0)      # (across the panel: aft, so its legends read from the seat)
 		var z := Vector3(-cos(GUN_TILT), sin(GUN_TILT), 0.0)      # (its face: inboard, turned up)
 		return Transform3D(Basis(x, z.cross(x), z).scaled(Vector3.ONE * GUN_SCALE), GUN_AT)
@@ -2396,6 +2408,17 @@ func _gun_ticks_step(delta: float) -> void:
 func _hold_for_gun_ticks() -> void:
 	for t: Array in _gun_ticks:
 		_buzz_hold[t[0]] = maxf(_buzz_hold.get(t[0], 0.0), float(t[3]) + float(t[2]))
+
+
+## A weapon's steady buzz in the left hand (WeaponMount.buzz: the Kiln's lance while it burns), asked after the view's
+## frame has fired the gun: a pulse as long as the frame, sent at once, each frame it burns; the frame it stops none is
+## sent, and the last has run out by then. Not while the gun's fire control sleeps (Raids on, never armed).
+func _gun_buzz(delta: float) -> void:
+	if gunnery == null or gunnery.dormant or not hands.has("left"):
+		return
+	var amp: float = gunnery.mount.buzz()
+	if amp > 0.0:
+		_gun_pulse(hands.left, amp, delta)
 
 
 ## A gun tick sent to the hand: the one place the gun's ticks reach the controller (gun_pulses keeps the last few).
@@ -2599,6 +2622,7 @@ func _process(delta: float) -> void:
 	if _brake_trace:
 		_brake_trace.capture(self, delta)
 	_apply_shudder(delta)
+	_gun_buzz(delta)      # (after the view's frame has fired the gun, and after the brakes' shudder: it wins while it lasts)
 	_sync_rush(delta)
 	tactical = TacticalScript.frame(self, tactical, delta, _rush_flow, camera == "cockpit" and startup.is_hot())
 	interior.set_power(startup.power)

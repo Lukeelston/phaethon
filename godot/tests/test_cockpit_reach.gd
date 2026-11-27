@@ -17,15 +17,18 @@
 ##   the GUN switch   in every cockpit whose craft has a weapon (sim/pilot_craft.gd armed; Raids, 2026-11-24) and in no
 ##                other: the Phaethon's, the Talon's and the Shrike's (its consoles are theirs: Raids stage 2) on the
 ##                starboard console's inboard face up front, outboard of the right lever (vr_cockpit.gd
-##                gun_switch_mount); the Basilisk's on its starboard sill, where it has stood
-##                since 2026-11-23. The same checks as the power's controls: the levers' sweep passes through nothing of
-##                it and keeps POWER_GAP clear (and the lever on its side, again, with its bat thrown up, straight out as
-##                in mid-throw, and thrown down); in place it crosses nothing but the starboard console it is let into
-##                (the Basilisk's, unmoved, nothing but BASILISK_GUN_KNOWN, told); the lever on its side keeps GUN_GAP
-##                off it; its bat is within GUN_REACH of the grip on its side at half and at full throttle and of that
-##                shoulder (the Basilisk's, unmoved, within
-##                BASILISK_GUN_REACH); and from the seat nothing hides its GUN lamp at idle or at full, nor its SAFE lamp
-##                at idle
+##                gun_switch_mount); the Kiln's (Raids stage 2: its lance) and the places the Orrery's and the Vesper's
+##                will have once they are armed (built here at their places by the cockpit's own fit_gun_switch, since
+##                their cockpits have none yet) on the same face (FLEET_GUNS); the Basilisk's on its starboard sill,
+##                where it has stood since 2026-11-23. The same checks as the power's controls: the levers' sweep passes
+##                through nothing of it and keeps POWER_GAP clear (and the lever on its side, again, with its bat thrown
+##                up, straight out as in mid-throw, and thrown down); in place it crosses nothing but the starboard
+##                console it is let into (so neither the POWER switch, its button, nor the map; the Basilisk's, unmoved,
+##                nothing but BASILISK_GUN_KNOWN, told); the lever on its side keeps GUN_GAP off it; it stands at
+##                GUN_LEAST_SCALE of the MODE switch's size or larger (the Basilisk's, unmoved, at its own); its bat is
+##                within GUN_REACH of the grip on its side at half and at full throttle and of that shoulder (the
+##                Basilisk's, unmoved, within BASILISK_GUN_REACH); and from the seat nothing hides its GUN lamp at idle
+##                or at full, nor its SAFE lamp at idle
 ## --headless --xr-mode off --audio-driver Dummy -s res://tests/test_cockpit_reach.gd -- --mute
 ## Prints COCKPIT REACH PASS. tests/probe_power_reach.gd measures the same things with what-ifs.
 extends SceneTree
@@ -57,6 +60,10 @@ const BASILISK_GUN_REACH := Vector3(0.60, 0.60, 0.71)
 # What the Basilisk's GUN switch crosses where it has stood since 2026-11-23 (its place is not this stage's to move):
 # the hull's sill it stands on, and the cabin roof's glass, through its panel's top (5 edges). Told, not failed.
 const BASILISK_GUN_KNOWN := ["PodHull", "canopy/roof_glass"]
+# The fleet's three (Raids stage 2): the Kiln's switch is built with its cockpit now that it carries its lance; the
+# Orrery's and the Vesper's are built by this test at their places (their craft are armed later) and held to the same.
+const FLEET_GUNS := [Craft.ORRERY, Craft.KILN, Craft.VESPER]
+const GUN_LEAST_SCALE := 0.6     # the GUN switch at this of the MODE switch's size, at the least (the Basilisk's aside)
 var failures := 0
 var checks := 0
 
@@ -129,6 +136,12 @@ func _run() -> void:
 		var gun: Node3D = v.gun_switch
 		_check("%s: a GUN switch in its cockpit (%s) if and only if it carries a weapon (\"%s\")" % [id, gun != null, Craft.weapon_of(id)],
 			(gun != null) == Craft.armed(id) and Craft.armed(id) == (Craft.weapon_of(id) != ""))
+		if id in FLEET_GUNS:
+			var own := gun != null
+			if gun == null and v.has_method("fit_gun_switch"):
+				gun = v.fit_gun_switch()      # (at its place, as the cockpit will build it once the craft is armed)
+			_check("%s: a GUN switch at its place in its cockpit (%s: %s)" % [id, gun != null, "its own" if own else "built here at its place"],
+				gun != null and (own or id != Craft.KILN))
 
 		# ---- the sweep: both levers, idle to full, against the map and the power's controls
 		var least := {"MapPod": ClashKit.REACH, "PowerSwitch": ClashKit.REACH, "PowerButton": ClashKit.REACH}
@@ -238,8 +251,8 @@ func _run() -> void:
 			var gun_b := b.begins_with("GunSwitch")
 			if gun_a and gun_b:
 				continue
-			if (gun_a or gun_b) and (Craft.phaethon_based(id) or id == Craft.SHRIKE) and (a.begins_with("cockpit_interior/ConsoleR") or b.begins_with("cockpit_interior/ConsoleR")):
-				continue      # (the Phaethons' and the Shrike's GUN switch's panel is let into the starboard console's inboard face)
+			if (gun_a or gun_b) and (Craft.phaethon_based(id) or id == Craft.SHRIKE or id in FLEET_GUNS) and (a.begins_with("cockpit_interior/ConsoleR") or b.begins_with("cockpit_interior/ConsoleR")):
+				continue      # (the Phaethons', the Shrike's and the fleet's GUN switch's panel is let into the starboard console's inboard face)
 			if (gun_a or gun_b) and id == Craft.BASILISK and BASILISK_GUN_KNOWN.any(func(w: String) -> bool: return (b if gun_a else a).begins_with(w)):
 				print("NOTE %s: its GUN switch, where it has stood since 2026-11-23, crosses %s >< %s (%d edges)" % [id, a, b, rec.n])
 				continue
@@ -278,6 +291,9 @@ func _run() -> void:
 			_check("%s: the GUN switch's bat is %.3f m from the %s grip at half throttle, %.3f at full, %.3f from that shoulder (at most %.2f, %.2f, %.2f)" % [
 				id, to_gun.x, "right" if side > 0.0 else "left", to_gun.y, to_gun.z, bar.x, bar.y, bar.z],
 				to_gun.x <= bar.x and to_gun.y <= bar.y and to_gun.z <= bar.z)
+			if id != Craft.BASILISK:
+				var scale: float = (gun.transform.basis.get_scale() as Vector3).x
+				_check("%s: the GUN switch stands at %.2f of the MODE switch's size (at least %.1f)" % [id, scale, GUN_LEAST_SCALE], scale >= GUN_LEAST_SCALE - 1e-6)
 
 		# ---- in sight from the seat, the levers at idle and at full
 		var looks := {"the button's cap": [cap, "PowerButton"],

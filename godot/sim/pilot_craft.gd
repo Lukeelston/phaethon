@@ -82,6 +82,11 @@ const TUNING := {
 #   turnDeg      degrees a second a missile turns toward its target's lead, at the most
 #   reloadS      s the rack takes to reload after a volley, all of it together
 #   lifeS        s a missile flies before it fizzes out
+# The lance (the Kiln's, view/weapons/lance_mount.gd), a beam along the gaze:
+#   reach        m: how long the beam is, at the most (it stops at the ground or the first hostile on it)
+#   coneDeg      degrees off the craft's forward the beam may go; a gaze further off leaves it at that edge
+#   dps          hits a second on the hostile the beam is on (whole hits, the remainder carried)
+#   fireS        s of burn that overheat it; it is dead till it has cooled `coolS` s
 const TRAITS := {
 	STANDARD: {"power": {"id": "slipstream", "name": "Slipstream", "lcd": "SLIPSTREAM",
 		"thrust": 1.15, "last": 4.0, "fill": 6.0, "reach": 120.0, "lane": 22.0},
@@ -96,7 +101,8 @@ const TRAITS := {
 	ORRERY: {"gripCapG": 1.13, "driftReach": 0.8,
 		"power": {"id": "gyro", "name": "Gyro Lock", "lcd": "GYRO LOCK", "grip": 1.2, "last": 4.0, "recharge": 15.0}},
 	KILN: {"thrustMax": 0.95, "brakes": 1.3, "wallShove": 0.75, "driftReach": 0.7,
-		"power": {"id": "ram", "name": "Ram Plate", "lcd": "RAM PLATE", "wallShove": 0.5, "last": 5.0, "recharge": 20.0}},
+		"power": {"id": "ram", "name": "Ram Plate", "lcd": "RAM PLATE", "wallShove": 0.5, "last": 5.0, "recharge": 20.0},
+		"weapon": {"reach": 600.0, "coneDeg": 25.0, "dps": 30.0, "fireS": 2.5, "coolS": 3.0}},
 	VESPER: {"engineCd": 0.88, "gripCapG": 0.9, "driftReach": 1.2,
 		"power": {"id": "ground", "name": "Ground Effect", "lcd": "GROUND EFFECT", "drag": 0.85,
 			"minV": 894.08, "climb": 0.03, "split": 0.08, "hardSplit": 0.12, "settle": 0.5}},
@@ -130,7 +136,8 @@ static func power_of(id: Variant) -> Dictionary:
 
 
 ## Does this airframe carry a weapon (WEAPONS)? Its cockpit then has a GUN switch (vr/vr_cockpit.gd), and X, and the
-## flat view's K and F, work its gun. Stage 1 of the Raids: the Phaethon, the Talon and the Basilisk; stage 2: the Shrike.
+## flat view's K and F, work its gun. Stage 1 of the Raids: the Phaethon, the Talon and the Basilisk; stage 2: the Shrike
+## and the Kiln.
 static func armed(id: Variant) -> bool:
 	return WEAPONS.has(known(id))
 
@@ -144,7 +151,9 @@ static func armed(id: Variant) -> bool:
 ##   missiles    the Shrike's: four darts on two cassettes that rise over its cheeks (view/arms/shrike_arms.gd), locked by
 ##               the gaze and fired together (view/weapons/missile_mount.gd); its arms are fitted at the first arming
 ##               (with Raids on, at load, stowed)
-const WEAPONS := {STANDARD: "cannons", TALON: "wing_guns", BASILISK: "turret", SHRIKE: "missiles"}
+##   lance       the Kiln's: a plasma beam from an emitter that rises out of its starboard foredeck (view/arms/kiln_arms.gd),
+##               along the gaze and held on (view/weapons/lance_mount.gd); its arms are fitted as the Shrike's are
+const WEAPONS := {STANDARD: "cannons", TALON: "wing_guns", BASILISK: "turret", SHRIKE: "missiles", KILN: "lance"}
 
 
 ## A craft's weapon (WEAPONS), "" for none.
