@@ -1,0 +1,58 @@
+[
+  {"src": "garage", "shot": "hall", "in": 0.7, "dur": 4.0, "fade_in": 1.2, "title": "THE GARAGE", "music": 0.42},
+
+  {"src": "garage", "shot": "fleet-phaethon-pod", "in": 0.3, "dur": 2.0, "label": "PHAETHON", "note": "The original chassis", "music": 0.46},
+  {"src": "garage", "shot": "fleet-shrike-engine", "in": 0.3, "dur": 2.0, "label": "SHRIKE RS", "note": "Lightweight sprint chassis"},
+  {"src": "garage", "shot": "fleet-orrery-engine", "in": 0.3, "dur": 2.0, "label": "ORRERY IX", "note": "Survey gondola"},
+  {"src": "garage", "shot": "fleet-kiln-engine", "in": 0.3, "dur": 2.0, "label": "KILN SIX", "note": "Rescue cab"},
+  {"src": "garage", "shot": "fleet-vesper-pod", "in": 0.3, "dur": 2.0, "label": "VESPER", "note": "Star Command livery"},
+  {"src": "garage", "shot": "fleet-basilisk-pod", "in": 0.3, "dur": 2.0, "label": "BASILISK", "note": "Gunship"},
+
+  {"src": "garage", "shot": "paint", "in": 0.5, "dur": 4.0, "label": "PAINT", "note": "Chosen at the bay"},
+  {"src": "garage", "shot": "talon", "in": 0.4, "dur": 3.0, "label": "PHAETHON TALON", "note": "A second body for the same bay"},
+  {"src": "garage2", "shot": "board", "in": 1.6, "dur": 5.0},
+
+  {"src": "garage2", "shot": "start-seat", "in": 2.6, "dur": 3.5, "music": 0.5, "gain": 4},
+  {"src": "garage2", "shot": "start-rear", "in": 0.4, "dur": 3.5, "gain": 4},
+  {"src": "garage2", "shot": "start-engine", "in": 0.4, "dur": 2.0, "gain": 4},
+  {"src": "garage2", "shot": "start-door", "in": 1.6, "dur": 3.0, "gain": 4},
+
+  {"src": "launch", "shot": "launch-seat", "in": 0.9, "dur": 3.5, "title": "THE NETWORK", "music": 0.52},
+  {"src": "launch", "shot": "launch-low", "in": 0.1, "dur": 1.5},
+  {"src": "highway", "shot": "highway-chase", "in": 0.3, "dur": 2.5},
+  {"src": "highway", "shot": "highway-front", "in": 0.3, "dur": 2.5},
+  {"src": "highway", "shot": "highway-pilot", "in": 0.3, "dur": 2.0},
+  {"src": "highway", "shot": "highway-seat", "in": 0.4, "dur": 2.0, "label": "AUTOPILOT", "note": "The game's own, flying the traffic"},
+  {"src": "climb", "shot": "climb-foot", "in": 0.0, "dur": 1.4, "label": "HELIOS", "note": "A road straight up a mountain"},
+  {"src": "climb", "shot": "climb-wall-side", "in": 0.5, "dur": 2.1},
+  {"src": "climb", "shot": "climb-rim", "in": 0.6, "dur": 2.0},
+  {"src": "shaft", "shot": "shaft-wall-out", "in": 0.4, "dur": 2.0, "label": "THE SHAFTS", "note": "Straight up, over the top, back down"},
+  {"src": "shaft", "shot": "shaft-top-seat", "in": 1.6, "dur": 2.0},
+  {"src": "leap", "shot": "leap-lane", "in": 0.2, "dur": 1.5, "label": "MOUNT HYPERION", "note": "Off the lip at 10,000 mph"},
+  {"src": "leap", "shot": "leap-side", "in": 0.4, "dur": 2.5},
+  {"src": "leap", "shot": "leap-under", "in": 0.5, "dur": 2.0},
+  {"src": "dusk", "shot": "dusk-front", "in": 0.3, "dur": 2.2},
+  {"src": "dusk", "shot": "dusk-engine", "in": 0.0, "dur": 2.3},
+
+  {"src": "raid", "shot": "raid-pack-seat", "in": 0.2, "dur": 2.0, "title": "RAIDS"},
+  {"src": "raid", "shot": "raid-guns-out", "in": 0.3, "dur": 2.5, "label": "PHAETHON", "note": "Twin cannons"},
+  {"src": "raid", "shot": "raid-fire-seat", "in": 0.9, "dur": 3.0},
+  {"src": "raid", "shot": "raid-fire-out", "in": 0.8, "dur": 3.0},
+  {"src": "raid", "shot": "raid-front", "in": 0.6, "dur": 1.0},
+  {"src": "basilisk", "shot": "basilisk-fire-close", "in": 0.4, "dur": 2.5, "label": "BASILISK", "note": "A turret that follows your eyes"},
+  {"src": "basilisk", "shot": "basilisk-seat-2", "in": 0.3, "dur": 2.5},
+  {"src": "basilisk", "shot": "basilisk-fire-out", "in": 0.4, "dur": 2.0},
+  {"src": "talon", "shot": "talon-high", "in": 0.3, "dur": 2.0, "label": "PHAETHON TALON", "note": "Wing guns"},
+  {"src": "talon", "shot": "talon-fire-seat", "in": 0.4, "dur": 2.5},
+  {"src": "raid", "shot": "raid-fire-seat-2", "in": 0.6, "dur": 3.0},
+
+  {"src": "leap", "shot": "leap-seat", "in": 0.5, "dur": 1.0},
+  {"src": "dusk", "shot": "dusk-chase", "in": 1.2, "dur": 1.0},
+  {"src": "climb", "shot": "climb-wall-seat", "in": 0.1, "dur": 1.0},
+  {"src": "highway", "shot": "highway-top", "in": 0.5, "dur": 1.0},
+  {"src": "raid", "shot": "raid-side", "in": 0.8, "dur": 1.0},
+  {"src": "shaft", "shot": "shaft-down-out", "in": 1.0, "dur": 1.0},
+  {"src": "leap", "shot": "leap-caught", "in": 0.15, "dur": 2.0, "fade_out": 0.3},
+
+  {"card": "PHAETHON", "sub": "Two engines. One cockpit.", "foot": "ElstonWorks  ·  Windows desktop + PC VR  ·  Footage from a development build", "dur": 6.5, "music": 0.75}
+]
