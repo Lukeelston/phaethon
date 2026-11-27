@@ -220,6 +220,8 @@ var _menu_page := ""                      # "" the quick menu's first page, "opt
 var slide_switch                          # vr/mode_switch.gd again: SLIDE up, GRIP down
 var gun_switch                            # ... and an armed craft's: GUN up (its weapon armed and out), SAFE down (gun_switch_mount)
 var _gun_shots := 0                       # (the shots the hand has felt)
+var gun_pulses: Array = []                # the gun's ticks as sent to the hand: [controller, amp, s, delay], the last 16 (tests read it)
+var _gun_ticks: Array = []                # a volley's later ticks, on the cockpit's own clock: [controller, amp, s, s till due]
 var drift_slider                          # vr/drift_slider.gd: how far it steps out (slide_amount)
 # The craft's power (sim/pilot_craft.gd TRAITS; Luke, 2026-11-24: "build the attributes and powers into the game"): its
 # guarded POWER switch (vr/mode_switch.gd again, 0.7 of its size: ARM up, SAFE down) on the port console's inboard
@@ -500,9 +502,10 @@ func recenter() -> void:
 		_buzz(hands.right, 0.3, 0.05)
 
 
-## A restart: back to first gear (the gearbox, if it's on).
+## A restart: back to first gear (the gearbox, if it's on); no gun tick left to come.
 func _respawn() -> void:
 	super()
+	_gun_ticks.clear()
 	if quest.gear >= 0:
 		quest.sync_handling(sim.hblend, true)
 
@@ -549,6 +552,8 @@ func _jolt_vignette() -> void:
 	cam.add_child(_jolt_quad)
 
 
+## (Under OpenXR, Godot 4.7.1 ignores `delay`, a TODO in its openxr_interface.cpp: the pulse goes at once. A volley's
+## gun ticks are timed on the cockpit's own clock instead: _gun_ticks, _gun_ticks_step.)
 func _buzz(c: XRController3D, amp: float, dur: float, delay := 0.0) -> void:
 	c.trigger_haptic_pulse("haptic", 0.0, amp, dur, delay)
 	_buzz_hold[c] = dur + delay
@@ -2258,7 +2263,9 @@ const GUN_AT := Vector3(0.544, 0.26, 0.06)      # (the Phaethons' GUN switch: gu
 const GUN_TILT := deg_to_rad(10.0)
 const GUN_SCALE := 0.7
 const GUN_TICKS := 4              # the most ticks a frame's shots are felt as (the Shrike's volley: one a missile) ...
-const GUN_TICK_GAP := 0.08        # ... s apart (the cockpit's double tick's spacing)
+const GUN_TICK_GAP := 0.08        # ... s apart (the cockpit's double tick's spacing), on the cockpit's own clock
+const GUN_TICK_AMP := 0.22        # a tick: this strong ...
+const GUN_TICK_S := 0.012         # ... and this long
 
 
 ## Where the GUN switch stands (cockpit rig).
@@ -2355,8 +2362,49 @@ func _gun_controls() -> void:
 	if gunnery.shots != _gun_shots:      # each shot a light tick in the hand that fires; several in a frame (a volley's
 		var ticks := clampi(gunnery.shots - _gun_shots, 1, GUN_TICKS)      # missiles), GUN_TICK_GAP apart
 		_gun_shots = gunnery.shots
-		for k in ticks:
-			_buzz(l, 0.22, 0.012, k * GUN_TICK_GAP)
+		_gun_volley_ticks(l, ticks)
+
+
+## A frame's `n` shots felt in hand c: one tick at once, the rest queued GUN_TICK_GAP apart on the cockpit's own clock
+## (_gun_ticks_step sends each when it falls due), and the hand held for them all, as one pulse's delay once did
+## (_buzz_hold: the brakes' shudder waits).
+func _gun_volley_ticks(c: XRController3D, n: int) -> void:
+	_gun_pulse(c, GUN_TICK_AMP, GUN_TICK_S)
+	for k in range(1, n):
+		_gun_ticks.append([c, GUN_TICK_AMP, GUN_TICK_S, k * GUN_TICK_GAP])
+	_hold_for_gun_ticks()
+
+
+## A frame of the cockpit's own clock (its _process, before the view's frame that may queue more): each queued gun tick
+## nearer by `delta`, and sent at once when it falls due. Thrown to SAFE, those already queued still come: they are the
+## feel of missiles already gone, 0.24 s of it at the most. A restart (_respawn) drops them.
+func _gun_ticks_step(delta: float) -> void:
+	if _gun_ticks.is_empty():
+		return
+	var left := []
+	for t: Array in _gun_ticks:
+		t[3] = float(t[3]) - delta
+		if float(t[3]) <= 1e-6:
+			_gun_pulse(t[0], t[1], t[2])
+		else:
+			left.append(t)
+	_gun_ticks = left
+	_hold_for_gun_ticks()
+
+
+## Each hand that has gun ticks still to come held until the last of them is over (_buzz_hold).
+func _hold_for_gun_ticks() -> void:
+	for t: Array in _gun_ticks:
+		_buzz_hold[t[0]] = maxf(_buzz_hold.get(t[0], 0.0), float(t[3]) + float(t[2]))
+
+
+## A gun tick sent to the hand: the one place the gun's ticks reach the controller (gun_pulses keeps the last few).
+## Sent at once: nothing gives it a delay (the engine would ignore one: _buzz).
+func _gun_pulse(c: XRController3D, amp: float, dur: float, delay := 0.0) -> void:
+	gun_pulses.append([c, amp, dur, delay])
+	if gun_pulses.size() > 16:
+		gun_pulses.pop_front()
+	_buzz(c, amp, dur, delay)
 
 
 ## Turn the slide on or off (the SLIDE / GRIP switch), and remember it: the pilot's own choice now (vr_prefs.json), and
@@ -2539,6 +2587,7 @@ func _sync_rush(delta: float) -> void:
 
 func _process(delta: float) -> void:
 	var t_in := Time.get_ticks_usec()
+	_gun_ticks_step(delta)      # (before the view's frame: a tick queued in it falls due a whole GUN_TICK_GAP later)
 	super(delta)
 	_memory_t += delta
 	if _memory_t >= 60.0:

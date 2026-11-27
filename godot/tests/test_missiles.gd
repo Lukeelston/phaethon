@@ -11,7 +11,8 @@
 ##   check_lock_builds      the gaze on a raider: no lock at 0.30 s, locks == [it] by 0.35 s; on a commuter 2 s: none;
 ##                          four raiders in turn (a glance off between): four locks, LOCK 4; a fifth is not added
 ##   check_volley           no lock: the trigger fires nothing; held while a lock is taken: nothing (a press, not a hold);
-##                          pressed with three locks: three missiles, one tick each in the left hand, three rounds hidden,
+##                          pressed with three locks: three missiles, one tick sent to the left hand that frame (at once,
+##                          the hand held for the volley's three), three rounds hidden,
 ##                          locks empty, RELOAD; drawn (three darts, three streaks, each raider still bracketed while a
 ##                          missile homes on it); held down, no more leave
 ##   check_homing_kills     each reaches its raider (1.5 km off, crossing at 400 m/s) within lifeS: three kills, the
@@ -35,6 +36,10 @@
 ##   check_raids_on_arming  Raids on (Ruling D: the first arming above measured over 5 ms): the fire control made at load,
 ##                          dormant, and the arms fitted then on the seat's hull, stowed (not drawn, the hull its own, four
 ##                          rounds); the first arming's frame told; armed, the same arms come out and the hull is cut
+##   check_volley_ticks     (Ruling S) on that seat's own frames (vr_cockpit.gd _process), three shots in a frame: a tick
+##                          sent to the left hand that frame and one at the first frame at or after each of 0.08 and 0.16 s,
+##                          every one sent at once (no delay: the engine ignores a pulse's delay under OpenXR); and three
+##                          shots in a frame, then a restart (Y's tap) the next: nothing sent after it
 ## Run with --fixed-fps 120: --headless --xr-mode off --fixed-fps 120 --audio-driver Dummy -s res://tests/test_missiles.gd -- --mute
 ## Prints MISSILES PASS. Puts user://vr_prefs.json back as it found it.
 extends SceneTree
@@ -60,7 +65,7 @@ const FAR := 1500.0             # m: the volley's raiders ...
 const CROSS_V := 400.0          # ... crossing at this
 const TICK_GAP := 0.08          # s between a volley's ticks in the hand (vr_cockpit.gd _gun_controls)
 const COST_MS := 0.15           # the mount's own mean a frame, four missiles homing, at the most
-const SECTIONS := 13
+const SECTIONS := 14
 var failures := 0
 var checks := 0
 var sections := 0               # (a section that dies on a script error never counts itself: the verdict then fails)
@@ -136,6 +141,8 @@ func _run() -> void:
 	Raids.enabled = true
 	v = await _seat(Pilot.SHRIKE)
 	check_raids_on_arming(v)
+	sections += 1
+	check_volley_ticks(v)
 	sections += 1
 	v.queue_free()
 	await process_frame
@@ -533,6 +540,7 @@ func check_volley(v, g) -> Array:
 	v._gun_shots = g.shots
 	var hand: XRController3D = v.hands.left
 	v._buzz_hold[hand] = 0.0
+	v.gun_pulses.clear()
 	_press(v, g)
 	v._gun_controls()      # (the cockpit's own: X's state, and the hand's ticks for the shots)
 	g.hold_fire = true     # (it read X: up again)
@@ -540,8 +548,9 @@ func check_volley(v, g) -> Array:
 	check("pressed with three locks: %d missiles (%d shots), three rounds hidden (%d), locks empty (%s), \"%s\"" % [m.missiles.size(), g.shots - shots, hidden,
 		m.locks, m.status()], m.missiles.size() == 3 and g.shots == shots + 3 and hidden == 3 and m.loaded == 1 and m.locks.is_empty() and m.status() == "RELOAD")
 	var tick_hold: float = v._buzz_hold.get(hand, 0.0)
-	check("one tick in the left hand for each, %.2f s apart: the hand held %.3f s (%.3f)" % [TICK_GAP, tick_hold, 0.012 + 2.0 * TICK_GAP],
-		absf(tick_hold - (0.012 + 2.0 * TICK_GAP)) < 1e-4)
+	var sent: Array = v.gun_pulses.map(func(p: Array) -> float: return snappedf(float(p[3]), 0.001))
+	check("the volley's frame sends one tick to the left hand, at once (sent, by their delays: %s), and holds the hand for the volley's three, %.2f s apart: %.3f s (%.3f: the brakes' shudder waits)" % [
+		sent, TICK_GAP, tick_hold, 0.012 + 2.0 * TICK_GAP], sent == [0.0] and v.gun_pulses[0][0] == hand and absf(tick_hold - (0.012 + 2.0 * TICK_GAP)) < 1e-4)
 	var each_target := []
 	for k in m.missiles.size():
 		each_target.append(m.missiles[k].target)
@@ -826,6 +835,35 @@ func check_flat_range() -> void:
 	game.queue_free()
 	await process_frame
 	View.track_override = "network"
+
+
+## `shots` shots in one frame on the cockpit's own frames (its _process: _gun_controls reads the fire control's count),
+## over `n` frames: each gun tick sent, as [the frame it was sent in, its delay]; with `restart`, the cockpit restarts
+## (Y's tap, _respawn) after the first frame.
+func _ticks_over(v, shots: int, n: int, restart: bool) -> Array:
+	v.gun_pulses.clear()
+	v.gunnery.shots += shots
+	var out := []
+	for i in n:
+		_hold_speed(v)
+		v._process(DT)
+		for p: Array in v.gun_pulses:
+			out.append([i, snappedf(float(p[3]), 0.001)])
+		v.gun_pulses.clear()
+		if restart and i == 0:
+			v._respawn()
+	return out
+
+
+func check_volley_ticks(v) -> void:
+	var want := [[0, 0.0]]
+	for k in [1, 2]:
+		want.append([int(ceil(k * TICK_GAP / DT - 1e-6)), 0.0])
+	var sent := _ticks_over(v, 3, 30, false)
+	check("three shots in a frame, on the cockpit's own frames: ticks sent [frame, delay] %s (want %s: at once, at %.3f and %.3f s)" % [sent, want,
+		float(want[1][0]) * DT, float(want[2][0]) * DT], sent == want)
+	var cut := _ticks_over(v, 3, 30, true)
+	check("three shots in a frame, a restart the next: ticks sent %s (want [[0, 0.0]]: none after the restart, none with a delay)" % [cut], cut == [[0, 0.0]])
 
 
 ## Raids on: the fire control made at load, dormant, and (Ruling D: the first arming measured over 5 ms) the arms built
