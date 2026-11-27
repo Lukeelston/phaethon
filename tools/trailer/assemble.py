@@ -236,7 +236,7 @@ def main():
             s.paste(im, ((j % cols) * tw, (j // cols) * th))
         s.save(sheet, quality=85)
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-framerate", str(FPS), "-i", os.path.join(frames_dir, "%06d.png"), "-i", wav,
-        "-c:v", "libx264", "-preset", "slow", "-crf", "18", "-pix_fmt", "yuv420p", "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709",
+        "-c:v", "libx264", "-preset", "slow", "-crf", "20", "-pix_fmt", "yuv420p", "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709",
         "-vf", "scale=out_color_matrix=bt709", "-c:a", "aac", "-b:a", "256k", "-movflags", "+faststart", "-shortest", out_path], check=True)
     print("wrote %s (%.1f MB)" % (out_path, os.path.getsize(out_path) / 1e6))
 

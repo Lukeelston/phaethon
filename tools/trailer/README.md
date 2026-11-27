@@ -7,7 +7,7 @@ apart from the titles.
 | File | What it does |
 | --- | --- |
 | `godot/tests/film_trailer_garage.gd` | Films the pilot garage from a free camera: the hall, each craft in its bay, the paint control, the Talon stood in the Phaethon's bay, the climb in, the one-touch start and the bay door. It presses the garage's own controls. |
-| `godot/tests/film_trailer.gd` | Films flying scenes from the seat and from outside (`--scene=launch`, `highway`, `climb`, `leap`, `shaft`, `dusk`, `night`, `raid`, `basilisk`, `talon`). The craft is flown through the sim: levers, air brakes, the game's autopilot, the GUN switch and its trigger. |
+| `godot/tests/film_trailer.gd` | Films flying scenes from the seat and from outside (`--scene=launch`, `depart`, `highway`, `climb`, `leap`, `shaft`, `dusk`, `night`, `raid`, `basilisk`, `talon`). The craft is flown through the sim: levers, air brakes, the game's autopilot, the GUN switch and its trigger. |
 | `tools/trailer/score.py` | Makes the score (NumPy and SciPy, no samples): D minor at 120 beats a minute, so a bar is two seconds. |
 | `tools/trailer/assemble.py` | Cuts the recordings to `edit.json`, adds the titles, mixes the game's sound with the score, and encodes the MP4. |
 | `tools/trailer/edit.json` | The edit list: which piece of which shot, for how long, and the words over it. |
@@ -46,13 +46,23 @@ The sections are the edit's own, in bars of two seconds: the garage's craft from
 Network from 40 s, the raids from 74 s, the last quick cuts from 100 s and the title at 108 s. Move a section in
 `edit.json` and move it here.
 
-## The first cut, as recorded
+## Outside views and the cockpit's pivot
 
-- The dusk scene was recorded before `_auto` was put right (film_unflown.gd's given levers count as a cruise, and the
-  autopilot does not fly under one): in those pictures the Shrike is coasting with nobody steering, and rides the wall.
-  The highway scene was recorded after, with the autopilot flying. Record dusk again before using more of it.
-- The launch is flown on both levers with nothing steering. From the seat that is the terminal and the portal; the
-  outside views after it run into the bypass's first bend, and only the first second and a half is in the cut.
+The game works the cockpit out about the pilot's head, which it reads off its camera (`vr_cockpit.gd` `_place_camera`:
+`head = EYE + cam.position`). An outside view moves that same camera. So `film_trailer.gd` puts the camera back in the
+seat before every step and moves it out again for the picture (`_tick`, `_frame`). Left out, a pitched or banked
+cockpit swings about the outside camera: on the face of Helios the first cut's Vesper stood tens of metres off its
+place, half in the road. (The Basilisk's outside views that keep the head on a raider are the exception: its turret
+is laid on that camera's middle. They are flown on a level, straight road, where the pivot moves nothing.)
+
+## The cut, as recorded
+
+- The climb, the dusk approach and the departure from Eridanus were recorded again for the second cut: the climb
+  with the pivot put right and with `craft_view.gd` `_steep_place` (the craft square to a steep road), dusk and the
+  departure with the autopilot flying (the first cut's dusk was coasting with nobody steering, and rode the wall).
+  Each shot logs the least room the pod had to its road's edge: 96 m or more in all of them.
+- The launch from the seat is flown on both levers with nothing steering: it is the terminal, which is straight.
+- The raid scenes were recorded before the pivot was put right. They are on a level, straight road.
 - `night` has not been recorded or looked at.
 
 `--preview=N` on either film script draws every Nth picture to a JPEG without the movie writer, for a contact sheet.

@@ -30,6 +30,7 @@ var _pictures := 0
 var _heading := Basis.IDENTITY
 var _fire := false       # the trigger held (view/gunnery.gd hold_fire)
 var _gaze = null         # a raider the head is kept on (the Basilisk's turret follows the gaze)
+var _room := INF         # the least room the pod has had to either edge of its road in this shot, m (logged at its end)
 
 
 func _frame() -> void:
@@ -37,6 +38,11 @@ func _frame() -> void:
 	_shot_t += DT
 	if seat and seat.gunnery:
 		seat.gunnery.hold_fire = _fire
+	if seat and not seat.sim.pod.off_road:
+		var sim = seat.sim
+		var R = sim.roads[sim.pod.path]
+		sim._nearest_on(sim.pod.path, sim.pod.x, sim.pod.y, sim.pod.hint, 12)
+		_room = minf(_room, float(R.w[clampi(int(sim._n_i), 0, R.N - 1)]) * 0.5 - absf(float(sim._n_lat)))
 	if _view.is_valid():
 		_view.call(_shot_t)
 	elif _gaze != null and seat.traffic_net.cars.has(_gaze):
@@ -60,6 +66,14 @@ func _frame() -> void:
 ## One step in the cockpit. With the game's autopilot flying, the cockpit reads its own (empty) hands and the autopilot's
 ## levers are what fly her (tests/render_autopilot.gd steps it so); otherwise film_unflown.gd's: flown on `levers`.
 func _tick() -> void:
+	# The cockpit is worked out about the pilot's head, which the game reads off its camera (vr_cockpit.gd
+	# _place_camera: head = EYE + cam.position). An outside view moves that camera, so it is put back in the seat for
+	# the step and moved out again for the picture (_frame): left out, a pitched or banked cockpit swung about the
+	# outside camera, tens of metres off its place on the face of Helios (the first cut's Vesper, half in the road).
+	# (Not while the head is kept on a raider from outside: the Basilisk's turret is laid on that camera's middle.)
+	if _view.is_valid() and _gaze == null:
+		seat.cam.position = Vector3.ZERO
+		seat.cam.rotation_degrees = LEVEL
 	if seat.autopilot != null and seat.autopilot.on:
 		seat._process(DT)
 		seat.approach_display._process(DT)
@@ -77,6 +91,8 @@ func _say(text: String) -> void:
 func _cut(name: String, view := Callable(), lens := 0.0) -> void:
 	if not _shot.is_empty():
 		print("SHOT %s end %d" % [_shot, Engine.get_process_frames()])
+		print("FILM %s: the pod never nearer than %.0f m to its road's edge" % [_shot, _room])
+	_room = INF
 	_shot = name
 	_shot_t = 0.0
 	_view = view
@@ -116,6 +132,16 @@ func _out(from: Vector3, at: Vector3, fov := 45.0, to_from = null, to_at = null,
 		var a: Vector3 = F * from.lerp(to_from if to_from != null else from, k)
 		var b: Vector3 = F * at.lerp(to_at if to_at != null else at, k)
 		seat.cam.global_transform = Transform3D(Basis.looking_at(b - a, F.basis.y), a)
+		seat.cam.fov = fov
+
+
+## An outside view placed in the cockpit's own frame (so many metres out from a wall is out from it, whatever its
+## slope) but held level, so that the wall is seen as steep as it is.
+func _out_wall(from: Vector3, at: Vector3, fov := 45.0, to_from = null, secs := 4.0) -> Callable:
+	return func(t: float) -> void:
+		var F := _craft_frame(false)
+		var a: Vector3 = F * from.lerp(to_from if to_from != null else from, clampf(t / secs, 0.0, 1.0))
+		seat.cam.global_transform = Transform3D(Basis.looking_at(F * at - a, Vector3.UP), a)
 		seat.cam.fov = fov
 
 
@@ -300,7 +326,8 @@ func _scene_scout() -> bool:
 	return true
 
 
-## Out of the terminal at Eridanus: from the seat, the levers pushed through to the stop, then from outside.
+## Out of the terminal at Eridanus: from the seat, the levers pushed through to the stop (nothing steers: the
+## terminal is straight, and the shot ends in it).
 func _scene_launch() -> bool:
 	if not await _open("city:ERIDANUS", {"vehicle": "phaethon"}):
 		return false
@@ -308,13 +335,25 @@ func _scene_launch() -> bool:
 	_cut("launch-seat")
 	await _push(1.0, 0.0, 1.0)
 	await _push(3.6, 1.0)
-	_cut("launch-low", _out(Vector3(5.5, 0.2, 8.0), Vector3(0.0, 0.6, -16.0), 56.0, Vector3(3.0, 1.2, 14.0), null, 3.0))
-	await _push(3.0, 1.0)
-	_cut("launch-side", _out(Vector3(15.0, 0.4, -30.0), Vector3(0.0, 0.6, -10.0), 42.0, Vector3(19.0, 1.6, 6.0), null, 3.2))
-	await _push(3.2, 1.0)
-	_cut("launch-seat-fast")
-	await _push(3.0, 1.0)
 	return true
+
+
+## Out of Eridanus from outside: the game's autopilot takes her from standing in the terminal, out of its portal and
+## round the bypass (it steers; the town's speed is its own).
+func _scene_depart() -> bool:
+	if not await _open("city:ERIDANUS", {"vehicle": "phaethon"}):
+		return false
+	await _push(0.5, 0.0, 1.0)
+	var auto := _auto(2500.0)
+	_cut("depart-low", _out(Vector3(5.5, 0.2, 8.0), Vector3(0.0, 0.6, -16.0), 56.0, Vector3(3.0, 1.2, 14.0), null, 4.0))
+	await _roll(4.0)
+	_cut("depart-front", _out(Vector3(8.0, 0.8, -38.0), Vector3(0.0, 0.8, -10.0), 42.0, Vector3(3.0, 0.0, -30.0), null, 4.0))
+	await _roll(4.0)
+	_cut("depart-side", _out(Vector3(16.0, 1.0, -26.0), Vector3(0.0, 0.6, -10.0), 44.0, Vector3(19.0, 1.6, 4.0), null, 4.0))
+	await _roll(4.0)
+	_cut("depart-pilot", _out(Vector3(2.8, 1.3, -3.6), Vector3(0.0, 0.9, 0.2), 50.0, Vector3(3.4, 1.0, -1.6), null, 3.0))
+	await _roll(3.0)
+	return auto
 
 
 ## A highway at 3,000 mph and more, the game's autopilot flying her through the traffic: outside, and from the seat.
@@ -340,17 +379,20 @@ func _scene_highway() -> bool:
 	return true
 
 
-## The face of Helios (film_unflown.gd _climb's stretch), from outside: the craft on a 75 degree wall.
+## The face of Helios (film_unflown.gd _climb's stretch): from the seat at its foot, then from outside, the camera
+## out from the wall but held level, so a 75 degree wall is seen as one, then out of the side of the cockpit, and over the rim.
 func _scene_climb() -> bool:
 	if not await _open("SHelios@6900", {"vehicle": "vesper", "paint": "star_command"}):
 		return false
 	await _roll(0.5)
 	_cut("climb-foot")
-	await _fly_to(6925, 1500.0, null, 3.0)
-	_cut("climb-wall-side", _out(Vector3(26.0, 3.0, -4.0), Vector3(0.0, 0.5, -9.0), 46.0, Vector3(18.0, 1.0, 10.0), null, 5.0, false))
-	await _fly_to(6990, 950.0, null, 4.0)
+	await _fly_to(6925, 1300.0, null, 3.0)
+	_cut("climb-wall-side", _out_wall(Vector3(30.0, 12.0, -4.0), Vector3(0.0, 1.0, -10.0), 46.0, Vector3(22.0, 16.0, 10.0), 4.5))
+	await _fly_to(6962, 650.0, null, 5.0)
+	_cut("climb-wall-back", _out_wall(Vector3(9.0, 9.0, 28.0), Vector3(0.0, 1.0, -12.0), 50.0, Vector3(-5.0, 6.0, 20.0), 3.5))
+	await _fly_to(6992, 650.0, null, 4.0)
 	_cut("climb-wall-seat")
-	await _fly_to(7015, 850.0, Vector3(8, 82, 0), 3.5)
+	await _fly_to(7015, 700.0, Vector3(8, 82, 0), 3.5)
 	_cut("climb-rim", _out(Vector3(-7.0, 2.5, 18.0), Vector3(0.0, 1.0, -12.0), 58.0, Vector3(5.0, 1.2, 12.0), null, 5.0, false))
 	await _fly_to(7185, 1200.0, null, 3.5)
 	return true
