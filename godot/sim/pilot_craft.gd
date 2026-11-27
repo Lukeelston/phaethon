@@ -70,11 +70,18 @@ const TUNING := {
 # sim-core.js has none), {} for a craft whose weapon is not built yet. Which weapon a craft carries is WEAPONS.
 #   rate         shots a second, the barrels taking turns
 #   boltV        m/s: a bolt's speed
-#   hits         hits a bolt does
+#   hits         hits a bolt does (missiles: a missile)
 #   reach        m: how far the aim is looked for
 #   fireS        s of fire on end that overheat it; it is dead till it has cooled `coolS` s
 #   assistDeg    how far off its bore (degrees) the fire control may take a target for it (fixed guns)
 # The Basilisk's repeats its power's fireS/coolS: its gun is its power.
+# Missiles (the Shrike's, view/weapons/missile_mount.gd), look-to-lock:
+#   locks        targets a volley may take, one missile each (and the rounds its rack holds)
+#   lockS        s a hostile holds under the gaze sight to be locked (the fire control's lock, view/gunnery.gd)
+#   missileV     m/s: a missile's own speed; the craft's own along its line is added at its launch, and kept
+#   turnDeg      degrees a second a missile turns toward its target's lead, at the most
+#   reloadS      s the rack takes to reload after a volley, all of it together
+#   lifeS        s a missile flies before it fizzes out
 const TRAITS := {
 	STANDARD: {"power": {"id": "slipstream", "name": "Slipstream", "lcd": "SLIPSTREAM",
 		"thrust": 1.15, "last": 4.0, "fill": 6.0, "reach": 120.0, "lane": 22.0},
@@ -84,7 +91,8 @@ const TRAITS := {
 		"weapon": {"rate": 18.0, "boltV": 1400.0, "hits": 1, "reach": 2200.0, "fireS": 4.0, "coolS": 2.5, "assistDeg": 3.0}},
 	SHRIKE: {"engineCd": 1.04, "gripCapG": 1.07, "brakes": 1.15,
 		"power": {"id": "kickdown", "name": "Kickdown", "lcd": "KICKDOWN",
-			"thrust": 1.35, "last": 1.5, "recharge": 12.0, "low": 0.3, "full": 0.85, "within": 0.3}},
+			"thrust": 1.35, "last": 1.5, "recharge": 12.0, "low": 0.3, "full": 0.85, "within": 0.3},
+		"weapon": {"locks": 4, "lockS": 0.35, "missileV": 900.0, "turnDeg": 120.0, "hits": 40, "reach": 3000.0, "reloadS": 5.0, "lifeS": 6.0}},
 	ORRERY: {"gripCapG": 1.13, "driftReach": 0.8,
 		"power": {"id": "gyro", "name": "Gyro Lock", "lcd": "GYRO LOCK", "grip": 1.2, "last": 4.0, "recharge": 15.0}},
 	KILN: {"thrustMax": 0.95, "brakes": 1.3, "wallShove": 0.75, "driftReach": 0.7,
@@ -122,7 +130,7 @@ static func power_of(id: Variant) -> Dictionary:
 
 
 ## Does this airframe carry a weapon (WEAPONS)? Its cockpit then has a GUN switch (vr/vr_cockpit.gd), and X, and the
-## flat view's K and F, work its gun. Stage 1 of the Raids: the Phaethon, the Talon and the Basilisk.
+## flat view's K and F, work its gun. Stage 1 of the Raids: the Phaethon, the Talon and the Basilisk; stage 2: the Shrike.
 static func armed(id: Variant) -> bool:
 	return WEAPONS.has(known(id))
 
@@ -133,7 +141,10 @@ static func armed(id: Variant) -> bool:
 ##   cannons     the Phaethon's: one in the nose of each engine, fixed along the engine's heading
 ##   wing_guns   the Talon's: one at each wing root, fixed forward; faster and lighter than the Phaethon's
 ##   turret      the Basilisk's gaze-slaved turret
-const WEAPONS := {STANDARD: "cannons", TALON: "wing_guns", BASILISK: "turret"}
+##   missiles    the Shrike's: four darts on two cassettes that rise over its cheeks (view/arms/shrike_arms.gd), locked by
+##               the gaze and fired together (view/weapons/missile_mount.gd); its arms are fitted at the first arming
+##               (with Raids on, at load, stowed)
+const WEAPONS := {STANDARD: "cannons", TALON: "wing_guns", BASILISK: "turret", SHRIKE: "missiles"}
 
 
 ## A craft's weapon (WEAPONS), "" for none.

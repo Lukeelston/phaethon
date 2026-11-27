@@ -21,14 +21,15 @@
 ## A target is a traffic Car (a commuter, or a raider: hostile) or a flyer of the raid's (its `flyer` true, which a Car
 ## has not; the raid's flyers module, view.raids.flyers, has it and counts its hits). The mount's word for the pilot
 ## (status()) is said on the strip when it changes.
-## The weapon's figures are the craft's (sim/pilot_craft.gd TRAITS[..].weapon: rate, boltV, hits, reach, fireS, coolS);
-## where it has none of them, RATE, BOLT_V, one hit a bolt, REACH, and its power's heat (the Basilisk's).
+## The weapon's figures are the craft's (sim/pilot_craft.gd TRAITS[..].weapon: rate, boltV, hits, reach, fireS, coolS,
+## lockS); where it has none of them, RATE, BOLT_V, one hit a bolt, REACH, its power's heat (the Basilisk's) and LOCK_S.
 ## Bolts and bursts are kept in the sims' frame (x, y, height) and drawn about the floating origin.
 ## The switch (deploy) and the trigger are the cockpit's: vr/vr_cockpit.gd, or K and F in the flat view. Fixed guns'
-## fire control: with Raids on, the director makes it at load (network_raids.gd build), dormant: not stepped until
-## the GUN is first armed, so arming costs no frame; with Raids off it is made the first time the GUN is armed (a flight
-## that never arms them builds none of it), its sounds read already at the view's build (warm_sounds). A turret's is
-## made at once, as its sight ball and glow are stepped while it is stowed.
+## (and missiles') fire control: with Raids on, the director makes it at load (network_raids.gd build), dormant: not
+## stepped until the GUN is first armed, and its mount made ready then (prepare: the Shrike's arms, stowed), so arming
+## costs no frame; with Raids off it is made the first time the GUN is armed (a flight that never arms them builds none
+## of it), its sounds read already at the view's build (warm_sounds). A turret's is made at once, as its sight ball and
+## glow are stepped while it is stowed.
 ##   gunnery = Gunnery.frame(view, gunnery, delta)        # once per frame, after the camera and the world
 ##   view.gunnery = Gunnery.make(view, true)              # (the director: fixed guns' made at load, dormant)
 class_name Gunnery
@@ -84,6 +85,7 @@ var aim_kind := "sky"              # "sky", "ground", "vehicle"
 var aim_car = null                 # the vehicle under the sight (fixed guns: or the assist's raider)
 var aim_lead := Vector3.ZERO       # where the bolts are laid (sims' frame): a vehicle's lead, else the aim
 var lock := 0.0                    # 0..1: how long it has held there
+var lock_s := LOCK_S               # ... s to build from 0 to 1 (the weapon's lockS: the Shrike's missiles lock on this)
 var rate := RATE                   # the weapon's figures (build: the craft's weapon row, these where it has none)
 var bolt_v := BOLT_V
 var reach := REACH
@@ -163,6 +165,8 @@ static func make(v, asleep := false):
 	g.dormant = asleep
 	v.add_child(g)
 	g.build(v)
+	if asleep:
+		g.mount.prepare()      # (what its first arming would build, built now, stowed: the Shrike's arms)
 	return g
 
 
@@ -187,6 +191,7 @@ func build(v) -> void:
 	bolt_v = float(row.get("boltV", BOLT_V))
 	reach = float(row.get("reach", REACH))
 	bolt_hits = int(row.get("hits", 1))
+	lock_s = float(row.get("lockS", LOCK_S))
 	sight = _sight_quad("GunSight")
 	sight_mat = sight.material_override
 	if mount.boresight():
@@ -427,10 +432,10 @@ func _find(o: Vector3, d: Vector3, delta: float) -> void:
 	# The lock holds through a glance off it (a head is never still, a vehicle never slow): it builds while
 	# the same vehicle is under the sight, eases off while none is, and starts again on another.
 	if aim_car != null and aim_car == _lock_car:
-		lock = minf(1.0, lock + delta / LOCK_S)
+		lock = minf(1.0, lock + delta / lock_s)
 	elif aim_car != null:
 		_lock_car = aim_car
-		lock = delta / LOCK_S
+		lock = delta / lock_s
 	else:
 		lock = maxf(0.0, lock - delta * LOCK_EASE)
 		if lock == 0.0:
@@ -588,8 +593,9 @@ func _lead(c) -> Vector3:
 
 
 ## ... `h` high (a flyer: from its own height, its climb led too), reckoned from `from` (sims' frame: the mount's origin,
-## found here if not given; the assist finds it once for its whole pack).
-func _lead_at(c, h: float, from := Vector3.INF) -> Vector3:
+## found here if not given; the assist finds it once for its whole pack), for a shot at `shot_v` m/s over the ground (a
+## missile in flight, its own speed: view/weapons/missile_mount.gd), or with none given a bolt fired now (_bolt_speed).
+func _lead_at(c, h: float, from := Vector3.INF, shot_v := 0.0) -> Vector3:
 	if from == Vector3.INF:
 		from = to_sim(mount.origin())
 	var flyer := _is_flyer(c)
@@ -597,7 +603,7 @@ func _lead_at(c, h: float, from := Vector3.INF) -> Vector3:
 		h = c.z
 	var at := Vector3(c.x, c.y, h)
 	var v := Vector3(c.hx * c.v, c.hy * c.v, c.vz if flyer else 0.0)
-	var speed := _bolt_speed((at - from).normalized())
+	var speed := shot_v if shot_v > 0.0 else _bolt_speed((at - from).normalized())
 	for k in 2:
 		var tof := from.distance_to(at) / speed
 		at = Vector3(c.x, c.y, h) + v * tof

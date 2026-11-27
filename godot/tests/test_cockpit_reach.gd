@@ -15,8 +15,9 @@
 ##                left lever's shaft crosses the switch's lower half: it leans along the line from the eye to there,
 ##                and wherever the shaft would not hide it, the shaft passes too near the switch's bat.)
 ##   the GUN switch   in every cockpit whose craft has a weapon (sim/pilot_craft.gd armed; Raids, 2026-11-24) and in no
-##                other: the Phaethon's and the Talon's on the starboard console's inboard face up front, outboard of the
-##                right lever (vr_cockpit.gd gun_switch_mount); the Basilisk's on its starboard sill, where it has stood
+##                other: the Phaethon's, the Talon's and the Shrike's (its consoles are theirs: Raids stage 2) on the
+##                starboard console's inboard face up front, outboard of the right lever (vr_cockpit.gd
+##                gun_switch_mount); the Basilisk's on its starboard sill, where it has stood
 ##                since 2026-11-23. The same checks as the power's controls: the levers' sweep passes through nothing of
 ##                it and keeps POWER_GAP clear (and the lever on its side, again, with its bat thrown up, straight out as
 ##                in mid-throw, and thrown down); in place it crosses nothing but the starboard console it is let into
@@ -237,8 +238,8 @@ func _run() -> void:
 			var gun_b := b.begins_with("GunSwitch")
 			if gun_a and gun_b:
 				continue
-			if (gun_a or gun_b) and Craft.phaethon_based(id) and (a.begins_with("cockpit_interior/ConsoleR") or b.begins_with("cockpit_interior/ConsoleR")):
-				continue      # (the Phaethons' GUN switch's panel is let into the starboard console's inboard face)
+			if (gun_a or gun_b) and (Craft.phaethon_based(id) or id == Craft.SHRIKE) and (a.begins_with("cockpit_interior/ConsoleR") or b.begins_with("cockpit_interior/ConsoleR")):
+				continue      # (the Phaethons' and the Shrike's GUN switch's panel is let into the starboard console's inboard face)
 			if (gun_a or gun_b) and id == Craft.BASILISK and BASILISK_GUN_KNOWN.any(func(w: String) -> bool: return (b if gun_a else a).begins_with(w)):
 				print("NOTE %s: its GUN switch, where it has stood since 2026-11-23, crosses %s >< %s (%d edges)" % [id, a, b, rec.n])
 				continue

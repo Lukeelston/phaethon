@@ -18,7 +18,8 @@
 ##   deployed     two muzzles; each barrel run out 0.6 m, drawn and out of its housing; nothing of the craft ahead
 ##   VR seat      the Talon's on the hull the seat sees, the Phaethon's on its engines; stowed, none drawn
 ## And the table: weapon_of for all seven; the rows (the Basilisk's repeats its power's fireS/coolS); {} for the rest;
-## the Basilisk's turret built exactly as turret.gd builds it, fired through its own mount, and no arms; the Shrike none.
+## the Basilisk's turret built exactly as turret.gd builds it, fired through its own mount, and no arms; the Shrike's
+## missiles' mount (view/weapons/missile_mount.gd), its arms not fitted until its GUN is armed (tests/test_missiles.gd).
 ## --headless --xr-mode off --audio-driver Dummy -s res://tests/test_arms.gd -- --mute
 ## Prints ARMS PASS.
 extends SceneTree
@@ -72,7 +73,7 @@ func _run() -> void:
 	print("basilisk")
 	await check_basilisk_unchanged()
 	print("shrike")
-	await check_no_arms(Pilot.SHRIKE)
+	await check_shrike_lazy()
 	print("VR seat")
 	await check_vr_seat()
 	View.vehicle_override = ""
@@ -295,18 +296,18 @@ func check_deployed(id: String, craft) -> void:
 # --- the table, the Basilisk, the rest of the fleet ----------------------------------------------------------
 
 func check_weapon_rows() -> void:
-	var want := {"phaethon": "cannons", "talon": "wing_guns", "shrike": "", "orrery": "", "kiln": "", "vesper": "", "basilisk": "turret"}
+	var want := {"phaethon": "cannons", "talon": "wing_guns", "shrike": "missiles", "orrery": "", "kiln": "", "vesper": "", "basilisk": "turret"}
 	var got := {}
 	for id: String in Pilot.ORDER:
 		got[id] = Pilot.weapon_of(id)
 	check("weapon_of is right for all seven: %s" % [got], Pilot.ORDER.size() == 7 and got == want)
-	check("WEAPONS names the three that carry one", Pilot.WEAPONS == {Pilot.STANDARD: "cannons", Pilot.TALON: "wing_guns", Pilot.BASILISK: "turret"})
+	check("WEAPONS names the four that carry one", Pilot.WEAPONS == {Pilot.STANDARD: "cannons", Pilot.TALON: "wing_guns", Pilot.BASILISK: "turret", Pilot.SHRIKE: "missiles"})
 	var empty := []
-	for id: String in [Pilot.SHRIKE, Pilot.ORRERY, Pilot.KILN, Pilot.VESPER]:
+	for id: String in [Pilot.ORRERY, Pilot.KILN, Pilot.VESPER]:
 		var row = Pilot.traits(id).get("weapon")
 		if row is Dictionary and (row as Dictionary).is_empty():
 			empty.append(id)
-	check("traits(id).weapon is {} for shrike, orrery, kiln and vesper (%s)" % [empty], empty.size() == 4)
+	check("traits(id).weapon is {} for orrery, kiln and vesper (%s)" % [empty], empty.size() == 3)
 	for id: String in ROWS:
 		var row = Pilot.traits(id).get("weapon")
 		check("%s's weapon row is %s" % [id, row], row is Dictionary and row == ROWS[id])
@@ -350,9 +351,16 @@ func check_basilisk_unchanged() -> void:
 	sections += 1
 
 
-func check_no_arms(id: String) -> void:
-	var game = await _flat(id)
-	check("the %s carries no arms (its weapon is not built yet), nor a turret" % id, game.craft.get("arms") == null and game.craft.turret == null)
+## The Shrike's weapon is its missiles' mount, and with the GUN never armed its arms are not fitted (the mount fits them
+## on the hull the pilot sees at the first arming): none in craft.arms, none on its pod; nor a turret.
+func check_shrike_lazy() -> void:
+	var game = await _flat(Pilot.SHRIKE)
+	var mount = game.craft.get("weapon")
+	var path: String = (mount.get_script() as Script).resource_path if mount != null else ""
+	check("the shrike's weapon is its missiles' mount (%s), its arms not fitted with the GUN never armed (%s, on its pod %s), nor a turret" % [path,
+		mount.get("arms") if mount != null else null, game.craft.pod.get_node_or_null("Arms")],
+		path.ends_with("missile_mount.gd") and mount.get("arms") == null and game.craft.get("arms") == null and game.craft.pod.get_node_or_null("Arms") == null
+		and game.craft.turret == null)
 	game.free()
 	await process_frame
 	sections += 1

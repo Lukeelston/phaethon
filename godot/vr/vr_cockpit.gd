@@ -1021,15 +1021,16 @@ func _build_cockpit() -> void:
 	slide_switch.build(bespoke_controls)
 	if sim != null and CraftModelScript.PilotCraft.armed(sim.P.vehicle):
 		# The craft's weapon (view/gunnery.gd): up arms it and brings it out; down makes it safe and stows it. The
-		# Phaethon's and the Talon's stands on the starboard console's inboard face up front, by the right lever; the
-		# Basilisk's on its starboard sill by the pilot's right elbow, under the gun's own sponson (gun_switch_mount).
+		# Phaethon's, the Talon's and the Shrike's (its consoles are the Phaethon's) stands on the starboard console's
+		# inboard face up front, by the right lever; the Basilisk's on its starboard sill by the pilot's right elbow,
+		# under the gun's own sponson (gun_switch_mount).
 		gun_switch = ModeSwitchScript.new()
 		gun_switch.name = "GunSwitch"
 		gun_switch.legends = ["GUN", "SAFE"]
 		gun_switch.colours = [Color(1.0, 0.22, 0.08), Color(0.35, 0.9, 0.45)]
 		gun_switch.throws = ["gun", "safe"]
 		shell.add_child(gun_switch)
-		gun_switch.transform = gun_switch_mount(CraftModelScript.PilotCraft.phaethon_based(sim.P.vehicle))
+		gun_switch.transform = gun_switch_mount(CraftModelScript.PilotCraft.phaethon_based(sim.P.vehicle) or shrike)
 		gun_switch.build(bespoke_controls)
 	# ... and how far it steps out: the drift slider, a fader in a rail on the same console's inboard
 	# shoulder, behind the switch and out of the box where a hand throws it (vr/drift_slider.gd).
@@ -2256,11 +2257,14 @@ func set_gun(on: bool) -> void:
 const GUN_AT := Vector3(0.544, 0.26, 0.06)      # (the Phaethons' GUN switch: gun_switch_mount)
 const GUN_TILT := deg_to_rad(10.0)
 const GUN_SCALE := 0.7
+const GUN_TICKS := 4              # the most ticks a frame's shots are felt as (the Shrike's volley: one a missile) ...
+const GUN_TICK_GAP := 0.08        # ... s apart (the cockpit's double tick's spacing)
 
 
 ## Where the GUN switch stands (cockpit rig).
-##   phaethon_family (the Phaethon, the Talon: sim/pilot_craft.gd phaethon_based; Raids, 2026-11-24): on the starboard
-##     console's inboard face up front, outboard of the right lever, low and forward under the MODE switch: the POWER
+##   phaethon_family (the Phaethon, the Talon: sim/pilot_craft.gd phaethon_based; Raids, 2026-11-24; and the Shrike,
+##     whose cockpit's consoles are theirs: Raids stage 2, 2026-11-26): on the starboard console's inboard face up front,
+##     outboard of the right lever, low and forward under the MODE switch: the POWER
 ##     switch's place on the port side, mirrored, a little higher. The POWER switch's size (GUN_SCALE of the MODE
 ##     switch's), its face GUN_TILT up from the console's side, its top edge in the console's face and its foot standing
 ##     proud: GUN up, SAFE down, the legends read along the console. Its bat is 0.240 / 0.153 / 0.722 m from the right
@@ -2348,9 +2352,11 @@ func _gun_controls() -> void:
 	gunnery.power = startup.power
 	var l: XRController3D = hands.left
 	gunnery.trigger = not menu.open and ((gun_wanted and _button(l, "ax_button")) or Input.is_key_pressed(KEY_F))
-	if gunnery.shots != _gun_shots:      # each shot a light tick in the hand that fires
+	if gunnery.shots != _gun_shots:      # each shot a light tick in the hand that fires; several in a frame (a volley's
+		var ticks := clampi(gunnery.shots - _gun_shots, 1, GUN_TICKS)      # missiles), GUN_TICK_GAP apart
 		_gun_shots = gunnery.shots
-		_buzz(l, 0.22, 0.012)
+		for k in ticks:
+			_buzz(l, 0.22, 0.012, k * GUN_TICK_GAP)
 
 
 ## Turn the slide on or off (the SLIDE / GRIP switch), and remember it: the pilot's own choice now (vr_prefs.json), and

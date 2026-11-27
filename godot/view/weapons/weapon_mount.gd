@@ -83,6 +83,13 @@ func steps_stowed() -> bool:
 	return false
 
 
+## Make ready, stowed, what its first arming would otherwise build in that frame: called once when its fire control is
+## made at load, dormant (Raids on: view/network_raids.gd build; view/gunnery.gd make). Fixed guns and a turret are
+## built with their model: nothing here. (The Shrike's missiles fit their arms: view/weapons/missile_mount.gd.)
+func prepare() -> void:
+	pass
+
+
 # --- a weapon that fires for itself ------------------------------------------------------------------------
 
 ## Does it fire for itself? Then the fire control (view/gunnery.gd step) fires no bolts and keeps no heat for it, and
