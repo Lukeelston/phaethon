@@ -46,6 +46,8 @@
 ##                          short, the lance back the first frame after it runs out
 ##     check_shudder_and_lance   the brakes' shudder and the lance on the left hand: the stronger has it (a hard shudder:
 ##                          no lance pulse; a light one: the lance's each frame)
+##     check_buzz_menu      (the whole-branch review's finding 4) the menu opened mid-burn: no pulse to either hand in
+##                          the two frames after; closed, the lance's pulses come back
 ## Run with --fixed-fps 120: --headless --xr-mode off --fixed-fps 120 --audio-driver Dummy -s res://tests/test_lance.gd -- --mute
 ## Prints LANCE PASS. Puts user://vr_prefs.json back as it found it.
 extends SceneTree
@@ -968,6 +970,7 @@ func check_buzz(v) -> void:
 	var each_frame := sent.size() == burned and sent.all(func(s: Array) -> bool: return s == want)
 	check_event_wins(v, m, hand)
 	check_shudder_and_lance(v, m, amp)
+	check_buzz_menu(v, m)
 	v.gun_wanted = false      # (SAFE)
 	v.gun_pulses.clear()
 	_hold_speed(v)
@@ -983,6 +986,31 @@ func check_buzz(v) -> void:
 	g.hold_fire = false
 	check("on the seat's own frames, held: it burns %d of 30 frames, a pulse to the left hand each of them (%s; want each %s: one, a frame long, no delay); SAFE thrown: the beam off that frame (%s), %d pulse(s) that frame, %d in the 10 after" % [
 		burned, sent.slice(0, 2), want, off, at_safe, later], burned >= 28 and each_frame and off and at_safe == 0 and later == 0)
+
+
+## (Mid-burn, on check_buzz's seat; the whole-branch review's finding 4.) The menu opened while the beam burns: the view's
+## frame then steps no fire control (the mount's burning stays as it was), and in the two frames after no pulse of any
+## kind is sent to either hand; closed, the beam burns again within a few frames and its pulses come back.
+func check_buzz_menu(v, m) -> void:
+	var was_burning: bool = m.burning
+	v.menu_open(true)
+	var in_menu := 0
+	var still: bool = true
+	for i in 2:
+		v.gun_pulses.clear()
+		_hold_speed(v)
+		v._process(DT)
+		in_menu += v.gun_pulses.size()
+		still = still and m.burning
+	v.menu_open(false)
+	var back := -1
+	for i in 30:
+		var f := _hand_frame(v)
+		if m.burning and int(f[0]) == 1:
+			back = i
+			break
+	check("the menu opened mid-burn (burning %s): two frames, the mount's burning left up (%s), %d pulse(s) sent (none); closed, the beam's pulses back %d frame(s) on" % [
+		was_burning, still, in_menu, back], was_burning and in_menu == 0 and back >= 0)
 
 
 ## One of the cockpit's own frames, the craft held at speed: [the lance's pulses sent in it (gun_pulses), the left hand's

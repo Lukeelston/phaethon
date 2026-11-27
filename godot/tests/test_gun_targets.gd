@@ -8,6 +8,9 @@
 ##   check_damage_raider    a raider of the raid's pack, among threats(), its full HP 6, takes five hits and is alive; the
 ##                          sixth returns true, killed told once while it was still in traffic, then it is gone from
 ##                          traffic, kills one more, in a burst of fire and smoke
+##   check_close_burst_sound   (the whole-branch review's finding 3) a raider 30 m ahead killed: the world player playing
+##                          its burst is held to BURST_MOST dB at the most (max_db); the world players then stopped and six
+##                          ground strikes played on them (every one, the burst's among them): each impact at PLAYER_MOST
 ##   check_fake_flyer       a flyer (a script-made object with a flyer's fields, hp_max 2) in a stub flyers module set on
 ##                          the director: alive, its full HP 2, led along its own climb from its own height (not the
 ##                          aim's); damage(f, 2, at) returns true, the stub's hit called once with 2, killed told once, and
@@ -31,7 +34,9 @@ const Livery := preload("res://view/livery.gd")
 const Outlook := preload("res://view/outlook.gd")
 const PREFS := "user://vr_prefs.json"
 const DT := 1.0 / 90.0
-const SECTIONS := 4
+const SECTIONS := 5
+const BURST_MOST := -2.5        # dB: the most a kill's burst is played at, however near (check_close_burst_sound)
+const PLAYER_MOST := 3.0        # dB: ... and every other world sound, the players' own most (Godot's default), as stage 1 flew
 ## A flyer as the fire control reads one (Task 2's raid_flyers.gd Flyer): a Car's fields and a flyer's own.
 const FLYER := """extends RefCounted
 var id := 0
@@ -127,6 +132,8 @@ func _run() -> void:
 		check_damage_commuter(v, g)
 		sections += 1
 		check_damage_raider(v, g)
+		sections += 1
+		check_close_burst_sound(v, g)
 		sections += 1
 		check_fake_flyer(v, g)
 		sections += 1
@@ -244,6 +251,33 @@ func check_damage_raider(v, g) -> void:
 		and told == [[c, true]] and not T.cars.has(c) and not g.alive(c) and g.kills == kills + 1 and burst.has("fireball") and burst.has("smoke"))
 	g.killed.disconnect(on_killed)
 	v.raids.pack.erase(c)
+
+
+func check_close_burst_sound(v, g) -> void:
+	var T = v.traffic_net
+	var c = _car(v, true, 30.0)
+	var at := Vector3(c.x, c.y, T.body_height(c))
+	for p: AudioStreamPlayer3D in g._world_audio:
+		p.stop()
+	var killed: bool = g.damage(c, 6, at)
+	var burst_most := []
+	for p: AudioStreamPlayer3D in g._world_audio:
+		if p.playing and p.stream == g._sounds.get("burst"):
+			burst_most.append(snappedf(p.max_db, 0.01))
+	for p: AudioStreamPlayer3D in g._world_audio:
+		p.stop()
+	for i in g._world_audio.size():
+		g._land({"b": Vector3(c.x, c.y, 0.0), "car": null, "kind": "ground"})
+	var impact_most := []
+	for p: AudioStreamPlayer3D in g._world_audio:
+		if p.playing and p.stream == g._sounds.get("impact"):
+			impact_most.append(snappedf(p.max_db, 0.01))
+	check("a raider 30 m ahead killed (%s): the burst's world player's most %s dB (%.1f at the most); the players stopped, six ground strikes: each impact's most %s (%.1f, as stage 1's)" % [
+			killed, burst_most, BURST_MOST, impact_most, PLAYER_MOST],
+		killed and burst_most.size() == 1 and float(burst_most[0]) <= BURST_MOST + 1e-6
+		and impact_most.size() == g._world_audio.size() and impact_most.all(func(m) -> bool: return is_equal_approx(float(m), PLAYER_MOST)))
+	v.raids.pack.erase(c)
+	g._fx.clear()
 
 
 func check_fake_flyer(v, g) -> void:

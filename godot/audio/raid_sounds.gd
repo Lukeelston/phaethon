@@ -40,9 +40,11 @@ const LOOPS := ["drone_whine", "gunship_drone", "lance_hum"]
 const LEVELS := {"drone_whine": -16.0, "gunship_drone": -16.0, "gunship_shot": -14.0, "missile_launch": -16.5,
 	"lance_hum": -21.0, "pulse_boom": -16.5, "orb_strike": -19.0}
 ## What each plays in its place when it was not made: the stand-in it replaced, [the fire control's pool, its turret sound,
-## its pitch] (view/gunnery.gd play_own); the flyers' had none, and play nothing.
+## its pitch] (view/gunnery.gd play_own); the flyers' had none, and play nothing. None louder than the jolt's thump: the
+## pulse's is the turret's impact, lower (-15.7 dBFS on disk, 1.3 s), not the burst it first was (-8.6, 5.5 dB over the
+## thump through the gun pool, 4.7 s: the whole-branch review).
 const STAND_IN := {"missile_launch": ["gun", "fire", 0.55], "lance_hum": ["gun", "deploy", 1.35],
-	"pulse_boom": ["gun", "burst", 0.55], "orb_strike": ["world", "impact", 1.5], "drone_whine": [], "gunship_drone": [],
+	"pulse_boom": ["gun", "impact", 0.45], "orb_strike": ["world", "impact", 1.5], "drone_whine": [], "gunship_drone": [],
 	"gunship_shot": []}
 const SRC := {"fan": "res://audio/startup/avionics.wav", "arc": "res://audio/startup/arc.wav",
 	"valve": "res://audio/startup/release.wav", "breaker": "res://audio/startup/clamp.wav",

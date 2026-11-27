@@ -19,6 +19,10 @@
 ##                          radius) and at most a frame after, each hit once, bare (no spark or impact sound of a hit's
 ##                          own; the kill's burst); a raider at 470 m and a drone 440 m off over the ground but 140 m up
 ##                          (462 m in the round) live, untouched
+##   check_close_burst      (the whole-branch review's finding 1) a raider 30 m ahead of the eye killed by a ring: every
+##                          disc the fire control draws for 3.3 s after (its burst's flash and fire, added, and its smoke,
+##                          blended) is at most NEAR_FX times its distance from the eye across; the drawn side's own
+##                          figures (view/gunnery.gd fx_side): 90 m at 30 m is at most 18, at 800 m still 90
 ##   check_gunship_never_killed_fresh   a 120 HP gunship inside takes 72 (seen and heard as a hit: a spark and the impact
 ##                          sound) and lives; the charge ends 12 s after the release ("PULSE READY" on the strip) and a
 ##                          second pulse then kills it
@@ -90,7 +94,8 @@ const TALL_LO := 0.5            # degrees: the wall from the eye straight ahead 
 const TALL_HI := 1.5            # ... and at the most (and anywhere round it on its first drawn frame)
 # Paced at the craft's own speed (check_at_speed): [m along the road from the craft, lanes over from the craft's, dies]
 const PACED := [[300.0, 0, true], [440.0, 1, true], [-440.0, 0, true], [470.0, -1, false]]
-const SECTIONS := 18
+const SECTIONS := 19
+const NEAR_FX := 0.6            # a burst's disc is drawn at most this many times its distance from the eye across (check_close_burst)
 var failures := 0
 var checks := 0
 var sections := 0               # (a section that dies on a script error never counts itself: the verdict then fails)
@@ -144,6 +149,8 @@ func _run() -> void:
 		sections += 1
 		_put_director(v, g)
 		check_ring_kills_in_radius(v, g)
+		sections += 1
+		check_close_burst(v, g)
 		sections += 1
 		check_gunship_never_killed_fresh(v, g)
 		sections += 1
@@ -604,6 +611,45 @@ func check_ring_kills_in_radius(v, g) -> void:
 		hits, g.hits, kills, g.kills, _director.kills_by, seen.spark, seen.impact],
 		g.hits == hits + 6 and g.kills == kills + 6 and int(_director.kills_by.raider) == 4 and int(_director.kills_by.drone) == 2
 		and int(seen.spark) == 0 and int(seen.impact) == 0)
+	_clear(v, g)
+
+
+func check_close_burst(v, g) -> void:
+	var eye := _eye(v, g)
+	var raider = _car(v, Vector2(eye.x, eye.y) + seat.road_way(v) * 30.0, true)
+	var off := Vector2(eye.x, eye.y).distance_to(Vector2(raider.x, raider.y))
+	_frames(v, g, 3)
+	_hush(g)
+	g._fx.clear()
+	var left := _press(v, g)
+	var killed_at := -1      # (frames after the release)
+	var made := {}           # kind -> size of the burst's effects (its fire, smoke and flash), as made
+	var worst := 0.0         # the most drawn side / distance from the eye of any of them, while it lasts
+	var worst_at := "none"
+	var sided: bool = g.has_method("fx_side")
+	for k in range(1, int(3.3 / DT)):
+		_frame(v, g)
+		if killed_at < 0:
+			if g.alive(raider):
+				continue
+			killed_at = k
+		var e: Vector3 = v.cam.global_position
+		for f: Dictionary in g._fx:
+			if not f.get("burst", false):
+				continue
+			made[String(f.kind)] = float(f.size)
+			var d := e.distance_to(g.to_render(f.p))
+			var side: float = g.fx_side(float(f.size), d) if sided else float(f.size)
+			if side / maxf(0.01, d) > worst:
+				worst = side / maxf(0.01, d)
+				worst_at = "%s %d frames after the kill, %.1f m across at %.1f m" % [f.kind, k - killed_at, side, d]
+	var near = _const(g, "FX_NEAR")
+	var sides: Array = [g.fx_side(90.0, 30.0), g.fx_side(90.0, 800.0)] if sided else [null, null]
+	check("a raider %.1f m ahead of the eye, killed by a ring (%s) %d frames after its release: the burst's effects as made %s (fire 34, smoke 46, flash 90: unchanged), each one's drawn side (fx_side) at its distance from the eye at most %.1f times that distance for 3.3 s after (the most %.3f: %s); FX_NEAR %s; fx_side(90, 30) %s (18 at the most), fx_side(90, 800) %s (90)" % [
+			off, left, killed_at, made, NEAR_FX, worst, worst_at, near, sides[0], sides[1]],
+		left and killed_at > 0 and made == {"fireball": 34.0, "smoke": 46.0, "flash": 90.0} and worst <= NEAR_FX + 1e-6
+		and near is float and is_equal_approx(near, NEAR_FX) and sides[0] is float and sides[0] <= 18.0 + 1e-6
+		and is_equal_approx(sides[1], 90.0))
 	_clear(v, g)
 
 

@@ -17,7 +17,9 @@
 ##     check_streams          each of the seven: made, 0.1 to 4 s long, a loop's points round it (a one-shot's none), its
 ##                            peak under -1 dBFS and no sample at full scale, the RMS of its loudest 100 ms within 6 dB of
 ##                            LEVELS; the time to make all seven told. And every layer of every recipe filled all it was
-##                            to fill from its recording (RaidSounds.fills: none ran out of its source part way)
+##                            to fill from its recording (RaidSounds.fills: none ran out of its source part way). And each
+##                            stand-in played through the gun pool no louder than the jolt's thump: its source's loudest
+##                            100 ms at THUMP_DB + 1.5 dBFS at the most (the whole-branch review's finding 2)
 ##     check_whine            a raid's drones: the whine plays, heard from no farther than the nearest drone and no nearer
 ##                            than that over the root of their number; destroyed one by one it plays on to the last, and
 ##                            stops in that very call (the fire control's damage); a frame on, still stopped
@@ -44,7 +46,7 @@
 ##                            not made (null, kept so: asked again, not tried again, so said once), no error; a Kiln flight
 ##                            with a raid up and the lance burning: no whine or drone player made (they had none), the
 ##                            gunship's report still made, the lance's stand-in plays as it did; the Vesper's boom taken
-##                            away, its release plays the stand-in it replaced (the turret's burst at 0.55). Put back after
+##                            away, its release plays the stand-in it replaced (the turret's impact at 0.45). Put back after
 ##     check_orb_window       the Orrery under the gunship: its three orbs set at it, two to strike this frame and the third
 ##                            the next (three strikes in two frames): one orb_strike starts, none more inside OWN_GAP of
 ##                            the fire control's own clock; a strike after it plays again
@@ -65,6 +67,8 @@ const STEP := 1.0 / 120.0
 const COST_MS := 0.05            # ms a frame the sounds may add, mean (the plan's 0.5 is the director, flyers and weapons together)
 const LOAD_MS := 150.0           # ms the load's making may take (the flyers' three and a weapon's), at the most
 const AT_LOAD := ["drone_whine", "gunship_drone", "gunship_shot", "lance_hum"]
+const TURRET_DIR := "res://audio/turret/"      # the stand-ins' sources (view/gunnery.gd AUDIO_DIR)
+const THUMP_DB := -15.0          # dBFS: the jolt's thump in the game's mix (audio/raid_sounds.gd LEVELS' note)
 var failures := 0
 var sections := 0                # (a section that dies on a script error never counts itself: the verdict then fails)
 var muted := false
@@ -381,6 +385,23 @@ func check_streams() -> void:
 	sections += 1
 	_check("each of the seven made, 0.1 to 4 s, the loops' points round them, peaks under -1 dBFS, none at full scale, its level within 6 dB of LEVELS: %s; all seven made in %.1f ms" % [
 		"; ".join(report), total], ok)
+	# (The whole-branch review's finding 2) every stand-in played through the gun pool, which gives a sound its own level
+	# to within about 1 dB, is no louder than the jolt's thump: its source's loudest 100 ms (read from the file itself:
+	# the game's import is QOA) at THUMP_DB + 1.5 at the most.
+	var stand_ins := []
+	var quiet := true
+	for n: String in RaidSounds.STAND_IN:
+		var s: Array = RaidSounds.STAND_IN[n]
+		if s.is_empty() or s[0] != "gun":
+			continue
+		var w := AudioStreamWAV.load_from_file(TURRET_DIR + String(s[1]) + ".wav", {"compress/mode": 0})
+		var x := RaidSounds.samples(w)
+		var level := linear_to_db(RaidSounds.loudest(x, w.mix_rate)) if not x.is_empty() else 0.0
+		var good := not x.is_empty() and level <= THUMP_DB + 1.5
+		quiet = quiet and good
+		stand_ins.append("%s's %s at %.2f: %.1f dBFS%s" % [n, s[1], float(s[2]), level, "" if good else " (!)"])
+	_check("each stand-in through the gun pool no louder than the jolt's thump (%.1f) + 1.5 dB on disk: %s" % [THUMP_DB,
+		"; ".join(stand_ins)], quiet and stand_ins.size() == 3)
 	var fills = _fills()      # (name -> [[samples filled, samples wanted], ...] a layer, as made)
 	var short := []
 	var layers := 0
@@ -813,10 +834,10 @@ func check_missing() -> void:
 	g.hold_fire = true
 	await _frame(v)
 	g.hold_fire = false
-	var burst: Array = _gun_playing(g, g._sounds.get("burst"))
+	var burst: Array = _gun_playing(g, g._sounds.get("impact"))
 	var pitch := 0.0
 	for p: AudioStreamPlayer3D in g._gun_audio:
-		if p.playing and p.stream == g._sounds.get("burst"):
+		if p.playing and p.stream == g._sounds.get("impact"):
 			pitch = p.pitch_scale
 	v.queue_free()
 	await process_frame
@@ -826,7 +847,7 @@ func check_missing() -> void:
 		for n: String in gone:
 			(_fills() as Dictionary).erase(n)
 	sections += 1
-	_check("a source missing and one unreadable: %s not made (%s), kept so (%s); a Kiln flight with a raid up: no whine or drone player, two reports, six drones (%s), the lance burning with no hum of its own (%s) and its stand-in playing (%d player-frames); the Vesper's boom taken away, a release plays the turret's burst (%d, at %.2f; the stand-in's 0.55)" % [
+	_check("a source missing and one unreadable: %s not made (%s), kept so (%s); a Kiln flight with a raid up: no whine or drone player, two reports, six drones (%s), the lance burning with no hum of its own (%s) and its stand-in playing (%d player-frames); the Vesper's boom taken away, a release plays the turret's impact on a gun player (%d, at %.2f; the stand-in's 0.45)" % [
 			gone, made, kept, flyers_ok, no_hum, stand_in, burst[0], pitch],
 		made.all(func(w) -> bool: return w == null) and kept and flyers_ok and no_hum and stand_in > 0 and burst[0] == 1
-			and is_equal_approx(pitch, 0.55))
+			and is_equal_approx(pitch, 0.45))

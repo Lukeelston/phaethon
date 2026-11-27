@@ -13,6 +13,12 @@
 ##                   gunship put down, every dive at the pilot, 22 s
 ##   --plan=weapons  the full mix, each craft parked under a raid's drones: the Kiln's lance burned 2.5 s, the Shrike's
 ##                   volley of four, the Vesper's pulse, the Orrery's orbs striking on their own
+##   --plan=close    (the whole-branch review's findings 2 and 3) every bus but Master muted, the Vesper parked and armed,
+##                   then the world held still (its fire control stepped alone): the jolt's thump; a kill's burst 30 m
+##                   ahead as it was (its player's most 3 dB) and as it is (a raider killed there: BURST_MOST_DB); the
+##                   pulse's stand-in as it was (the burst at 0.55) and as it is (the impact at 0.45), through the gun
+##                   pool; a release among six raiders 50 to 150 m off as it was (its boom and six bursts at 3 dB, each
+##                   when the ring would reach it) and as it is (a real release: its boom, its kills' bursts)
 ## REC lines give each stage's time from the start of the film's sound (its frames / 120).
 extends SceneTree
 
@@ -143,6 +149,8 @@ func _run() -> void:
 			await _arrival()
 		"weapons":
 			await _weapons()
+		"close":
+			await _close()
 	quit()
 
 
@@ -219,6 +227,105 @@ func _arrival() -> void:
 	seat.raids.reset()
 	await _for(2.0)
 	_rec("end")
+
+
+## `seconds` of the still world: the fire control stepped alone, the film's frames let pass.
+func _still(g, seconds: float) -> void:
+	for i in roundi(seconds / STEP):
+		g.step(STEP)
+		await process_frame
+
+
+## A raider of the director's pack standing still at `at` (the sims' plane), on the craft's road's nearest sample.
+func _raider_at(at: Vector2):
+	var T = seat.traffic_net
+	var sim = seat.sim
+	var road: int = sim.pod.path
+	var R = sim.roads[road]
+	var h := int(sim.pod.hint)
+	var near := h
+	for i in range(maxi(0, h - 400), mini(R.N - 1, h + 400)):
+		if Vector2(R.px[i], R.py[i]).distance_squared_to(at) < Vector2(R.px[near], R.py[near]).distance_squared_to(at):
+			near = i
+	var c = T.Car.new()
+	c.id = 998000 + T.cars.size()
+	c.kind = T.CAR
+	c.road = road
+	c.dir = 1
+	c.f = float(near)
+	c.lane = 0
+	c.lat = T._lane_lat(c, 0)
+	c.hostile = true
+	T._place(c)
+	c.x = at.x
+	c.y = at.y
+	c.v = 0.0
+	T.cars.append(c)
+	seat.raids.pack.append(c)
+	return c
+
+
+func _close() -> void:
+	seat = await _seat(Pilot.VESPER)
+	if seat == null:
+		return
+	await _arm()
+	await _for(1.5)
+	for i in range(1, AudioServer.bus_count):
+		AudioServer.set_bus_mute(i, true)
+	var g = seat.gunnery
+	seat.traffic_net.cars.clear()
+	seat.raids.pack.clear()
+	var cam: Camera3D = root.get_viewport().get_camera_3d()
+	var eye: Vector3 = g.to_sim(cam.global_position)
+	var fw: Vector3 = g.dir_to_sim(-cam.global_transform.basis.z)
+	var way := Vector2(fw.x, fw.y).normalized()
+	var at30 := Vector2(eye.x, eye.y) + way * 30.0
+	var six := []      # [m off, the sims' plane]
+	for k in 6:
+		var d := 50.0 + 20.0 * k
+		six.append([d, Vector2(eye.x, eye.y) + way.rotated(deg_to_rad(-50.0 + 20.0 * k)) * d])
+	print("REC_BEGIN")
+	await _still(g, 1.0)
+	_rec("thump")
+	seat.jolt(1.0)
+	await _still(g, 1.2)
+	_rec("burst 30 m ahead, as it was (most 3 dB)")
+	g._play(g._world_audio, "burst", g.to_render(Vector3(at30.x, at30.y, eye.z - 1.0)), 1.0, 3.0)
+	await _still(g, 3.0)
+	_rec("burst 30 m ahead, as it is (a raider killed there)")
+	var c = _raider_at(at30)
+	g.damage(c, g.HOSTILE_HP, Vector3(c.x, c.y, seat.traffic_net.body_height(c)), false, true)
+	await _still(g, 3.0)
+	_rec("the pulse's stand-in as it was (burst at 0.55)")
+	g.play("gun", "burst", Vector3.INF, 0.55)
+	await _still(g, 5.0)
+	_rec("the pulse's stand-in as it is (impact at 0.45)")
+	g.play("gun", "impact", Vector3.INF, 0.45)
+	await _still(g, 2.0)
+	_rec("a release among six raiders 50 to 150 m off, as it was (bursts at 3 dB)")
+	g.play_own("gun", "pulse_boom")
+	var due := []
+	for s: Array in six:
+		due.append([float(s[0]) / 900.0, s[1]])      # (the ring: 450 m in 0.5 s)
+	for k in roundi(3.2 / STEP):
+		for i in range(due.size() - 1, -1, -1):
+			if float(due[i][0]) <= k * STEP:
+				var p: Vector2 = due[i][1]
+				g._play(g._world_audio, "burst", g.to_render(Vector3(p.x, p.y, eye.z - 1.0)), 1.0, 3.0)
+				due.remove_at(i)
+		g.step(STEP)
+		await process_frame
+	_rec("a release among six raiders 50 to 150 m off, as it is")
+	for s: Array in six:
+		_raider_at(s[1])
+	var kills: int = g.kills
+	g.hold_fire = true
+	g.step(STEP)
+	await process_frame
+	g.hold_fire = false
+	await _still(g, 3.2)
+	_rec("end (%d killed by the release)" % (g.kills - kills))
 
 
 func _weapons() -> void:

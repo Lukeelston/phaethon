@@ -81,7 +81,11 @@ signal struck_commuter(car)        # a bolt struck a commuter: sparks only
 const MAX_BOLTS := 48
 const BOLT_WIDTH := 0.0105        # a bolt's least width for its distance from the eye: about six tenths of a degree
 const STREAK := 38.0              # m: a bolt's streak, once it is that far out of the muzzle
-const MAX_FX := 40
+const MAX_FX := 64                # (a full raid's pulse kills 16 at once: their bursts are 48 effects)
+const FX_NEAR := 0.6              # a kill's burst is drawn at most this many times its distance from the eye across (fx_side):
+                                  # 18 m at 30 m; a raider's at 150 m and beyond as it always was (its flash's 90 m)
+const BURST_MOST_DB := -2.5       # dB: the most a kill's burst is played at however near (its player's max_db): a kill inside
+                                  # about 130 m at the jolt's thump; beyond that, and every other sound, as they were (3)
 
 var view
 var mount: WeaponMountScript       # the craft's weapon (view/craft_model.gd `weapon`): what this fires through
@@ -268,7 +272,8 @@ func _player(parent: Node, db: float) -> AudioStreamPlayer3D:
 	return p
 
 
-func _play(players: Array, sound: String, at := Vector3.INF, pitch := 1.0) -> void:
+## `most_db`: the player's most (max_db), set on every play (a kill's burst: BURST_MOST_DB; all else the default's 3).
+func _play(players: Array, sound: String, at := Vector3.INF, pitch := 1.0, most_db := 3.0) -> void:
 	if not _sounds.has(sound):
 		return
 	for p: AudioStreamPlayer3D in players:
@@ -277,6 +282,7 @@ func _play(players: Array, sound: String, at := Vector3.INF, pitch := 1.0) -> vo
 				p.global_position = at
 			p.stream = _sounds[sound]
 			p.pitch_scale = pitch
+			p.max_db = most_db
 			p.play()
 			return
 
@@ -697,10 +703,16 @@ func _land(bolt: Dictionary) -> void:
 	_play(_world_audio, "impact", to_render(at), 0.9 + 0.2 * _rng.randf())
 
 
-func _add_fx(p: Vector3, kind: String, dur: float, size: float) -> void:
+## `burst`: a kill's (drawn no wider than fx_side lets it be near the eye).
+func _add_fx(p: Vector3, kind: String, dur: float, size: float, burst := false) -> void:
 	if _fx.size() >= MAX_FX:
 		_fx.pop_front()
-	_fx.append({"p": p, "kind": kind, "t": 0.0, "dur": dur, "size": size})
+	_fx.append({"p": p, "kind": kind, "t": 0.0, "dur": dur, "size": size, "burst": burst})
+
+
+## m across a burst's disc of `side` m is drawn at `dist` m from the eye: at most FX_NEAR times that distance.
+static func fx_side(side: float, dist: float) -> float:
+	return minf(side, dist * FX_NEAR)
 
 
 ## (_add_fx, for a weapon that fires for itself.)
@@ -798,7 +810,7 @@ func damage(t, n: int, at: Vector3, quiet := false, bare := false) -> bool:
 		kills += 1
 		killed.emit(t)
 		_burst(body, GUNSHIP_BURST if String(t.kind) == "gunship" else 1.0)
-		print("GUN: %s %d shot down at %d m (%d shots, %d hits, %d out)" % [t.kind, id, int(aim_dist), shots, hits, kills])
+		print("GUN: %s %d shot down at %d m (%d shots, %d hits, %d out)" % [t.kind, id, int(_away(body)), shots, hits, kills])
 		return true
 	_damage[id] = int(_damage.get(id, 0)) + n
 	if _damage[id] < HOSTILE_HP:
@@ -808,8 +820,13 @@ func damage(t, n: int, at: Vector3, quiet := false, bare := false) -> bool:
 	killed.emit(t)          # (the raid counts it first: knock_out takes the car out of traffic)
 	view.traffic_net.knock_out(t)
 	_burst(body)
-	print("GUN: raider %d knocked out at %d m (%d shots, %d hits, %d out)" % [id, int(aim_dist), shots, hits, kills])
+	print("GUN: raider %d knocked out at %d m (%d shots, %d hits, %d out)" % [id, int(_away(body)), shots, hits, kills])
 	return true
+
+
+## m over the ground from the craft's pod to `at` (the sims' frame): how far off a kill was, for the log.
+func _away(at: Vector3) -> float:
+	return Vector2(at.x - view.sim.pod.x, at.y - view.sim.pod.y).length()
 
 
 ## Every hostile the raid has, raiders and flyers: the director's threats() where it has one, else traffic's
@@ -826,10 +843,10 @@ func threats() -> Array:
 
 ## A hostile shot down: fire, smoke and a flash where it was, and the burst's sound; `grow` times a raider's size.
 func _burst(body: Vector3, grow := 1.0) -> void:
-	_add_fx(body, "fireball", 0.9, 34.0 * grow)
-	_add_fx(body + Vector3(0, 0, 4), "smoke", 3.2, 46.0 * grow)
-	_add_fx(body, "flash", 0.12, 90.0 * grow)
-	_play(_world_audio, "burst", to_render(body))
+	_add_fx(body, "fireball", 0.9, 34.0 * grow, true)
+	_add_fx(body + Vector3(0, 0, 4), "smoke", 3.2, 46.0 * grow, true)
+	_add_fx(body, "flash", 0.12, 90.0 * grow, true)
+	_play(_world_audio, "burst", to_render(body), 1.0, BURST_MOST_DB)
 
 
 ## m across target t's brackets on the gaze sight: a vehicle's by its kind (BRACKET), a flyer's from its own pick radius
@@ -914,17 +931,26 @@ func _draw(cam: Camera3D) -> void:
 				nf += 1
 			"flash", "spark":
 				var s := size * (0.4 + 0.6 * u) * (maxf(1.0, eye.distance_to(p) * 0.004))
+				if f.get("burst", false):
+					s = fx_side(s, eye.distance_to(p))
 				_flash_mm.set_instance_transform(nf, Transform3D(Basis().scaled(Vector3.ONE * s), p))
 				var c := Color(1.0, 0.85, 0.6) if f.kind == "flash" else Color(1.0, 0.55, 0.2)
 				_flash_mm.set_instance_color(nf, c * (1.0 - u) * 2.0)
 				nf += 1
 			"fireball":
-				_flash_mm.set_instance_transform(nf, Transform3D(Basis().scaled(Vector3.ONE * size * (0.35 + 0.65 * sqrt(u))), p + Vector3.UP * 6.0 * u))
+				var fire_at := p + Vector3.UP * 6.0 * u
+				var fire_side := size * (0.35 + 0.65 * sqrt(u))
+				if f.get("burst", false):
+					fire_side = fx_side(fire_side, eye.distance_to(fire_at))
+				_flash_mm.set_instance_transform(nf, Transform3D(Basis().scaled(Vector3.ONE * fire_side), fire_at))
 				_flash_mm.set_instance_color(nf, Color(1.0, 0.45 + 0.3 * (1.0 - u), 0.15) * (1.0 - u * u) * 2.2)
 				nf += 1
 			"dust", "smoke":
 				var grow := size * (0.35 + 0.65 * sqrt(u))
-				_smoke_mm.set_instance_transform(ns, Transform3D(Basis().scaled(Vector3.ONE * grow), p + Vector3.UP * (2.0 + 10.0 * u) * (1.0 if f.kind == "smoke" else 0.3)))
+				var puff_at := p + Vector3.UP * (2.0 + 10.0 * u) * (1.0 if f.kind == "smoke" else 0.3)
+				if f.get("burst", false):
+					grow = fx_side(grow, eye.distance_to(puff_at))
+				_smoke_mm.set_instance_transform(ns, Transform3D(Basis().scaled(Vector3.ONE * grow), puff_at))
 				var col := Color(0.36, 0.31, 0.26) if f.kind == "dust" else Color(0.12, 0.11, 0.1)
 				col.a = (1.0 - u) * (0.75 if f.kind == "dust" else 0.85)
 				_smoke_mm.set_instance_color(ns, col)
