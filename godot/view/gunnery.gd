@@ -86,6 +86,9 @@ const FX_NEAR := 0.6              # a kill's burst is drawn at most this many ti
                                   # 18 m at 30 m; a raider's at 150 m and beyond as it always was (its flash's 90 m)
 const BURST_MOST_DB := -2.5       # dB: the most a kill's burst is played at however near (its player's max_db): a kill inside
                                   # about 130 m at the jolt's thump; beyond that, and every other sound, as they were (3)
+const BURST_GAP := 0.6            # s of this one's own clock: a burst sound started within this of the last one's start ...
+const BURST_STEP_DB := 6.0        # ... has a most this many dB under the last one's (a volley of kills: a pulse's ring) ...
+const BURST_FLOOR_DB := 18.0      # ... and no lower than this many under BURST_MOST_DB; after BURST_GAP with none, back at it
 
 var view
 var mount: WeaponMountScript       # the craft's weapon (view/craft_model.gd `weapon`): what this fires through
@@ -154,6 +157,8 @@ var _aim_age := 0                  # frames since it
 var _los := {}                     # raider -> [when its line was searched (_now), clear]
 var _now := 0.0                    # s of this fire control's frames (step)
 var _status := ""                  # the mount's last word for the pilot (status())
+var _burst_at := -INF              # _now when the last burst sound started, and its most (dB): the volley's steps (_burst)
+var _burst_most := BURST_MOST_DB
 
 
 ## Once per frame. Creates itself, if the craft has a weapon, the first time its GUN is armed (`gun_wanted`): a
@@ -841,12 +846,19 @@ func threats() -> Array:
 	return []
 
 
-## A hostile shot down: fire, smoke and a flash where it was, and the burst's sound; `grow` times a raider's size.
+## A hostile shot down: fire, smoke and a flash where it was, and the burst's sound; `grow` times a raider's size. The
+## sound's most is BURST_MOST_DB, or, within BURST_GAP of the last burst's start, BURST_STEP_DB under that one's (to the
+## floor): a volley's bursts do not add up. Every kill draws its whole burst.
 func _burst(body: Vector3, grow := 1.0) -> void:
 	_add_fx(body, "fireball", 0.9, 34.0 * grow, true)
 	_add_fx(body + Vector3(0, 0, 4), "smoke", 3.2, 46.0 * grow, true)
 	_add_fx(body, "flash", 0.12, 90.0 * grow, true)
-	_play(_world_audio, "burst", to_render(body), 1.0, BURST_MOST_DB)
+	var most := BURST_MOST_DB
+	if _now - _burst_at < BURST_GAP:
+		most = maxf(_burst_most - BURST_STEP_DB, BURST_MOST_DB - BURST_FLOOR_DB)
+	_burst_at = _now
+	_burst_most = most
+	_play(_world_audio, "burst", to_render(body), 1.0, most)
 
 
 ## m across target t's brackets on the gaze sight: a vehicle's by its kind (BRACKET), a flyer's from its own pick radius

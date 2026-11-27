@@ -11,6 +11,9 @@
 ##   check_close_burst_sound   (the whole-branch review's finding 3) a raider 30 m ahead killed: the world player playing
 ##                          its burst is held to BURST_MOST dB at the most (max_db); the world players then stopped and six
 ##                          ground strikes played on them (every one, the burst's among them): each impact at PLAYER_MOST
+##   check_burst_volley     six raiders killed at once (as a pulse's ring does, bare): six bursts drawn, and their sounds'
+##                          mosts step down in the order they started (VOLLEY_MOST); once VOLLEY_GAP s of the fire
+##                          control's clock have passed with none, a kill's burst is back at BURST_MOST
 ##   check_fake_flyer       a flyer (a script-made object with a flyer's fields, hp_max 2) in a stub flyers module set on
 ##                          the director: alive, its full HP 2, led along its own climb from its own height (not the
 ##                          aim's); damage(f, 2, at) returns true, the stub's hit called once with 2, killed told once, and
@@ -34,9 +37,13 @@ const Livery := preload("res://view/livery.gd")
 const Outlook := preload("res://view/outlook.gd")
 const PREFS := "user://vr_prefs.json"
 const DT := 1.0 / 90.0
-const SECTIONS := 5
+const SECTIONS := 6
 const BURST_MOST := -2.5        # dB: the most a kill's burst is played at, however near (check_close_burst_sound)
 const PLAYER_MOST := 3.0        # dB: ... and every other world sound, the players' own most (Godot's default), as stage 1 flew
+## check_burst_volley: six kills at once, their bursts' mosts in the order they started (each 6 dB under the last, to 18 under
+## the first); and the s of the fire control's clock after which a burst is back at BURST_MOST
+const VOLLEY_MOST := [-2.5, -8.5, -14.5, -20.5, -20.5, -20.5]
+const VOLLEY_GAP := 0.6
 ## A flyer as the fire control reads one (Task 2's raid_flyers.gd Flyer): a Car's fields and a flyer's own.
 const FLYER := """extends RefCounted
 var id := 0
@@ -134,6 +141,8 @@ func _run() -> void:
 		check_damage_raider(v, g)
 		sections += 1
 		check_close_burst_sound(v, g)
+		sections += 1
+		check_burst_volley(v, g)
 		sections += 1
 		check_fake_flyer(v, g)
 		sections += 1
@@ -257,6 +266,8 @@ func check_close_burst_sound(v, g) -> void:
 	var T = v.traffic_net
 	var c = _car(v, true, 30.0)
 	var at := Vector3(c.x, c.y, T.body_height(c))
+	for i in int(ceil((VOLLEY_GAP + 0.05) / DT)):      # (a kill on its own: clear of check_damage_raider's, its clock run on)
+		g.step(DT)
 	for p: AudioStreamPlayer3D in g._world_audio:
 		p.stop()
 	var killed: bool = g.damage(c, 6, at)
@@ -274,9 +285,45 @@ func check_close_burst_sound(v, g) -> void:
 			impact_most.append(snappedf(p.max_db, 0.01))
 	check("a raider 30 m ahead killed (%s): the burst's world player's most %s dB (%.1f at the most); the players stopped, six ground strikes: each impact's most %s (%.1f, as stage 1's)" % [
 			killed, burst_most, BURST_MOST, impact_most, PLAYER_MOST],
-		killed and burst_most.size() == 1 and float(burst_most[0]) <= BURST_MOST + 1e-6
+		killed and burst_most.size() == 1 and is_equal_approx(float(burst_most[0]), BURST_MOST)
 		and impact_most.size() == g._world_audio.size() and impact_most.all(func(m) -> bool: return is_equal_approx(float(m), PLAYER_MOST)))
 	v.raids.pack.erase(c)
+	g._fx.clear()
+
+
+func check_burst_volley(v, g) -> void:
+	var T = v.traffic_net
+	for i in int(ceil((VOLLEY_GAP + 0.05) / DT)):      # (clear of the bursts before: the fire control's clock run on)
+		g.step(DT)
+	for p: AudioStreamPlayer3D in g._world_audio:
+		p.stop()
+	g._fx.clear()
+	var killed := 0
+	for k in 6:
+		var c = _car(v, true, 40.0 + 20.0 * k)
+		killed += int(g.damage(c, 6, Vector3(c.x, c.y, T.body_height(c)), false, true))
+		v.raids.pack.erase(c)
+	var fires: int = g._fx.filter(func(f): return f.kind == "fireball").size()
+	var mosts := []      # (the pool's players are taken in order, so this is the order the bursts started)
+	for p: AudioStreamPlayer3D in g._world_audio:
+		if p.playing and p.stream == g._sounds.get("burst"):
+			mosts.append(snappedf(p.max_db, 0.01))
+	for p: AudioStreamPlayer3D in g._world_audio:
+		p.stop()
+	for i in int(ceil((VOLLEY_GAP + 0.05) / DT)):
+		g.step(DT)
+	var c = _car(v, true, 30.0)
+	var late_killed: bool = g.damage(c, 6, Vector3(c.x, c.y, T.body_height(c)), false, true)
+	v.raids.pack.erase(c)
+	var late := []
+	for p: AudioStreamPlayer3D in g._world_audio:
+		if p.playing and p.stream == g._sounds.get("burst"):
+			late.append(snappedf(p.max_db, 0.01))
+	check("six raiders killed at once (%d), six bursts drawn (%d fires): their sounds' mosts in order %s (want %s); %.2f s on, a kill (%s) is back at %s (want [%.1f])" % [
+			killed, fires, mosts, VOLLEY_MOST, VOLLEY_GAP + 0.05, late_killed, late, BURST_MOST],
+		killed == 6 and fires == 6 and mosts == VOLLEY_MOST and late_killed and late == [BURST_MOST])
+	for p: AudioStreamPlayer3D in g._world_audio:
+		p.stop()
 	g._fx.clear()
 
 

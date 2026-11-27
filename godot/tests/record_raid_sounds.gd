@@ -18,7 +18,9 @@
 ##                   ahead as it was (its player's most 3 dB) and as it is (a raider killed there: BURST_MOST_DB); the
 ##                   pulse's stand-in as it was (the burst at 0.55) and as it is (the impact at 0.45), through the gun
 ##                   pool; a release among six raiders 50 to 150 m off as it was (its boom and six bursts at 3 dB, each
-##                   when the ring would reach it) and as it is (a real release: its boom, its kills' bursts)
+##                   when the ring would reach it) and as it is (a real release: its boom, its kills' bursts, stepped
+##                   down one after another: view/gunnery.gd BURST_STEP_DB); then a release with one raider 50 m off
+##                   (its boom and one burst: what any stepping leaves)
 ## REC lines give each stage's time from the start of the film's sound (its frames / 120).
 extends SceneTree
 
@@ -320,6 +322,15 @@ func _close() -> void:
 	for s: Array in six:
 		_raider_at(s[1])
 	var kills: int = g.kills
+	g.hold_fire = true
+	g.step(STEP)
+	await process_frame
+	g.hold_fire = false
+	await _still(g, 3.2)
+	_rec("a release with one raider 50 m off (%d killed by the last)" % (g.kills - kills))
+	g.mount.charge = 0.0      # (its charge given back by hand: the recharge is the tests')
+	_raider_at(six[0][1])
+	kills = g.kills
 	g.hold_fire = true
 	g.step(STEP)
 	await process_frame
