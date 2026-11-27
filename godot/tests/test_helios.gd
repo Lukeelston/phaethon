@@ -267,6 +267,30 @@ func _run() -> void:
 			crooked += int(tilt > 0.5)
 			gantries.append("%s at %d, %.0f degrees from straight up, %.2f from the deck's up" % [spec[2], at, rad_to_deg(up.angle_to(Vector3.UP)), tilt])
 	_check("the gantries on the face stand with it: %s" % [gantries], gantries.size() >= 2 and crooked == 0)
+
+	# craft: on the face the craft stands square to the road too (view/craft_view.gd _steep_place): a body rides its
+	# 1.5 m out from the wall, not 1.5 m up it (39 cm off a 75 degree wall: in it); on gentle road nothing has moved.
+	var places := []
+	var craft_ok := true
+	for at: int in [7000, 6945, 3000]:
+		sim.respawn_on(r, at, 1)
+		var grade: float = (sim.net_height(r, float(at + 1)) - sim.net_height(r, float(at - 1))) / (2.0 * float(R.len[at]))
+		var c := 1.0 / sqrt(1.0 + grade * grade)
+		var up := Vector3(-grade * c * R.tx[at], c, grade * c * R.ty[at])
+		var road_at: Vector3 = v.wz(sim.pod.x, sim.pod.y, sim.pod.z - float(sim.P.rideH))
+		var pod_off: float = (v.wz(sim.pod.x, sim.pod.y, sim.pod.z) - road_at).dot(up)
+		var engine: Vector3 = v.body_place(sim.eL)
+		# (the engine against the road's own line through the pod's place: along the slope, then out from it)
+		var engine_off: float = (engine - road_at).dot(up)
+		var straight: Vector3 = Vector3(sim.pod.x - v.org_x, sim.pod.z, -(sim.pod.y - v.org_y))
+		var moved: float = (v.wz(sim.pod.x, sim.pod.y, sim.pod.z) - straight).length()
+		places.append("at %d (%.0f degrees) the pod is %.2f m out from the road and an engine %.2f m, the pod drawn %.2f m from straight up" % [at,
+			rad_to_deg(atan(grade)), pod_off, engine_off, moved])
+		if absf(grade) > 0.4:
+			craft_ok = craft_ok and absf(pod_off - float(sim.P.rideH)) < 0.02 and absf(engine_off - float(sim.P.rideH)) < 0.05
+		elif absf(grade) < 0.15:
+			craft_ok = craft_ok and moved == 0.0
+	_check("on the face the craft stands square to the road, a ride height out from it; on gentle road it is where it was: %s" % [places], craft_ok)
 	v.free()
 	print("HELIOS %s (%d failures)" % ["PASS" if failures == 0 else "FAIL", failures])
 	quit(0 if failures == 0 else 1)
