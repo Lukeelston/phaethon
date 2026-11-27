@@ -33,8 +33,9 @@
 ##   shot     DRONE_HP hits: the fire control's damage calls hit(f, n), which destroys it at none left; the director then
 ##            counts it from its own kind (on_kill: kills_by.drone)
 ## The gunship (one, with the raids the director's has_gunship names: a flight's 3rd, then every other one), put down
-## at the arrival on its first station (spawn_gunship); its model (Codex's) is loaded then, with its shots' batch, and
-## both kept for the flight:
+## at the arrival on its first station (spawn_gunship); its model (Codex's) and its shots' batch are made at build,
+## hidden and none of them a flyer, and kept for the flight (made at its first arrival, that frame was 20 ms over the
+## frames before it, windowed: its glow's pipeline compiled then; tests/probe_raid_firsts.gd):
 ##   its run  it holds station STATION_ALT over the zone's road for STATION_S; drops to STRAFE_ALT over DOWN_S (from rest
 ##            along the road up to the town's limit, Traffic.SF_V), runs STRAFE_S along the road at that limit, its run's
 ##            way, so a craft on the road behind has it in front of its fixed guns (on a bend it runs off the road's
@@ -92,7 +93,7 @@
 ## frame of theirs (update) allocates nothing (a look for prey halves a bucket; the batches' buffers are kept); only
 ## a look at the pilot for cover (the sim's net_near), and what a dive's end or a shot sets off, do (a shot fired, its
 ## line looked along, a commuter's run-down, a hit taken, their log lines).
-##   flyers.build(view, director)              the director's build (no model loaded, nothing drawn)
+##   flyers.build(view, director)              the director's build (the gunship's model made, hidden; nothing drawn)
 ##   flyers.spawn_drones(zone, n)              its arrival: `zone` is the director's _zone(k) ({road, z, pts})
 ##   flyers.spawn_gunship(zone)                ... with the gunship (one at most)
 ##   flyers.gunship()                          the gunship up, or null
@@ -276,7 +277,7 @@ var _buf := PackedFloat32Array()          # the batch's buffer: a 3x4 transform 
 var _rng := RandomNumberGenerator.new()
 var shots: Array = []                     # the gunship's shots in flight: {p, v, t, n, pilot, car, top, floor, ox, oy, oz}
 var shots_made := 0                       # shots fired this flight (each one's n)
-var ship: Node3D = null                   # the gunship's model (Codex's), made when the first gunship is put down
+var ship: Node3D = null                   # the gunship's model (Codex's), made at build, hidden till a gunship is put down
 var _pivot: Node3D                        # ... its turret's yaw, its pitch, and its muzzle
 var _cradle: Node3D
 var _muzzle: Node3D
@@ -302,6 +303,7 @@ func build(v, d) -> void:
 	world = v.get("network_world")
 	name = "raid_flyers"
 	_rng.seed = 20261126
+	_make_ship()      # (hidden: none of it a flyer, nothing drawn till a gunship is put down)
 	if RaidSounds.heard(v):      # (their sounds and players, made now: none in a flight without sound)
 		_make_players()
 
@@ -783,7 +785,7 @@ func spawn_gunship(zone: Dictionary) -> void:
 	_pose_ship(g)
 
 
-## The gunship's model (Codex's: loaded now, the first gunship put down) and its shots' batch, kept for the flight.
+## The gunship's model (Codex's: made at build, hidden) and its shots' batch, kept for the flight.
 func _make_ship() -> void:
 	if ship != null:
 		return

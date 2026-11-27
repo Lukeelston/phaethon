@@ -121,6 +121,13 @@ func prepare() -> void:
 		_fit_arms()
 
 
+## Raids on (weapon_mount.gd prepare_drawing): the ring made now, hidden, so the first arming's frame does not compile the
+## ring's pipeline.
+func prepare_drawing(g) -> void:
+	if ring == null and arms != null:
+		_build_drawing(g)
+
+
 ## Codex's arms on the hull the pilot sees (the hull last dressed: view/fleet_airframe.gd ensure_arms).
 func _fit_arms() -> void:
 	arms = craft.fleet.ensure_arms() if craft.fleet != null else null

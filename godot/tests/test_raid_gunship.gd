@@ -475,9 +475,9 @@ func check_cadence(v) -> void:
 	var hp: int = g.hp if g != null else -1
 	var r: float = g.r if g != null else -1.0
 	sections += 1
-	_check("has_gunship(1..5) %s (want false, false, true, false, true); the director's own arrivals, raids 1 to 3: gunships %s (want 0, 0, 1), its model loaded after each %s; its HP %d (GUNSHIP_HP %d), pick radius %.0f m (GUNSHIP_R %.0f); the arrivals' frames %s ms (the third loads its model)" % [
+	_check("has_gunship(1..5) %s (want false, false, true, false, true); the director's own arrivals, raids 1 to 3: gunships %s (want 0, 0, 1), its model loaded after each %s (made at the flyers' build since task 11: loaded from the first); its HP %d (GUNSHIP_HP %d), pick radius %.0f m (GUNSHIP_R %.0f); the arrivals' frames %s ms" % [
 			says, ships, loaded, hp, F.GUNSHIP_HP, r, F.GUNSHIP_R, frames],
-		says == [false, false, true, false, true] and ships == [0, 0, 1] and loaded == [false, false, true] and hp == F.GUNSHIP_HP and r == F.GUNSHIP_R
+		says == [false, false, true, false, true] and ships == [0, 0, 1] and loaded == [true, true, true] and hp == F.GUNSHIP_HP and r == F.GUNSHIP_R
 			and R._count == 3)
 
 

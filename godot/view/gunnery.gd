@@ -189,6 +189,7 @@ static func make(v, asleep := false):
 	g.build(v)
 	if asleep:
 		g.mount.prepare()      # (what its first arming would build, built now, stowed: the Shrike's arms, the Kiln's, the Vesper's, the Orrery's)
+		g.mount.prepare_drawing(g)      # (and the drawing whose pipeline its first frame would compile: the Kiln's beam, the Vesper's ring)
 	return g
 
 

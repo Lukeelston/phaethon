@@ -102,6 +102,14 @@ func prepare() -> void:
 	pass
 
 
+## Raids on, with prepare(): its drawing that the first arming's first frame would otherwise make, made now under fire
+## control g, hidden (the Kiln's beam, the Vesper's ring). Made in flight, its first frame compiled the drawing's
+## pipeline there: the first arming's frame 15 to 22 ms over the frames before it, windowed (tests/probe_raid_firsts.gd).
+## Made at load, that is paid at load. Nothing for the rest (their drawing's first frames measured under 5 ms).
+func prepare_drawing(_g) -> void:
+	pass
+
+
 # --- a weapon that fires for itself ------------------------------------------------------------------------
 
 ## Does it fire for itself? Then the fire control (view/gunnery.gd step) fires no bolts and keeps no heat for it, and
