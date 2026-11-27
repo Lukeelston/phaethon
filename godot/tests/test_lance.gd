@@ -41,7 +41,11 @@
 ##                          first arming's frame told; armed, the same arms come out
 ##   check_buzz             on that seat's own frames (vr_cockpit.gd _process), the trigger held: while it burns, one pulse
 ##                          a frame to the left hand, a frame long, sent at once (no delay: the engine ignores one); SAFE
-##                          thrown: the beam off that frame, and no pulse that frame or after
+##                          thrown: the beam off that frame, and no pulse that frame or after. Before SAFE, mid-burn:
+##     check_event_wins     an event buzz on the left hand wins while its hold lasts: no lance pulse, the hold not cut
+##                          short, the lance back the first frame after it runs out
+##     check_shudder_and_lance   the brakes' shudder and the lance on the left hand: the stronger has it (a hard shudder:
+##                          no lance pulse; a light one: the lance's each frame)
 ## Run with --fixed-fps 120: --headless --xr-mode off --fixed-fps 120 --audio-driver Dummy -s res://tests/test_lance.gd -- --mute
 ## Prints LANCE PASS. Puts user://vr_prefs.json back as it found it.
 extends SceneTree
@@ -65,6 +69,8 @@ const SPEED := 1500.0 * MPH     # m/s
 const STRAIGHT := 1600.0        # m of road ahead that must run straight and level
 const SKY_LOOK := Vector3(0.0, 0.12, -1.0)      # the gaze up into the empty sky ahead (inside the cone: 7 degrees up)
 const COST_MS := 0.10           # the mount's own mean a frame, the beam held on a target among a full raid, at the most
+const EVENT_AMP := 0.6          # an event buzz in the left hand mid-burn (check_event_wins): this strong ...
+const EVENT_S := 0.045          # ... this long (5.4 frames: its hold runs out mid-frame, never on a frame's edge)
 const SECTIONS := 16
 var failures := 0
 var checks := 0
@@ -960,6 +966,8 @@ func check_buzz(v) -> void:
 	var amp: float = (m.get_script() as Script).get_script_constant_map().get("BUZZ_AMP", -1.0)
 	var want := [1, true, snappedf(amp, 0.001), snappedf(DT, 1e-5), 0.0]
 	var each_frame := sent.size() == burned and sent.all(func(s: Array) -> bool: return s == want)
+	check_event_wins(v, m, hand)
+	check_shudder_and_lance(v, m, amp)
 	v.gun_wanted = false      # (SAFE)
 	v.gun_pulses.clear()
 	_hold_speed(v)
@@ -975,3 +983,67 @@ func check_buzz(v) -> void:
 	g.hold_fire = false
 	check("on the seat's own frames, held: it burns %d of 30 frames, a pulse to the left hand each of them (%s; want each %s: one, a frame long, no delay); SAFE thrown: the beam off that frame (%s), %d pulse(s) that frame, %d in the 10 after" % [
 		burned, sent.slice(0, 2), want, off, at_safe, later], burned >= 28 and each_frame and off and at_safe == 0 and later == 0)
+
+
+## One of the cockpit's own frames, the craft held at speed: [the lance's pulses sent in it (gun_pulses), the left hand's
+## _buzz_hold after it].
+func _hand_frame(v) -> Array:
+	v.gun_pulses.clear()
+	_hold_speed(v)
+	v._process(DT)
+	return [v.gun_pulses.size(), float(v._buzz_hold.get(v.hands.left, 0.0))]
+
+
+## (Mid-burn, on check_buzz's seat.) An event buzz on the left hand (the cockpit's own _buzz: EVENT_AMP for EVENT_S, as a
+## hit's or a detent's) wins while its hold lasts: it is sent (the hand held its length), no lance pulse is sent while the
+## hold lasts, the lance does not shorten the hold (it runs down a frame at a time), and the lance's pulses come back the
+## first frame after it has run out.
+func check_event_wins(v, m, hand: XRController3D) -> void:
+	v._buzz(hand, EVENT_AMP, EVENT_S)
+	var held_at_once: float = v._buzz_hold.get(hand, 0.0)
+	var frames := []          # [lance pulses, the hold after the frame, the hold it should have]
+	var lance_while_held := 0
+	var shortened := false
+	var back_at := -1
+	var after_back := 0
+	for i in 12:
+		var f := _hand_frame(v)
+		var due := maxf(0.0, EVENT_S - (i + 1) * DT)
+		frames.append([f[0], snappedf(f[1], 1e-5), snappedf(due, 1e-5)])
+		shortened = shortened or absf(float(f[1]) - due) > 1e-6
+		if float(f[1]) > 0.0:
+			lance_while_held += int(f[0])
+		elif back_at < 0:
+			back_at = i if int(f[0]) == 1 else -2
+		else:
+			after_back += int(f[0])
+	var free_at := int(ceil(EVENT_S / DT - 1e-6)) - 1      # (the first frame whose hold has run down to nothing)
+	check("mid-burn (%s), an event buzz on the left hand, %.1f for %.3f s: sent (the hand held %.3f s); while its hold lasts no lance pulse (%d sent); the hold runs down a frame at a time, never cut short (%s: [lance pulses, hold, due] %s); the lance back on frame %d (%d, the first with the hold run out) and every frame after (%d of %d)" % [
+		m.burning, EVENT_AMP, EVENT_S, held_at_once, lance_while_held, not shortened, frames.slice(0, 7), back_at, free_at, after_back, 11 - free_at],
+		m.burning and absf(held_at_once - EVENT_S) < 1e-9 and lance_while_held == 0 and not shortened and back_at == free_at and after_back == 11 - free_at)
+
+
+## (Mid-burn, on check_buzz's seat.) The two steady effects on the left hand, the brakes' shudder (vr_cockpit.gd
+## _apply_shudder) and the lance's buzz: the stronger has the hand that frame. A stand-in for the wind's audio (the test
+## runs muted, so the seat has none) gives the left brake's shudder by hand: hard (brake_haptic_strength 0.8), the lance
+## sends nothing; light (0.012), the lance's pulse goes each frame.
+func check_shudder_and_lance(v, m, amp: float) -> void:
+	var stub_script := GDScript.new()
+	stub_script.source_code = "extends Node\nvar shudder := [0.0, 0.0]\nvar shake := [0.0, 0.0]\nfunc update(_inp: Dictionary, _delta: float) -> void:\n\tpass\n"
+	stub_script.reload()
+	var stub: Node = stub_script.new()
+	var was = v.wind_audio
+	v.wind_audio = stub
+	var result := {}
+	for s: float in [1.0, 0.06]:
+		stub.shudder = [s, 0.0]
+		var pulses := 0
+		for i in 10:
+			pulses += int(_hand_frame(v)[0])
+		result[snappedf(Seat.brake_haptic_strength(s), 0.001)] = pulses
+	v.wind_audio = was
+	stub.free()
+	var strengths: Array = result.keys()
+	check("mid-burn (%s), the left brake's shudder and the lance (%.2f): {shudder strength: lance pulses in 10 frames} %s (the hard shudder has the hand: none; under the lance's: one a frame)" % [
+		m.burning, amp, result], m.burning and strengths.size() == 2 and float(strengths[0]) > amp and int(result[strengths[0]]) == 0
+		and float(strengths[1]) < amp and int(result[strengths[1]]) == 10)

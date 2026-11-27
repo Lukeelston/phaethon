@@ -256,6 +256,7 @@ var _g_from := [0.0, 0.0, -1.0, 0.0]      # the pod's velocity, the sim's clock 
 var _jolt_quad: MeshInstance3D   # the jolt's red vignette before the camera (made at load with raids on)
 const JOLT_BUZZ_S := 0.2         # s of the jolt's buzz, full strength, both hands (a wall hit's: 0.85 for 0.14 s)
 var _buzz_hold := {}   # controller -> seconds an event buzz still owns it (the shudder waits)
+var _shudder_left := 0.0   # the left hand's shudder this frame (_apply_shudder), sent or not: the lance's buzz yields to a stronger one (_gun_buzz)
 const SHAKE_M := 0.004   # cockpit shake per unit of air-brake shudder, metres
 const GRAB_SHAKE_M := 0.007   # the gear's grab: the cockpit's jolt, metres (fore and aft, a little up)
 const GRAB_HZ := 22.0
@@ -572,6 +573,7 @@ static func brake_haptic_strength(shudder: float) -> float:
 func _apply_shudder(delta: float) -> void:
 	for c in _buzz_hold.keys():
 		_buzz_hold[c] = maxf(0.0, _buzz_hold[c] - delta)
+	_shudder_left = 0.0
 	var tremble := _startup_shake(delta)
 	if not wind_audio:
 		_shake = _grab_jolt(delta) + tremble
@@ -583,6 +585,10 @@ func _apply_shudder(delta: float) -> void:
 		var hand: XRController3D = hands.left if k == 0 else hands.right
 		var strength := maxf(brake_haptic_strength(s[k]), SLIDE_SCRUB * slide_scrub(k == 1))   # the brake's shudder, or the slide's scrub
 		strength = maxf(strength, startup_rumble(_hand_engine(k)))                            # ... or that hand's engine starting, or straining against the brake
+		if k == 0:
+			_shudder_left = strength
+			if _gun_steady() > strength:
+				continue      # (the lance's steady buzz is the stronger: it has the left hand this frame, _gun_buzz sends it)
 		if strength > 0.0 and _buzz_hold.get(hand, 0.0) <= 0.0:
 			hand.trigger_haptic_pulse("haptic", 0.0, strength, 0.05, 0.0)
 	var up: float = s[0] * w[0] + s[1] * w[1]
@@ -2411,23 +2417,40 @@ func _hold_for_gun_ticks() -> void:
 
 
 ## A weapon's steady buzz in the left hand (WeaponMount.buzz: the Kiln's lance while it burns), asked after the view's
-## frame has fired the gun: a pulse as long as the frame, sent at once, each frame it burns; the frame it stops none is
-## sent, and the last has run out by then. Not while the gun's fire control sleeps (Raids on, never armed).
+## frame has fired the gun and after the brakes' shudder (_apply_shudder): a pulse as long as the frame, sent at once,
+## each frame it burns; the frame it stops none is sent, and the last has run out by then. It is a steady effect, as the
+## shudder is: an event buzz on that hand wins while its hold lasts (_buzz_hold: none is sent till it has run out), and
+## it claims no hold of its own. Of the two steady effects the stronger has the hand each frame: the shudder sends its
+## pulse only when it is at least the buzz's strength (_apply_shudder), this only when it is stronger than the shudder
+## (_shudder_left), so one of them at most reaches the hand. Not while the gun's fire control sleeps (Raids on, never
+## armed).
 func _gun_buzz(delta: float) -> void:
-	if gunnery == null or gunnery.dormant or not hands.has("left"):
+	if not hands.has("left"):
 		return
-	var amp: float = gunnery.mount.buzz()
-	if amp > 0.0:
-		_gun_pulse(hands.left, amp, delta)
+	var amp := _gun_steady()
+	if amp <= _shudder_left or _buzz_hold.get(hands.left, 0.0) > 0.0:
+		return
+	_gun_pulse(hands.left, amp, delta, 0.0, true)
+
+
+## The gun's steady buzz this frame (WeaponMount.buzz), 0 with none or while its fire control sleeps.
+func _gun_steady() -> float:
+	if gunnery == null or gunnery.dormant:
+		return 0.0
+	return gunnery.mount.buzz()
 
 
 ## A gun tick sent to the hand: the one place the gun's ticks reach the controller (gun_pulses keeps the last few).
-## Sent at once: nothing gives it a delay (the engine would ignore one: _buzz).
-func _gun_pulse(c: XRController3D, amp: float, dur: float, delay := 0.0) -> void:
+## Sent at once: nothing gives it a delay (the engine would ignore one: _buzz). A tick is an event (_buzz: it holds the
+## hand); `steady` (the lance's buzz) goes straight to the controller, as the shudder's does, and holds nothing.
+func _gun_pulse(c: XRController3D, amp: float, dur: float, delay := 0.0, steady := false) -> void:
 	gun_pulses.append([c, amp, dur, delay])
 	if gun_pulses.size() > 16:
 		gun_pulses.pop_front()
-	_buzz(c, amp, dur, delay)
+	if steady:
+		c.trigger_haptic_pulse("haptic", 0.0, amp, dur, delay)
+	else:
+		_buzz(c, amp, dur, delay)
 
 
 ## Turn the slide on or off (the SLIDE / GRIP switch), and remember it: the pilot's own choice now (vr_prefs.json), and
@@ -2622,7 +2645,7 @@ func _process(delta: float) -> void:
 	if _brake_trace:
 		_brake_trace.capture(self, delta)
 	_apply_shudder(delta)
-	_gun_buzz(delta)      # (after the view's frame has fired the gun, and after the brakes' shudder: it wins while it lasts)
+	_gun_buzz(delta)      # (after the view's frame has fired the gun, and after the brakes' shudder: the stronger of the two has the hand)
 	_sync_rush(delta)
 	tactical = TacticalScript.frame(self, tactical, delta, _rush_flow, camera == "cockpit" and startup.is_hot())
 	interior.set_power(startup.power)
