@@ -2,13 +2,16 @@
 ## windowed (tests/probe_raid_firsts.gd), cold: the Kiln's first arming was 15 to 22 ms over the frames before it, the
 ## Vesper's 15, the third raid's arrival (the gunship's) 18 to 20: each the first frame of a drawing whose pipeline was
 ## compiled then (the lance's beam, the pulse's ring, the gunship's glow), made in that frame. Made at load instead, with
-## Raids on only. In the VR seat on the Network (XR off), before any raid:
+## Raids on only. The first raid's arrival (the drones' batch made, their model read from disk) measured +3 to +5 ms, under
+## the line on a desktop but the first every flight with Raids on meets: its batch made at load too (the controller's
+## ruling). In the VR seat on the Network (XR off), before any raid:
 ##   Raids off   (first, so the resource cache is the flight's own) the Kiln, the Vesper: no director, no flyers node, no
-##               fire control, the mount's drawing not made (beam, ring null), no Arms node, the gunship's model not in
-##               the resource cache
+##               fire control, the mount's drawing not made (beam, ring null), no Arms node, neither flyer model (the
+##               gunship's, the drone's) in the resource cache
 ##   Raids on    the Phaethon, the Shrike, the Kiln, the Vesper, the Orrery, 60 frames flown: the flyers' gunship model
-##               made and hidden, its shots' batch empty, none of it a flyer (all() empty, gunship() null), the drones'
-##               batch not made (its first arrival measured under the line); the fire control made at load and
+##               made and hidden, its shots' batch empty, none of it a flyer (all() empty, gunship() null); the drones'
+##               batch made with nothing drawn (no instance shown), no drone (count("drone") 0), the drone's model in the
+##               resource cache; the fire control made at load and
 ##               dormant; the Kiln's beam and its glow, the Vesper's ring, made under it and not drawn; the Shrike's and
 ##               the Orrery's drawing not made (their first frames measured under the line)
 ## --headless --xr-mode off --fixed-fps 120 --audio-driver Dummy -s res://tests/test_raid_preload.gd -- --mute
@@ -20,6 +23,7 @@ const Pilot := preload("res://sim/pilot_craft.gd")
 const Raids := preload("res://view/network_raids.gd")
 const Chase := preload("res://view/network_chase.gd")
 const GUNSHIP_PATH := "res://art/traffic/raid_gunship.glb"
+const DRONE_PATH := "res://art/traffic/raid_drone.glb"
 const PREFS := "user://vr_prefs.json"
 const DT := 1.0 / 120.0
 var failures := 0
@@ -68,9 +72,11 @@ func _run() -> void:
 		var v = await _seat(id, false)
 		var m = v.craft.weapon
 		var arms: Array = v.find_children("Arms", "", true, false)
-		_check("Raids off, %s: no director (%s), no flyers node (%s), no fire control (%s), its drawing not made (%s), no Arms node (%d), the gunship's model not in the cache (%s)" % [
-				id, v.raids, v.find_child("raid_flyers", true, false), v.gunnery, m.get("beam") if id == Pilot.KILN else m.get("ring"), arms.size(), ResourceLoader.has_cached(GUNSHIP_PATH)],
+		_check("Raids off, %s: no director (%s), no flyers node (%s), no fire control (%s), its drawing not made (%s), no Arms node (%d), the gunship's model not in the cache (%s), nor the drone's (%s)" % [
+				id, v.raids, v.find_child("raid_flyers", true, false), v.gunnery, m.get("beam") if id == Pilot.KILN else m.get("ring"), arms.size(), ResourceLoader.has_cached(GUNSHIP_PATH),
+				ResourceLoader.has_cached(DRONE_PATH)],
 			v.raids == null and v.find_child("raid_flyers", true, false) == null and v.gunnery == null and arms.is_empty() and not ResourceLoader.has_cached(GUNSHIP_PATH)
+				and not ResourceLoader.has_cached(DRONE_PATH)
 				and (m.get("beam") if id == Pilot.KILN else m.get("ring")) == null)
 		v.queue_free()
 		await process_frame
@@ -86,9 +92,11 @@ func _run() -> void:
 		var g = v.gunnery
 		var m = v.craft.weapon
 		var ship_fine: bool = F.ship != null and not F.ship.visible and F._glow != null and F._glow.multimesh.visible_instance_count == 0 and F.all().is_empty() and F.gunship() == null
-		_check("Raids on, %s, before any raid: the gunship's model made (%s), hidden (%s), its shots' batch empty (%s), no flyer (%d, gunship %s), the drones' batch not made (%s), the model in the cache (%s)" % [
-				id, F.ship, F.ship.visible if F.ship else "-", F._glow.multimesh.visible_instance_count if F._glow else -1, F.all().size(), F.gunship(), F.batch, ResourceLoader.has_cached(GUNSHIP_PATH)],
-			ship_fine and F.batch == null and ResourceLoader.has_cached(GUNSHIP_PATH) and R.state == "")
+		_check("Raids on, %s, before any raid: the gunship's model made (%s), shown (%s), its shots' batch empty (%s), no flyer (%d, gunship %s), the model in the cache (%s); the drones' batch made (%s), none drawn (%s), no drone (%d), the drone's model in the cache (%s)" % [
+				id, F.ship, F.ship.visible if F.ship else "-", F._glow.multimesh.visible_instance_count if F._glow else -1, F.all().size(), F.gunship(), ResourceLoader.has_cached(GUNSHIP_PATH),
+				F.batch, F.batch.multimesh.visible_instance_count if F.batch else -1, F.count("drone"), ResourceLoader.has_cached(DRONE_PATH)],
+			ship_fine and ResourceLoader.has_cached(GUNSHIP_PATH) and R.state == "" and F.batch != null and F.batch.multimesh.visible_instance_count == 0
+				and F.count("drone") == 0 and ResourceLoader.has_cached(DRONE_PATH))
 		var dormant: bool = g != null and g.dormant
 		if id == Pilot.KILN:
 			_check("Raids on, the Kiln: its fire control dormant (%s), the beam made under it (%s) and hidden (%s), its glow empty (%s)" % [dormant, m.beam,

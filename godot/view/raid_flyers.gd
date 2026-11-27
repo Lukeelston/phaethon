@@ -1,7 +1,8 @@
 ## Raids' flyers: the drones over a raided city's town zone (docs/superpowers/specs/2026-11-24-network-raids-design.md,
 ## "Drones and the gunship"; the stage 2 plan, task 2). Made by the raid director at its build (view/network_raids.gd,
 ## so with Raids on only), and empty until a raid arrives; the drone's model (Codex's, view/raid_flyer_art.gd) is loaded
-## when the first drones are put down, and its batch kept for the flight.
+## and its batch made at build, no instance shown, and kept for the flight (made at the first arrival, that frame was
+## 3 to 5 ms over the frames before it, windowed: the first frame every flight with Raids on meets).
 ##   drones   put down at the arrival (spawn_drones) in groups of two to four, spread along the zone's road (clear of the
 ##            pilot where it has room, as the raiders are), each group circling its own point of the road at CIRCLE_V,
 ##            each drone at its own height, DRONE_ALT above the road. One off its rest (DIVE_REST s from its last dive's
@@ -93,7 +94,7 @@
 ## frame of theirs (update) allocates nothing (a look for prey halves a bucket; the batches' buffers are kept); only
 ## a look at the pilot for cover (the sim's net_near), and what a dive's end or a shot sets off, do (a shot fired, its
 ## line looked along, a commuter's run-down, a hit taken, their log lines).
-##   flyers.build(view, director)              the director's build (the gunship's model made, hidden; nothing drawn)
+##   flyers.build(view, director)              the director's build (the gunship's model and the drones' batch made; nothing drawn)
 ##   flyers.spawn_drones(zone, n)              its arrival: `zone` is the director's _zone(k) ({road, z, pts})
 ##   flyers.spawn_gunship(zone)                ... with the gunship (one at most)
 ##   flyers.gunship()                          the gunship up, or null
@@ -266,7 +267,7 @@ var director
 var sim
 var traffic
 var world                                 # the Network's world (view/network_world.gd): its roofs (halls, the tube)
-var batch: MultiMeshInstance3D = null     # the drones' batch (Codex's model), made when the first drones are put down
+var batch: MultiMeshInstance3D = null     # the drones' batch (Codex's model), made at build, no instance shown till drones are put down
 var pilot_share := PILOT_SHARE            # (tests set it)
 var update_ms := 0.0                      # what the last update took (tests read it)
 var _list: Array = []                     # every flyer up
@@ -304,6 +305,7 @@ func build(v, d) -> void:
 	name = "raid_flyers"
 	_rng.seed = 20261126
 	_make_ship()      # (hidden: none of it a flyer, nothing drawn till a gunship is put down)
+	_make_batch()     # (the drones' batch, no instance shown: none a flyer, nothing drawn till drones are put down)
 	if RaidSounds.heard(v):      # (their sounds and players, made now: none in a flight without sound)
 		_make_players()
 
@@ -372,7 +374,7 @@ func spawn_drones(zone: Dictionary, n: int) -> void:
 	_draw_batch()
 
 
-## The drones' batch: Codex's model, loaded now (the first drones put down), and kept. Never culled for where its
+## The drones' batch: Codex's model, loaded now (at build), and kept. Never culled for where its
 ## mesh's own box is (it is drawn about the floating origin), and drawn larger far off as traffic's bodies are, so a
 ## drone is never under a couple of pixels wide.
 func _make_batch() -> void:
