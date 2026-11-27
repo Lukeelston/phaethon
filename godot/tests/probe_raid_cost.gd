@@ -47,6 +47,11 @@
 ##                beneath, and put back each frame and kept whole, outside the timing; off, nothing (no director, the
 ##                GUN never armed). 240 frames to warm, 120 to settle, then --frames timed: the view's _process, the
 ##                renderer's CPU, the GPU. Alternate the two; the difference is what a raid costs.
+##   --mode=absent  (stage 2, task 11; headless is fine) Raids off, the GUN never armed, each of the seven craft in
+##                turn, 240 frames flown on the Network: no director (no network_raids node), no flyers node (raid_flyers),
+##                no fire control (gunnery == null; the Basilisk's turret excepted: its fire control is made at load, as
+##                stage 1's), no Arms node anywhere under the view, neither flyer model (raid_drone.glb, raid_gunship.glb) in
+##                the resource cache, and RaidSounds' cache empty. One line a craft.
 ## Run windowed (a small window: the work is offscreen), with sound (a flight has it) on the Dummy driver:
 ## --xr-mode off --resolution 640x360 --fixed-fps 120 --audio-driver Dummy -s res://tests/probe_raid_cost.gd --
 ##   --mode=off|raid|whole [--frames=1200] [--vehicle=phaethon|talon] [--size=4128x2208] [--arm=split] [--raids=on|off]
@@ -168,7 +173,8 @@ func _initialize() -> void:
 
 
 func _run() -> void:
-	if DisplayServer.get_name() == "headless":
+	var absent := OS.get_cmdline_user_args().has("--mode=absent")
+	if DisplayServer.get_name() == "headless" and not absent:
 		push_error("The raid cost probe needs a rendering display (it times the GPU).")
 		quit(1)
 		return
@@ -196,6 +202,8 @@ func _run() -> void:
 		ok = await _raid()
 	elif mode == "whole":
 		ok = await _whole()
+	elif mode == "absent":
+		ok = await _absent()
 	else:
 		push_error("--mode=off, --mode=raid or --mode=whole")
 		ok = false
@@ -323,6 +331,71 @@ func _frame(phase: String, speed: float) -> Dictionary:
 
 
 # --- Raids off ---------------------------------------------------------------------------------------------------
+
+## --mode=absent: each of the seven craft, Raids off, the GUN never armed: nothing of the raids made or loaded.
+func _absent() -> bool:
+	var Pilot: GDScript = load("res://sim/pilot_craft.gd")
+	var Sounds: GDScript = load("res://audio/raid_sounds.gd")
+	var crafts := [Pilot.STANDARD, Pilot.TALON, Pilot.BASILISK, Pilot.SHRIKE, Pilot.KILN, Pilot.VESPER, Pilot.ORRERY]
+	var models := ["res://art/traffic/raid_drone.glb", "res://art/traffic/raid_gunship.glb"]
+	var ok := true
+	for id in crafts:
+		vehicle = id
+		_make_seat(false)
+		for i in 240:
+			_hold(800.0 / MPH)
+			game._process(DT)
+			await process_frame
+		var director = game.get("raids")
+		var node = game.find_child("network_raids", true, false)
+		var flyers = game.find_child("raid_flyers", true, false)
+		var gun = game.get("gunnery")
+		var arms: Array = game.find_children("Arms", "", true, false)
+		var cached: Array = models.filter(func(m): return ResourceLoader.has_cached(m))
+		var sounds: Dictionary = Sounds.get("_cache")
+		var gun_fine: bool = gun == null or id == Pilot.BASILISK
+		var fine: bool = director == null and node == null and flyers == null and gun_fine and arms.is_empty() and cached.is_empty() and sounds.is_empty() and not bool(game.gun_wanted)
+		print("RAID COST absent %-9s Raids off, GUN never armed, 240 frames: director %s, network_raids node %s, flyers node %s, fire control %s%s, Arms nodes %d, flyer models cached %s, RaidSounds cache %d: %s" % [
+			id, director, node, flyers, gun, " (the turret's, made at load: excepted)" if gun != null and id == Pilot.BASILISK else "", arms.size(), str(cached), sounds.size(),
+			"nothing of the raids exists" if fine else "FAIL something was made"])
+		ok = ok and fine
+		game.queue_free()
+		game = null
+		await process_frame
+		await process_frame
+	print("RAID COST absent: %s" % ("PASS, seven of seven" if ok else "FAIL"))
+	return ok
+
+
+## The game's VR cockpit in the root (no offscreen viewport: --mode=absent runs headless too), Raids pinned on or off.
+func _make_seat(raids_on: bool) -> void:
+	Livery.pinned = true
+	Livery.current = Livery.FACTORY
+	Outlook.pinned = true
+	Chase.pinned = true
+	Chase.enabled = false
+	var R: GDScript = load(RAIDS_PATH)
+	R.set("pinned", true)
+	R.set("enabled", raids_on)
+	Seat.track_override = "network"
+	Seat.job_override = "none"
+	Seat._camera_loaded = true
+	Seat.camera = "cockpit"
+	Seat._startup_loaded = true
+	Seat.cold_start = false
+	Seat._nose_loaded = true
+	Seat._slide_loaded = true
+	Seat._map_loaded = true
+	Seat._school_loaded = true
+	Seat._rush_loaded = true
+	Seat.vehicle_override = vehicle
+	Seat.best_dir = OS.get_user_data_dir().path_join("raid_cost_")
+	game = Seat.new()
+	root.add_child(game)
+	game.set_process(false)
+	game.sim.P.obstacleCollisions = false
+	game.traffic_net.collide = false
+
 
 func _off() -> bool:
 	_make(false, Seat)

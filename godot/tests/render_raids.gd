@@ -25,8 +25,16 @@
 ##                 not), the option rows, Fly for every course, Pilot garage and Quit; and the room left in its column;
 ##                 the label naming the craft Fly will use (FlyCraft), with every craft's name, against its column; and
 ##                 the headset board's two hint lines (under its option rows, and at its foot) against the board.
+##   --set=full    (stage 2, task 11) a full raid as the director makes a flight's third: six raiders, ten drones (its
+##                 most) and the gunship, put down in DUNES's town zone with the craft at the zone's start heading in, the
+##                 GUN safe, the world running (the drones circling, the gunship on its station, then firing):
+##                 then the craft moved on to some 700 m short of the gunship's station:
+##                 full-seat (from the seat, the head turned to the flyers' middle, 90 degrees), full-ahead (the seat's
+##                 own look ahead), full-gunship (the head on the gunship, a narrow lens), full-fire (its first shot in
+##                 flight, the head on it), full-dash (the raid's line), full-map-local and full-map-global (the map's
+##                 two modes, flyers on it), then the tactical display up: full-tac-seat, full-tac-map
 ## Needs a window: --xr-mode off --resolution 1600x900 --fixed-fps 120 --audio-driver Dummy
-##   -s res://tests/render_raids.gd -- --mute --out=ABSOLUTE_DIRECTORY --set=raid|struck|off|menus [--vehicle=phaethon]
+##   -s res://tests/render_raids.gd -- --mute --out=ABSOLUTE_DIRECTORY --set=raid|struck|off|menus|full [--vehicle=phaethon]
 extends SceneTree
 
 const Seat := preload("res://vr/vr_cockpit.gd")
@@ -76,6 +84,8 @@ func _run() -> void:
 			ok = await _off_set()
 		"menus":
 			ok = await _menus_set()
+		"full":
+			ok = await _full_set()
 		_:
 			push_error("--set=raid|struck|off|menus")
 			ok = false
@@ -516,6 +526,125 @@ func _off_set() -> bool:
 	game.free()
 	await process_frame
 	return true
+
+
+# --- a full raid (stage 2) -----------------------------------------------------------------------------------------
+
+func _full_set() -> bool:
+	_pin(true)
+	var game = _seat()
+	var sim = game.sim
+	var R = game.get("raids")
+	if R == null:
+		push_error("No director with Raids pinned on")
+		return false
+	var F = R.flyers
+	R.pack_size = Vector2i(6, 6)
+	R.drones = Vector2i(10, 10)
+	R.away_t = 1.0e9
+	R.first_after = 1.0e9
+	sim.P.obstacleCollisions = false
+	game.traffic_net.collide = false
+	var t := _town(sim)
+	for i in 60:
+		_hold(game, 1000.0 / MPH)
+		game._process(DT)
+	R._count = 2                     # (its next is the flight's third: the gunship's)
+	R._alarm()
+	R.city = int(t.city)
+	R.arrive_r = 0.0
+	sim.respawn_on(int(t.road), int(t.z.x) + 4, 1)
+	for i in 120:
+		_hold(game, 150.0 / MPH)
+		game._process(DT)
+	R.arrive_r = 15000.0
+	var n := 0
+	while R.state == "called" and n < 240:
+		_hold(game, 150.0 / MPH)
+		game._process(DT)
+		n += 1
+	if R.state != "on":
+		push_error("The raid never arrived (%s)" % R.state)
+		return false
+	for i in 600:                    # (5 s: the drones on their circles, the gunship on its station)
+		_hold(game, 150.0 / MPH)
+		game._process(DT)
+	var gs0 = F.gunship()
+	if gs0 != null:                  # (the craft moved on, 30 samples, some 700 m, short of its station: in its reach, in view)
+		sim.respawn_on(int(gs0.road), maxi(int(gs0.f) - 30, 2), 1)
+		for i in 90:
+			_hold(game, 150.0 / MPH)
+			game._process(DT)
+	_hide_layers(game)
+	var g = game.gunnery
+	var cam := game.cam as Camera3D
+	print("RAIDS RENDER full: %d raiders, %d drones, gunship %s (%s), dash \"%s\", fire control %s" % [R.pack.size(), F.count("drone"), F.gunship() != null,
+		F.gunship().state if F.gunship() != null else "-", game._net_text(), g])
+	var mid := Vector3.ZERO
+	for f in F.all():
+		mid += g.to_render(Vector3(f.x, f.y, f.z))
+	mid /= maxf(1.0, F.all().size())
+	_look_at(game, cam, mid)
+	await _snap(game, "full-seat", 90)
+	_look_seat(game, cam)
+	await _snap(game, "full-ahead", 90)
+	var gs = F.gunship()
+	if gs != null:
+		var at: Vector3 = g.to_render(Vector3(gs.x, gs.y, gs.z))
+		print("RAIDS RENDER full: the gunship %.0f m from the eye, %.0f m up, its model drawn %s at %s; the drones' batch %d drawn, the nearest drone %.0f m" % [
+			cam.global_position.distance_to(at), gs.z - sim.pod.z, F.ship.is_visible_in_tree(), str(F.ship.global_position.round()), F.batch.multimesh.visible_instance_count if F.batch else -1,
+			_nearest_flyer(F, sim)])
+		_look_at(game, cam, at)
+		await _snap(game, "full-gunship", 20)
+	n = 0
+	while F.shots.is_empty() and n < 2400:
+		_hold(game, 150.0 / MPH)
+		game._process(DT)
+		n += 1
+	if not F.shots.is_empty():
+		for i in 18:                 # (0.15 s of its flight)
+			_hold(game, 150.0 / MPH)
+			game._process(DT)
+		if not F.shots.is_empty():
+			var s: Dictionary = F.shots[0]
+			print("RAIDS RENDER full: the gunship's shot %d frames on, at %s (%s), %.0f m off" % [n, "the pilot" if bool(s.pilot) else "a commuter", F.gunship().state if F.gunship() else "-",
+				(s.p as Vector3).distance_to(Vector3(sim.pod.x, sim.pod.y, sim.pod.z))])
+			_look_at(game, cam, g.to_render(s.p))
+			await _snap(game, "full-fire", 40)
+	else:
+		print("RAIDS RENDER full: no shot in %d frames" % n)
+	_look_at(game, cam, (game.dashboard as Node3D).global_position)
+	await _snap(game, "full-dash", 34)
+	var whole: bool = Seat.map_whole
+	for mode in [false, true]:
+		Seat.map_whole = mode
+		for i in 12:
+			_hold(game, 150.0 / MPH)
+			game._process(DT)
+		_look_at(game, cam, (game.minimap_panel as Node3D).global_position)
+		await _snap(game, "full-map-global" if mode else "full-map-local", 24)
+	Seat.map_whole = whole
+	Tactical.wanted = true
+	for i in 151:
+		_hold(game, 150.0 / MPH)
+		game._process(DT)
+	print("RAIDS RENDER full: tactical %d lines, %d raiders, %d drones, gunship %s, dash \"%s\"" % [game.tactical.line_count if game.tactical else -1, R.pack.size(),
+		F.count("drone"), F.gunship() != null, game._net_text()])
+	_look_seat(game, cam)
+	await _snap(game, "full-tac-seat", 90)
+	_look_at(game, cam, (game.minimap_panel as Node3D).global_position)
+	await _snap(game, "full-tac-map", 24)
+	Tactical.wanted = false
+	game.free()
+	await process_frame
+	return true
+
+
+static func _nearest_flyer(F, sim) -> float:
+	var best := INF
+	for f in F.all():
+		best = minf(best, Vector3(f.x - sim.pod.x, f.y - sim.pod.y, f.z - sim.pod.z).length())
+	return best
 
 
 # --- the menus ----------------------------------------------------------------------------------------------------
