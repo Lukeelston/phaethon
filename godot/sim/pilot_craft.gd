@@ -87,6 +87,11 @@ const TUNING := {
 #   coneDeg      degrees off the craft's forward the beam may go; a gaze further off leaves it at that edge
 #   dps          hits a second on the hostile the beam is on (whole hits, the remainder carried)
 #   fireS        s of burn that overheat it; it is dead till it has cooled `coolS` s
+# The pulse (the Vesper's, view/weapons/pulse_mount.gd), a ring released round the craft:
+#   radius       m: how far the ring reaches from where it was released (a flyer in the round, a raider over the ground)
+#   rechargeS    s from a release before the next may leave
+#   gunshipFrac  of the gunship's full HP the ring takes (a drone or a raider it destroys): under 1, so never a fresh one
+#   spreadS      s the ring takes to reach its radius
 const TRAITS := {
 	STANDARD: {"power": {"id": "slipstream", "name": "Slipstream", "lcd": "SLIPSTREAM",
 		"thrust": 1.15, "last": 4.0, "fill": 6.0, "reach": 120.0, "lane": 22.0},
@@ -105,7 +110,8 @@ const TRAITS := {
 		"weapon": {"reach": 600.0, "coneDeg": 25.0, "dps": 30.0, "fireS": 2.5, "coolS": 3.0}},
 	VESPER: {"engineCd": 0.88, "gripCapG": 0.9, "driftReach": 1.2,
 		"power": {"id": "ground", "name": "Ground Effect", "lcd": "GROUND EFFECT", "drag": 0.85,
-			"minV": 894.08, "climb": 0.03, "split": 0.08, "hardSplit": 0.12, "settle": 0.5}},
+			"minV": 894.08, "climb": 0.03, "split": 0.08, "hardSplit": 0.12, "settle": 0.5},
+		"weapon": {"radius": 450.0, "rechargeS": 12.0, "gunshipFrac": 0.6, "spreadS": 0.5}},
 	BASILISK: {"engineCd": 1.02, "driftReach": 0.85,
 		"power": {"id": "turret", "name": "Gaze Turret", "lcd": "GUN", "drag": 1.04, "fireS": 4.0, "coolS": 3.0},
 		"weapon": {"fireS": 4.0, "coolS": 3.0}},
@@ -136,8 +142,8 @@ static func power_of(id: Variant) -> Dictionary:
 
 
 ## Does this airframe carry a weapon (WEAPONS)? Its cockpit then has a GUN switch (vr/vr_cockpit.gd), and X, and the
-## flat view's K and F, work its gun. Stage 1 of the Raids: the Phaethon, the Talon and the Basilisk; stage 2: the Shrike
-## and the Kiln.
+## flat view's K and F, work its gun. Stage 1 of the Raids: the Phaethon, the Talon and the Basilisk; stage 2: the Shrike,
+## the Kiln and the Vesper.
 static func armed(id: Variant) -> bool:
 	return WEAPONS.has(known(id))
 
@@ -153,7 +159,10 @@ static func armed(id: Variant) -> bool:
 ##               (with Raids on, at load, stowed)
 ##   lance       the Kiln's: a plasma beam from an emitter that rises out of its starboard foredeck (view/arms/kiln_arms.gd),
 ##               along the gaze and held on (view/weapons/lance_mount.gd); its arms are fitted as the Shrike's are
-const WEAPONS := {STANDARD: "cannons", TALON: "wing_guns", BASILISK: "turret", SHRIKE: "missiles", KILN: "lance"}
+##   pulse       the Vesper's: a shock ring released round the craft from a wheel that rises out of its forward starboard
+##               sill (view/arms/vesper_arms.gd), on a long recharge (view/weapons/pulse_mount.gd); its arms are fitted as
+##               the Kiln's are
+const WEAPONS := {STANDARD: "cannons", TALON: "wing_guns", BASILISK: "turret", SHRIKE: "missiles", KILN: "lance", VESPER: "pulse"}
 
 
 ## A craft's weapon (WEAPONS), "" for none.

@@ -17,9 +17,10 @@
 ##   the GUN switch   in every cockpit whose craft has a weapon (sim/pilot_craft.gd armed; Raids, 2026-11-24) and in no
 ##                other: the Phaethon's, the Talon's and the Shrike's (its consoles are theirs: Raids stage 2) on the
 ##                starboard console's inboard face up front, outboard of the right lever (vr_cockpit.gd
-##                gun_switch_mount); the Kiln's (Raids stage 2: its lance) and the places the Orrery's and the Vesper's
-##                will have once they are armed (built here at their places by the cockpit's own fit_gun_switch, since
-##                their cockpits have none yet) on the same face (FLEET_GUNS); the Basilisk's on its starboard sill,
+##                gun_switch_mount); the Kiln's and the Vesper's (Raids stage 2: the lance, the pulse; an armed fleet
+##                craft's is its cockpit's own) and the place the Orrery's will have once it is armed (built here at its
+##                place by the cockpit's own fit_gun_switch, since its cockpit has none yet) on the same face
+##                (FLEET_GUNS); the Basilisk's on its starboard sill,
 ##                where it has stood since 2026-11-23. The same checks as the power's controls: the levers' sweep passes
 ##                through nothing of it and keeps POWER_GAP clear (and the lever on its side, again, with its bat thrown
 ##                up, straight out as in mid-throw, and thrown down); in place it crosses nothing but the starboard
@@ -60,8 +61,8 @@ const BASILISK_GUN_REACH := Vector3(0.60, 0.60, 0.71)
 # What the Basilisk's GUN switch crosses where it has stood since 2026-11-23 (its place is not this stage's to move):
 # the hull's sill it stands on, and the cabin roof's glass, through its panel's top (5 edges). Told, not failed.
 const BASILISK_GUN_KNOWN := ["PodHull", "canopy/roof_glass"]
-# The fleet's three (Raids stage 2): the Kiln's switch is built with its cockpit now that it carries its lance; the
-# Orrery's and the Vesper's are built by this test at their places (their craft are armed later) and held to the same.
+# The fleet's three (Raids stage 2): an armed one's switch is built with its cockpit (the Kiln's lance, the Vesper's
+# pulse); an unarmed one's (the Orrery's, armed later) is built by this test at its place and held to the same.
 const FLEET_GUNS := [Craft.ORRERY, Craft.KILN, Craft.VESPER]
 const GUN_LEAST_SCALE := 0.6     # the GUN switch at this of the MODE switch's size, at the least (the Basilisk's aside)
 var failures := 0
@@ -141,7 +142,7 @@ func _run() -> void:
 			if gun == null and v.has_method("fit_gun_switch"):
 				gun = v.fit_gun_switch()      # (at its place, as the cockpit will build it once the craft is armed)
 			_check("%s: a GUN switch at its place in its cockpit (%s: %s)" % [id, gun != null, "its own" if own else "built here at its place"],
-				gun != null and (own or id != Craft.KILN))
+				gun != null and (own or not Craft.armed(id)))
 
 		# ---- the sweep: both levers, idle to full, against the map and the power's controls
 		var least := {"MapPod": ClashKit.REACH, "PowerSwitch": ClashKit.REACH, "PowerButton": ClashKit.REACH}

@@ -7,6 +7,7 @@
 ##                  forward and aimed by pointing the craft, with an assist cone
 ##   the Shrike     view/weapons/missile_mount.gd: look-to-lock missiles (fires for itself)
 ##   the Kiln       view/weapons/lance_mount.gd: a plasma beam along the gaze (fires for itself)
+##   the Vesper     view/weapons/pulse_mount.gd: a shock ring released round the craft (fires for itself)
 ## The bodies here are the defaults: a mount that never comes out and never fires.
 ##   g.mount = craft.weapon; g.mount.power = power; g.mount.step(delta, want_out, aim_render, gaze_dir_render)
 ## A weapon that fires for itself (missiles, a beam, a pulse, orbs) answers own_fire() true: then the fire control runs
@@ -87,7 +88,7 @@ func steps_stowed() -> bool:
 
 ## Make ready, stowed, what its first arming would otherwise build in that frame: called once when its fire control is
 ## made at load, dormant (Raids on: view/network_raids.gd build; view/gunnery.gd make). Fixed guns and a turret are
-## built with their model: nothing here. (The Shrike's missiles and the Kiln's lance fit their arms.)
+## built with their model: nothing here. (The Shrike's missiles, the Kiln's lance and the Vesper's pulse fit their arms.)
 func prepare() -> void:
 	pass
 
@@ -119,6 +120,12 @@ func status() -> String:
 ## does. Its shots' ticks are apart from it (the fire control's shot count).
 func buzz() -> float:
 	return 0.0
+
+
+## How many kicks it has given this flight: each a strong tick in both hands, an event (the Vesper's pulse: one a
+## release). The cockpit gives one for each new one after the frame's fire (vr/vr_cockpit.gd _gun_kick).
+func kicks() -> int:
+	return 0
 
 
 # --- for the sights (view/gunnery.gd _draw): what a mount without them answers ------------------------------

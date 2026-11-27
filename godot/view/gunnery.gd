@@ -26,11 +26,11 @@
 ## lockS); where it has none of them, RATE, BOLT_V, one hit a bolt, REACH, its power's heat (the Basilisk's) and LOCK_S.
 ## Bolts and bursts are kept in the sims' frame (x, y, height) and drawn about the floating origin.
 ## The switch (deploy) and the trigger are the cockpit's: vr/vr_cockpit.gd, or K and F in the flat view. Fixed guns'
-## (and missiles' and the lance's) fire control: with Raids on, the director makes it at load (network_raids.gd build),
-## dormant: not stepped until the GUN is first armed, and its mount made ready then (prepare: the Shrike's and the
-## Kiln's arms, stowed), so arming costs no frame; with Raids off it is made the first time the GUN is armed (a flight
-## that never arms them builds none of it), its sounds read already at the view's build (warm_sounds). A turret's is
-## made at once, as its sight ball and glow are stepped while it is stowed.
+## (and missiles', the lance's and the pulse's) fire control: with Raids on, the director makes it at load
+## (network_raids.gd build), dormant: not stepped until the GUN is first armed, and its mount made ready then (prepare:
+## the Shrike's, the Kiln's and the Vesper's arms, stowed), so arming costs no frame; with Raids off it is made the
+## first time the GUN is armed (a flight that never arms them builds none of it), its sounds read already at the view's
+## build (warm_sounds). A turret's is made at once, as its sight ball and glow are stepped while it is stowed.
 ##   gunnery = Gunnery.frame(view, gunnery, delta)        # once per frame, after the camera and the world
 ##   view.gunnery = Gunnery.make(view, true)              # (the director: fixed guns' made at load, dormant)
 class_name Gunnery
@@ -168,7 +168,7 @@ static func make(v, asleep := false):
 	v.add_child(g)
 	g.build(v)
 	if asleep:
-		g.mount.prepare()      # (what its first arming would build, built now, stowed: the Shrike's arms, the Kiln's)
+		g.mount.prepare()      # (what its first arming would build, built now, stowed: the Shrike's arms, the Kiln's, the Vesper's)
 	return g
 
 
