@@ -82,9 +82,9 @@ func node() -> Node3D:
 	return null
 
 
-## Its own sounds (audio/raid_sounds.gd's names): made with its fire control (view/gunnery.gd build: none with --mute or in
-## a shot) and played through it (g.play_own, g.own_loop). None for a mount without: fixed guns and a turret play the fire
-## control's turret sounds.
+## Its own sounds (audio/raid_sounds.gd's names): made with its fire control (view/gunnery.gd build: with Raids on, and none
+## with --mute or in a shot) and played through it (g.play_own, g.own_loop), else their stand-ins. None for a mount
+## without: fixed guns and a turret play the fire control's turret sounds.
 func own_sounds() -> Array:
 	return []
 

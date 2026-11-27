@@ -43,7 +43,7 @@ NASA does not endorse Phaethon, and nothing here should be read as its endorseme
 
 ### Raid sounds
 
-The raid's flyers and four craft's weapons play sounds that `godot/audio/raid_sounds.gd` makes in the game as a flight with raids loads, from recordings already listed here: nothing new was downloaded for them. It cuts the recordings, runs them faster or slower as a tape is run (pitch and pace together), layers them and shapes their rise and fall, and lays a slow swell in level over two of the loops. Each recording keeps its credit and terms where its bank lists it: [the start-up recordings](godot/audio/startup/CREDITS.md), [the ramjet's](godot/audio/ramjet/CREDITS.md) and [the engines' piano](godot/audio/engines/CREDITS.md).
+The raid's flyers and four craft's weapons play sounds that `godot/audio/raid_sounds.gd` makes in the game as a flight with raids loads (with raids off the weapons keep the turret's own synthesised sounds), from recordings already listed here: nothing new was downloaded for them. It cuts the recordings, runs them faster or slower as a tape is run (pitch and pace together), layers them and shapes their rise and fall, and lays a slow swell in level over two of the loops. Each recording keeps its credit and terms where its bank lists it: [the start-up recordings](godot/audio/startup/CREDITS.md), [the ramjet's](godot/audio/ramjet/CREDITS.md) and [the engines' piano](godot/audio/engines/CREDITS.md).
 
 | Raid sound | Made from |
 | --- | --- |

@@ -1,8 +1,8 @@
 ## The raid's own sounds (the stage 2 plan, task 9): the drones' whine, the gunship's drone and its shot's report, and the
 ## sounds of four craft's weapons (the Shrike's missiles leaving, the Kiln's lance burning, the Vesper's pulse released, an
-## Orrery orb striking). Each is made in code at load (with Raids on: the director's build and the fire control it makes
-## then; with Raids off, a craft's weapon's at its fire control's build, the GUN's first arming), once a run, and kept;
-## none with --mute or in a shot, and none with Raids off and the GUN never armed.
+## Orrery orb striking). Each is made in code at load, with Raids on only (the director's build and the fire control it
+## makes then), once a run, and kept; none with --mute or in a shot, and none with Raids off, armed or not (Ruling AF: a
+## weapon then plays the turret's stand-ins, view/gunnery.gd play_own).
 ## Made from recordings already in the game (Ruling AD: the owner had synthesised sounds rebuilt from recordings): cut,
 ## run faster or slower as a tape is (pitch and pace together), layered and shaped. A loop's layer is a steady stretch of
 ## a recording, its end folded into its start (_chunk), or, from a stretch too short for that, grains of it laid half
@@ -54,6 +54,8 @@ const SRC := {"fan": "res://audio/startup/avionics.wav", "arc": "res://audio/sta
 static var sources := SRC.duplicate()      # where each recording is read from (a test points one elsewhere: a missing source)
 static var _cache := {}           # name -> AudioStreamWAV, or null once it could not be made (tests read it)
 static var make_ms := {}          # name -> ms its making took (tests and the cost probe read it)
+static var fills := {}            # name -> [[samples filled, samples wanted], ...] a layer, as made (tests read it): a layer
+                                  # whose recording ran out part way filled fewer, and its sound was said once in the log
 
 
 static func drone_whine() -> AudioStream:
@@ -99,17 +101,26 @@ static func make(name: String) -> AudioStream:
 	var out := PackedFloat32Array()
 	out.resize(int(float(spec.length) * rate) & ~1)      # (even: the stream is written two samples at a time)
 	var ok: bool = not (spec.layers as Array).is_empty()
+	var got := []           # each layer's [samples filled, samples wanted]
+	var short := []
 	for layer: Dictionary in spec.layers:
 		var rec := _recording(String(layer.src))
 		if rec == null:
 			ok = false
 			break
+		var fill: Array
 		if not spec.loop:
-			_slice(out, rate, rec, layer)
+			fill = _slice(out, rate, rec, layer)
 		elif layer.has("grain"):
-			_grains(out, rate, rec, layer)
+			fill = _grains(out, rate, rec, layer)
 		else:
-			_chunk(out, rate, rec, layer)
+			fill = _chunk(out, rate, rec, layer)
+		got.append(fill)
+		if int(fill[0]) < int(fill[1]):
+			short.append("layer %d (%s) %d of %d samples" % [got.size(), layer.src, fill[0], fill[1]])
+	fills[name] = got
+	if ok and not short.is_empty():      # (it is still made: that layer shorter, or absent)
+		print("RAID SOUNDS: %s: its recording ran out for %s" % [name, ", ".join(short)])
 	var w: AudioStreamWAV = null
 	if ok:
 		if spec.has("throb"):
@@ -132,10 +143,10 @@ static func make(name: String) -> AudioStream:
 ##   throb:              [[depth, cycles], ...]: a swell in the level, a whole number of times round the loop
 static func _recipe(name: String) -> Dictionary:
 	match name:
-		"drone_whine":       # small rotors: the door's motor run half as fast again, a second a fourth over it, the
-			return {"length": 1.2, "loop": true, "throb": [[0.16, 12], [0.08, 9]], "layers": [      # fan's air, their beat
-				{"src": "motor", "from": 0.3, "ratio": 1.55, "db": 0.0},
-				{"src": "motor", "from": 1.0, "ratio": 2.07, "db": -6.0},
+		"drone_whine":       # small rotors: the door's motor run half as fast again, a second at twice its speed (from its
+			return {"length": 1.2, "loop": true, "throb": [[0.16, 12], [0.08, 9]], "layers": [      # start: the loop and its
+				{"src": "motor", "from": 0.3, "ratio": 1.55, "db": 0.0},                               # fold need 2.64 s of its
+				{"src": "motor", "from": 0.0, "ratio": 2.0, "db": -6.0},                               # 2.70), the fan's air
 				{"src": "fan", "from": 0.2, "ratio": 1.3, "db": -4.0}]}
 		"gunship_drone":     # a heavy lifter: the fan run at 0.42 (a big rotor's blades), the motor an octave down (its
 			return {"length": 1.6, "rate": 16000, "loop": true, "throb": [[0.45, 7]], "layers": [  # turbine), the shuttle's
@@ -215,11 +226,16 @@ static func _read(w: AudioStreamWAV, from: float, seconds: float) -> Array:
 
 ## `count` output samples of x (prefix sum S) from source position p (fractional), each `step` source samples on from the
 ## last: each the mean of the source over the step it spans (step >= 1: a box, so a recording run faster does not fold
-## its top back down into what is heard), or read between two samples (step < 1). Stops short at x's end.
-static func _run(x: PackedFloat32Array, S: PackedFloat64Array, p: float, step: float, count: int) -> PackedFloat32Array:
+## its top back down into what is heard), or read between two samples (step < 1). -> [the samples (count of them), how
+## many were filled]: it stops short, the rest silent, where x ends (none filled from p at or past its end, or from an
+## empty x).
+static func _run(x: PackedFloat32Array, S: PackedFloat64Array, p: float, step: float, count: int) -> Array:
 	var y := PackedFloat32Array()
 	y.resize(count)
 	var last := x.size() - 2.0
+	if p < 0.0 or p > last:
+		return [y, 0]
+	var filled := 0
 	if step >= 1.0:
 		var inv := 1.0 / step
 		var ia := int(p)
@@ -233,6 +249,7 @@ static func _run(x: PackedFloat32Array, S: PackedFloat64Array, p: float, step: f
 			y[i] = (sb - sa) * inv
 			sa = sb
 			p = b
+			filled += 1
 	else:
 		for i in count:
 			if p > last:
@@ -240,30 +257,34 @@ static func _run(x: PackedFloat32Array, S: PackedFloat64Array, p: float, step: f
 			var k := int(p)
 			y[i] = x[k] + (x[k + 1] - x[k]) * (p - k)
 			p += step
-	return y
+			filled += 1
+	return [y, filled]
 
 
 ## A loop's layer, added into `out` (the whole loop): the recording from `from`, run at `ratio`, the loop's length and
 ## FOLD more of it, its last FOLD laid over its first under an equal-power cross-fade, so it runs on from its end into its
-## start: seamless.
-static func _chunk(out: PackedFloat32Array, rate: int, w: AudioStreamWAV, layer: Dictionary) -> void:
+## start: seamless (if the recording holds all of it: -> [samples filled, the loop's length and FOLD]).
+static func _chunk(out: PackedFloat32Array, rate: int, w: AudioStreamWAV, layer: Dictionary) -> Array:
 	var n := out.size()
 	var f := int(FOLD * rate)
 	var step := float(layer.ratio) * w.mix_rate / rate
 	var read: Array = _read(w, float(layer.from), (n + f) * step / w.mix_rate)
-	var y := _run(read[0], read[1], 0.0, step, n + f)
+	var ran: Array = _run(read[0], read[1], 0.0, step, n + f)
+	var y: PackedFloat32Array = ran[0]
 	var gain := db_to_linear(float(layer.db))
 	for i in f:
 		var u := (i + 0.5) / f * PI * 0.5
 		out[i] += (y[i] * sin(u) + y[n + i] * cos(u)) * gain
 	for i in range(f, n):
 		out[i] += y[i] * gain
+	return [ran[1], n + f]
 
 
 ## A loop's layer from a short steady stretch (from .. to s), added into `out`: grains of it, each from its own place in
 ## the stretch (a fixed draw), run at `ratio`, laid half over one another under a sine window (their power sums level)
-## round the loop's end and back into its start: seamless wherever it is cut.
-static func _grains(out: PackedFloat32Array, rate: int, w: AudioStreamWAV, layer: Dictionary) -> void:
+## round the loop's end and back into its start: seamless wherever it is cut. -> [samples filled, samples wanted], over
+## all its grains.
+static func _grains(out: PackedFloat32Array, rate: int, w: AudioStreamWAV, layer: Dictionary) -> Array:
 	var read: Array = _read(w, float(layer.from), float(layer.to) - float(layer.from))
 	var x: PackedFloat32Array = read[0]
 	var step := float(layer.ratio) * w.mix_rate / rate
@@ -272,10 +293,15 @@ static func _grains(out: PackedFloat32Array, rate: int, w: AudioStreamWAV, layer
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash(String(layer.src)) + roundi(float(layer.ratio) * 1000.0)
 	var gain := db_to_linear(float(layer.db))
+	var filled := 0
+	var wanted := 0
 	for j in hops:      # (grain j from j/hops of the loop to (j + 2)/hops: every sample under two of them)
 		var start := j * n / hops
 		var g := (j + 2) * n / hops - start
-		var y := _run(x, read[1], rng.randf_range(0.0, maxf(0.0, x.size() - 3.0 - g * step)), step, g)
+		var ran: Array = _run(x, read[1], rng.randf_range(0.0, maxf(0.0, x.size() - 3.0 - g * step)), step, g)
+		var y: PackedFloat32Array = ran[0]
+		filled += int(ran[1])
+		wanted += g
 		var c := cos(PI / g)      # (the window, sin(pi (i + 1/2) / g), turned on a sample at a time)
 		var s := sin(PI / g)
 		var wy := sin(PI * 0.5 / g)
@@ -285,28 +311,39 @@ static func _grains(out: PackedFloat32Array, rate: int, w: AudioStreamWAV, layer
 			var t := wy * c + wx * s
 			wx = wx * c - wy * s
 			wy = t
+	return [filled, wanted]
 
 
 ## A one-shot's layer, added into `out`: the recording from `from` s, run at `ratio` (falling to `glide` by the sound's
-## end, if given), starting `at` s into the sound, rising over `rise` and dying away with `fall` (its e-folding).
-static func _slice(out: PackedFloat32Array, rate: int, w: AudioStreamWAV, layer: Dictionary) -> void:
+## end, if given), starting `at` s into the sound, rising over `rise` and dying away with `fall` (its e-folding). ->
+## [samples filled, samples wanted]: wanted till it has died 60 dB away or the sound ends, whichever is first.
+static func _slice(out: PackedFloat32Array, rate: int, w: AudioStreamWAV, layer: Dictionary) -> Array:
 	var start := int(float(layer.at) * rate)
 	var length := out.size() - start
 	var r0 := float(layer.ratio)
 	var r1 := float(layer.get("glide", r0))
 	var read: Array = _read(w, float(layer.from), maxf(r0, r1) * length / rate)
 	var y: PackedFloat32Array
+	var filled := 0
 	if r1 == r0:
-		y = _run(read[0], read[1], 0.0, r0 * w.mix_rate / rate, length)
-	else:      # (its speed falling: run in eight stretches, each at its own)
+		var ran: Array = _run(read[0], read[1], 0.0, r0 * w.mix_rate / rate, length)
+		y = ran[0]
+		filled = ran[1]
+	else:      # (its speed falling: run in eight stretches, each at its own; one that runs out ends them, the rest silent)
 		y = PackedFloat32Array()
 		var p := 0.0
 		for k in 8:
 			var count := (k + 1) * length / 8 - k * length / 8
 			var step := lerpf(r0, r1, (k + 0.5) / 8.0) * w.mix_rate / rate
-			y.append_array(_run(read[0], read[1], p, step, count))
+			var ran: Array = _run(read[0], read[1], p, step, count)
+			y.append_array(ran[0])
+			filled += int(ran[1])
+			if int(ran[1]) < count:
+				break
 			p += step * count
+		y.resize(length)
 	var rise := maxf(float(layer.rise) * rate, 1.0)
+	var life := mini(length, int(rise + maxf(float(layer.fall) * rate, 1.0) * log(1000.0)))      # (60 dB down)
 	var decay := exp(-1.0 / maxf(float(layer.fall) * rate, 1.0))
 	var gain := db_to_linear(float(layer.db))
 	var env := gain
@@ -319,6 +356,20 @@ static func _slice(out: PackedFloat32Array, rate: int, w: AudioStreamWAV, layer:
 			if env < 1e-4 * gain:
 				break      # (died away: 80 dB down)
 		out[start + i] += v
+	var want := life
+	if filled < life and filled > 0 and _died(read[0]):
+		want = filled      # (its recording died away before it ended: all it had to give)
+	return [mini(filled, life), want]
+
+
+## Has recording stretch x died away at its end (its last 10 ms under -50 dBFS: the bank's one-shots end in silence)?
+static func _died(x: PackedFloat32Array) -> bool:
+	var n := x.size()
+	var k := mini(n, 480)
+	var acc := 0.0
+	for i in range(n - k, n):
+		acc += x[i] * x[i]
+	return k > 0 and sqrt(acc / k) < 0.00316
 
 
 ## A loop's throb: its level swelling by each [depth, cycles] a whole number of times round it (so it is seamless).

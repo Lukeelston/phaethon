@@ -19,8 +19,10 @@
 ## firing and 5, the trigger each frame (mount.fire(g, delta, pulling)), and fires through this fire control's targets:
 ##   g.alive(t)  g.hp_of(t)  g.damage(t, n, at, quiet, bare)  g.threats()  g.add_fx(p, kind, dur, size)  g.play(pool, sound, at, pitch)
 ##   g.play_own(pool, sound, at)  g.own_loop(sound, on)
-## (its own sounds, audio/raid_sounds.gd's, the names its mount's own_sounds() lists: made at this one's build, with sound;
-## with --mute or in a shot, or a source missing, play_own plays the stand-in each replaced and own_loop answers false)
+## (its own sounds, audio/raid_sounds.gd's, the names its mount's own_sounds() lists: made at this one's build, with sound
+## and Raids on; with --mute, in a shot, with Raids off (Ruling AF) or a source missing, play_own plays the stand-in each
+## replaced and own_loop answers false. play_own starts a sound at most once in OWN_GAP of this one's own clock: three
+## orbs striking in two frames are one strike heard, not three of one sound stacked)
 ## and reads where the aim met the ground this frame, g.aim_ground (a beam ends there). A mount that is not aimed (its
 ## aimed() false: the Vesper's pulse, a ring round the craft) gets no search along its aim (1, 2) and no sight (3).
 ## A target is a traffic Car (a commuter, or a raider: hostile) or a flyer of the raid's (its `flyer` true, which a Car
@@ -72,6 +74,7 @@ const LOCK_S := 0.35              # s a vehicle holds under the sight to be lock
 const LOCK_EASE := 3.0            # ... and the lock lost a second with none under it
 const HOSTILE_HP := 6                         # hits a hostile raider (Raids) takes, whatever its kind (a commuter takes none: no weapon knocks one out)
 const GUNSHIP_BURST := 3.0        # a gunship shot down bursts this many times a raider's size
+const OWN_GAP := 0.05             # s of this one's own clock (step's) within which play_own starts no sound a second time
 
 signal killed(car)                 # a hostile shot down, the raid counts it: a raider before traffic.knock_out takes it out of traffic, a flyer once its module has destroyed it
 signal struck_commuter(car)        # a bolt struck a commuter: sparks only
@@ -134,6 +137,7 @@ var _servo: AudioStreamPlayer3D
 var _gun_audio: Array = []
 var _world_audio: Array = []
 var _own_loop: AudioStreamPlayer3D = null      # its mount's own loop (the lance's hum), at the mount: made at build with it
+var _own_at := {}                  # sound -> _now when play_own last started it
 var _was_out := false
 var _was_moving := false
 var dormant := false               # made at load (Raids on) and not stepped until the GUN is first armed
@@ -214,7 +218,8 @@ func build(v) -> void:
 	for n: String in SOUND_NAMES:
 		if _sound_cache.has(n):
 			_sounds[n] = _sound_cache[n]
-	if RaidSounds.heard(v):      # (its mount's own, made now: none with --mute or in a shot, when its stand-ins play)
+	if RaidSounds.heard(v) and v.get("raids") != null:      # (its mount's own, made now: none with --mute, in a shot or with
+		# Raids off (Ruling AF; the director sets view.raids before its build makes this one), when its stand-ins play)
 		for n: String in mount.own_sounds():
 			var s := RaidSounds.make(n)
 			if s != null:
@@ -715,9 +720,13 @@ func play(pool_name: String, sound: String, at := Vector3.INF, pitch := 1.0) -> 
 
 
 ## A sound of the mount's own (audio/raid_sounds.gd: a name its own_sounds() lists) from pool `pool_name` ("gun": at the
-## mount's node; "world": at `at`, render frame). Not made (--mute, a shot, a source missing): the stand-in it replaced
-## (RaidSounds.STAND_IN: a turret sound re-pitched, from its own pool).
+## mount's node; "world": at `at`, render frame). Not made (--mute, a shot, Raids off, a source missing): the stand-in it
+## replaced (RaidSounds.STAND_IN: a turret sound re-pitched, from its own pool). Started already within OWN_GAP: not again
+## (copies of one sound a frame or two apart add up: two 6 dB, three 9.5 dB over one).
 func play_own(pool_name: String, sound: String, at := Vector3.INF) -> void:
+	if _own_at.has(sound) and _now - float(_own_at[sound]) < OWN_GAP:
+		return
+	_own_at[sound] = _now
 	if _sounds.has(sound):
 		play(pool_name, sound, at if pool_name == "world" else Vector3.INF)
 		return
@@ -727,8 +736,8 @@ func play_own(pool_name: String, sound: String, at := Vector3.INF) -> void:
 
 
 ## The mount's own loop (the lance's hum: a name its own_sounds() lists) playing while `on`, stopped in the call it is not
-## (call it every frame). -> false when it has none (not made: --mute, a shot, a source missing): the mount then plays
-## its stand-in.
+## (call it every frame). -> false when it has none (not made: --mute, a shot, Raids off, a source missing): the mount
+## then plays its stand-in.
 func own_loop(sound: String, on: bool) -> bool:
 	if _own_loop == null or _own_loop.stream != _sounds.get(sound):
 		return false

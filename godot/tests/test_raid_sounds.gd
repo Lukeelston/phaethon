@@ -3,7 +3,9 @@
 ## the Network (XR off), the Kiln (its lance's hum), Raids pinned on but for the first check. Run it twice:
 ##   --mute (the muted half)
 ##     check_off_makes_none   Raids off, the GUN never armed, 60 frames: raid_sounds.gd's cache is empty, no director and no
-##                            fire control (so none of the raid's players)
+##                            fire control (so none of the raid's players); then the GUN armed and the lance burned 1 s
+##                            (Ruling AF): still nothing made, no loop on the fire control, none of the raid's sounds on
+##                            it, and the lance's stand-in (the turret's servo, higher) plays
 ##     check_muted            Raids on, a full raid (drones and the gunship), the GUN armed and the lance burning 2 s: no
 ##                            stream made (the cache still empty), no player of the flyers', no loop on the fire control,
 ##                            none of the raid's sounds on it; the lance's stand-in plays as it did
@@ -14,7 +16,8 @@
 ##                            gunship's drone, two reports) and the lance's loop on the fire control, none playing
 ##     check_streams          each of the seven: made, 0.1 to 4 s long, a loop's points round it (a one-shot's none), its
 ##                            peak under -1 dBFS and no sample at full scale, the RMS of its loudest 100 ms within 6 dB of
-##                            LEVELS; the time to make all seven told
+##                            LEVELS; the time to make all seven told. And every layer of every recipe filled all it was
+##                            to fill from its recording (RaidSounds.fills: none ran out of its source part way)
 ##     check_whine            a raid's drones: the whine plays, heard from no farther than the nearest drone and no nearer
 ##                            than that over the root of their number; destroyed one by one it plays on to the last, and
 ##                            stops in that very call (the fire control's damage); a frame on, still stopped
@@ -42,6 +45,9 @@
 ##                            with a raid up and the lance burning: no whine or drone player made (they had none), the
 ##                            gunship's report still made, the lance's stand-in plays as it did; the Vesper's boom taken
 ##                            away, its release plays the stand-in it replaced (the turret's burst at 0.55). Put back after
+##     check_orb_window       the Orrery under the gunship: its three orbs set at it, two to strike this frame and the third
+##                            the next (three strikes in two frames): one orb_strike starts, none more inside OWN_GAP of
+##                            the fire control's own clock; a strike after it plays again
 ## Run with --fixed-fps 120. Prints RAID SOUNDS PASS. Puts user://vr_prefs.json back as it found it.
 ##   muted:  --headless --xr-mode off --fixed-fps 120 --audio-driver Dummy -s res://tests/test_raid_sounds.gd -- --mute
 ##   sound:  --headless --xr-mode off --fixed-fps 120 --audio-driver Dummy -s res://tests/test_raid_sounds.gd
@@ -96,7 +102,7 @@ func _check(label: String, passed: bool) -> void:
 func _run() -> void:
 	var prefs_existed := FileAccess.file_exists(PREFS)
 	var prefs := FileAccess.get_file_as_bytes(PREFS) if prefs_existed else PackedByteArray()
-	var want := 2 if muted else 12
+	var want := 2 if muted else 13
 	await check_off_makes_none()
 	Raids.pinned = true
 	Raids.enabled = true
@@ -120,6 +126,7 @@ func _run() -> void:
 		await process_frame
 		await check_weapons()
 		await check_missing()
+		await check_orb_window()
 	_check("every section ran to its end (%d of %d)" % [sections, want], sections == want)
 	Raids.pinned = false
 	Raids.enabled = false
@@ -239,6 +246,13 @@ static func _players(v) -> Array:
 	return out
 
 
+## RaidSounds.fills (name -> [[samples filled, samples wanted], ...] a layer), read as the script's own at run time: null
+## where it keeps none.
+static func _fills():
+	var s: Script = load("res://audio/raid_sounds.gd")
+	return s.get("fills")
+
+
 ## The gun pool's players playing `stream`: [how many, all on the mount's node].
 static func _gun_playing(g, stream) -> Array:
 	var n := 0
@@ -258,9 +272,29 @@ func check_off_makes_none() -> void:
 	var v = await _cockpit(Pilot.KILN)
 	await _fly(v, 0.5)
 	var made := RaidSounds._cache.keys()
+	var bare: bool = v.raids == null and v.gunnery == null
+	await _arm(v)      # (Ruling AF: armed, with Raids off, the weapon's own is still not made)
+	var g = v.gunnery
+	var burned := 0
+	var stand_in := 0
+	if g != null:
+		g.hold_fire = true
+		for i in 120:
+			await _frame(v)
+			burned += int(g.mount.burning)
+			for p: AudioStreamPlayer3D in g._gun_audio:
+				stand_in += int(p.playing and p.stream == g._sounds.get("deploy"))
+		g.hold_fire = false
+	var own := []
+	if g != null:
+		for n: String in RaidSounds.NAMES:
+			if g._sounds.has(n):
+				own.append(n)
 	sections += 1
-	_check("Raids off, the GUN never armed, 60 frames: raid_sounds.gd's cache empty (%s), no director (%s), no fire control (%s)" % [made, v.raids, v.gunnery],
-		made.is_empty() and v.raids == null and v.gunnery == null)
+	_check("Raids off, the GUN never armed, 60 frames: raid_sounds.gd's cache empty (%s), no director and no fire control (%s); then armed and the lance burned (%d of 120 frames): the cache still empty (%s), no loop on the fire control (%s), none of the raid's sounds on it (%s), the lance's stand-in playing (%d player-frames)" % [
+			made, bare, burned, RaidSounds._cache.keys(), _hum(v), own, stand_in],
+		made.is_empty() and bare and g != null and burned > 100 and RaidSounds._cache.is_empty() and _hum(v) == null and own.is_empty()
+			and stand_in > 0)
 	v.queue_free()
 	await process_frame
 
@@ -347,6 +381,24 @@ func check_streams() -> void:
 	sections += 1
 	_check("each of the seven made, 0.1 to 4 s, the loops' points round them, peaks under -1 dBFS, none at full scale, its level within 6 dB of LEVELS: %s; all seven made in %.1f ms" % [
 		"; ".join(report), total], ok)
+	var fills = _fills()      # (name -> [[samples filled, samples wanted], ...] a layer, as made)
+	var short := []
+	var layers := 0
+	var want_layers := 0
+	for n: String in RaidSounds.NAMES:
+		want_layers += (RaidSounds._recipe(n).layers as Array).size()
+	if fills is Dictionary:
+		for n: String in RaidSounds.NAMES:
+			var each: Array = fills.get(n, [])
+			if each.size() != (RaidSounds._recipe(n).layers as Array).size():
+				short.append("%s: %d of %d layers told" % [n, each.size(), (RaidSounds._recipe(n).layers as Array).size()])
+			for k in each.size():
+				layers += 1
+				if int(each[k][0]) != int(each[k][1]):
+					short.append("%s layer %d: %d of %d samples" % [n, k + 1, int(each[k][0]), int(each[k][1])])
+	_check("every layer of every recipe filled all it was to fill from its recording (%d of %d layers told; short: %s)" % [layers, want_layers,
+			short if fills is Dictionary else "NO FILLS KEPT"],
+		fills is Dictionary and short.is_empty() and layers == want_layers)
 
 
 func check_whine(v) -> void:
@@ -661,6 +713,66 @@ func check_weapons() -> void:
 	_check("each weapon's own, made at load and played at its mount: %s" % "; ".join(report), ok)
 
 
+func check_orb_window() -> void:
+	var v = await _cockpit(Pilot.ORRERY)
+	var k := _city(v)
+	await _raid_on(v, k, 0, 0, true)
+	var F = v.raids.flyers
+	var gs = F.gunship()
+	if gs != null:      # (1.5 km down the road from it: inside a send's reach, 2.2 km, beyond an orb's own, 900 m, so none goes on its own)
+		var Rd = v.sim.roads[int(gs.road)]
+		var f: float = gs.f + 1500.0 / float(Rd.len[clampi(int(gs.f), 0, Rd.N - 1)])
+		v.sim.respawn_on(int(gs.road), clampi(int(f), 2, Rd.N - 3), 1)
+	await _arm(v)
+	await _fly(v, 0.5)      # (the orbs up out of their cradles into orbit)
+	var g = v.gunnery
+	var m = g.mount
+	var strike = RaidSounds._cache.get("orb_strike")
+	var gap = g.get_script().get("OWN_GAP")
+	var starts := []        # orb_strike's starts, a frame
+	var struck := []        # strikes landed, a frame
+	var was: int = m.strikes
+	if gs != null and m.orbs.size() == 3:
+		var at := Vector3(gs.x, gs.y, gs.z)
+		for o in m.orbs:      # (all three at it: two there now, the third 18 m off, a frame behind them)
+			o.state = "out"
+			o.target = gs
+			o.v = Vector3.ZERO
+			o.flown = 0.0
+		m.orbs[0].p = at
+		m.orbs[1].p = at + Vector3(0.0, 0.0, 1.0)
+		m.orbs[2].p = at + Vector3(18.0, 0.0, 0.0)
+		for i in 2:
+			for p: AudioStreamPlayer3D in g._gun_audio:
+				p.stop()
+			await _frame(v)
+			starts.append(_gun_playing(g, strike)[0])
+			struck.append(m.strikes - was)
+			was = m.strikes
+		for i in 8:      # (past the gap: 67 ms of the fire control's frames)
+			for p: AudioStreamPlayer3D in g._gun_audio:
+				p.stop()
+			await _frame(v)
+		var o = m.orbs[0]
+		o.state = "out"
+		o.target = gs
+		o.v = Vector3.ZERO
+		o.p = Vector3(gs.x, gs.y, gs.z)
+		for p: AudioStreamPlayer3D in g._gun_audio:
+			p.stop()
+		await _frame(v)
+		starts.append(_gun_playing(g, strike)[0])
+		struck.append(m.strikes - was)
+	v.raids.reset()
+	v.queue_free()
+	await process_frame
+	sections += 1
+	_check("the Orrery's three orbs at the gunship: strikes a frame %s (three in the first two), orb_strike's starts a frame %s: one, none more inside the gap (%s s of the fire control's own clock); %d frames on, a strike plays again" % [
+			struck.slice(0, 2), starts.slice(0, 2), gap, 10],
+		gs != null and struck.size() == 3 and int(struck[0]) + int(struck[1]) == 3 and int(struck[0]) >= 1 and starts[0] + starts[1] == 1
+			and starts[0] == 1 and int(struck[2]) == 1 and starts[2] == 1)
+
+
 func check_missing() -> void:
 	var sources_were: Dictionary = RaidSounds.sources.duplicate()
 	var cache_was: Dictionary = RaidSounds._cache.duplicate()
@@ -710,6 +822,9 @@ func check_missing() -> void:
 	await process_frame
 	RaidSounds.sources = sources_were
 	RaidSounds._cache = cache_was
+	if _fills() is Dictionary:      # (the remade ones' fills taken out: those made with their sources are not in the cache now)
+		for n: String in gone:
+			(_fills() as Dictionary).erase(n)
 	sections += 1
 	_check("a source missing and one unreadable: %s not made (%s), kept so (%s); a Kiln flight with a raid up: no whine or drone player, two reports, six drones (%s), the lance burning with no hum of its own (%s) and its stand-in playing (%d player-frames); the Vesper's boom taken away, a release plays the turret's burst (%d, at %.2f; the stand-in's 0.55)" % [
 			gone, made, kept, flyers_ok, no_hum, stand_in, burst[0], pitch],

@@ -25,7 +25,7 @@
 ##   felt       buzz(): a light steady buzz in the left hand while it burns (vr/vr_cockpit.gd _gun_buzz)
 ##   sounds     its hum (audio/raid_sounds.gd lance_hum), a loop at the mount the frames the beam burns, stopped in the
 ##              frame it goes off for whatever reason (g.own_loop, called every frame of fire), unheard. With none made
-##              (--mute, a shot, a source missing): its stand-in, the turret's servo higher, again every HUM_EVERY s
+##              (Raids off, --mute, a shot, a source missing): its stand-in, the turret's servo higher, again every HUM_EVERY s
 ## Its arms are fitted on the hull the pilot sees (view/fleet_airframe.gd ensure_arms: the hull last dressed, the VR
 ## seat's own, else the craft's pod) the first time the GUN asks them out: a flight with Raids off that never arms them
 ## builds none of them, nor this one's drawing. With Raids on they are fitted at load, stowed (prepare).
