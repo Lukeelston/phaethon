@@ -18,7 +18,8 @@
 ##             gunship_every'th after (has_gunship: the 3rd, 5th, 7th), the gunship, holding station over the road ahead
 ##             of the pack, strafing low along it, and firing slow shots at the pilot and the commuters. It ends when
 ##             no raider and no flyer is left (cleared if any was killed, else lost), or lost: the pilot away_t s
-##             beyond R_KEEP of the town and of every raider and flyer, or time_limit s gone. Surviving raiders flee:
+##             beyond R_KEEP of the town and of every raider and flyer, or its time limit gone (limit(): time_limit s, or
+##             time_limit_gunship s for a raid that came with the gunship: task 10's ruling). Surviving raiders flee:
 ##             taken out of traffic; surviving flyers go (and the gunship's shots with them). The floor is released
 ##   over      the lull after one, lull s (the same clock as the first wait) until the next is called
 ## A restart (reset), or a crash and the sim's respawn after it, sets a raid aside: no award, the pack gone, the
@@ -119,7 +120,11 @@ var flyers = null                # the raid's flyers (view/raid_flyers.gd: made 
 var first_after := 60.0          # s of waiting before a flight's first
 var lull := Vector2(60.0, 90.0)  # s of waiting after one, drawn between these
 var arrive_r := 15000.0          # m from the town zone: in range, and the pack is placed
-var time_limit := 120.0          # s from arriving
+const TIME_LIMIT := 120.0        # s from arriving: a raid's time limit ...
+const TIME_LIMIT_GUNSHIP := 180.0    # ... and one's that came with the gunship (task 10, measured: the Phaethon's cannons, which
+                                     # reach it only on its runs, need three of them; 120 s left it up)
+var time_limit := TIME_LIMIT     # (tests set it: a test's own limit holds for a raid with the gunship too)
+var time_limit_gunship := TIME_LIMIT_GUNSHIP
 var away_t := 20.0               # s beyond R_KEEP of the town zone, and of every raider, after arriving
 var tick_every := 5.0            # s between commuters lost while it is off-screen
 var tick_cap := 40               # ... and the most lost that way (they stop there; the raid stands)
@@ -143,6 +148,7 @@ var _not_closing := 0.0          # s since the pilot last came nearer it
 var _t := 0.0                    # s since arriving
 var _away := 0.0                 # s beyond R_KEEP of the town zone and of every raider
 var _why := ""                   # why the last was lost: "away" | "time" | "fled" | "not reached"
+var _with_gunship := false       # this raid came with the gunship (at its arrival)
 var _last_city := -1             # the last raid's city: not picked for the next
 var _wrecked := false            # the craft is down (sim.crash_t): the sim respawns it when that runs out
 var _killed := {}                # Car -> true: this raid's raiders shot (on_kill), before traffic loses them
@@ -268,7 +274,7 @@ func update(delta: float) -> void:
 			_away = _away + delta if _far_from_it() else 0.0
 			if _away >= away_t:
 				_end("lost", "away")
-			elif _t >= time_limit:
+			elif _t >= limit():
 				_end("lost", "time")
 
 
@@ -544,11 +550,18 @@ func _arrive() -> void:
 	_t = 0.0
 	_away = 0.0
 	_grace = 0.0
+	_with_gunship = has_gunship(_count)
 	print("RAID: arrived")
 	if flyers != null:
 		flyers.spawn_drones(zone, maxi(mini(drones.x + _count - 1, drones.y), 0))
 		if has_gunship(_count):
 			flyers.spawn_gunship(zone)
+
+
+## This raid's time limit, s from its arrival: time_limit, or time_limit_gunship for one that came with the gunship
+## (unless a test has set time_limit: then that, for both).
+func limit() -> float:
+	return time_limit_gunship if _with_gunship and time_limit == TIME_LIMIT else time_limit
 
 
 ## Does a flight's raid number n (1, its first) bring the gunship: the gunship_from'th, then every gunship_every'th?
@@ -772,6 +785,7 @@ func reset(why := "restart") -> void:
 	_t = 0.0
 	_away = 0.0
 	_grace = 0.0
+	_with_gunship = false
 	if _count > 0:
 		_lull_len = _rng.randf_range(lull.x, lull.y)
 	if aside:
@@ -789,7 +803,7 @@ func text() -> String:
 			var c: Dictionary = sim.cities[city]
 			return "RAID  %s  %s  %d LOST" % [c.name, view._far(Vector2(float(c.cx) - sim.pod.x, float(c.cy) - sim.pod.y).length()), lost]
 		"on":
-			var left := int(maxf(time_limit - _t, 0.0))
+			var left := int(maxf(limit() - _t, 0.0))
 			var line := "RAID"
 			if not pack.is_empty():
 				line += "  %d RAIDERS" % pack.size()

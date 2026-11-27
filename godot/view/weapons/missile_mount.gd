@@ -16,7 +16,10 @@
 ##            SAFE and back, the rack is not refilled.
 ##   flight   in the sims' frame, from the seat's mouth along its rail at missileV plus the craft's own speed along that
 ##            line (kept: it neither gains nor loses with the craft after); each frame it turns toward its target's lead
-##            (the fire control's _lead_at, at the missile's own speed) by turnDeg a second at the most. Within HIT_R of
+##            (the fire control's _lead_at, at the missile's own speed) by turnDeg a second at the most. Turning its
+##            hardest it bleeds BLEED m/s a second, down to MIN_V, so its turn tightens and a target close beside the craft,
+##            inside its turn at full speed, is still reached (task 10: the raid bot's missiles circled drones 250 to 490 m
+##            off the nose for their whole life); out of that turn it gains back as fast, to the speed it left at. Within HIT_R of
 ##            its target over the frame (the nearest the two came, each on a straight line) it strikes: g.damage(target,
 ##            hits). A commuter it passes as near is struck instead (g.damage(c, 0): sparks, never a knock-out) and it is
 ##            spent. Its target gone, it flies on straight; at lifeS it fizzes out (a spark). No ground and no cover:
@@ -44,6 +47,8 @@ const LAUNCH_HEAT := 0.35         # ... and each launch warms them this much (a 
 const SEATS := 4                  # the arms' seats: two on each cassette, port then starboard (their slots and muzzles)
 const ORDER := [0, 2, 1, 3]       # the seats a volley takes in turn: port, starboard, port, starboard
 const HIT_R := 8.0                # m: a missile this near its target, or a commuter on its way, over a frame strikes it
+const BLEED := 1500.0             # m/s a second a missile loses turning its hardest (and gains back out of it) ...
+const MIN_V := 200.0              # ... down to this (its turn then some 100 m round, at 120 degrees a second)
 const MAX_FLYING := 8             # missiles in flight at once (two volleys: one lives lifeS, longer than the reload)
 const DART_TAIL := 0.27           # m from a dart's middle to its tail, where its streak begins (Codex's dart: 0.52 m long)
 const STREAK_W := 0.06            # m: a streak's least width (a bolt's is 0.22: this one leaves a rail a metre from the eye)
@@ -206,6 +211,11 @@ func own_sounds() -> Array:
 	return ["missile_launch"]
 
 
+## A target locked already: the fire control's gate lets the gaze go from it to the next.
+func taken(t) -> bool:
+	return locks.has(t)
+
+
 ## "RELOAD" while the rack reloads (nothing leaves, though locks may be taken), else "LOCK n" while it holds locks.
 func status() -> String:
 	if reload > 0.0:
@@ -269,7 +279,8 @@ func _volley(g) -> void:
 		var line: Vector3 = GunneryScript.dir_to_sim(-m.basis.z).normalized()
 		if missiles.size() >= MAX_FLYING:
 			_fizz(g, missiles.pop_front())
-		missiles.append({"p": g.to_sim(m.origin), "v": line * (missile_v + maxf(0.0, way.dot(line))), "target": c, "t": 0.0})
+		var v0: float = missile_v + maxf(0.0, way.dot(line))
+		missiles.append({"p": g.to_sim(m.origin), "v": line * v0, "v0": v0, "target": c, "t": 0.0})
 		g.shots += 1
 		add_heat(LAUNCH_HEAT)
 		away += 1
@@ -308,7 +319,13 @@ func _fly(g, delta: float) -> void:
 			var flyer := GunneryScript._is_flyer(c)
 			q = Vector3(c.x, c.y, c.z if flyer else g._middle(c))
 			w = Vector3(c.hx * c.v, c.hy * c.v, c.vz if flyer else 0.0)
-			v = _turned(v, g._lead_at(c, q.z, p, v.length()) - p, turn * delta)
+			var want: Vector3 = g._lead_at(c, q.z, p, v.length()) - p
+			var speed := v.length()
+			if v.angle_to(want) > turn * delta:      # (its hardest turn: it bleeds speed, and turns the tighter for it)
+				speed = maxf(MIN_V, speed - BLEED * delta)
+			else:
+				speed = minf(float(m.get("v0", speed)), speed + BLEED * delta)
+			v = _turned(v.normalized() * speed, want, turn * delta)
 		p += v * delta
 		m.p = p
 		m.v = v

@@ -432,8 +432,10 @@ func _find(o: Vector3, d: Vector3, delta: float) -> void:
 			picked = up
 			car_t = float(up.t)
 	# A locked target keeps the sight while the gaze stays inside the sight's ring of it, though another crosses in
-	# front: the tracker holds its target in its gate (a vehicle's capsule, or a flyer's sphere, fattened by it).
-	if _lock_car != null and (picked.is_empty() or picked.car != _lock_car) and alive(_lock_car):
+	# front: the tracker holds its target in its gate (a vehicle's capsule, or a flyer's sphere, fattened by it). Not
+	# one its mount has taken already (taken: the missiles' locks), so the next beside it can be locked (task 10: a pack
+	# over adjacent lanes locked one at a time only).
+	if _lock_car != null and (picked.is_empty() or picked.car != _lock_car) and alive(_lock_car) and not mount.taken(_lock_car):
 		var gate := maxf(2.0, aim_dist * tan(deg_to_rad(SIGHT_DEG) * 0.3))
 		var held := -1.0
 		if not _is_flyer(_lock_car):
