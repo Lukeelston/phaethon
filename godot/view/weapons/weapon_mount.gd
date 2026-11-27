@@ -82,6 +82,13 @@ func node() -> Node3D:
 	return null
 
 
+## Its own sounds (audio/raid_sounds.gd's names): made with its fire control (view/gunnery.gd build: none with --mute or in
+## a shot) and played through it (g.play_own, g.own_loop). None for a mount without: fixed guns and a turret play the fire
+## control's turret sounds.
+func own_sounds() -> Array:
+	return []
+
+
 ## Must it be stepped while stowed, from the start of a flight? Then its fire control is made at once; otherwise
 ## the first time the GUN is armed (view/gunnery.gd frame), so a flight that never arms it builds none of it.
 func steps_stowed() -> bool:

@@ -41,6 +41,20 @@ Phaethon uses excerpts from the 19 Freesound sources below. Each author publishe
 
 NASA does not endorse Phaethon, and nothing here should be read as its endorsement.
 
+### Raid sounds
+
+The raid's flyers and four craft's weapons play sounds that `godot/audio/raid_sounds.gd` makes in the game as a flight with raids loads, from recordings already listed here: nothing new was downloaded for them. It cuts the recordings, runs them faster or slower as a tape is run (pitch and pace together), layers them and shapes their rise and fall, and lays a slow swell in level over two of the loops. Each recording keeps its credit and terms where its bank lists it: [the start-up recordings](godot/audio/startup/CREDITS.md), [the ramjet's](godot/audio/ramjet/CREDITS.md) and [the engines' piano](godot/audio/engines/CREDITS.md).
+
+| Raid sound | Made from |
+| --- | --- |
+| The drones' whine | jasonLON, [Electric Motor Whir.aif](https://freesound.org/s/125401/), and tt_runscript, [1U Rackmount Server Fan](https://freesound.org/s/732705/), as the garage door's motor and the start-up's fans (CC0) |
+| The gunship's drone | the same fan and motor, slowed, over klangfabrik's [shuttlelaunch.wav](https://freesound.org/s/220127/) (CC0), as the ramjet's roar |
+| The gunship's shot | the shuttle launch's ignition thump and NASA's RS-25 film, as the ramjet's light-up; kyles, [switch big breaker metal click on, off.flac](https://freesound.org/s/451933/) (CC0); the engines' bang (Salamander Grand Piano V3, CC BY 3.0) |
+| The Shrike's missiles leaving | the breaker; reg7783, [release_air_pffft.wav](https://freesound.org/s/131302/) (CC0); the ramjet's RS-25 crackle and light-up |
+| The Kiln's lance | FlashTrauma, [Electricity](https://freesound.org/s/398274/), craigsmith, [S16-18 Tesla coil sparking and humming.wav](https://freesound.org/s/675760/), and chungus43A, [60Hz electrical mains hum](https://freesound.org/s/733737/) (CC0), as the start-up's arc |
+| The Vesper's pulse | the ramjet's light-up and cut-off (the shuttle launch and the RS-25), the engines' bang (CC BY 3.0) and the air valve |
+| An Orrery orb's strike | the breaker, the start-up's arc and SpliceSound, [Heavy metal light switch, flipping.wav](https://freesound.org/s/188194/) (CC0) |
+
 ### Engine loops and one-shots
 
 Alexander Holm recorded the Yamaha C5 for **Salamander Grand Piano V3**. Roberto assembled the SFZ+FLAC V3+20200602 edition for FreePats. The recordings carry [Creative Commons Attribution 3.0 Unported](https://creativecommons.org/licenses/by/3.0/). [Original sound bank](https://freepats.zenvoid.org/Piano/acoustic-grand-piano.html)

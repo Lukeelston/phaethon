@@ -25,7 +25,9 @@
 ##            (view/gunnery.gd's ribbon and glow), STREAK_W wide at the least (a bolt's least is 0.22 m), so where it
 ##            leaves the rail a metre or so from the eye it is a thin line: nothing bright fills the view, and nothing
 ##            moves the camera or the cockpit.
-##   sounds   stand-ins for Task 9, which owns them: a launch and a strike are turret sounds re-pitched (g.play).
+##   sounds   a volley's launch (audio/raid_sounds.gd missile_launch, at the mount: g.play_own), once for the volley, not
+##            once a missile (four of one sound at once would stack up to 12 dB louder), unheard; a strike's: the
+##            turret's impact, lower, where it strikes (kept from the stand-ins)
 ## Its arms are fitted on the hull the pilot sees (the VR seat's own, else the craft's pod; view/shrike_airframe.gd
 ## ensure_arms) the first time the GUN asks them out: a flight with Raids off that never arms them builds none of them,
 ## nor this one's batches and brackets. With Raids on they are fitted at load, stowed (prepare).
@@ -46,8 +48,7 @@ const MAX_FLYING := 8             # missiles in flight at once (two volleys: one
 const DART_TAIL := 0.27           # m from a dart's middle to its tail, where its streak begins (Codex's dart: 0.52 m long)
 const STREAK_W := 0.06            # m: a streak's least width (a bolt's is 0.22: this one leaves a rail a metre from the eye)
 const STREAK_COL := Color(2.6, 1.5, 0.55)      # a bolt's (view/gunnery.gd _draw)
-const LAUNCH_PITCH := 0.55        # (stand-ins, Task 9's to replace: the turret's shot, lower, for a launch ...)
-const STRIKE_PITCH := 0.7         # (... and its impact, lower, for a strike)
+const STRIKE_PITCH := 0.7         # a strike: the turret's impact, lower (kept)
 
 var craft                         # the CraftModel (view/craft_model.gd)
 var arms = null                   # Codex's arms (view/arms/shrike_arms.gd), fitted at the first arming
@@ -201,6 +202,10 @@ func own_fire() -> bool:
 	return true
 
 
+func own_sounds() -> Array:
+	return ["missile_launch"]
+
+
 ## "RELOAD" while the rack reloads (nothing leaves, though locks may be taken), else "LOCK n" while it holds locks.
 func status() -> String:
 	if reload > 0.0:
@@ -267,8 +272,9 @@ func _volley(g) -> void:
 		missiles.append({"p": g.to_sim(m.origin), "v": line * (missile_v + maxf(0.0, way.dot(line))), "target": c, "t": 0.0})
 		g.shots += 1
 		add_heat(LAUNCH_HEAT)
-		g.play("gun", "fire", Vector3.INF, LAUNCH_PITCH)      # (a stand-in for the launch's own sound: Task 9's)
 		away += 1
+	if away > 0:
+		g.play_own("gun", "missile_launch")      # (the volley's launch, once)
 	locks.clear()
 	reload = reload_s
 	print("GUN: Shrike RS missiles fired: %d away" % away)
@@ -310,7 +316,7 @@ func _fly(g, delta: float) -> void:
 		if c != null and _passed(p, v, q, w, delta, r2):
 			missiles.remove_at(k)
 			g.damage(c, hits, q)
-			g.play("world", "impact", g.to_render(q), STRIKE_PITCH)      # (a stand-in for the strike's own sound: Task 9's)
+			g.play("world", "impact", g.to_render(q), STRIKE_PITCH)      # (the strike: the turret's impact, lower: kept)
 	_commuters_met(g, delta, r2)
 	for k in range(missiles.size() - 1, -1, -1):      # (and at lifeS it fizzes out)
 		if float(missiles[k].t) >= life_s:
@@ -392,7 +398,7 @@ func _commuters_met(g, delta: float, r2: float) -> void:
 		missiles.remove_at(k)
 		var at := Vector3(c.x, c.y, traffic.body_height(c))
 		g.damage(c, 0, at)      # (a strike: sparks off it, never a knock-out)
-		g.play("world", "impact", g.to_render(at), STRIKE_PITCH)      # (the strike's stand-in, as on a target)
+		g.play("world", "impact", g.to_render(at), STRIKE_PITCH)      # (the strike, as on a target)
 
 
 ## A missile spent at its life's end: it fizzes out where it is (a bolt's spark at the end of its reach).

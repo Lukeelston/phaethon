@@ -34,8 +34,8 @@
 ##   glow      the wheel's heat is the charge it holds (Ruling Y): 1 - charge / rechargeS, dark just after a release,
 ##             brightening to full when it is ready again; full before the first.
 ##   felt      one strong tick in both hands on the release, below a jolt's (kicks: vr/vr_cockpit.gd _gun_kick)
-##   sounds    stand-ins for Task 9's, which owns them: turret sounds re-pitched (g.play), unheard: the boom on the release
-##             (pulse_boom) and a cue when it is charged again (pulse_ready)
+##   sounds    the boom on the release (audio/raid_sounds.gd pulse_boom, at the mount: g.play_own), unheard; a cue when it
+##             is charged again: the turret's servo, higher (kept from the stand-ins)
 ## Its arms are fitted on the hull the pilot sees (view/fleet_airframe.gd ensure_arms: the hull last dressed, the VR
 ## seat's own, else the craft's pod) the first time the GUN asks them out: a flight with Raids off that never arms them
 ## builds none of them, nor this one's drawing. With Raids on they are fitted at load, stowed (prepare).
@@ -56,8 +56,7 @@ const RING_END := 0.35            # ... this much of it at its radius ...
 const LINGER_S := 0.25            # ... and out over this long after, at its radius
 const RING_COL := Color(0.86, 0.62, 1.0)      # the wheel's lens's lilac (its front white-hot: the shader's)
 const SEGMENTS := 128             # round the ring (a chord 0.14 m inside the circle at 450 m)
-const BOOM_PITCH := 0.55          # (stand-ins, Task 9's to replace: the turret's burst, lower, for the release ...)
-const READY_PITCH := 1.7          # (... and its servo, higher, for the charge full again)
+const READY_PITCH := 1.7          # the charge full again: the turret's servo, higher (kept)
 
 var craft                         # the CraftModel (view/craft_model.gd)
 var arms = null                   # Codex's arms (view/arms/vesper_arms.gd), fitted at the first arming
@@ -83,7 +82,7 @@ var _asked := false               # asked out this frame (the switch, with power
 var _shown := -1.0                # the deploy the arms were last set to
 var _held := false                # the trigger held last frame
 var _readied := false             # charged since its last release (status: PULSE READY)
-var _cue := false                 # charged this frame (the ready cue's stand-in, played in fire)
+var _cue := false                 # charged this frame (its ready cue, played in fire)
 var _step_us := 0
 
 
@@ -175,6 +174,10 @@ func own_fire() -> bool:
 	return true
 
 
+func own_sounds() -> Array:
+	return ["pulse_boom"]
+
+
 ## "PULSE READY" once it has charged again after a release, else "".
 func status() -> String:
 	return "PULSE READY" if _readied else ""
@@ -203,7 +206,7 @@ func fire(g, delta: float, pulling: bool) -> void:
 	_held = g.trigger or g.hold_fire
 	if _cue:
 		_cue = false
-		g.play("gun", "deploy", Vector3.INF, READY_PITCH)      # (a stand-in for the charge's own cue: Task 9's pulse_ready)
+		g.play("gun", "deploy", Vector3.INF, READY_PITCH)      # (the charge's cue: the turret's servo, higher: kept)
 	if arms != null:
 		arms.heat = 1.0 - charge / recharge_s      # (the charge it holds: Ruling Y)
 	if ring != null:
@@ -226,7 +229,7 @@ func _release(g) -> void:
 	charge = recharge_s
 	_readied = false
 	released += 1
-	g.play("gun", "burst", Vector3.INF, BOOM_PITCH)      # (a stand-in for the release's own boom: Task 9's pulse_boom)
+	g.play_own("gun", "pulse_boom")      # (the release's boom)
 	_tell("released (%d threats about)" % ahead.size())
 
 

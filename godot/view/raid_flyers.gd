@@ -73,6 +73,20 @@
 ##            behind them (SHOT_SHADER: added, they were lost on a bright sky), none under SHOT_MIN_ANG to the eye;
 ##            they are not on the maps.
 ##   shot     GUNSHIP_HP hits (the fire control's burst for it is GUNSHIP_BURST times a raider's): kills_by.gunship
+## Their sounds (audio/raid_sounds.gd's, made at build: none with --mute or in a shot; unheard by anyone), each on a player
+## of its own made then, on the Master bus as the engines' are (so the menu's and the pause's mute of it holds them too):
+##   the whine    the drones' one loop, not one each: put each frame where the swarm is heard from (_sounds_step: toward
+##                each drone as loud as it would be, at the distance that gives them all their loudness together), so a
+##                dive on the pilot comes up loud from where it comes; playing while any drone is up
+##   the drone    the gunship's loop, on it while it is up
+##   the report   a shot's, at the muzzle as it is fired
+## A loop stops in the call that takes the last of its flyers (destroy: the last drone, the gunship) and in the raid's end
+## or a restart (clear), never a frame later. Each is at most its *_DB, that within its *_UNIT m, and falls 6 dB with each
+## doubling of the distance beyond (inverse distance). Set by measure in the game's own mix (tests/record_raid_sounds.gd
+## under the movie writer, the two ears' power together): the whine at its most -29.5 dBFS and the drone -30.0, 15 dB and
+## more under the Phaethon cruising dry at 1,500 mph (-14.2: the quieter of it and the Kiln, -13.3); in the louder ear
+## each is still 12.9 and 13.4 dB under that cruise's quieter ear. The report at its most -19.1, 4 dB under the jolt's
+## thump (-15.0).
 ## Positions are the sims' frame (x, y, height), as the fire control's bolts are; the drones' batch, the gunship's
 ## model and its shots' batch are drawn about the view's floating origin, the batches' buffers written once a frame. A
 ## frame of theirs (update) allocates nothing (a look for prey halves a bucket; the batches' buffers are kept); only
@@ -90,10 +104,12 @@
 ##   flyers.ray_flyer(f, o, d, pad)            ... one flyer's sphere (its pick radius r, fattened by pad): t, or -1
 ##   flyers.hit(f, n) / destroy(f)             the fire control's damage
 ##   flyers.marks(x, y, r)                     the maps: [[x, y, Traffic.HOSTILE_MARK], ...], under r from (x, y) on each axis
+##   flyers.whine / hull_drone / reports       the sounds' players (null, or none, with --mute or in a shot)
 extends Node3D
 
 const Traffic := preload("res://view/network_traffic.gd")
 const Art := preload("res://view/raid_flyer_art.gd")
+const RaidSounds := preload("res://audio/raid_sounds.gd")
 
 const DRONE_HP := 2                       # hits a drone takes
 const DRONE_ALT := Vector2(60.0, 120.0)   # m above the road a drone circles at (each its own)
@@ -150,6 +166,14 @@ const SHOT_SIDE := 4.0                    # m across a shot's glow ...
 const GLOW_SIDE := 7.0                    # ... and its muzzle's, at its brightest
 const SHOT_MIN_ANG := 0.02                # rad: neither ever drawn smaller to the eye (a shot 700 m off, 14 m across)
 const SHOT_COL := Color(1.0, 0.2, 0.03)   # their red, round a white-hot middle
+const WHINE_DB := -9.0                    # dB: the drones' whine at its most (its stream is made to RaidSounds.LEVELS), ...
+const WHINE_UNIT := 100.0                 # ... that within this many metres of where the swarm is heard from
+const HULL_DB := -11.0                    # the gunship's drone, ...
+const HULL_UNIT := 150.0
+const REPORT_DB := -2.0                   # ... and a shot's report
+const REPORT_UNIT := 150.0
+const EAR_NEAR := 30.0                    # m: a drone nearer the ear than this counts as this near (where the whine is from)
+const SOUND_REACH := 8000.0               # m: none of them heard beyond this (their players' max_distance)
 # The shots' and the glow's discs, turned to the eye: laid over what is behind them, not added to it (added, an orange
 # glow on a bright cloud by day was white on white, as raid_burst.gd's ring was): a red disc round a white-hot middle,
 # the instance colour its red and, in its alpha, its strength.
@@ -262,6 +286,9 @@ var _gunship: Gunship = null              # the gunship up
 var _zone := {}                           # its zone (the director's _zone(k)) ...
 var _roofs: Array = []                    # ... the roofs over its road there: [Vector2(first, last sample)], in order
 var _roofs_road := -1
+var whine: AudioStreamPlayer3D = null     # the drones' whine (one for them all), the gunship's drone, and two players for
+var hull_drone: AudioStreamPlayer3D = null    # its shots' reports (one may still ring as the next is fired): made at build,
+var reports: Array = []                   # none with --mute or in a shot
 var _best_c = null                        # (a look for a commuter to fire on: the best so far, and its lead)
 var _best_d := INF
 var _best_lead := Vector3.ZERO
@@ -275,6 +302,8 @@ func build(v, d) -> void:
 	world = v.get("network_world")
 	name = "raid_flyers"
 	_rng.seed = 20261126
+	if RaidSounds.heard(v):      # (their sounds and players, made now: none in a flight without sound)
+		_make_players()
 
 
 ## The raid's drones put down over `zone` (the director's _zone(k)): `n` of them (as many as the batch has room for),
@@ -366,6 +395,7 @@ func update(delta: float) -> void:
 	_shots_step(delta)
 	_draw_batch()
 	_draw_glow()
+	_sounds_step()
 	update_ms = (Time.get_ticks_usec() - t0) / 1000.0
 
 
@@ -1173,6 +1203,7 @@ func _shoot(g: Gunship) -> void:
 	shots_made += 1
 	shots.append({"p": m, "v": (g.lead - m).normalized() * SHOT_V, "t": 0.0, "n": shots_made, "pilot": g.at_pod, "car": g.prey,
 		"top": g.z, "floor": g.lead.z - SHOT_FLOOR, "ox": mx, "oy": my, "oz": float(r.y)})
+	_report(r)
 	if g.at_pod:
 		print("RAID: gunship fires on you")
 
@@ -1354,7 +1385,7 @@ func gunship() -> Gunship:
 	return _gunship
 
 
-## Every flyer gone (the raid's end, a restart), and every shot, and nothing drawn.
+## Every flyer gone (the raid's end, a restart), and every shot, and nothing drawn; their sounds stopped now.
 func clear() -> void:
 	_list.clear()
 	_groups.clear()
@@ -1366,6 +1397,9 @@ func clear() -> void:
 		_glow.multimesh.visible_instance_count = 0
 	if batch != null:
 		batch.multimesh.visible_instance_count = 0
+	_quiet_gone()
+	for p: AudioStreamPlayer3D in reports:
+		p.stop()
 
 
 ## Every flyer up: the live list (read it; duplicate() it to destroy flyers while going through it).
@@ -1427,11 +1461,97 @@ func hit(f, n: int) -> bool:
 
 
 ## Flyer f gone (shot down: the director counts it from its kind; or taken away). The gunship's shots in flight fly on.
+## The last drone's whine, or the gunship's drone, stops now.
 func destroy(f) -> void:
 	_list.erase(f)
 	if f == _gunship:
 		_gunship = null
 		ship.visible = false
+	_quiet_gone()
+
+
+# --- their sounds ---------------------------------------------------------------------------------------------------
+
+## Their players, made at build with their sounds (audio/raid_sounds.gd): one whose sound could not be made (a source of
+## it missing) is not made, and that sound is not heard (they had none before).
+func _make_players() -> void:
+	var s := RaidSounds.drone_whine()
+	if s != null:
+		whine = _sound_player("RaidWhine", s, WHINE_DB, WHINE_UNIT)
+	s = RaidSounds.gunship_drone()
+	if s != null:
+		hull_drone = _sound_player("RaidGunshipDrone", s, HULL_DB, HULL_UNIT)
+	s = RaidSounds.gunship_shot()
+	if s != null:
+		for k in 2:
+			reports.append(_sound_player("RaidReport%d" % (k + 1), s, REPORT_DB, REPORT_UNIT))
+
+
+## A player of theirs, its place the world's (top level: set where it plays, about the view's floating origin): at most
+## `db`, that within `unit` m, falling 6 dB with each doubling of the distance beyond.
+func _sound_player(n: String, s: AudioStream, db: float, unit: float) -> AudioStreamPlayer3D:
+	var p := AudioStreamPlayer3D.new()
+	p.name = n
+	p.stream = s
+	p.volume_db = db
+	p.max_db = db
+	p.unit_size = unit
+	p.max_distance = SOUND_REACH
+	p.bus = "Master"
+	p.top_level = true
+	add_child(p)
+	return p
+
+
+## The loops, a frame of a raid on (update): the whine while any drone is up, from where the swarm is heard (each drone
+## weighed by how loud it would be, 1 / its distance from the ear squared (EAR_NEAR at the least): toward their weighed
+## way from the ear, at 1 / the root of the weights' sum, the distance one source as loud as all of them would be), the
+## gunship's drone on it while it is up; each stopped once what it is of is gone.
+func _sounds_step() -> void:
+	if whine != null:
+		var cam := get_viewport().get_camera_3d()
+		var eye := cam.global_position if cam != null else Vector3.ZERO
+		var ox: float = view.org_x
+		var oy: float = view.org_y
+		var weight := 0.0
+		var way := Vector3.ZERO
+		for f: Flyer in _list:
+			if f.kind != "drone":
+				continue
+			var off := Vector3(f.x - ox, f.z, -(f.y - oy)) - eye
+			var d := maxf(off.length(), EAR_NEAR)
+			weight += 1.0 / (d * d)
+			way += off / (d * d * d)
+		if weight > 0.0:
+			whine.global_position = eye + (way.normalized() if way.length_squared() > 1e-24 else Vector3.FORWARD) / sqrt(weight)
+			if not whine.playing:
+				whine.play()
+	if hull_drone != null and _gunship != null:
+		hull_drone.global_position = ship.global_position
+		if not hull_drone.playing:
+			hull_drone.play()
+	_quiet_gone()
+
+
+## The loops of what is gone stopped now: the whine with no drone left, the gunship's drone with no gunship.
+func _quiet_gone() -> void:
+	if whine != null and whine.playing and count("drone") == 0:
+		whine.stop()
+	if hull_drone != null and hull_drone.playing and _gunship == null:
+		hull_drone.stop()
+
+
+## A shot's report at the muzzle (`at`: the render frame): on a player not ringing, else on the first.
+func _report(at: Vector3) -> void:
+	if reports.is_empty():
+		return
+	var p: AudioStreamPlayer3D = reports[0]
+	for q: AudioStreamPlayer3D in reports:
+		if not q.playing:
+			p = q
+			break
+	p.global_position = at
+	p.play()
 
 
 ## The flyers on the map: [[x, y, Traffic.HOSTILE_MARK], ...], those under r from (x, y) on each axis (|dx| < r and

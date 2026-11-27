@@ -18,6 +18,9 @@
 ## A weapon that fires for itself (its mount's own_fire(): missiles, a beam, a pulse, orbs) is given, in place of 4's
 ## firing and 5, the trigger each frame (mount.fire(g, delta, pulling)), and fires through this fire control's targets:
 ##   g.alive(t)  g.hp_of(t)  g.damage(t, n, at, quiet, bare)  g.threats()  g.add_fx(p, kind, dur, size)  g.play(pool, sound, at, pitch)
+##   g.play_own(pool, sound, at)  g.own_loop(sound, on)
+## (its own sounds, audio/raid_sounds.gd's, the names its mount's own_sounds() lists: made at this one's build, with sound;
+## with --mute or in a shot, or a source missing, play_own plays the stand-in each replaced and own_loop answers false)
 ## and reads where the aim met the ground this frame, g.aim_ground (a beam ends there). A mount that is not aimed (its
 ## aimed() false: the Vesper's pulse, a ring round the craft) gets no search along its aim (1, 2) and no sight (3).
 ## A target is a traffic Car (a commuter, or a raider: hostile) or a flyer of the raid's (its `flyer` true, which a Car
@@ -42,6 +45,7 @@ const Sim := preload("res://sim/craft_sim.gd")
 const PilotCraft := preload("res://sim/pilot_craft.gd")
 const WeaponMountScript := preload("res://view/weapons/weapon_mount.gd")
 const SightShader := preload("res://view/gun_sight.gdshader")
+const RaidSounds := preload("res://audio/raid_sounds.gd")
 const GlowShader := preload("res://view/gun_glow.gdshader")
 const SmokeShader := preload("res://view/gun_smoke.gdshader")
 const AUDIO_DIR := "res://audio/turret/"
@@ -129,6 +133,7 @@ var _sounds := {}                  # name -> AudioStream
 var _servo: AudioStreamPlayer3D
 var _gun_audio: Array = []
 var _world_audio: Array = []
+var _own_loop: AudioStreamPlayer3D = null      # its mount's own loop (the lance's hum), at the mount: made at build with it
 var _was_out := false
 var _was_moving := false
 var dormant := false               # made at load (Raids on) and not stepped until the GUN is first armed
@@ -209,10 +214,19 @@ func build(v) -> void:
 	for n: String in SOUND_NAMES:
 		if _sound_cache.has(n):
 			_sounds[n] = _sound_cache[n]
+	if RaidSounds.heard(v):      # (its mount's own, made now: none with --mute or in a shot, when its stand-ins play)
+		for n: String in mount.own_sounds():
+			var s := RaidSounds.make(n)
+			if s != null:
+				_sounds[n] = s
 	var at: Node = mount.node() if mount.node() != null else self      # (a mount with no node of its own: here)
 	_servo = _player(at, -2.0)
 	for i in 3:
 		_gun_audio.append(_player(at, 1.0))
+	for n: String in mount.own_sounds():      # (its own loop: a player of its own, as loud as the gun pool's)
+		if n in RaidSounds.LOOPS and _sounds.has(n):
+			_own_loop = _player(at, 1.0)
+			_own_loop.stream = _sounds[n]
 	for i in 6:
 		var p := _player(self, 4.0)
 		p.unit_size = 60.0
@@ -698,6 +712,31 @@ func play(pool_name: String, sound: String, at := Vector3.INF, pitch := 1.0) -> 
 		_play(_world_audio, sound, at, pitch)
 	else:
 		push_error("Gunnery.play: no pool \"%s\" (it has \"gun\" and \"world\")" % pool_name)
+
+
+## A sound of the mount's own (audio/raid_sounds.gd: a name its own_sounds() lists) from pool `pool_name` ("gun": at the
+## mount's node; "world": at `at`, render frame). Not made (--mute, a shot, a source missing): the stand-in it replaced
+## (RaidSounds.STAND_IN: a turret sound re-pitched, from its own pool).
+func play_own(pool_name: String, sound: String, at := Vector3.INF) -> void:
+	if _sounds.has(sound):
+		play(pool_name, sound, at if pool_name == "world" else Vector3.INF)
+		return
+	var stand_in: Array = RaidSounds.STAND_IN.get(sound, [])
+	if not stand_in.is_empty():
+		play(stand_in[0], stand_in[1], at if stand_in[0] == "world" else Vector3.INF, stand_in[2])
+
+
+## The mount's own loop (the lance's hum: a name its own_sounds() lists) playing while `on`, stopped in the call it is not
+## (call it every frame). -> false when it has none (not made: --mute, a shot, a source missing): the mount then plays
+## its stand-in.
+func own_loop(sound: String, on: bool) -> bool:
+	if _own_loop == null or _own_loop.stream != _sounds.get(sound):
+		return false
+	if on and not _own_loop.playing:
+		_own_loop.play()
+	elif not on and _own_loop.playing:
+		_own_loop.stop()
+	return true
 
 
 # --- the targets: what any weapon fires at ---------------------------------------------------------------------

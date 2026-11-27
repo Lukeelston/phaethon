@@ -35,8 +35,9 @@
 ##            in the orbs' mint: nothing bright fills the view, nothing moves the camera or the cockpit. The bay's glow
 ##            (heat) is the share of its orbs away
 ##   felt     one tick on a send (the fire control's shot count): nothing on a strike
-##   sounds   stand-ins for Task 9, which owns them, unheard: turret sounds re-pitched (g.play) for a send (orb_send) and a
-##            strike (orb_strike)
+##   sounds   a strike (audio/raid_sounds.gd orb_strike, at the mount: g.play_own; the brief's place for a weapon's own, so
+##            the pilot hears each orb strike home, up to 2.2 km off), unheard; a send: the turret's shot, lower (kept
+##            from the stand-ins)
 ## Its arms are fitted on the hull the pilot sees (view/fleet_airframe.gd ensure_arms: the hull last dressed, the VR seat's
 ## own, else the craft's pod) the first time the GUN asks them out: a flight with Raids off that never arms them builds
 ## none of them, nor this one's streaks. With Raids on they are fitted at load, stowed (prepare).
@@ -58,8 +59,7 @@ const ORB_R := 0.071              # m: an orb's radius (her ball, 0.101 x ORB_SC
 const STREAK_W := 0.06            # m: a streak's least width (the missiles'; a bolt's is 0.22)
 const STREAK_COL := Color(0.6, 2.2, 1.9)      # the orbs' lens's mint, made a glow (a bolt's is 2.6, 1.5, 0.55)
 const HEAT_EASE := 2.0            # the bay's glow moves this much a second toward the share of its orbs away
-const SEND_PITCH := 0.8           # (stand-ins, Task 9's to replace: the turret's shot, lower, for a send: orb_send ...)
-const STRIKE_PITCH := 1.5         # (... and its impact, higher, for a strike: orb_strike)
+const SEND_PITCH := 0.8           # a send: the turret's shot, lower (kept)
 
 
 ## One orb's state (the mount's `orbs`, one each of the arms' orbs).
@@ -186,7 +186,7 @@ func origin() -> Vector3:
 	return (arms as Node3D).global_position if arms != null else _hull().global_position
 
 
-## The hull: the fire control's players (a send's stand-in) hang there, where the arms are fitted.
+## The hull: the fire control's players (a send's and a strike's sounds) hang there, where the arms are fitted.
 func node() -> Node3D:
 	return _hull()
 
@@ -197,6 +197,10 @@ func heat() -> float:
 
 func own_fire() -> bool:
 	return true
+
+
+func own_sounds() -> Array:
+	return ["orb_strike"]
 
 
 ## Orb k's place in the orbit now (the cab's frame: the arms').
@@ -353,7 +357,7 @@ func _fly_out(g, o: Orb, here: Vector3, speed: float, delta: float) -> void:
 		_turn_back(o)
 		strikes += 1
 		g.damage(c, hits, at, true)      # (quiet: a commuter would never be touched)
-		g.play("world", "impact", g.to_render(at), STRIKE_PITCH)      # (a stand-in for the strike's own sound: Task 9's orb_strike)
+		g.play_own("gun", "orb_strike", g.to_render(at))      # (the strike: at the mount; its stand-in, at the strike)
 
 
 ## Home again from out: back to its place in the orbit, its target dropped.
@@ -428,7 +432,7 @@ func _send(g, here: Vector3, frame: Transform3D) -> void:
 		return
 	sends += 1
 	g.shots += 1      # (one shot: the cockpit's one tick in the hand that fires)
-	g.play("gun", "fire", Vector3.INF, SEND_PITCH)      # (a stand-in for the send's own sound: Task 9's orb_send)
+	g.play("gun", "fire", Vector3.INF, SEND_PITCH)      # (the send: the turret's shot, lower: kept)
 	print("GUN: %s orbs sent: %d at a %s %.0f m off" % [_name(), n, String(c.kind) if GunneryScript._is_flyer(c) else "raider", _dist(c, here)])
 
 

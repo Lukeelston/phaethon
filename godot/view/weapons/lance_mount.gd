@@ -23,7 +23,9 @@
 ##              glow, GLOW_DEG wide): nothing nearer the eye than the mouth, nothing fills the view, nothing moves the
 ##              camera or the cockpit. The emitter's heat follows fire_s / fireS.
 ##   felt       buzz(): a light steady buzz in the left hand while it burns (vr/vr_cockpit.gd _gun_buzz)
-##   sounds     a stand-in for Task 9's hum, which owns it: a turret sound re-pitched (g.play), unheard.
+##   sounds     its hum (audio/raid_sounds.gd lance_hum), a loop at the mount the frames the beam burns, stopped in the
+##              frame it goes off for whatever reason (g.own_loop, called every frame of fire), unheard. With none made
+##              (--mute, a shot, a source missing): its stand-in, the turret's servo higher, again every HUM_EVERY s
 ## Its arms are fitted on the hull the pilot sees (view/fleet_airframe.gd ensure_arms: the hull last dressed, the VR
 ## seat's own, else the craft's pod) the first time the GUN asks them out: a flight with Raids off that never arms them
 ## builds none of them, nor this one's drawing. With Raids on they are fitted at load, stowed (prepare).
@@ -43,8 +45,7 @@ const GLOW_ON_HOSTILE := 1.6      # ... this much wider on a hostile ...
 const GLOW_COL := Color(1.0, 0.6, 0.25)
 const GLOW_LIGHT := {"hostile": 2.2, "ground": 1.2, "air": 0.4}      # ... and this bright, by what it ends on
 const BUZZ_AMP := 0.15            # the hand's buzz while it burns (a gun tick is 0.22, the power's felt 0.35)
-const HUM_EVERY := 0.9            # (a stand-in for Task 9's hum: the turret's servo, higher, again this often while it burns)
-const HUM_PITCH := 1.35
+const HUM_EVERY := 0.9            # (with no hum made, its stand-in: the turret's servo, higher, again this often while it burns)
 
 var craft                         # the CraftModel (view/craft_model.gd)
 var arms = null                   # Codex's arms (view/arms/kiln_arms.gd), fitted at the first arming
@@ -73,7 +74,7 @@ var _carry := 0.0                 # the fraction of a hit carried into the next 
 var _cooled := false              # cooled since it last overheated (status: GUN READY)
 var _ends := "air"                # what the beam ends on: "hostile", "ground" or "air"
 var _burn_s := 0.0                # s of this burn (the log)
-var _hum := 0.0                   # s till the hum's stand-in again
+var _hum := 0.0                   # s till the hum's stand-in again (with no hum made)
 var _step_us := 0
 
 
@@ -181,7 +182,7 @@ func origin() -> Vector3:
 	return (m as Transform3D).origin if m != null else _hull().global_position
 
 
-## The hull: the fire control's players (the hum) hang there, where the arms are fitted.
+## The hull: the fire control's players (the hum's loop) hang there, where the arms are fitted.
 func node() -> Node3D:
 	return _hull()
 
@@ -197,6 +198,10 @@ func limited() -> bool:
 
 func own_fire() -> bool:
 	return true
+
+
+func own_sounds() -> Array:
+	return ["lance_hum"]
 
 
 ## "GUN HOT" while it cools, "GUN READY" once it has cooled, else "".
@@ -232,6 +237,11 @@ func fire(g, delta: float, pulling: bool) -> void:
 		beam_len = 0.0
 		fire_s = maxf(0.0, fire_s - delta * fire_max / cool_s)
 	burning = on
+	if not g.own_loop("lance_hum", on) and on:      # (no hum made: its stand-in, again every HUM_EVERY s of the burn)
+		_hum -= delta
+		if _hum <= 0.0:
+			_hum = HUM_EVERY
+			g.play_own("gun", "lance_hum")
 	if arms != null:
 		arms.heat = fire_s / fire_max
 	if beam != null:
@@ -239,7 +249,7 @@ func fire(g, delta: float, pulling: bool) -> void:
 	cost_ms = (_step_us + Time.get_ticks_usec() - t0) / 1000.0
 
 
-## A frame of the beam on: where it ends, the hits on what it ends on, the heat, and the hum's stand-in.
+## A frame of the beam on: where it ends, the hits on what it ends on, and the heat.
 func _burn(g, delta: float) -> void:
 	var o: Vector3 = g.to_sim(beam_from)
 	var d := GunneryScript.dir_to_sim(beam_dir)
@@ -269,10 +279,6 @@ func _burn(g, delta: float) -> void:
 	if on_beam != null and n > 0:
 		g.damage(on_beam, n, o + d * end, false, true)      # (bare: Ruling T)
 	_burn_s += delta
-	_hum -= delta
-	if _hum <= 0.0:
-		_hum = HUM_EVERY
-		g.play("gun", "deploy", Vector3.INF, HUM_PITCH)      # (a stand-in for the lance's hum: Task 9's lance_hum, a loop for the burn)
 	fire_s += delta
 	if fire_s >= fire_max - 1e-6:      # (overheated: this frame is its last)
 		fire_s = fire_max
