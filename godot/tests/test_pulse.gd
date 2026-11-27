@@ -1,15 +1,16 @@
 ## The Vesper's shock pulse (view/weapons/pulse_mount.gd on Codex's arms, view/arms/vesper_arms.gd; fired for itself through
 ## view/gunnery.gd's own-fire hook). In the VR seat on the Network (XR off), the Vesper on a straight at 1,500 mph. Raids
 ## are pinned off, so the GUN's first arming makes the fire control and the arms; once armed the world is held still and
-## the fire control stepped on its own (the craft stands where it is: the ring spreads round it as round a craft at
-## rest), every target is put where the test wants it, and (after the commuters' check, which has no raid) a director of
-## the test's own is put in (never updated), so its raiders are a raid's pack and its kills are counted (kills_by).
-## Distances are from the release point, the wheel's centre (its muzzle), as the ring's are: in the round for a flyer,
-## over the ground for a raider:
+## the fire control stepped on its own (the craft stands where it is), every target is put where the test wants it, and
+## (after the commuters' check, which has no raid) a director of the test's own is put in (never updated), so its raiders
+## are a raid's pack and its kills are counted (kills_by). Then a Raids-on seat, flown on its own frames at 1,500 mph.
+## The ring rides with the craft (Ruling W): its centre is the wheel's centre (its muzzle) each frame, and distances are
+## from there: in the round for a flyer, over the ground for a raider:
 ##   check_table            weapon_of(VESPER) is "pulse", its weapon row is the brief's, and it is armed
 ##   check_lazy             with the GUN never armed: no Arms node on either hull, no fire control (Raids off); armed: the
 ##                          fire control is made, firing for itself through the pulse's mount, the Arms on the hull the
-##                          seat sees (not the hidden pod), out in 1 s. The first arming's frame is told (Ruling D)
+##                          seat sees (not the hidden pod), out in 1 s, the wheel's glow full (Ruling Y: charged, before
+##                          the first release). The first arming's frame is told (Ruling D)
 ##   check_ignores_commuters   (Review Focus 5) no raid on: a ring released among ten commuters 40 to 400 m round the
 ##                          craft: all ten still in traffic, no strike, nothing hit, struck_commuter never told, the score
 ##                          unchanged; the ring did go out
@@ -21,25 +22,30 @@
 ##   check_gunship_never_killed_fresh   a 120 HP gunship inside takes 72 (seen and heard as a hit: a spark and the impact
 ##                          sound) and lives; the charge ends 12 s after the release ("PULSE READY" on the strip) and a
 ##                          second pulse then kills it
-##   check_recharge         the trigger at 11.9 s does nothing; at 12.0 s a second ring leaves; the wheel's heat follows the
-##                          charge (half at 6 s); a trigger held down through the next charge's end releases nothing (a
-##                          press, not a hold) until it is let go and pressed again
+##   check_recharge         the trigger at 11.9 s does nothing; at 12.0 s a second ring leaves; the wheel's glow is the
+##                          stored charge (Ruling Y: 0 just after a release, half at 6 s, full at 12 s); a trigger held
+##                          down through the next charge's end releases nothing (a press, not a hold) until it is let go
+##                          and pressed again
 ##   check_safe_mid_use     (Review Focus 3, Ruling V) SAFE thrown 0.1 s into a spread: the ring finishes it and its raider
 ##                          at 400 m dies on time; SAFE at 4 s into the recharge, GUN at 6 s: 6 s are left, not refilled;
 ##                          charged, at SAFE a press releases nothing (stowed), nor once GUN is thrown before it is out
 ##   check_raid_ends_mid_spread   (Ruling V) a raider shot by other means mid-spread: no hit on it after, one kill; the
 ##                          raid reset mid-spread: no hit and no kill after, no error, and a raider and a drone put down
 ##                          after it, ahead of the ring, are not hit by it
-##   check_sims_frame       the floating origin moved 36 km mid-spread: the ring drawn where its figures say about it
-##                          (the sims' frame), and its raider dies on time
-##   check_drawn            (Ruling V, the comfort rule) at rest: not drawn till its band is COMFORT m off the pod and
-##                          each engine (the frame and radius it first shows at told), never drawn nearer them; flat, on the
-##                          road's plane under the release point; drawn at 150 m and at 450 m, fading; gone after its spread
+##   check_drawn            (Rulings V, X) at rest: not drawn till its wall is COMFORT m off the pod and each engine (the
+##                          frame and radius it first shows at told), never drawn nearer them; a wall standing on the
+##                          road's plane under the craft, centred on the wheel (within FOLLOW_M), TALL_LO to TALL_HI
+##                          degrees tall from the eye straight ahead at 150 m and at 450 m, no more than TALL_HI anywhere on
+##                          its first drawn frame; fading; gone after its spread and linger
+##   check_no_sight         (Ruling Z) the Vesper armed and out, a raider under the gaze: no gaze sight drawn, no brackets
+##                          (the fire control looks for nothing along the gaze for it)
 ##   check_cost             a ring among a full raid (6 raiders, 10 drones, the gunship) with traffic's most (220) about,
 ##                          ten times: the mount's own time a frame (its step and fire) over each ring's frames, mean and
-##                          worst, the release frames and the frames kills land on told apart; the mean held under COST_MS
+##                          worst, the release frames and the frames kills land on told apart; the mean held under COST_MS;
+##                          and what the gaze search it no longer gets would cost a frame, told
 ##   check_flat_range       the flat view on the Range (no seat, no traffic, no raid): nothing built till armed; armed, the
 ##                          fire control and the arms on the craft's own pod, out in about a second; a press releases a ring
+##   check_sight_other      (Ruling Z) the Kiln, armed and out, a raider under the gaze: its gaze sight drawn, bracketing it
 ##   check_raids_on_arming  Raids on (Ruling D: the first arming measured over 5 ms): the fire control made at load,
 ##                          dormant, and the arms fitted then on the seat's hull, stowed (not drawn, the hull its own); the
 ##                          first arming's frame told; armed, the same arms come out
@@ -47,9 +53,18 @@
 ##                          that frame, below a jolt's (an event: each hand held its length), sent at once (no delay: the
 ##                          engine ignores one); none in the frames after, none for a press while it recharges; no shot
 ##                          counted (no per-shot tick)
+##   check_at_speed         (Ruling W) on the seat's own frames at 1,500 mph, raiders paced at the craft's own speed 300 m
+##                          and 440 m ahead and 440 m behind: all three die, each no sooner than the ring reaches it (its
+##                          distance from the craft that frame) and at most a frame after; one 470 m ahead lives,
+##                          untouched. The drawn ring's centre is the wheel's every frame it is drawn (within FOLLOW_M),
+##                          the wheel a few metres from the pod, while the floating origin follows the pod
+##   check_sims_frame       on the same frames, the craft put down 30 km off mid-spread (the floating origin goes with
+##                          it): the ring drawn round the wheel there too (within FOLLOW_M)
 ##   check_no_flash         on the same seat's own frames at 1,500 mph, a release and its whole spread: no CanvasLayer's
 ##                          shown or child count changed, the camera's offsets, field of view and children as they were,
-##                          the jolt's vignette at 0; the band never drawn within COMFORT m of the pod or an engine
+##                          the jolt's vignette at 0; the wall never drawn within COMFORT m of the pod or an engine; it
+##                          first shows at the radius it does at rest; TALL_LO to TALL_HI degrees tall straight ahead at
+##                          150 m and at 450 m, no more than TALL_HI anywhere on its first drawn frame
 ## Run with --fixed-fps 120: --headless --xr-mode off --fixed-fps 120 --audio-driver Dummy -s res://tests/test_pulse.gd -- --mute
 ## Prints PULSE PASS. Puts user://vr_prefs.json back as it found it.
 extends SceneTree
@@ -71,8 +86,13 @@ const MPH := 0.44704
 const SPEED := 1500.0 * MPH     # m/s
 const STRAIGHT := 1600.0        # m of road ahead that must run straight and level
 const COST_MS := 0.10           # the mount's own mean a frame over a ring's frames among a full raid, at the most
-const COMFORT := 20.0           # m: the ring's band is never drawn nearer the pod or an engine (over the ground) than this
-const SECTIONS := 15
+const COMFORT := 20.0           # m: the ring's wall is never drawn nearer the pod or an engine (over the ground) than this
+const FOLLOW_M := 0.05          # m: the drawn ring's centre is this near the wheel's centre (over the ground), at the most
+const TALL_LO := 0.5            # degrees: the wall from the eye straight ahead at 150 m and at 450 m, at the least ...
+const TALL_HI := 1.5            # ... and at the most (and anywhere round it on its first drawn frame)
+# Paced at the craft's own speed (check_at_speed): [m along the road from the craft, lanes over from the craft's, dies]
+const PACED := [[300.0, 0, true], [440.0, 1, true], [-440.0, 0, true], [470.0, -1, false]]
+const SECTIONS := 18
 var failures := 0
 var checks := 0
 var sections := 0               # (a section that dies on a script error never counts itself: the verdict then fails)
@@ -80,6 +100,7 @@ var _next_id := 996000
 var _way := 1
 var _fleet: Array = []          # traffic's own vehicles when the GUN was armed (put back for check_cost)
 var _director = null
+var _first_r_rest := -1.0       # the radius the ring first shows at, at rest (check_drawn)
 
 
 func _initialize() -> void:
@@ -134,21 +155,28 @@ func _run() -> void:
 		sections += 1
 		check_raid_ends_mid_spread(v, g)
 		sections += 1
-		check_sims_frame(v, g)
-		sections += 1
 		check_drawn(v, g)
+		sections += 1
+		check_no_sight(v, g)
 		sections += 1
 		check_cost(v, g)
 		sections += 1
 	v.queue_free()
 	await process_frame
+	_director = null
 	await check_flat_range()
+	sections += 1
+	await check_sight_other()
 	sections += 1
 	Raids.enabled = true
 	v = await _seat(Pilot.VESPER)
 	if check_raids_on_arming(v):
 		sections += 1
 		check_hand_tick(v)
+		sections += 1
+		check_at_speed(v)
+		sections += 1
+		check_sims_frame(v)
 		sections += 1
 		check_no_flash(v)
 		sections += 1
@@ -236,13 +264,18 @@ func _road_way(v) -> Vector2:
 	return Vector2(R.tx[i], R.ty[i]) * _way
 
 
-## Where a ring released now would leave: the wheel's centre (its muzzle), the sims' frame.
+## The wheel's centre now (its muzzle), the sims' frame: where the ring is centred.
 func _centre(g) -> Vector3:
 	return g.to_sim((g.mount.arms.muzzles()[0] as Transform3D).origin)
 
 
-## A sims' point `dist` m over the ground from the release point (_centre), `bearing` degrees left of the road's way (0
-## ahead, 180 behind, -90 to the right), `up` m over the release point's height.
+## The seat's eye (Seat.EYE on the rig), the sims' frame.
+func _eye(v, g) -> Vector3:
+	return g.to_sim(v.rig.global_transform * Seat.EYE)
+
+
+## A sims' point `dist` m over the ground from the wheel's centre, `bearing` degrees left of the road's way (0 ahead, 180
+## behind, -90 to the right), `up` m over the wheel's height.
 func _point(v, g, dist: float, bearing: float, up := 0.0) -> Vector3:
 	var c := _centre(g)
 	var dir := _road_way(v).rotated(deg_to_rad(bearing))
@@ -250,7 +283,7 @@ func _point(v, g, dist: float, bearing: float, up := 0.0) -> Vector3:
 
 
 ## A vehicle at `at` (the sims' plane), standing still, on the craft's road's nearest sample: a commuter, or a raider of
-## the raid's pack.
+## the test's director's pack (when it has one).
 func _car(v, at: Vector2, hostile: bool):
 	var T = v.traffic_net
 	var sim = v.sim
@@ -281,7 +314,7 @@ func _car(v, at: Vector2, hostile: bool):
 	return c
 
 
-## A raider `dist` m over the ground from the release point, `bearing` degrees left of the road's way.
+## A raider `dist` m over the ground from the wheel's centre, `bearing` degrees left of the road's way.
 func _raider_at(v, g, dist: float, bearing: float):
 	var p := _point(v, g, dist, bearing)
 	return _car(v, Vector2(p.x, p.y), true)
@@ -304,31 +337,35 @@ func _flyer(kind: String, at: Vector3, hp := -1):
 	return f
 
 
-## A target's distance from the release point `c`: in the round for a flyer, over the ground for a vehicle.
+## A target's distance from the ring's centre `c`: in the round for a flyer, over the ground for a vehicle.
 static func _dist(c: Vector3, t) -> float:
 	if GunneryScript._is_flyer(t):
 		return c.distance_to(Vector3(t.x, t.y, t.z))
 	return Vector2(c.x, c.y).distance_to(Vector2(t.x, t.y))
 
 
-## The gaze from the seat's eye, ahead along the rig (the pulse is not aimed: the gaze only lays the fire control's sight).
-func _look(v) -> void:
+## The gaze from the seat's eye, ahead along the rig, or on vehicle `at`.
+func _look(v, at = null) -> void:
 	var cam: Camera3D = v.cam
 	var rig: Transform3D = v.rig.global_transform
 	cam.global_position = rig * Seat.EYE
-	cam.look_at(cam.global_position + rig.basis * Vector3(0.0, -0.03, -1.0).normalized(), rig.basis.y)
+	if at == null:
+		cam.look_at(cam.global_position + rig.basis * Vector3(0.0, -0.03, -1.0).normalized(), rig.basis.y)
+	else:
+		var g = v.gunnery
+		cam.look_at(g.to_render(Vector3(at.x, at.y, v.traffic_net.body_height(at))), rig.basis.y)
 
 
 ## One frame of the still world: the gaze laid, the fire control stepped.
-func _frame(v, g, dt := DT) -> void:
-	_look(v)
+func _frame(v, g, dt := DT, at = null) -> void:
+	_look(v, at)
 	g.step(dt)
 
 
 ## `n` frames of it.
-func _frames(v, g, n: int) -> void:
+func _frames(v, g, n: int, at = null) -> void:
 	for i in n:
-		_frame(v, g)
+		_frame(v, g, DT, at)
 
 
 ## The trigger pressed for a frame (a press: the frame after, let go). Whether a ring left in that frame.
@@ -394,30 +431,53 @@ static func _const(m, name: String, none = null):
 	return (m.get_script() as Script).get_script_constant_map().get(name, none)
 
 
-## The ring's band as drawn this frame over the ground about the release point: [inner, outer] m, or [] when not drawn.
-static func _band(m) -> Array:
-	if m.ring == null or not m.ring.visible:
-		return []
-	var r: float = m.drawn_r
-	return [r * (1.0 - float(_const(m, "BAND", 0.0))), r]
+## Is the ring drawn this frame?
+static func _shown(m) -> bool:
+	return m.ring != null and m.ring.visible
 
 
-## How near the drawn band comes to the pod or an engine, over the ground (INF when it is not drawn).
-static func _band_off_craft(v, m) -> float:
-	var band := _band(m)
-	if band.is_empty():
+## How near the drawn wall (at its radius about its centre) comes to the pod or an engine, over the ground (INF when it is
+## not drawn).
+static func _wall_off_craft(v, m) -> float:
+	if not _shown(m):
 		return INF
+	var r: float = m.drawn_r
 	var c: Vector3 = m.centre
 	var least := INF
 	for b in [v.sim.pod, v.sim.eL, v.sim.eR]:
-		var d := Vector2(b.x - c.x, b.y - c.y).length()
-		var off := 0.0
-		if d < band[0]:
-			off = band[0] - d
-		elif d > band[1]:
-			off = d - band[1]
-		least = minf(least, off)
+		least = minf(least, absf(Vector2(b.x - c.x, b.y - c.y).length() - r))
 	return least
+
+
+## How far the drawn ring's centre (its node, the render frame, read back into the sims' frame) stands off the wheel's
+## centre now, over the ground (INF when it is not drawn).
+static func _off_wheel(g, m) -> float:
+	if not _shown(m):
+		return INF
+	var o: Vector3 = g.to_sim(m.ring.global_position)
+	var w: Vector3 = g.to_sim(m.origin())
+	return Vector2(o.x - w.x, o.y - w.y).length()
+
+
+## How tall the drawn wall stands from the eye (degrees), at its point in the way `way` (a unit vector, the sims' plane)
+## from its centre: from its foot, on its plane, to its top. -1 when not drawn (or a mount with no standing wall).
+static func _tall_deg(eye: Vector3, m, way: Vector2) -> float:
+	if not _shown(m) or m.get("ring_tall") == null:
+		return -1.0
+	var r: float = m.drawn_r
+	var c: Vector3 = m.centre
+	var p := Vector2(c.x, c.y) + way * r
+	var foot := Vector3(p.x, p.y, float(m.ring_h) + float(_const(m, "RING_LIFT", 0.0)))
+	var top := foot + Vector3(0.0, 0.0, float(m.ring_tall))
+	return rad_to_deg((foot - eye).angle_to(top - eye))
+
+
+## ... the tallest anywhere round it (64 ways).
+static func _tallest_deg(eye: Vector3, m) -> float:
+	var most := -1.0
+	for k in 64:
+		most = maxf(most, _tall_deg(eye, m, Vector2.RIGHT.rotated(TAU * k / 64.0)))
+	return most
 
 
 # --- the checks ----------------------------------------------------------------------------------------------
@@ -475,9 +535,9 @@ func check_lazy(v):
 		_frame(v, g)
 		frames += 1
 	var took := begun * 1.0 + frames * DT
-	check("out in %.3f s (1.0; %.3f of it in the view's frames since the switch): the leaves open and the wheel rises and fans out (deploy %.2f), the arms drawn; charged (%.1f s to go), its word \"%s\"" % [
-		took, begun, mount.deploy_t(), mount.charge, mount.status()], mount.is_out() and absf(took - 1.0) <= 2.0 * DT and begun > 0.0
-		and arms.visible and mount.charge == 0.0)
+	check("out in %.3f s (1.0; %.3f of it in the view's frames since the switch): the leaves open and the wheel rises and fans out (deploy %.2f), the arms drawn; charged (%.1f s to go), its word \"%s\", never released, the wheel's glow %.3f (full: Ruling Y)" % [
+		took, begun, mount.deploy_t(), mount.charge, mount.status(), mount.heat()], mount.is_out() and absf(took - 1.0) <= 2.0 * DT and begun > 0.0
+		and arms.visible and mount.charge == 0.0 and mount.released == 0 and absf(mount.heat() - 1.0) < 1e-6)
 	return g
 
 
@@ -589,7 +649,7 @@ func check_ring_kills_in_radius(v, g) -> void:
 		var untouched: bool = g.alive(t) and (int(t.hp) == int(t.hp_max) if GunneryScript._is_flyer(t) else not g._damage.has(t.id))
 		spared = spared and untouched
 		said.append("%s (%.1f m): %s" % [d[0], _dist(c0, t), "lives, untouched" if untouched else "TOUCHED"])
-	check("a ring released (%s) from the wheel's centre (%.4f m off it): %s" % [left, centred, "; ".join(said)],
+	check("a ring released (%s) round the wheel's centre (%.4f m off it): %s" % [left, centred, "; ".join(said)],
 		left and centred < 0.01 and on_time and spared)
 	check("each hit once (hits %d -> %d: six), kills %d -> %d, the director's by kind %s (four raiders, two drones); bare: no spark (%d) and no impact sound (%d) of a hit's own, the kills' bursts drawn" % [
 		hits, g.hits, kills, g.kills, _director.kills_by, seen.spark, seen.impact],
@@ -640,6 +700,7 @@ func check_recharge(v, g) -> void:
 	var m = g.mount
 	var before: int = m.released
 	var first := _press(v, g)
+	var at_once: float = m.heat()
 	var half := -1.0
 	var early := false
 	var at_12 := false
@@ -652,30 +713,34 @@ func check_recharge(v, g) -> void:
 			_frame(v, g)
 		if k == int(round(6.0 / DT)):
 			half = m.heat()
-	check("a ring (%s); the trigger pressed at 11.9 s: nothing leaves (%s); at 12.0 s a second ring leaves (%s), %d in these 12 s; the wheel's heat %.3f at 6 s (half: the charge's)" % [
-		first, early, at_12, m.released - before, half], first and not early and at_12 and m.released - before == 2 and absf(half - 0.5) < 0.01)
+	check("a ring (%s); the trigger pressed at 11.9 s: nothing leaves (%s); at 12.0 s a second ring leaves (%s), %d in these 12 s; the wheel's glow %.3f just after the release (0) and %.3f at 6 s (half: the stored charge)" % [
+		first, early, at_12, m.released - before, at_once, half], first and not early and at_12 and m.released - before == 2
+		and absf(at_once) < 1e-6 and absf(half - 0.5) < 0.01)
 	# Held down through the next charge's end: nothing leaves while it is held; let go and pressed, one does.
 	var was: int = m.released
+	var full := -1.0
 	for k in range(1, int(12.1 / DT) + 1):
 		g.hold_fire = k >= int(round(11.9 / DT))
 		_frame(v, g)
+		if k == int(round(12.0 / DT)):
+			full = m.heat()
 	var while_held: int = m.released - was
 	var charged_then: bool = m.charge == 0.0
 	g.hold_fire = false
 	_frame(v, g)
 	var pressed := _press(v, g)
-	check("the trigger held down from 11.9 s to 12.1 s into the next charge: %d ring(s) leave while it is held (charged at 12: %s); let go and pressed again, one leaves (%s)" % [
-		while_held, charged_then, pressed], while_held == 0 and charged_then and pressed)
+	check("the trigger held down from 11.9 s to 12.1 s into the next charge: %d ring(s) leave while it is held (charged at 12: %s, the wheel's glow %.3f: full); let go and pressed again, one leaves (%s)" % [
+		while_held, charged_then, full, pressed], while_held == 0 and charged_then and absf(full - 1.0) < 1e-6 and pressed)
 	_clear(v, g)
 
 
 func check_safe_mid_use(v, g) -> void:
 	var m = g.mount
 	var raider = _raider_at(v, g, 400.0, 0.0)
-	var c0 := _centre(g)
 	_frames(v, g, 3)
 	var left := _press(v, g)
 	var gone_at := -1
+	var d := -1.0          # (its distance from the ring's centre the frame it went: the wheel stowing moves that centre a little)
 	var drawn_after := false
 	for k in range(1, int(0.9 / DT)):
 		if k == int(round(0.1 / DT)):
@@ -683,12 +748,13 @@ func check_safe_mid_use(v, g) -> void:
 		_frame(v, g)
 		if gone_at < 0 and not g.alive(raider):
 			gone_at = k
-		if k > int(round(0.1 / DT)) and m.ring != null and m.ring.visible:
+			d = _dist(m.centre, raider)
+		if k > int(round(0.1 / DT)) and _shown(m):
 			drawn_after = true
-	var due := 0.5 * _dist(c0, raider) / 450.0
-	check("SAFE thrown 0.1 s into a spread (a ring left: %s): the ring finishes it (drawn after: %s), its raider %.1f m off gone %.4f s in (due %.4f)" % [
-		left, drawn_after, _dist(c0, raider), gone_at * DT, due], left and drawn_after and gone_at > 0 and gone_at * DT >= due - 1e-6
-		and gone_at * DT <= due + DT + 1e-6)
+	var due := 0.5 * d / 450.0
+	check("SAFE thrown 0.1 s into a spread (a ring left: %s): the ring finishes it (drawn after: %s), its raider gone %.4f s in at %.1f m from the ring's centre (due %.4f)" % [
+		left, drawn_after, gone_at * DT, d, due], left and drawn_after and gone_at > 0 and gone_at * DT >= due - 1e-4
+		and gone_at * DT <= due + DT + 1e-4)
 	# SAFE at 4 s into the recharge (the release above), GUN at 6 s.
 	g.want_out = true
 	_charged(v, g)
@@ -701,7 +767,7 @@ func check_safe_mid_use(v, g) -> void:
 			g.want_out = true       # (... and GUN at 6 s)
 		_frame(v, g)
 	var left_s: float = m.charge
-	check("SAFE at 4 s into a recharge (a ring left: %s), GUN at 6 s: %.3f s are left (6: its clock ran at SAFE, not refilled), its word \"%s\", the wheel's heat %.3f (0.5)" % [
+	check("SAFE at 4 s into a recharge (a ring left: %s), GUN at 6 s: %.3f s are left (6: its clock ran at SAFE, not refilled), its word \"%s\", the wheel's glow %.3f (0.5)" % [
 		again, left_s, m.status(), m.heat()], again and absf(left_s - 6.0) <= 2.0 * DT + 1e-6 and m.status() == "" and absf(m.heat() - 0.5) < 0.01)
 	# Charged: at SAFE a press releases nothing; GUN thrown, nothing before the wheel is out; out, one leaves.
 	_charged(v, g)
@@ -754,73 +820,65 @@ func check_raid_ends_mid_spread(v, g) -> void:
 	_clear(v, g)
 
 
-## The floating origin moved mid-spread: the ring stays where it was released (the sims' frame).
-func check_sims_frame(v, g) -> void:
-	var m = g.mount
-	var raider = _raider_at(v, g, 300.0, 0.0)
-	var c0 := _centre(g)
-	_frames(v, g, 3)
-	var org := Vector2(v.org_x, v.org_y)
-	var left := _press(v, g)
-	_frames(v, g, int(round(0.1 / DT)))
-	v.org_x += 30000.0      # (the origin moved 36 km: everything drawn about it is drawn 36 km over)
-	v.org_y -= 20000.0
-	var off := INF
-	var gone_at := -1
-	for k in range(int(round(0.1 / DT)) + 1, int(0.9 / DT)):
-		_frame(v, g)
-		if gone_at < 0 and not g.alive(raider):
-			gone_at = k
-		if k == int(round(0.3 / DT)) and m.ring.visible:
-			var want := Vector3(m.centre.x - v.org_x, m.ring_h, -(m.centre.y - v.org_y))
-			off = Vector2(m.ring.global_position.x - want.x, m.ring.global_position.z - want.z).length()
-	v.org_x = org.x
-	v.org_y = org.y
-	var due := 0.5 * _dist(c0, raider) / 450.0
-	check("the floating origin moved 36 km 0.1 s into the spread (a ring left: %s): drawn %.4f m off where its figures say about it at 0.3 s (within 0.01); its raider gone %.4f s in (due %.4f)" % [
-		left, off, gone_at * DT, due], left and off < 0.01 and gone_at > 0 and gone_at * DT >= due - 1e-6 and gone_at * DT <= due + DT + 1e-6)
-	_frame(v, g)
-	_clear(v, g)
-
-
-## (Ruling V, the comfort rule) At rest (the world still): where and when the ring is drawn.
+## (Rulings V, X, the comfort rule) At rest (the world still): where, when and how tall the ring is drawn.
 func check_drawn(v, g) -> void:
 	var m = g.mount
-	var c0 := _centre(g)
+	var eye := _eye(v, g)
+	var ahead := _road_way(v)
 	var left := _press(v, g)
-	var on_release: bool = m.ring != null and m.ring.visible
+	var on_release: bool = _shown(m)
 	var first := -1
 	var first_r := 0.0
+	var first_tall := -1.0
 	var nearest := INF
-	var at := {}          # radius drawn: [frame, light, flat, on the road's plane under the release point]
+	var follow := 0.0
+	var at := {}          # radius drawn: [frame, light, standing, on the road's plane under the craft, degrees tall ahead]
 	var last_drawn := -1
 	for k in range(1, int(1.0 / DT)):
 		_frame(v, g)
-		if m.ring == null or not m.ring.visible:
+		if not _shown(m):
 			continue
 		last_drawn = k
 		if first < 0:
 			first = k
 			first_r = m.drawn_r
-		nearest = minf(nearest, _band_off_craft(v, m))
+			first_tall = _tallest_deg(eye, m)
+		nearest = minf(nearest, _wall_off_craft(v, m))
+		follow = maxf(follow, _off_wheel(g, m))
 		if k == int(round(150.0 / 450.0 * 0.5 / DT)) or k == int(round(0.5 / DT)):
 			var b: Basis = m.ring.global_basis
-			var flat: bool = absf(b.y.normalized().dot(Vector3.UP)) > 0.9999 and absf(b.x.length() - m.drawn_r) < 1e-3 and absf(b.z.length() - m.drawn_r) < 1e-3
+			var tall = m.get("ring_tall")
+			var standing: bool = tall != null and absf(b.y.normalized().dot(Vector3.UP)) > 0.9999 and absf(b.y.length() - float(tall)) < 1e-3 \
+				and absf(b.x.length() - m.drawn_r) < 1e-3 and absf(b.z.length() - m.drawn_r) < 1e-3
 			var o: Vector3 = g.to_sim(m.ring.global_position)
-			var road: float = g.ground_at(c0.x, c0.y)
-			var placed: bool = Vector2(o.x - c0.x, o.y - c0.y).length() < 0.01 and o.z >= road and o.z <= road + 0.5
-			at[snappedf(m.drawn_r, 0.1)] = [k, snappedf(float(m.ring_light), 0.001), flat, placed]
+			var road: float = g.ground_at(o.x, o.y)
+			var placed: bool = o.z >= road and o.z <= road + 0.5
+			at[snappedf(m.drawn_r, 0.1)] = [k, snappedf(float(m.ring_light), 0.001), standing, placed, snappedf(_tall_deg(eye, m, ahead), 0.01)]
+	_first_r_rest = first_r
 	var r150: Array = at.get(150.0, [])
 	var r450: Array = at.get(450.0, [])
-	print("  RING: first drawn %d frames after the release, at %.1f m (its band's inner edge %.1f m)" % [first, first_r, first_r * (1.0 - float(_const(m, "BAND", 0.0)))])
-	check("a ring (%s): not drawn on the release frame (%s); first drawn %d frames on, at %.1f m; on every frame drawn its band %.1f m off the pod and the engines at the nearest (at least %.0f)" % [
-		left, on_release, first, first_r, nearest, COMFORT], left and not on_release and first > 1 and nearest >= COMFORT)
-	check("drawn at 150 m (%s) and at 450 m (%s) [frame, light, flat, on the road's plane under the release point]: fading; last drawn %d frames on (%.2f s: its spread and its linger), none after" % [
-		r150, r450, last_drawn, last_drawn * DT], r150.size() == 4 and r450.size() == 4 and bool(r150[2]) and bool(r150[3]) and bool(r450[2])
-		and bool(r450[3]) and float(r450[1]) < float(r150[1]) and float(r450[1]) > 0.0 and last_drawn > int(0.5 / DT) and last_drawn < int(1.0 / DT) - 1
-		and m.ring_t < 0.0)
+	print("  RING AT REST: first drawn %d frames after the release, at %.1f m, %.2f degrees tall at the most from the eye" % [first, first_r, first_tall])
+	check("a ring (%s): not drawn on the release frame (%s); first drawn %d frames on, at %.1f m, %.2f degrees tall at the most from the eye (at most %.1f); on every frame drawn its wall %.1f m off the pod and the engines at the nearest (at least %.0f), centred %.4f m off the wheel's centre at the most (%.2f)" % [
+		left, on_release, first, first_r, first_tall, TALL_HI, nearest, COMFORT, follow, FOLLOW_M], left and not on_release and first > 1
+		and first_tall > 0.0 and first_tall <= TALL_HI and nearest >= COMFORT and follow <= FOLLOW_M)
+	check("drawn at 150 m (%s) and at 450 m (%s) [frame, light, standing, on the road's plane under the craft, degrees tall from the eye straight ahead (%.1f to %.1f)]: fading; last drawn %d frames on (%.2f s: its spread and its linger), none after" % [
+		r150, r450, TALL_LO, TALL_HI, last_drawn, last_drawn * DT], r150.size() == 5 and r450.size() == 5 and bool(r150[2]) and bool(r150[3])
+		and bool(r450[2]) and bool(r450[3]) and float(r150[4]) >= TALL_LO and float(r150[4]) <= TALL_HI and float(r450[4]) >= TALL_LO
+		and float(r450[4]) <= TALL_HI and float(r450[1]) < float(r150[1]) and float(r450[1]) > 0.0 and last_drawn > int(0.5 / DT)
+		and last_drawn < int(1.0 / DT) - 1 and m.ring_t < 0.0)
 	check("it hangs in the world under the fire control (%s), not before the camera nor on a CanvasLayer" % [m.ring.get_parent().name if m.ring else null],
 		m.ring != null and m.ring.get_parent() == g)
+	_clear(v, g)
+
+
+## (Ruling Z) The Vesper armed and out, a raider ahead under the gaze: no gaze sight, no brackets.
+func check_no_sight(v, g) -> void:
+	var m = g.mount
+	var raider = _raider_at(v, g, 300.0, 0.0)
+	_frames(v, g, 10, raider)
+	var aimed = m.aimed() if m.has_method("aimed") else null
+	check("the Vesper armed and out (%s), a raider 300 m ahead under the gaze: the mount aimed %s; the gaze sight drawn %s, on a vehicle %s (no sight, no brackets)" % [
+		m.is_out(), aimed, g.sight.visible, g.aim_car], m.is_out() and aimed == false and not g.sight.visible and g.aim_car == null)
 	_clear(v, g)
 
 
@@ -836,6 +894,16 @@ func check_cost(v, g) -> void:
 	while v.traffic_net.cars.size() < v.traffic_net.TARGET:      # (traffic's most, near a city: 220, along the road 2 km behind to 4 km ahead)
 		var at := P + way * rng.randf_range(-2000.0, 4000.0) + Vector2(-way.y, way.x) * rng.randf_range(-0.8, 0.8) * hw
 		_car(v, at, false)
+	# What the fire control's gaze search (its _find: traffic's and the flyers' picks along the gaze, the ground) costs a frame
+	# here: the search an unaimed mount no longer gets (Ruling Z).
+	_look(v)
+	var o: Vector3 = g.to_sim(v.cam.global_position)
+	var d: Vector3 = GunneryScript.dir_to_sim(-v.cam.global_transform.basis.z.normalized())
+	var t_find := Time.get_ticks_usec()
+	for i in 240:
+		g._find(o, d, DT)
+	var find_ms := (Time.get_ticks_usec() - t_find) / 1000.0 / 240.0
+	_frame(v, g)
 	var ring_ms := PackedFloat32Array()
 	var release_ms := PackedFloat32Array()
 	var kill_ms := PackedFloat32Array()
@@ -882,8 +950,8 @@ func check_cost(v, g) -> void:
 	for c: float in whole:
 		whole_mean += c
 	whole_mean /= maxf(1.0, whole.size())
-	print("  COST: ten rings among a full raid (17 threats) with %d vehicles about: the mount's own step and fire %s; the whole fire control's step %.4f ms mean; %d kills" % [
-		v.traffic_net.cars.size(), "; ".join(said), whole_mean, kills])
+	print("  COST: ten rings among a full raid (17 threats) with %d vehicles about: the mount's own step and fire %s; the whole fire control's step %.4f ms mean; %d kills; the gaze search it no longer gets %.4f ms a frame" % [
+		v.traffic_net.cars.size(), "; ".join(said), whole_mean, kills, find_ms])
 	check("ten rings among a full raid with traffic's fleet about (%d): the mount %.4f ms a frame mean over the rings' frames (under %.2f); %d kills (16 a ring: the gunship lives through one)" % [
 		v.traffic_net.cars.size(), mean_all, COST_MS, kills], ring_ms.size() >= 10 * int(0.5 / DT) and mean_all < COST_MS and kills == 160)
 	_clear(v, g)
@@ -919,13 +987,44 @@ func check_flat_range() -> void:
 	var drawn := false
 	for i in int(0.6 / DT):
 		game._process(DT)
-		drawn = drawn or (mount.ring != null and mount.ring.visible)
+		drawn = drawn or _shown(mount)
 	check("the flat view on the Range: nothing built till armed (%s); armed, the fire control (%s) and the Arms on the craft's own pod (%s), out (deploy %.2f), drawn; a press releases a ring (%d), drawn (%s)" % [
 		none, g != null, arms, mount.deploy_t(), left, drawn],
 		none and g.mount == mount and arms != null and mount.get("arms") == arms and mount.is_out() and arms.is_visible_in_tree() and left == 1 and drawn)
 	game.queue_free()
 	await process_frame
 	View.track_override = "network"
+
+
+## (Ruling Z) Another armed craft keeps its gaze sight: the Kiln (its lance, aimed by the gaze), armed and out on the
+## Network (Raids off), the world still, a raider 300 m ahead under the gaze: the sight drawn, bracketing it.
+func check_sight_other() -> void:
+	var v = await _seat(Pilot.KILN)
+	v.gun_wanted = true
+	for i in 3:
+		_hold_speed(v)
+		v._process(DT)
+	var g = v.gunnery
+	if g == null:
+		check("the Kiln armed: its fire control made (%s)" % g, false)
+		v.queue_free()
+		await process_frame
+		return
+	v.traffic_net.cars.clear()
+	g.power = 1.0
+	g.want_out = true
+	for i in int(1.2 / DT):
+		_frame(v, g)
+	var P := Vector2(v.sim.pod.x, v.sim.pod.y)
+	var raider = _car(v, P + _road_way(v) * 300.0, true)
+	_frames(v, g, 10, raider)
+	var state = g.sight_mat.get_shader_parameter("state")
+	var aimed = g.mount.aimed() if g.mount.has_method("aimed") else null
+	check("the Kiln armed and out (%s), a raider 300 m ahead under the gaze: the mount aimed %s; the gaze sight drawn (%s), on the raider (%s), bracketing it (state %s: 1)" % [
+		g.mount.is_out(), aimed, g.sight.visible, g.aim_car == raider, state], g.mount.is_out() and aimed == true and g.sight.visible
+		and g.aim_car == raider and int(state) == 1)
+	v.queue_free()
+	await process_frame
 
 
 ## Raids on: the fire control made at load, dormant, and (Ruling D: the first arming measured over 5 ms) the arms built
@@ -967,14 +1066,59 @@ func check_raids_on_arming(v) -> bool:
 	return true
 
 
-## One of the cockpit's own frames, the craft held at speed, the trigger held or not: the pulses sent in it.
-func _seat_frame(v, g, held := false) -> Array:
+## One of the cockpit's own frames, the craft held at speed, the trigger held or not, the paced raiders (`paced`: see
+## _pace) put where they must stand for it: the pulses sent in it.
+func _seat_frame(v, g, held := false, paced := []) -> Array:
 	v.gun_pulses.clear()
 	g.hold_fire = held
 	_hold_speed(v)
+	_pace(v, paced)
 	v._process(DT)
 	g.hold_fire = false
 	return v.gun_pulses.duplicate()
+
+
+## Each paced raider ([car, m along the road from the craft, lanes over from the craft's, ...]) stood where it must be
+## after the frame to come: that far along the road from where the pod will be (its speed held: SPEED x DT on), in the
+## middle of the lane nearest the pod's place across the road (the E2 is 400 m wide) or the given number of lanes over,
+## stopped (traffic's own drive then moves it a hair at most). So it keeps the craft's own pace.
+func _pace(v, paced: Array) -> void:
+	if paced.is_empty():
+		return
+	var sim = v.sim
+	var T = v.traffic_net
+	var R = sim.roads[sim.pod.path]
+	var i := clampi(int(sim.pod.hint), 0, R.N - 2)
+	var dx: float = sim.pod.x - R.px[i]
+	var dy: float = sim.pod.y - R.py[i]
+	var f_pod: float = i + (dx * R.tx[i] + dy * R.ty[i]) / float(R.len[i])
+	var lat_pod: float = -dx * R.ty[i] + dy * R.tx[i]
+	for row: Array in paced:
+		var c = row[0]
+		var lanes: int = (T._lanes[c.road] as Array).size()
+		var near := 0
+		for k in lanes:
+			if absf(T._lane_lat(c, k) - lat_pod) < absf(T._lane_lat(c, near) - lat_pod):
+				near = k
+		c.f = f_pod + _way * (float(row[1]) + SPEED * DT) / float(R.len[i])
+		c.lane = clampi(near + int(row[2]), 0, lanes - 1)
+		c.lat = T._lane_lat(c, c.lane)
+		c.v = 0.0
+		c.place(R)
+
+
+## (On the Raids-on seat.) The last ring over, it is charged by hand (the recharge is check_recharge's: 12 s more at speed
+## would fly the craft off its straight) and the craft put on a straight again.
+func _ready_on_seat(v, g) -> void:
+	var m = g.mount
+	for i in int(1.0 / DT):
+		if m.ring_t < 0.0:
+			break
+		_seat_frame(v, g)
+	m.charge = 0.0
+	_on_a_straight(v)
+	for i in 10:
+		_seat_frame(v, g)
 
 
 ## (On the Raids-on seat, armed above.) The cockpit's own frames: out, a release.
@@ -1007,6 +1151,113 @@ func check_hand_tick(v) -> void:
 		and absf(float(held[0]) - dur) < 1e-3 and absf(float(held[1]) - dur) < 1e-3 and later == 0 and again == 0 and g.shots == shots)
 
 
+## (Ruling W, on the same seat.) Raiders paced at the craft's own speed at 1,500 mph, a ring released on the seat's own
+## frames: who dies, when, from the craft's own place that frame; and the drawn ring's centre against the wheel's.
+func check_at_speed(v) -> void:
+	var g = v.gunnery
+	var m = v.craft.weapon
+	var R = v.raids
+	_ready_on_seat(v, g)
+	var paced := []
+	var P := Vector2(v.sim.pod.x, v.sim.pod.y)
+	for row: Array in PACED:
+		var c = _car(v, P + _road_way(v) * float(row[0]), true)
+		R.pack.append(c)
+		paced.append([c, row[0], row[1], row[2]])
+	for i in 3:
+		_seat_frame(v, g, false, paced)
+	var org0 := Vector2(v.org_x, v.org_y)
+	var hits: int = g.hits
+	_seat_frame(v, g, true, paced)
+	var left: bool = m.ring_t >= 0.0
+	var gone := {}        # car -> [frame, its distance from the ring's centre that frame]
+	var nearest := {}     # car -> the nearest it came to the ring's centre while the ring was out
+	var follow := 0.0     # the drawn centre off the wheel's, the worst
+	var wheel_pod := 0.0  # the wheel's centre off the pod's, the worst (over the ground)
+	var drawn := 0
+	for k in range(1, int(0.8 / DT)):
+		var live := paced.filter(func(p: Array) -> bool: return g.alive(p[0]))
+		_seat_frame(v, g, false, live)
+		for p: Array in paced:
+			var c = p[0]
+			if not gone.has(c) and not g.alive(c):
+				gone[c] = [k, _dist(m.centre, c)]
+			if m.ring_t >= 0.0 and g.alive(c):
+				nearest[c] = minf(float(nearest.get(c, INF)), _dist(m.centre, c))
+		if _shown(m):
+			drawn += 1
+			follow = maxf(follow, _off_wheel(g, m))
+		var w: Vector3 = g.to_sim(m.origin())
+		wheel_pod = maxf(wheel_pod, Vector2(w.x - v.sim.pod.x, w.y - v.sim.pod.y).length())
+	var org_moved := Vector2(v.org_x, v.org_y).distance_to(org0)
+	var said := []
+	var right := true
+	for p: Array in paced:
+		var c = p[0]
+		var dies: bool = p[3]
+		if dies:
+			var k := int(gone[c][0]) if gone.has(c) else -1
+			var d := float(gone[c][1]) if gone.has(c) else -1.0
+			var due := 0.5 * d / 450.0
+			var ok: bool = gone.has(c) and k * DT >= due - 1e-4 and k * DT <= due + DT + 1e-4
+			right = right and ok
+			said.append("%.0f m %s: %s" % [absf(float(p[1])), "ahead" if float(p[1]) > 0.0 else "behind",
+				("gone %.4f s in at %.1f m from the craft, due %.4f" % [k * DT, d, due]) if gone.has(c) else "NEVER REACHED"])
+		else:
+			var untouched: bool = g.alive(c) and not g._damage.has(c.id)
+			right = right and untouched
+			said.append("%.0f m ahead: %s (%.1f m from the craft at the nearest while the ring was out)" % [float(p[1]),
+				"lives, untouched" if untouched else "TOUCHED", float(nearest.get(c, -1.0))])
+	check("at 1,500 mph on the seat's own frames, raiders paced at the craft's speed, a ring released (%s): %s; hits %d -> %d" % [
+		left, "; ".join(said), hits, g.hits], left and right and g.hits == hits + 3)
+	check("... the drawn ring's centre %.4f m off the wheel's at the worst over %d frames drawn (within %.2f), the wheel %.2f m off the pod at the most, while the floating origin followed the pod %.0f m" % [
+		follow, drawn, FOLLOW_M, wheel_pod, org_moved], drawn > 0 and follow <= FOLLOW_M and wheel_pod < 4.0 and org_moved > 300.0)
+	for p: Array in paced:
+		v.traffic_net.cars.erase(p[0])
+	R.pack.clear()
+	R._killed.clear()
+	R.kills = 0
+	R._zero_kills_by()
+
+
+## (On the same seat.) The craft put down 30 km off mid-spread (the floating origin goes with it): the ring stays on it.
+func check_sims_frame(v) -> void:
+	var g = v.gunnery
+	var m = v.craft.weapon
+	var sim = v.sim
+	_ready_on_seat(v, g)
+	_seat_frame(v, g, true)
+	var left: bool = m.ring_t >= 0.0
+	for i in int(round(0.1 / DT)):
+		_seat_frame(v, g)
+	var there := []
+	for r in sim.roads.size():
+		var Rd = sim.roads[r]
+		if Rd.shaft or Rd.deck or not v.traffic_net._public_road(Rd):
+			continue
+		for i in range(2, Rd.N - 2, 8):
+			if absf(Vector2(Rd.px[i] - sim.pod.x, Rd.py[i] - sim.pod.y).length() - 30000.0) < 300.0:
+				there = [r, i]
+				break
+		if not there.is_empty():
+			break
+	if there.is_empty():
+		check("a road sample 30 km off to put the craft down on", false)
+		return
+	var org0 := Vector2(v.org_x, v.org_y)
+	sim.respawn_on(there[0], there[1], 1)
+	var follow := 0.0
+	var drawn := 0
+	for i in int(0.3 / DT):
+		_seat_frame(v, g)
+		if _shown(m):
+			drawn += 1
+			follow = maxf(follow, _off_wheel(g, m))
+	var moved := Vector2(v.org_x, v.org_y).distance_to(org0)
+	check("a ring (%s), the craft put down %.1f km off 0.1 s into its spread (the floating origin with it): drawn round the wheel there, %.4f m off its centre at the worst over %d frames (within %.2f)" % [
+		left, moved / 1000.0, follow, drawn, FOLLOW_M], left and moved > 29000.0 and drawn > 0 and follow <= FOLLOW_M)
+
+
 ## The CanvasLayers under the view, each one's [shown, its children], and the camera's [h_offset, v_offset, fov, children].
 static func _screen(v) -> Array:
 	var layers := []
@@ -1016,20 +1267,11 @@ static func _screen(v) -> Array:
 	return [layers, [cam.h_offset, cam.v_offset, cam.fov, cam.get_child_count()]]
 
 
-## (On the same seat.) A release at 1,500 mph and its whole spread on the seat's own frames. The last ring over, it is
-## charged by hand (the recharge is check_recharge's: 12 s more at speed would fly the craft off its straight) and the craft
-## put on a straight again.
+## (On the same seat.) A release at 1,500 mph and its whole spread on the seat's own frames.
 func check_no_flash(v) -> void:
 	var g = v.gunnery
 	var m = v.craft.weapon
-	for i in int(1.0 / DT):
-		if m.ring_t < 0.0:
-			break
-		_seat_frame(v, g)
-	m.charge = 0.0
-	_on_a_straight(v)
-	for i in 10:
-		_seat_frame(v, g)
+	_ready_on_seat(v, g)
 	var before := _screen(v)
 	_seat_frame(v, g, true)
 	var left: bool = m.ring_t >= 0.0
@@ -1038,6 +1280,8 @@ func check_no_flash(v) -> void:
 	var nearest := INF
 	var first := -1
 	var first_r := 0.0
+	var first_tall := -1.0
+	var tall := {}
 	var changed := []
 	for k in range(1, int(0.8 / DT)):
 		_seat_frame(v, g)
@@ -1046,12 +1290,21 @@ func check_no_flash(v) -> void:
 			changed = [k, now]
 		same = same and now == before
 		glow = maxf(glow, float(v._jolt_glow))
-		if m.ring != null and m.ring.visible:
+		if _shown(m):
+			var eye := _eye(v, g)
 			if first < 0:
 				first = k
 				first_r = m.drawn_r
-			nearest = minf(nearest, _band_off_craft(v, m))
-	print("  RING AT 1,500 MPH: first drawn %d frames after the release, at %.1f m" % [first, first_r])
-	check("at 1,500 mph on the seat's own frames, a release (%s) and its spread: the CanvasLayers and the camera (offsets, field of view, children) as they were (%s%s), the jolt's vignette at %.2f; the band drawn (first %d frames on, at %.1f m) never within %.0f m of the pod or an engine (%.1f at the nearest)" % [
-		left, same, "" if changed.is_empty() else ": changed at frame %d to %s" % changed, glow, first, first_r, COMFORT, nearest],
-		left and same and glow == 0.0 and first > 0 and nearest >= COMFORT)
+				first_tall = _tallest_deg(eye, m)
+			nearest = minf(nearest, _wall_off_craft(v, m))
+			if k == int(round(150.0 / 450.0 * 0.5 / DT)) or k == int(round(0.5 / DT)):
+				tall[snappedf(m.drawn_r, 0.1)] = snappedf(_tall_deg(eye, m, _road_way(v)), 0.01)
+	var t150 := float(tall.get(150.0, -1.0))
+	var t450 := float(tall.get(450.0, -1.0))
+	print("  RING AT 1,500 MPH: first drawn %d frames after the release, at %.1f m (at rest %.1f m), %.2f degrees tall at the most from the eye" % [first, first_r, _first_r_rest, first_tall])
+	check("at 1,500 mph on the seat's own frames, a release (%s) and its spread: the CanvasLayers and the camera (offsets, field of view, children) as they were (%s%s), the jolt's vignette at %.2f; the wall drawn (first %d frames on, at %.1f m: at rest %.1f) never within %.0f m of the pod or an engine (%.1f at the nearest)" % [
+		left, same, "" if changed.is_empty() else ": changed at frame %d to %s" % changed, glow, first, first_r, _first_r_rest, COMFORT, nearest],
+		left and same and glow == 0.0 and first > 0 and nearest >= COMFORT and absf(first_r - _first_r_rest) < 1e-3)
+	check("... from the eye at 1,500 mph: %.2f degrees tall at the most on its first drawn frame (at most %.1f); straight ahead %.2f at 150 m and %.2f at 450 m (%.1f to %.1f)" % [
+		first_tall, TALL_HI, t150, t450, TALL_LO, TALL_HI], first_tall > 0.0 and first_tall <= TALL_HI and t150 >= TALL_LO and t150 <= TALL_HI
+		and t450 >= TALL_LO and t450 <= TALL_HI)

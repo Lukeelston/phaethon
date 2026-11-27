@@ -1,13 +1,12 @@
 ## The Vesper's shock pulse (view/weapons/pulse_mount.gd on Codex's view/arms/vesper_arms.gd) in the game's own VR cockpit
 ## with XR off, on a Network straight: from the seat and from outside with the GUN never armed (seat-stowed, out-stowed)
 ## and armed, the wheel up out of the forward starboard sill (seat-armed, out-armed); then a ring with the world held still
-## (the fire control stepped on its own, as tests/test_pulse.gd does: the craft stands where it is, so the ring spreads
-## round it as round a craft at rest): from the seat in its first frames (early-f2, before it is drawn; early-first, the
-## first frame it is drawn; early-first-down, the same looking down to the right over the wheel; early-f12), at 150 m and
-## at 450 m from the seat (seat-150, seat-450) and from above (above-150, above-450); and a ring on the view's own frames at
-## 1,500 mph, the craft chasing its front (moving-first: the first frame it is drawn; moving-450 from the seat;
-## moving-above-450). The still world's shots never run the view's own frame: the dash's strip is never told the gun's
-## words, and shows none of them.
+## (the fire control stepped on its own, as tests/test_pulse.gd does: the craft stands where it is): from the seat on the
+## first frame it is drawn (seat-first), at 150 m and at 450 m (seat-150, seat-450), and from above (above-150, above-450);
+## and a ring on the view's own frames at 1,500 mph, riding with the craft (moving-first, moving-150, moving-450 from the
+## seat; moving-above-450). The still world's shots never run the view's own frame: the dash's strip is never told the
+## gun's words, and shows none of them. Each shot's line tells how tall the ring's wall stands from the eye straight ahead
+## (degrees) and how bright it is.
 ## Needs a window: --xr-mode off --fixed-fps 120 -s res://tests/render_pulse.gd -- --mute --out=ABSOLUTE_DIRECTORY
 extends SceneTree
 
@@ -21,7 +20,6 @@ const DT := 1.0 / 120.0
 const SPEED := 1500.0 * 0.44704
 const STRAIGHT := 1600.0
 const LOOK := Vector3(0.0, -0.035, -1.0)      # the seat's look: ahead along the rig, a little down
-const DOWN_RIGHT := Vector3(0.45, -0.42, -1.0)      # ... and down to the right, over the wheel and the road beside it
 const OUT_EYE := Vector3(3.4, 1.9, 1.6)       # outside: behind the forward starboard sill and above it (the cockpit's own frame)
 var output := ""
 var _way := 1
@@ -113,16 +111,9 @@ func _run() -> void:
 		frame += 1
 		_look_seat(game, cam, LOOK)
 		g.step(DT)
-		if frame == 2:
-			await _snap(game, g, "early-f2", 90)
 		if first < 0 and m.ring.visible:
 			first = frame
-			await _snap(game, g, "early-first", 90)
-			_look_seat(game, cam, DOWN_RIGHT)
-			_redraw(game, g)
-			await _snap(game, g, "early-first-down", 90)
-		if frame == 12:
-			await _snap(game, g, "early-f12", 90)
+			await _snap(game, g, "seat-first", 90)
 		if frame == int(round(150.0 / 450.0 * 0.5 / DT)):
 			await _snap(game, g, "seat-150", 90)
 			_look_above(game, cam, m, 460.0)
@@ -158,6 +149,10 @@ func _run() -> void:
 			_look_seat(game, cam, LOOK)
 			_redraw(game, g)
 			await _snap(game, g, "moving-first", 90)
+		if k == int(round(150.0 / 450.0 * 0.5 / DT)):
+			_look_seat(game, cam, LOOK)
+			_redraw(game, g)
+			await _snap(game, g, "moving-150", 90)
 		if k == int(round(0.5 / DT)):
 			_look_seat(game, cam, LOOK)
 			_redraw(game, g)
@@ -219,11 +214,19 @@ func _snap(game, g, shot: String, fov: float) -> void:
 		print("PULSE VIEW %s (unarmed: no fire control %s, no arms %s)" % [path, game.gunnery == null, game.shell.get_node("PodHull").get_node_or_null("Arms") == null])
 	else:
 		var m = g.mount
-		var eye: Vector3 = g.to_sim(game.cam.global_position)
-		var front := Vector2(eye.x - m.centre.x, eye.y - m.centre.y).length()      # (the eye's way from the release point, over the ground)
-		print("PULSE VIEW %s deploy=%.2f ring_t=%.3f r=%.1f drawn=%s drawn_r=%.1f light=%.2f heat=%.2f charge=%.2f; the eye %.2f m over the ring's plane, %.1f m from its release point" % [
-			path, m.deploy_t(), m.ring_t, m.ring_r, m.ring.visible if m.ring != null else false, m.drawn_r, m.ring_light, m.heat(), m.charge,
-			eye.z - (m.ring_h + float((m.get_script() as Script).get_script_constant_map().get("RING_LIFT", 0.0))), front])
+		var lift := float((m.get_script() as Script).get_script_constant_map().get("RING_LIFT", 0.0))
+		var eye: Vector3 = g.to_sim(game.rig.global_transform * Seat.EYE)      # (the seat's eye, wherever the camera is)
+		var off := Vector2(eye.x - m.centre.x, eye.y - m.centre.y).length()      # (the eye from the ring's centre, over the ground)
+		var tall := -1.0      # (degrees from the seat's eye, straight ahead along the rig)
+		if m.ring != null and m.ring.visible:
+			var fw: Vector3 = g.dir_to_sim(-game.rig.global_transform.basis.z)
+			var way := Vector2(fw.x, fw.y).normalized()
+			var p: Vector2 = Vector2(m.centre.x, m.centre.y) + way * float(m.drawn_r)
+			var foot := Vector3(p.x, p.y, float(m.ring_h) + lift)
+			tall = rad_to_deg((foot - eye).angle_to(foot + Vector3(0.0, 0.0, m.ring_tall) - eye))
+		print("PULSE VIEW %s deploy=%.2f ring_t=%.3f drawn=%s r=%.1f tall=%.2f m (%.2f deg from the seat's eye ahead) light=%.2f heat=%.2f charge=%.2f; the seat's eye %.2f m over the ring's plane, %.1f m from its centre" % [
+			path, m.deploy_t(), m.ring_t, m.ring.visible if m.ring != null else false, m.drawn_r, m.ring_tall, tall, m.ring_light, m.heat(), m.charge,
+			eye.z - (m.ring_h + lift), off])
 
 
 ## As tests/test_pulse.gd: the start of a straight, level stretch of road.

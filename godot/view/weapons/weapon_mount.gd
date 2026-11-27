@@ -128,6 +128,12 @@ func kicks() -> int:
 	return 0
 
 
+## Is it aimed (by the gaze, or by pointing the craft)? One that is not (the Vesper's pulse, a ring round the craft) is
+## given no sight and no gaze brackets, and the fire control searches nothing along its aim (view/gunnery.gd step, _draw).
+func aimed() -> bool:
+	return true
+
+
 # --- for the sights (view/gunnery.gd _draw): what a mount without them answers ------------------------------
 
 ## Is it aimed by pointing the craft (fixed guns: a boresight ring and a lead pip), not by the gaze (a turret: the

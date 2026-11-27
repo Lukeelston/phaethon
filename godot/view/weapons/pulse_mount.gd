@@ -1,31 +1,38 @@
 ## The Vesper's shock pulse as a WeaponMount (view/weapons/weapon_mount.gd), on Codex's arms (view/arms/vesper_arms.gd: a
 ## pulse wheel on a lift that rises out of the forward starboard sill, its four quarter rings fanning into one transducer).
 ## It fires for itself (own_fire): the fire control (view/gunnery.gd) hands this the trigger each frame (fire); this keeps
-## the ring, its hits and the charge. It is not aimed: the gaze lays only the fire control's own sight. Its figures are
-## the craft's weapon row (sim/pilot_craft.gd TRAITS[..].weapon: radius, rechargeS, gunshipFrac, spreadS).
-##   release   on the trigger's press (not while it is held), the wheel out and asked out, and charged: a ring leaves the
-##             wheel's centre (its muzzle) and widens to `radius` m in spreadS s (0 on the release's frame, radius x t /
-##             spreadS after). The charge, rechargeS s, then counts down whatever the switch does (thrown to SAFE and
-##             back it is not refilled); "PULSE READY" (status, which the fire control says on the strip) once it ends.
+## the ring, its hits and the charge. It is not aimed (aimed: false): the fire control draws no gaze sight for it and does
+## not search along the gaze. Its figures are the craft's weapon row (sim/pilot_craft.gd TRAITS[..].weapon: radius,
+## rechargeS, gunshipFrac, spreadS).
+##   release   on the trigger's press (not while it is held), the wheel out and asked out, and charged: a ring leaves round
+##             the craft and widens to `radius` m in spreadS s (0 on the release's frame, radius x t / spreadS after). The
+##             charge, rechargeS s, then counts down whatever the switch does (thrown to SAFE and back it is not
+##             refilled); "PULSE READY" (status, which the fire control says on the strip) once it ends.
+##   centre    the ring rides with the craft (Ruling W): each frame its centre is the wheel's centre then (its muzzle, the
+##             sims' frame) and its plane the road's height under it (g.ground_at). Threats paced by the craft at any speed
+##             are reached as at rest.
 ##   hits      the threats the raid has at the release (g.threats(): its raiders and its flyers; a commuter is never
-##             looked at), each once, the first frame the ring's radius has reached its distance from the release point:
-##             in the round for a flyer, over the ground for a raider. A drone or a raider is destroyed (g.damage with
-##             its full HP, g.hp_of), bare: its burst and the burst's sound are the hit's picture and sound (up to 16
+##             looked at), each once, the first frame the ring's radius has reached its distance from the centre that
+##             frame: in the round for a flyer, over the ground for a raider. A drone or a raider is destroyed (g.damage
+##             with its full HP, g.hp_of), bare: its burst and the burst's sound are the hit's picture and sound (up to 16
 ##             die inside half a second, and a spark and an impact sound each would take the fire control's six world
 ##             players from the bursts). The gunship takes gunshipFrac of its full HP (the flyers module's hp_max, read
 ##             through g.hp_of), not bare: seen and heard as a hit; it never kills a fresh one. One gone meanwhile (shot,
 ##             fled, the raid ended or reset: a restart, a respawn) is passed over, so once the raid is gone the ring hits
 ##             nothing; one that comes after the release is not hit by it, ahead of the ring or behind it. A ring under
 ##             way finishes its spread whatever the switch does: SAFE stops a new release, not one under way.
-##   drawn     the ring (view/weapons/pulse_ring.gdshader): one flat band on the road's plane under the release point,
-##             RING_LIFT over it, added, unshaded, no depth write; its outer edge at the ring's radius, BAND of it wide (a
-##             bright leading edge, a faint wash behind), dimming from RING_ENERGY to RING_END x that over the spread and
-##             out over LINGER_S at its radius after. It is kept in the sims' frame where it was released (drawn about
-##             the floating origin, as the fire control's own are) and drawn only on a frame its band is CLEAR m or more
-##             off the pod and each engine, over the ground: so it first shows clear of the craft's hull and engines
-##             (at rest at 52.5 m, its 7th frame; at 1,500 mph, the craft chasing its front, at 225 m, its 30th: measured
-##             by tests/test_pulse.gd) and never passes under them drawn. Nothing fills the view and nothing touches the camera or the HUD: no flash. The wheel's heat
-##             follows the charge (charge / rechargeS: full at the release, out when it is ready again).
+##   drawn     the ring (view/weapons/pulse_ring.gdshader; Ruling X): a low wall standing on the ring's plane (RING_LIFT
+##             over the road's) all the way round at its radius, RISE x its radius tall, so from the craft it stands about
+##             TALL_DEG tall at any radius (0.6 m at 45 m, 6.3 m at 450 m): white-hot at its foot, soft to its top, added,
+##             unshaded, no depth write (the depth test on: the land and the craft's own cockpit hide it where they stand
+##             before it). It dims from RING_ENERGY to RING_END x that over the spread and goes out over LINGER_S at its
+##             radius after. Drawn about the floating origin from its sims' frame figures (as the fire control's own are),
+##             in the world, never on the camera or a canvas, and only on a frame it stands CLEAR m or more off the pod and
+##             each engine (over the ground): it first shows clear of the craft's hull and engines, at the same radius at
+##             any speed (measured by tests/test_pulse.gd). Nothing fills the view and nothing touches the camera or the
+##             HUD: no flash.
+##   glow      the wheel's heat is the charge it holds (Ruling Y): 1 - charge / rechargeS, dark just after a release,
+##             brightening to full when it is ready again; full before the first.
 ##   felt      one strong tick in both hands on the release, below a jolt's (kicks: vr/vr_cockpit.gd _gun_kick)
 ##   sounds    stand-ins for Task 9's, which owns them: turret sounds re-pitched (g.play), unheard: the boom on the release
 ##             (pulse_boom) and a cue when it is charged again (pulse_ready)
@@ -40,8 +47,9 @@ const GunneryScript := preload("res://view/gunnery.gd")
 const PilotCraft := preload("res://sim/pilot_craft.gd")
 const RingShader := preload("res://view/weapons/pulse_ring.gdshader")
 const DEPLOY_S := 1.0             # s from stowed to out: the leaves open, the wheel rises and fans (the fixed guns' figure)
-const BAND := 0.06                # the ring's band, of its radius, inward of its edge (27 m at 450)
-const CLEAR := 25.0               # m: drawn only on a frame its band is this far off the pod and each engine (over the ground)
+const TALL_DEG := 0.8             # the ring's wall stands about this tall seen from the craft, at any radius ...
+const RISE := 0.013964            # ... tan(TALL_DEG): its height, of its radius (0.63 m at 45 m, 6.3 m at 450 m)
+const CLEAR := 25.0               # m: drawn only on a frame its wall is this far off the pod and each engine (over the ground)
 const RING_LIFT := 0.3            # m: its plane over the road's (not to fight the road's surface)
 const RING_ENERGY := 1.6          # its light at the release ...
 const RING_END := 0.35            # ... this much of it at its radius ...
@@ -62,11 +70,12 @@ var charge := 0.0                 # s of the recharge left (0: charged)
 var released := 0                 # rings released this flight (kicks: one each)
 var ring_t := -1.0                # s since the ring's release (-1: no ring)
 var ring_r := 0.0                 # m: its radius now (its hits')
-var centre := Vector3.ZERO        # where it was released (the sims' frame: the wheel's centre then)
-var ring_h := 0.0                 # the road's height under it (the sims' frame): the plane it is drawn on
+var centre := Vector3.ZERO        # its centre this frame (the sims' frame: the wheel's centre now; the last ring's once over)
+var ring_h := 0.0                 # the road's height under it (the sims' frame): the plane it stands on
 var ahead: Array = []             # the threats it has still to reach (those the raid had at its release)
 var ring: MeshInstance3D = null   # its drawing (made with the arms' first frame: _build_drawing)
 var drawn_r := -1.0               # the radius it was drawn at this frame, -1 for none (tests read it)
+var ring_tall := 0.0              # ... how tall (m) ...
 var ring_light := 0.0             # ... and how bright
 var cost_ms := 0.0                # what the last frame's step and fire took (tests read it)
 var _mat: ShaderMaterial
@@ -176,6 +185,11 @@ func kicks() -> int:
 	return released
 
 
+## Not aimed (Ruling Z): the ring goes round the craft, so the fire control draws no gaze sight and searches nothing.
+func aimed() -> bool:
+	return false
+
+
 # --- each frame, from the fire control -------------------------------------------------------------------------
 
 func fire(g, delta: float, pulling: bool) -> void:
@@ -191,16 +205,21 @@ func fire(g, delta: float, pulling: bool) -> void:
 		_cue = false
 		g.play("gun", "deploy", Vector3.INF, READY_PITCH)      # (a stand-in for the charge's own cue: Task 9's pulse_ready)
 	if arms != null:
-		arms.heat = charge / recharge_s
+		arms.heat = 1.0 - charge / recharge_s      # (the charge it holds: Ruling Y)
 	if ring != null:
 		_draw(g)
 	cost_ms = (_step_us + Time.get_ticks_usec() - t0) / 1000.0
 
 
-## A ring leaves the wheel's centre: the threats there now are the ones it will reach.
-func _release(g) -> void:
+## The ring's centre this frame (Ruling W): the wheel's centre now, the sims' frame, and the road's height under it.
+func _recentre(g) -> void:
 	centre = g.to_sim(origin())
 	ring_h = g.ground_at(centre.x, centre.y)
+
+
+## A ring leaves round the craft: the threats there now are the ones it will reach.
+func _release(g) -> void:
+	_recentre(g)
 	ring_t = 0.0
 	ring_r = 0.0
 	ahead = g.threats().duplicate()      # (the raid's raiders and flyers: never a commuter)
@@ -211,9 +230,10 @@ func _release(g) -> void:
 	_tell("released (%d threats about)" % ahead.size())
 
 
-## A frame of the ring: it widens, and each threat it has reached is hit; past its spread it reaches no more, and once it
-## has lingered it is gone.
+## A frame of the ring: it moves with the craft and widens, and each threat it has reached from where the craft is now is
+## hit; past its spread it reaches no more, and once it has lingered it is gone.
 func _spread(g, delta: float) -> void:
+	_recentre(g)
 	ring_t += delta
 	var done := ring_t >= spread_s - 1e-6
 	ring_r = radius if done else radius * ring_t / spread_s
@@ -253,7 +273,7 @@ func _tell(what: String) -> void:
 
 # --- drawing ----------------------------------------------------------------------------------------------------
 
-## The ring's band, under the fire control (drawn about the floating origin as its own are), hidden.
+## The ring's wall, under the fire control (drawn about the floating origin as its own are), hidden.
 func _build_drawing(g) -> void:
 	_mat = ShaderMaterial.new()
 	_mat.shader = RingShader
@@ -261,25 +281,24 @@ func _build_drawing(g) -> void:
 	_mat.set_shader_parameter("colour", Vector3(RING_COL.r, RING_COL.g, RING_COL.b))
 	ring = MeshInstance3D.new()
 	ring.name = "PulseRing"
-	ring.mesh = _band_mesh(1.0 - BAND)
+	ring.mesh = _wall_mesh()
 	ring.material_override = _mat
 	ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	ring.visible = false
 	g.add_child(ring)
 
 
-## A flat band round the up axis (the render frame's XZ plane), from `inner` to 1 across; UV.y 0 at its inner edge, 1 at
-## its outer.
-static func _band_mesh(inner: float) -> ArrayMesh:
+## A wall round the up axis (the render frame's Y), radius 1, from 0 to 1 up; UV.y 0 at its foot, 1 at its top.
+static func _wall_mesh() -> ArrayMesh:
 	var verts := PackedVector3Array()
 	var uvs := PackedVector2Array()
 	var index := PackedInt32Array()
 	for k in SEGMENTS + 1:
 		var a := TAU * float(k) / SEGMENTS
 		var out := Vector3(cos(a), 0.0, sin(a))
-		verts.append(out * inner)
-		uvs.append(Vector2(float(k) / SEGMENTS, 0.0))
 		verts.append(out)
+		uvs.append(Vector2(float(k) / SEGMENTS, 0.0))
+		verts.append(out + Vector3.UP)
 		uvs.append(Vector2(float(k) / SEGMENTS, 1.0))
 	for k in SEGMENTS:
 		var i := 2 * k
@@ -294,10 +313,11 @@ static func _band_mesh(inner: float) -> ArrayMesh:
 	return mesh
 
 
-## The ring where it was released, as wide as it has spread and as bright as it has faded; not on a frame its band is
-## within CLEAR of the craft.
+## The ring's wall round the craft this frame, as wide as it has spread, as tall as that (RISE of it) and as bright as it
+## has faded; not on a frame it stands within CLEAR of the craft.
 func _draw(g) -> void:
 	drawn_r = -1.0
+	ring_tall = 0.0
 	ring_light = 0.0
 	var showing := ring_t >= 0.0 and ring_r > 0.0 and _clear_of_craft(g.view.sim)
 	ring.visible = showing
@@ -308,20 +328,18 @@ func _draw(g) -> void:
 	if ring_t > spread_s:
 		light *= clampf(1.0 - (ring_t - spread_s) / LINGER_S, 0.0, 1.0)
 	var at: Vector3 = g.to_render(Vector3(centre.x, centre.y, ring_h + RING_LIFT))      # (the sims' frame, about the floating origin)
-	ring.global_transform = Transform3D(Basis().scaled(Vector3(ring_r, 1.0, ring_r)), at)
+	ring.global_transform = Transform3D(Basis().scaled(Vector3(ring_r, ring_r * RISE, ring_r)), at)
 	_mat.set_shader_parameter("energy", light)
 	drawn_r = ring_r
+	ring_tall = ring_r * RISE
 	ring_light = light
 
 
-## Is the band (BAND of the radius inward of its edge) CLEAR m or more off the pod and each engine, over the ground?
+## Does the wall (at the ring's radius about its centre) stand CLEAR m or more off the pod and each engine, over the ground?
 func _clear_of_craft(sim) -> bool:
-	var outer := ring_r + CLEAR
-	var inner := ring_r * (1.0 - BAND) - CLEAR
 	for b in [sim.pod, sim.eL, sim.eR]:
 		var dx: float = b.x - centre.x
 		var dy: float = b.y - centre.y
-		var d := sqrt(dx * dx + dy * dy)
-		if d > inner and d < outer:
+		if absf(sqrt(dx * dx + dy * dy) - ring_r) < CLEAR:
 			return false
 	return true

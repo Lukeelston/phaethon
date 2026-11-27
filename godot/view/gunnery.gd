@@ -18,7 +18,8 @@
 ## A weapon that fires for itself (its mount's own_fire(): missiles, a beam, a pulse, orbs) is given, in place of 4's
 ## firing and 5, the trigger each frame (mount.fire(g, delta, pulling)), and fires through this fire control's targets:
 ##   g.alive(t)  g.hp_of(t)  g.damage(t, n, at, quiet, bare)  g.threats()  g.add_fx(p, kind, dur, size)  g.play(pool, sound, at, pitch)
-## and reads where the aim met the ground this frame, g.aim_ground (a beam ends there).
+## and reads where the aim met the ground this frame, g.aim_ground (a beam ends there). A mount that is not aimed (its
+## aimed() false: the Vesper's pulse, a ring round the craft) gets no search along its aim (1, 2) and no sight (3).
 ## A target is a traffic Car (a commuter, or a raider: hostile) or a flyer of the raid's (its `flyer` true, which a Car
 ## has not; the raid's flyers module, view.raids.flyers, has it and counts its hits). The mount's word for the pilot
 ## (status()) is said on the strip when it changes.
@@ -288,7 +289,7 @@ func step(delta: float) -> void:
 	var aim_d: Vector3 = ray[1]
 	var gaze_d: Vector3 = -cam.global_transform.basis.z.normalized()
 	var live := mount.deploy_t() > 0.0 or out_ok
-	if live:
+	if live and mount.aimed():      # (a mount that is not aimed, the Vesper's pulse, looks for nothing along it)
 		_find(to_sim(aim_o), dir_to_sim(aim_d), delta)
 	else:
 		aim_kind = "sky"
@@ -819,7 +820,9 @@ func _sounds_step(asked_out: bool) -> void:
 
 func _draw(cam: Camera3D) -> void:
 	var eye := cam.global_position
-	if mount.boresight():
+	if not mount.aimed():
+		sight.visible = false      # (not aimed, the Vesper's pulse: no sight, no gaze brackets)
+	elif mount.boresight():
 		_draw_boresight(eye)
 	else:
 		_draw_gaze_sight(eye, cam)
