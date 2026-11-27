@@ -92,6 +92,16 @@ const TUNING := {
 #   rechargeS    s from a release before the next may leave
 #   gunshipFrac  of the gunship's full HP the ring takes (a drone or a raider it destroys): under 1, so never a fresh one
 #   spreadS      s the ring takes to reach its radius
+# The orbs (the Orrery's, view/weapons/orb_mount.gd), three that circle the craft and strike:
+#   orbs         how many (Codex's arms have three)
+#   reach        m from the craft: an orb rested in its orbit takes the nearest threat this near on its own
+#   sendReach    m from the craft: the trigger sends every orb in orbit at the hostile under the gaze this near (the
+#                fire control's gaze search reaches as far)
+#   orbV         m/s: an orb's speed out and back, the craft's own speed added
+#   hits         hits a strike does
+#   restS        s an orb rests in its orbit after a sortie before it takes a threat on its own again
+#   orbitR       m from the craft's up axis the orbs circle at
+#   orbitS       s a turn of the orbit takes
 const TRAITS := {
 	STANDARD: {"power": {"id": "slipstream", "name": "Slipstream", "lcd": "SLIPSTREAM",
 		"thrust": 1.15, "last": 4.0, "fill": 6.0, "reach": 120.0, "lane": 22.0},
@@ -104,7 +114,8 @@ const TRAITS := {
 			"thrust": 1.35, "last": 1.5, "recharge": 12.0, "low": 0.3, "full": 0.85, "within": 0.3},
 		"weapon": {"locks": 4, "lockS": 0.35, "missileV": 900.0, "turnDeg": 120.0, "hits": 40, "reach": 3000.0, "reloadS": 5.0, "lifeS": 6.0}},
 	ORRERY: {"gripCapG": 1.13, "driftReach": 0.8,
-		"power": {"id": "gyro", "name": "Gyro Lock", "lcd": "GYRO LOCK", "grip": 1.2, "last": 4.0, "recharge": 15.0}},
+		"power": {"id": "gyro", "name": "Gyro Lock", "lcd": "GYRO LOCK", "grip": 1.2, "last": 4.0, "recharge": 15.0},
+		"weapon": {"orbs": 3, "reach": 900.0, "sendReach": 2200.0, "orbV": 700.0, "hits": 3, "restS": 1.2, "orbitR": 4.0, "orbitS": 3.0}},
 	KILN: {"thrustMax": 0.95, "brakes": 1.3, "wallShove": 0.75, "driftReach": 0.7,
 		"power": {"id": "ram", "name": "Ram Plate", "lcd": "RAM PLATE", "wallShove": 0.5, "last": 5.0, "recharge": 20.0},
 		"weapon": {"reach": 600.0, "coneDeg": 25.0, "dps": 30.0, "fireS": 2.5, "coolS": 3.0}},
@@ -143,14 +154,14 @@ static func power_of(id: Variant) -> Dictionary:
 
 ## Does this airframe carry a weapon (WEAPONS)? Its cockpit then has a GUN switch (vr/vr_cockpit.gd), and X, and the
 ## flat view's K and F, work its gun. Stage 1 of the Raids: the Phaethon, the Talon and the Basilisk; stage 2: the Shrike,
-## the Kiln and the Vesper.
+## the Kiln, the Vesper and the Orrery. Every pilot craft is armed.
 static func armed(id: Variant) -> bool:
 	return WEAPONS.has(known(id))
 
 
 ## Each craft's weapon, hidden in its hull until its GUN switch is armed (Raids; Luke: "Modelled and hidden - have codex
 ## work on the art"): its hardware is view/arms/<craft>_arms.gd (the Basilisk's, its turret: view/turret.gd), built with
-## its model (view/craft_model.gd `arms`), and its figures are TRAITS[..].weapon. The rest of the fleet's come later.
+## its model (view/craft_model.gd `arms`), and its figures are TRAITS[..].weapon.
 ##   cannons     the Phaethon's: one in the nose of each engine, fixed along the engine's heading
 ##   wing_guns   the Talon's: one at each wing root, fixed forward; faster and lighter than the Phaethon's
 ##   turret      the Basilisk's gaze-slaved turret
@@ -162,7 +173,10 @@ static func armed(id: Variant) -> bool:
 ##   pulse       the Vesper's: a shock ring released round the craft from a wheel that rises out of its forward starboard
 ##               sill (view/arms/vesper_arms.gd), on a long recharge (view/weapons/pulse_mount.gd); its arms are fitted as
 ##               the Kiln's are
-const WEAPONS := {STANDARD: "cannons", TALON: "wing_guns", BASILISK: "turret", SHRIKE: "missiles", KILN: "lance", VESPER: "pulse"}
+##   orbs        the Orrery's: three survey orbs that rise out of cradles in its bonnet (view/arms/orrery_arms.gd), circle
+##               the craft, strike the nearest threat on their own and go where the pilot looks on the trigger
+##               (view/weapons/orb_mount.gd); its arms are fitted as the Kiln's are
+const WEAPONS := {STANDARD: "cannons", TALON: "wing_guns", BASILISK: "turret", SHRIKE: "missiles", KILN: "lance", VESPER: "pulse", ORRERY: "orbs"}
 
 
 ## A craft's weapon (WEAPONS), "" for none.

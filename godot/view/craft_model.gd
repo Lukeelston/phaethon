@@ -91,10 +91,11 @@ var turret = null    # the Basilisk's gun (view/turret.gd), on the pod; view/gun
 var weapon = null    # what view/gunnery.gd fires through (view/weapons/weapon_mount.gd): the Basilisk's, its turret's mount;
                      # the Phaethon's and the Talon's, their arms' fixed guns (view/weapons/fixed_guns_mount.gd); the
                      # Shrike's, its missiles (view/weapons/missile_mount.gd); the Kiln's, its lance
-                     # (view/weapons/lance_mount.gd); the Vesper's, its pulse (view/weapons/pulse_mount.gd)
+                     # (view/weapons/lance_mount.gd); the Vesper's, its pulse (view/weapons/pulse_mount.gd); the Orrery's,
+                     # its orbs (view/weapons/orb_mount.gd)
 var arms = null      # the craft's weapon hardware, hidden in its hull until armed (view/arms/<craft>_arms.gd; sim/pilot_craft.gd
                      # WEAPONS): the Phaethon's cannons on its engines, the Talon's wing guns on its pod; null for the rest
-                     # (the Basilisk's gun is its turret; the Shrike's, the Kiln's and the Vesper's arms are their mounts',
+                     # (the Basilisk's gun is its turret; the Shrike's, the Kiln's, the Vesper's and the Orrery's arms are their mounts',
                      # fitted on the hull the pilot sees at the first arming, or at load with Raids on)
 const ARMS := {"cannons": preload("res://view/arms/phaethon_arms.gd"), "wing_guns": preload("res://view/arms/talon_arms.gd")}
 const TurretScript := preload("res://view/turret.gd")
@@ -103,6 +104,7 @@ const FixedGunsMountScript := preload("res://view/weapons/fixed_guns_mount.gd")
 const MissileMountScript := preload("res://view/weapons/missile_mount.gd")
 const LanceMountScript := preload("res://view/weapons/lance_mount.gd")
 const PulseMountScript := preload("res://view/weapons/pulse_mount.gd")
+const OrbMountScript := preload("res://view/weapons/orb_mount.gd")
 const Shrike := preload("res://view/shrike_airframe.gd")
 const Talon := preload("res://view/talon_airframe.gd")
 const PilotCraft := preload("res://sim/pilot_craft.gd")
@@ -636,6 +638,8 @@ func build(v, checkpoint := Callable(), reuse_engine_body := Callable()) -> void
 		weapon = LanceMountScript.new(self)
 	if PilotCraft.weapon_of(sim.P.vehicle) == "pulse":      # (the Vesper's: as the Kiln's)
 		weapon = PulseMountScript.new(self)
+	if PilotCraft.weapon_of(sim.P.vehicle) == "orbs":      # (the Orrery's: as the Kiln's)
+		weapon = OrbMountScript.new(self)
 	var flap_mat := null if shrike or fleet else Kit.polished(0.85, 0.2)
 	for s in [-1.0, 1.0]:
 		var hinge := Node3D.new()

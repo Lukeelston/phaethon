@@ -8,6 +8,8 @@
 ##   the Shrike     view/weapons/missile_mount.gd: look-to-lock missiles (fires for itself)
 ##   the Kiln       view/weapons/lance_mount.gd: a plasma beam along the gaze (fires for itself)
 ##   the Vesper     view/weapons/pulse_mount.gd: a shock ring released round the craft (fires for itself)
+##   the Orrery     view/weapons/orb_mount.gd: three orbs that circle it, strike on their own and go where it looks
+##                  (fires for itself)
 ## The bodies here are the defaults: a mount that never comes out and never fires.
 ##   g.mount = craft.weapon; g.mount.power = power; g.mount.step(delta, want_out, aim_render, gaze_dir_render)
 ## A weapon that fires for itself (missiles, a beam, a pulse, orbs) answers own_fire() true: then the fire control runs
@@ -88,7 +90,7 @@ func steps_stowed() -> bool:
 
 ## Make ready, stowed, what its first arming would otherwise build in that frame: called once when its fire control is
 ## made at load, dormant (Raids on: view/network_raids.gd build; view/gunnery.gd make). Fixed guns and a turret are
-## built with their model: nothing here. (The Shrike's missiles, the Kiln's lance and the Vesper's pulse fit their arms.)
+## built with their model: nothing here. (The Shrike's missiles, the Kiln's lance, the Vesper's pulse and the Orrery's orbs fit their arms.)
 func prepare() -> void:
 	pass
 

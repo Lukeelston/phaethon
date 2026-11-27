@@ -25,11 +25,12 @@
 ## (status()) is said on the strip when it changes.
 ## The weapon's figures are the craft's (sim/pilot_craft.gd TRAITS[..].weapon: rate, boltV, hits, reach, fireS, coolS,
 ## lockS); where it has none of them, RATE, BOLT_V, one hit a bolt, REACH, its power's heat (the Basilisk's) and LOCK_S.
+## The aim is looked for as far as the weapon may be sent where it has a sendReach (the Orrery's orbs), else its reach.
 ## Bolts and bursts are kept in the sims' frame (x, y, height) and drawn about the floating origin.
 ## The switch (deploy) and the trigger are the cockpit's: vr/vr_cockpit.gd, or K and F in the flat view. Fixed guns'
-## (and missiles', the lance's and the pulse's) fire control: with Raids on, the director makes it at load
+## (and missiles', the lance's, the pulse's and the orbs') fire control: with Raids on, the director makes it at load
 ## (network_raids.gd build), dormant: not stepped until the GUN is first armed, and its mount made ready then (prepare:
-## the Shrike's, the Kiln's and the Vesper's arms, stowed), so arming costs no frame; with Raids off it is made the
+## the Shrike's, the Kiln's, the Vesper's and the Orrery's arms, stowed), so arming costs no frame; with Raids off it is made the
 ## first time the GUN is armed (a flight that never arms them builds none of it), its sounds read already at the view's
 ## build (warm_sounds). A turret's is made at once, as its sight ball and glow are stepped while it is stowed.
 ##   gunnery = Gunnery.frame(view, gunnery, delta)        # once per frame, after the camera and the world
@@ -169,7 +170,7 @@ static func make(v, asleep := false):
 	v.add_child(g)
 	g.build(v)
 	if asleep:
-		g.mount.prepare()      # (what its first arming would build, built now, stowed: the Shrike's arms, the Kiln's, the Vesper's)
+		g.mount.prepare()      # (what its first arming would build, built now, stowed: the Shrike's arms, the Kiln's, the Vesper's, the Orrery's)
 	return g
 
 
@@ -192,7 +193,7 @@ func build(v) -> void:
 	var row: Dictionary = v.sim.traits.get("weapon", {})
 	rate = float(row.get("rate", RATE))
 	bolt_v = float(row.get("boltV", BOLT_V))
-	reach = float(row.get("reach", REACH))
+	reach = float(row.get("sendReach", row.get("reach", REACH)))      # (the orbs': as far as a send may go)
 	bolt_hits = int(row.get("hits", 1))
 	lock_s = float(row.get("lockS", LOCK_S))
 	sight = _sight_quad("GunSight")
@@ -841,16 +842,7 @@ func _draw(cam: Camera3D) -> void:
 		var streak := minf(STREAK, length * k + 0.3)
 		var mid := head - dir * streak * 0.5
 		var width := maxf(0.22, eye.distance_to(mid) * BOLT_WIDTH)
-		var z := -dir
-		var x := z.cross(Vector3.UP if absf(z.y) < 0.98 else Vector3.RIGHT).normalized()
-		var y := z.cross(x)
-		# Turn the flat ribbon to face the eye about its own line.
-		var to_eye := (eye - mid)
-		var face := (to_eye - dir * to_eye.dot(dir)).normalized()
-		if face.length_squared() > 0.5:
-			y = face
-			x = y.cross(z).normalized()
-		_bolt_mm.set_instance_transform(n, Transform3D(Basis(x * width, y * width, z * streak), mid))
+		_bolt_mm.set_instance_transform(n, ribbon(mid, dir, streak, width, eye))
 		_bolt_mm.set_instance_color(n, Color(2.6, 1.5, 0.55, 1.0))
 		n += 1
 	_bolt_mm.visible_instance_count = n
@@ -983,6 +975,21 @@ func _batch(n: String, mesh: Mesh, mat: Material, count: int) -> MultiMesh:
 	mmi.custom_aabb = AABB(Vector3(-30000, -30000, -30000), Vector3(60000, 60000, 60000))
 	add_child(mmi)
 	return mm
+
+
+## A streak's place (render frame): the bolt's ribbon (_bolt_mesh) `length` m along unit `dir` (its head that way) and
+## `width` m across, its middle at `mid`, turned about its own line to face the eye. The bolts' (_draw), the missiles'
+## (view/weapons/missile_mount.gd) and the orbs' (view/weapons/orb_mount.gd).
+static func ribbon(mid: Vector3, dir: Vector3, length: float, width: float, eye: Vector3) -> Transform3D:
+	var z := -dir
+	var x := z.cross(Vector3.UP if absf(z.y) < 0.98 else Vector3.RIGHT).normalized()
+	var y := z.cross(x)
+	var to_eye := eye - mid
+	var face := (to_eye - dir * to_eye.dot(dir)).normalized()
+	if face.length_squared() > 0.5:
+		y = face
+		x = y.cross(z).normalized()
+	return Transform3D(Basis(x * width, y * width, z * length), mid)
 
 
 ## A bolt: a flat ribbon one unit long, across X and along Z, facing +Y (its streak texture's head

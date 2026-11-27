@@ -79,12 +79,10 @@ const Flyers := preload("res://view/raid_flyers.gd")
 const Chase := preload("res://view/network_chase.gd")
 const Livery := preload("res://view/livery.gd")
 const Outlook := preload("res://view/outlook.gd")
+const SeatKit := preload("res://tests/seat_kit.gd")      # (the seat flown on its own frames at speed, shared)
 const ROW := {"radius": 450.0, "rechargeS": 12.0, "gunshipFrac": 0.6, "spreadS": 0.5}
 const PREFS := "user://vr_prefs.json"
 const DT := 1.0 / 120.0
-const MPH := 0.44704
-const SPEED := 1500.0 * MPH     # m/s
-const STRAIGHT := 1600.0        # m of road ahead that must run straight and level
 const COST_MS := 0.10           # the mount's own mean a frame over a ring's frames among a full raid, at the most
 const COMFORT := 20.0           # m: the ring's wall is never drawn nearer the pod or an engine (over the ground) than this
 const FOLLOW_M := 0.05          # m: the drawn ring's centre is this near the wheel's centre (over the ground), at the most
@@ -97,7 +95,7 @@ var failures := 0
 var checks := 0
 var sections := 0               # (a section that dies on a script error never counts itself: the verdict then fails)
 var _next_id := 996000
-var _way := 1
+var seat := SeatKit.new()      # (tests/seat_kit.gd: the craft on a straight, held at speed, its raiders paced)
 var _fleet: Array = []          # traffic's own vehicles when the GUN was armed (put back for check_cost)
 var _director = null
 var _first_r_rest := -1.0       # the radius the ring first shows at, at rest (check_drawn)
@@ -207,61 +205,12 @@ func _seat(id: String):
 	root.add_child(v)
 	await process_frame
 	v.set_process(false)
-	_on_a_straight(v)
+	seat.on_a_straight(v)
 	for i in 10:
-		_hold_speed(v)
+		seat.hold_speed(v)
 		v._process(DT)
-	_hold_speed(v)
+	seat.hold_speed(v)
 	return v
-
-
-## Put the craft at the start of a straight, level stretch of its road (STRAIGHT m of it ahead).
-func _on_a_straight(v) -> void:
-	var sim = v.sim
-	var span := int(ceil(STRAIGHT / float(Sim.NET_STEP)))
-	var roads := [int(sim.pod.path)]
-	for r in sim.roads.size():
-		if r != roads[0]:
-			roads.append(r)
-	for r: int in roads:
-		var R = sim.roads[r]
-		if R.deck or R.shaft or R.banked or R.role != "" or R.N < span + 400:
-			continue
-		var from := clampi(int(sim.pod.hint), 300, R.N - span - 100) if r == roads[0] else 300
-		for i in range(from, R.N - span - 100, 6):
-			var th := atan2(R.ty[i], R.tx[i])
-			var h0: float = sim.road_h(r, float(i))
-			var ok := true
-			for k in range(i, i + span + 1, 2):
-				if absf(angle_difference(th, atan2(R.ty[k], R.tx[k]))) > deg_to_rad(0.15) or absf(sim.road_h(r, float(k)) - h0) > 1.0 \
-						or sim.in_pressure(r, k):
-					ok = false
-					break
-			if ok:
-				sim.respawn_on(r, i, 1)
-				_way = 1
-				print("  on road %s at sample %d: %.1f km straight and level ahead, %.0f m wide" % [R.name, i, STRAIGHT / 1000.0, R.w[i]])
-				return
-	print("  (no straight found: flying where it starts)")
-
-
-## All three bodies at 1,500 mph along the road under the pod, level.
-func _hold_speed(v) -> void:
-	var sim = v.sim
-	var R = sim.roads[sim.pod.path]
-	var i := clampi(int(sim.pod.hint), 0, R.N - 1)
-	for b in [sim.eL, sim.eR, sim.pod]:
-		b.vx = R.tx[i] * _way * SPEED
-		b.vy = R.ty[i] * _way * SPEED
-		b.vz = 0.0
-
-
-## The road's way at the pod (a unit vector in the sims' plane).
-func _road_way(v) -> Vector2:
-	var sim = v.sim
-	var R = sim.roads[sim.pod.path]
-	var i := clampi(int(sim.pod.hint), 0, R.N - 1)
-	return Vector2(R.tx[i], R.ty[i]) * _way
 
 
 ## The wheel's centre now (its muzzle), the sims' frame: where the ring is centred.
@@ -278,7 +227,7 @@ func _eye(v, g) -> Vector3:
 ## behind, -90 to the right), `up` m over the wheel's height.
 func _point(v, g, dist: float, bearing: float, up := 0.0) -> Vector3:
 	var c := _centre(g)
-	var dir := _road_way(v).rotated(deg_to_rad(bearing))
+	var dir := seat.road_way(v).rotated(deg_to_rad(bearing))
 	return Vector3(c.x + dir.x * dist, c.y + dir.y * dist, c.z + up)
 
 
@@ -299,7 +248,7 @@ func _car(v, at: Vector2, hostile: bool):
 	c.id = _next_id
 	c.kind = T.CAR
 	c.road = road
-	c.dir = _way
+	c.dir = seat.way
 	c.f = float(near)
 	c.lane = 0
 	c.lat = T._lane_lat(c, 0)
@@ -496,17 +445,17 @@ func check_lazy(v):
 		hull.get_node_or_null("Arms"), v.craft.pod.get_node_or_null("Arms"), v.gunnery],
 		hull.get_node_or_null("Arms") == null and v.craft.pod.get_node_or_null("Arms") == null and v.gunnery == null)
 	var t0 := Time.get_ticks_usec()
-	_hold_speed(v)
+	seat.hold_speed(v)
 	v._process(DT)
 	var before_ms := (Time.get_ticks_usec() - t0) / 1000.0
 	v.gun_wanted = true
-	_hold_speed(v)
+	seat.hold_speed(v)
 	t0 = Time.get_ticks_usec()
 	v._process(DT)
 	var arming_ms := (Time.get_ticks_usec() - t0) / 1000.0
 	var after := []
 	for i in 3:
-		_hold_speed(v)
+		seat.hold_speed(v)
 		t0 = Time.get_ticks_usec()
 		v._process(DT)
 		after.append(snappedf((Time.get_ticks_usec() - t0) / 1000.0, 0.01))
@@ -824,7 +773,7 @@ func check_raid_ends_mid_spread(v, g) -> void:
 func check_drawn(v, g) -> void:
 	var m = g.mount
 	var eye := _eye(v, g)
-	var ahead := _road_way(v)
+	var ahead := seat.road_way(v)
 	var left := _press(v, g)
 	var on_release: bool = _shown(m)
 	var first := -1
@@ -889,7 +838,7 @@ func check_cost(v, g) -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 7
 	var hw: float = float(v.sim.roads[v.sim.pod.path].w[int(v.sim.pod.hint)]) * 0.5
-	var way := _road_way(v)
+	var way := seat.road_way(v)
 	var P := Vector2(v.sim.pod.x, v.sim.pod.y)
 	while v.traffic_net.cars.size() < v.traffic_net.TARGET:      # (traffic's most, near a city: 220, along the road 2 km behind to 4 km ahead)
 		var at := P + way * rng.randf_range(-2000.0, 4000.0) + Vector2(-way.y, way.x) * rng.randf_range(-0.8, 0.8) * hw
@@ -1002,7 +951,7 @@ func check_sight_other() -> void:
 	var v = await _seat(Pilot.KILN)
 	v.gun_wanted = true
 	for i in 3:
-		_hold_speed(v)
+		seat.hold_speed(v)
 		v._process(DT)
 	var g = v.gunnery
 	if g == null:
@@ -1016,7 +965,7 @@ func check_sight_other() -> void:
 	for i in int(1.2 / DT):
 		_frame(v, g)
 	var P := Vector2(v.sim.pod.x, v.sim.pod.y)
-	var raider = _car(v, P + _road_way(v) * 300.0, true)
+	var raider = _car(v, P + seat.road_way(v) * 300.0, true)
 	_frames(v, g, 10, raider)
 	var state = g.sight_mat.get_shader_parameter("state")
 	var aimed = g.mount.aimed() if g.mount.has_method("aimed") else null
@@ -1043,17 +992,17 @@ func check_raids_on_arming(v) -> bool:
 		g.dormant and g.mount == mount and stowed_arms != null and mount.get("arms") == stowed_arms
 		and not stowed_arms.visible and closed == v.craft.fleet.part(&"Cab") and mount.deploy_t() == 0.0)
 	var t0 := Time.get_ticks_usec()
-	_hold_speed(v)
+	seat.hold_speed(v)
 	v._process(DT)
 	var before_ms := (Time.get_ticks_usec() - t0) / 1000.0
 	v.gun_wanted = true
-	_hold_speed(v)
+	seat.hold_speed(v)
 	t0 = Time.get_ticks_usec()
 	v._process(DT)
 	var arming_ms := (Time.get_ticks_usec() - t0) / 1000.0
 	var after := []
 	for i in 3:
-		_hold_speed(v)
+		seat.hold_speed(v)
 		t0 = Time.get_ticks_usec()
 		v._process(DT)
 		after.append(snappedf((Time.get_ticks_usec() - t0) / 1000.0, 0.01))
@@ -1066,59 +1015,11 @@ func check_raids_on_arming(v) -> bool:
 	return true
 
 
-## One of the cockpit's own frames, the craft held at speed, the trigger held or not, the paced raiders (`paced`: see
-## _pace) put where they must stand for it: the pulses sent in it.
-func _seat_frame(v, g, held := false, paced := []) -> Array:
-	v.gun_pulses.clear()
-	g.hold_fire = held
-	_hold_speed(v)
-	_pace(v, paced)
-	v._process(DT)
-	g.hold_fire = false
-	return v.gun_pulses.duplicate()
-
-
-## Each paced raider ([car, m along the road from the craft, lanes over from the craft's, ...]) stood where it must be
-## after the frame to come: that far along the road from where the pod will be (its speed held: SPEED x DT on), in the
-## middle of the lane nearest the pod's place across the road (the E2 is 400 m wide) or the given number of lanes over,
-## stopped (traffic's own drive then moves it a hair at most). So it keeps the craft's own pace.
-func _pace(v, paced: Array) -> void:
-	if paced.is_empty():
-		return
-	var sim = v.sim
-	var T = v.traffic_net
-	var R = sim.roads[sim.pod.path]
-	var i := clampi(int(sim.pod.hint), 0, R.N - 2)
-	var dx: float = sim.pod.x - R.px[i]
-	var dy: float = sim.pod.y - R.py[i]
-	var f_pod: float = i + (dx * R.tx[i] + dy * R.ty[i]) / float(R.len[i])
-	var lat_pod: float = -dx * R.ty[i] + dy * R.tx[i]
-	for row: Array in paced:
-		var c = row[0]
-		var lanes: int = (T._lanes[c.road] as Array).size()
-		var near := 0
-		for k in lanes:
-			if absf(T._lane_lat(c, k) - lat_pod) < absf(T._lane_lat(c, near) - lat_pod):
-				near = k
-		c.f = f_pod + _way * (float(row[1]) + SPEED * DT) / float(R.len[i])
-		c.lane = clampi(near + int(row[2]), 0, lanes - 1)
-		c.lat = T._lane_lat(c, c.lane)
-		c.v = 0.0
-		c.place(R)
-
-
 ## (On the Raids-on seat.) The last ring over, it is charged by hand (the recharge is check_recharge's: 12 s more at speed
-## would fly the craft off its straight) and the craft put on a straight again.
+## would fly the craft off its straight) and the craft put on a straight again (tests/seat_kit.gd ready_on_seat).
 func _ready_on_seat(v, g) -> void:
 	var m = g.mount
-	for i in int(1.0 / DT):
-		if m.ring_t < 0.0:
-			break
-		_seat_frame(v, g)
-	m.charge = 0.0
-	_on_a_straight(v)
-	for i in 10:
-		_seat_frame(v, g)
+	seat.ready_on_seat(v, g, func() -> bool: return m.ring_t < 0.0, func() -> void: m.charge = 0.0)
 
 
 ## (On the Raids-on seat, armed above.) The cockpit's own frames: out, a release.
@@ -1126,10 +1027,10 @@ func check_hand_tick(v) -> void:
 	var g = v.gunnery
 	var m = v.craft.weapon
 	for i in int(1.2 / DT):
-		_seat_frame(v, g)
+		seat.seat_frame(v, g)
 	var shots: int = g.shots
 	var was: int = m.released
-	var sent := _seat_frame(v, g, true)
+	var sent := seat.seat_frame(v, g, true)
 	var left: bool = m.released == was + 1
 	var hands := [v.hands.left, v.hands.right]
 	var got := []
@@ -1142,10 +1043,10 @@ func check_hand_tick(v) -> void:
 		and float(got[0][3]) == 0.0 and float(got[1][3]) == 0.0
 	var later := 0
 	for i in 30:
-		later += _seat_frame(v, g).size()
-	var again := _seat_frame(v, g, true).size()      # (a press while it recharges)
+		later += seat.seat_frame(v, g).size()
+	var again := seat.seat_frame(v, g, true).size()      # (a press while it recharges)
 	for i in 10:
-		again += _seat_frame(v, g).size()
+		again += seat.seat_frame(v, g).size()
 	check("on the seat's own frames, a release (%s): %s [hand (0 left, 1 right), amp, s, delay]: one tick in each hand, strong (%.2f: at least 0.5) and below a jolt's (1.0), at once; each hand held its length (%s s); none in the 30 frames after (%d), none for a press while it recharges (%d); no shot counted (%d -> %d)" % [
 		left, got, amp, held, later, again, shots, g.shots], left and each and amp >= 0.5 and amp < 1.0 and dur > 0.0
 		and absf(float(held[0]) - dur) < 1e-3 and absf(float(held[1]) - dur) < 1e-3 and later == 0 and again == 0 and g.shots == shots)
@@ -1161,14 +1062,14 @@ func check_at_speed(v) -> void:
 	var paced := []
 	var P := Vector2(v.sim.pod.x, v.sim.pod.y)
 	for row: Array in PACED:
-		var c = _car(v, P + _road_way(v) * float(row[0]), true)
+		var c = _car(v, P + seat.road_way(v) * float(row[0]), true)
 		R.pack.append(c)
 		paced.append([c, row[0], row[1], row[2]])
 	for i in 3:
-		_seat_frame(v, g, false, paced)
+		seat.seat_frame(v, g, false, paced)
 	var org0 := Vector2(v.org_x, v.org_y)
 	var hits: int = g.hits
-	_seat_frame(v, g, true, paced)
+	seat.seat_frame(v, g, true, paced)
 	var left: bool = m.ring_t >= 0.0
 	var gone := {}        # car -> [frame, its distance from the ring's centre that frame]
 	var nearest := {}     # car -> the nearest it came to the ring's centre while the ring was out
@@ -1177,7 +1078,7 @@ func check_at_speed(v) -> void:
 	var drawn := 0
 	for k in range(1, int(0.8 / DT)):
 		var live := paced.filter(func(p: Array) -> bool: return g.alive(p[0]))
-		_seat_frame(v, g, false, live)
+		seat.seat_frame(v, g, false, live)
 		for p: Array in paced:
 			var c = p[0]
 			if not gone.has(c) and not g.alive(c):
@@ -1226,10 +1127,10 @@ func check_sims_frame(v) -> void:
 	var m = v.craft.weapon
 	var sim = v.sim
 	_ready_on_seat(v, g)
-	_seat_frame(v, g, true)
+	seat.seat_frame(v, g, true)
 	var left: bool = m.ring_t >= 0.0
 	for i in int(round(0.1 / DT)):
-		_seat_frame(v, g)
+		seat.seat_frame(v, g)
 	var there := []
 	for r in sim.roads.size():
 		var Rd = sim.roads[r]
@@ -1249,7 +1150,7 @@ func check_sims_frame(v) -> void:
 	var follow := 0.0
 	var drawn := 0
 	for i in int(0.3 / DT):
-		_seat_frame(v, g)
+		seat.seat_frame(v, g)
 		if _shown(m):
 			drawn += 1
 			follow = maxf(follow, _off_wheel(g, m))
@@ -1273,7 +1174,7 @@ func check_no_flash(v) -> void:
 	var m = v.craft.weapon
 	_ready_on_seat(v, g)
 	var before := _screen(v)
-	_seat_frame(v, g, true)
+	seat.seat_frame(v, g, true)
 	var left: bool = m.ring_t >= 0.0
 	var same := true
 	var glow := 0.0
@@ -1284,7 +1185,7 @@ func check_no_flash(v) -> void:
 	var tall := {}
 	var changed := []
 	for k in range(1, int(0.8 / DT)):
-		_seat_frame(v, g)
+		seat.seat_frame(v, g)
 		var now := _screen(v)
 		if now != before and changed.is_empty():
 			changed = [k, now]
@@ -1298,7 +1199,7 @@ func check_no_flash(v) -> void:
 				first_tall = _tallest_deg(eye, m)
 			nearest = minf(nearest, _wall_off_craft(v, m))
 			if k == int(round(150.0 / 450.0 * 0.5 / DT)) or k == int(round(0.5 / DT)):
-				tall[snappedf(m.drawn_r, 0.1)] = snappedf(_tall_deg(eye, m, _road_way(v)), 0.01)
+				tall[snappedf(m.drawn_r, 0.1)] = snappedf(_tall_deg(eye, m, seat.road_way(v)), 0.01)
 	var t150 := float(tall.get(150.0, -1.0))
 	var t450 := float(tall.get(450.0, -1.0))
 	print("  RING AT 1,500 MPH: first drawn %d frames after the release, at %.1f m (at rest %.1f m), %.2f degrees tall at the most from the eye" % [first, first_r, _first_r_rest, first_tall])

@@ -441,15 +441,7 @@ func _draw(g) -> void:
 		var streak := minf(GunneryScript.STREAK, speed * float(m.t) + 0.3)
 		var mid := at - dir * (DART_TAIL + streak * 0.5)
 		var width := maxf(STREAK_W, eye.distance_to(mid) * GunneryScript.BOLT_WIDTH)
-		var z := -dir
-		var x := z.cross(Vector3.UP if absf(z.y) < 0.98 else Vector3.RIGHT).normalized()
-		var y := z.cross(x)
-		var to_eye := eye - mid
-		var face := (to_eye - dir * to_eye.dot(dir)).normalized()
-		if face.length_squared() > 0.5:
-			y = face
-			x = y.cross(z).normalized()
-		streak_batch.set_instance_transform(n, Transform3D(Basis(x * width, y * width, z * streak), mid))
+		streak_batch.set_instance_transform(n, GunneryScript.ribbon(mid, dir, streak, width, eye))
 		streak_batch.set_instance_color(n, STREAK_COL)
 		n += 1
 	dart_batch.visible_instance_count = n

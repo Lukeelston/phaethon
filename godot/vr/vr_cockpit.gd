@@ -2272,8 +2272,7 @@ const GUN_KICK_S := 0.08          # ... and this long (a jolt's JOLT_BUZZ_S 0.2)
 
 ## The craft's weapon's GUN switch (view/gunnery.gd): up arms it and brings it out; down makes it safe and stows it. At
 ## its place in this cockpit (gun_switch_mount), on the shell, built as the cockpit's other guarded switches are. The
-## cockpit builds it for a craft that carries a weapon (sim/pilot_craft.gd armed); tests/test_cockpit_reach.gd builds it
-## in an unarmed craft's too (the Orrery's), at the place its will have once it is armed, to hold that to its bars.
+## cockpit builds it for a craft that carries a weapon (sim/pilot_craft.gd armed: every pilot craft since Raids stage 2).
 func fit_gun_switch() -> Node3D:
 	var id: String = sim.P.vehicle
 	gun_switch = ModeSwitchScript.new()
@@ -2298,8 +2297,8 @@ func fit_gun_switch() -> Node3D:
 ##     right lever keeps about 20 mm off it through its whole travel, the bat up, straight out (mid-throw) or down
 ##     (tests/test_cockpit_reach.gd); and the box before it where a hand throws it is 24 mm clear of the MODE switch's
 ##     (tests/test_gun_controls.gd; review, 2026-11-24: where they met, one push up threw both).
-##   the Orrery, the Kiln, the Vesper (Raids stage 2, 2026-11-26: the Kiln's lance and the Vesper's pulse now, the
-##     Orrery's orbs later): their cabins' consoles, levers, MODE and POWER switches and map stand where the Phaethon's
+##   the Orrery, the Kiln, the Vesper (Raids stage 2, 2026-11-26: the Orrery's orbs, the Kiln's lance and the Vesper's
+##     pulse): their cabins' consoles, levers, MODE and POWER switches and map stand where the Phaethon's
 ##     do (the fleet's own fittings are out on the sills: vr/fleet_flight_deck.gd), so theirs is the Phaethons' place
 ##     too; its bars measured in each by tests/test_cockpit_reach.gd.
 ##   else (the Basilisk, 2026-11-23: stage 1's place, unchanged): on the starboard sill's inner ledge, by the right
