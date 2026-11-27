@@ -1672,8 +1672,38 @@ func wz(x: float, y: float, z: float) -> Vector3:
 			return network_world.shaft.point(sim.pod.path, f, sim._n_lat, z - sim.net_height(sim.pod.path, f), org_x, org_y)
 		if not sim.pod.off_road and sim.roads[sim.pod.path].deck:
 			return _deck_place(x, y, z)
-		return Vector3(x - org_x, z, -(y - org_y))
+		var flat := Vector3(x - org_x, z, -(y - org_y))
+		return flat if sim.pod.off_road else _steep_place(x, y, z, flat)
 	return w3(x, y, z)
+
+
+## On a steep road of the Network that is no deck road (the face of Helios, 75 degrees) what stands over the road
+## stands square to it too, as _deck_place stands it on Mount Hyperion's. The sims' heights are straight up: a body
+## rides 1.5 m over its road, and laid straight up on a 75 degree wall its middle is 39 cm off the wall: the engines
+## and the pod were drawn half in the road (Luke, of the Vesper on the face in the second trailer: "cutting through
+## the mesh"). So a place's height over the road (the road under the pod, carried along its slope to that place:
+## body_place's own slope and its own measure of steep, so the engines it lays along the slope keep their height
+## over it) is laid along the road's own up. Nothing moves on a road gentler than body_place's 0.15 (a jump's ramp
+## is 8.5 degrees), up a shaft or on a deck road (theirs are their own), off the roads, or far from the pod: it
+## eases out from 80 m along the road to nothing at 200 (the slope is the pod's, and the face curves away from it).
+func _steep_place(x: float, y: float, z: float, flat: Vector3) -> Vector3:
+	var P = sim.pod
+	var R = sim.roads[P.path]
+	if R.shaft or R.N < 3 or sim.in_pressure(P.path, P.hint):
+		return flat
+	var i: int = clampi(P.hint, 1, R.N - 2)
+	var grade: float = (sim.net_height(P.path, float(i + 1)) - sim.net_height(P.path, float(i - 1))) / (2.0 * float(R.len[i]))
+	var steepness := smoothstep(0.15, 0.4, absf(grade))
+	if steepness <= 0.0:
+		return flat
+	var along: float = (x - P.x) * R.tx[i] + (y - P.y) * R.ty[i]
+	var near := 1.0 - smoothstep(80.0, 200.0, absf(along))
+	if near <= 0.0 or absf((x - P.x) * R.nx[i] + (y - P.y) * R.ny[i]) > 900.0:
+		return flat
+	var c := 1.0 / sqrt(1.0 + grade * grade)
+	var s := grade * c
+	var over: float = z - ((P.z - sim.P.rideH) + along * grade)
+	return flat + (Vector3(-s * R.tx[i], c, s * R.ty[i]) - Vector3.UP) * over * steepness * near
 
 
 ## On a deck road (Mount Hyperion's) what stands over the deck stands square to it. The sims' heights are
