@@ -118,6 +118,12 @@ func fire(_g, _delta: float, _pulling: bool) -> void:
 	pass
 
 
+## Has it taken `t` already (the Shrike's missiles: locked it)? Then the fire control's gate does not hold the sight on
+## it (view/gunnery.gd _find): the gaze moves on to the next.
+func taken(_t) -> bool:
+	return false
+
+
 ## A word for the pilot ("LOCK 3", "RELOAD", "PULSE READY"), or "": the fire control says it on the strip
 ## (view._power_say) when it changes to a word.
 func status() -> String:

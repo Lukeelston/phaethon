@@ -9,7 +9,8 @@
 ##                          fire control is made, firing for itself through the missile mount, the Arms on the hull the
 ##                          seat sees (not the hidden pod), out in 1 s. The first arming's frame is told (Ruling D)
 ##   check_lock_builds      the gaze on a raider: no lock at 0.30 s, locks == [it] by 0.35 s; on a commuter 2 s: none;
-##                          four raiders in turn (a glance off between): four locks, LOCK 4; a fifth is not added
+##                          four raiders in turn (a glance off between): four locks, LOCK 4; a fifth is not added;
+##                          two side by side 12 m apart, the first locked: the gaze straight onto the second locks it
 ##   check_volley           no lock: the trigger fires nothing; held while a lock is taken: nothing (a press, not a hold);
 ##                          pressed with three locks: three missiles, one tick sent to the left hand that frame (at once,
 ##                          the hand held for the volley's three), three rounds hidden,
@@ -26,6 +27,8 @@
 ##                          fly on straight and fizz at lifeS, no kill, the lock dropped
 ##   check_commuter_in_the_way   a commuter on the line to its raider: struck (commuter_strikes one more), still in
 ##                          traffic, the missile spent, its raider untouched
+##   check_close_beside     a still drone 300 m off the left, inside a full-speed missile's turn: locked, fired, shot down
+##                          within lifeS (a missile in its hardest turn bleeds speed)
 ##   check_safe_mid_use     (Review Focus 3) SAFE 2 s into a reload, GUN again at 3 s: 2 s of it left (not 0, not 5),
 ##                          the rack not refilled; the lock held when SAFE was thrown is gone
 ##   check_cost             four missiles homing on four flyers for 600 frames, traffic's most (220 vehicles) about: the
@@ -65,7 +68,7 @@ const FAR := 1500.0             # m: the volley's raiders ...
 const CROSS_V := 400.0          # ... crossing at this
 const TICK_GAP := 0.08          # s between a volley's ticks in the hand (vr_cockpit.gd _gun_controls)
 const COST_MS := 0.15           # the mount's own mean a frame, four missiles homing, at the most
-const SECTIONS := 14
+const SECTIONS := 15
 var failures := 0
 var checks := 0
 var sections := 0               # (a section that dies on a script error never counts itself: the verdict then fails)
@@ -129,6 +132,8 @@ func _run() -> void:
 		check_target_gone_mid_flight(v, g)
 		sections += 1
 		check_commuter_in_the_way(v, g)
+		sections += 1
+		check_close_beside(v, g)
 		sections += 1
 		check_safe_mid_use(v, g)
 		sections += 1
@@ -496,6 +501,15 @@ func check_lock_builds(v, g) -> void:
 	_frames(v, g, int(0.5 / DT), pack[0])
 	check("... the gaze back on the first a while: it is not locked twice (%d locks)" % m.locks.size(), m.locks.size() == 4)
 	_clear(v, g)
+	# Two side by side 12 m apart at 500 m (a pack over adjacent lanes, as the raid bot met them, task 10): the first
+	# locked, then the gaze straight onto the second, no glance off between: the fire control's gate does not keep the
+	# sight on one the missiles have locked already, so the second locks too.
+	var pair := [_car(v, _ahead(v, 500.0, -6.0), true), _car(v, _ahead(v, 500.0, 6.0), true)]
+	var first := _lock(v, g, pair[0])
+	var second := _hold(v, g, pair[1])
+	check("two raiders side by side 12 m apart at 500 m: the first locked (%s), the gaze straight onto the second locks it too (%s): %d locks" % [first, second, m.locks.size()],
+		first and second and m.locks == pair)
+	_clear(v, g)
 
 
 ## -> the volley's three raiders (crossing at CROSS_V), or [] (its failure told).
@@ -729,6 +743,29 @@ func check_commuter_in_the_way(v, g) -> void:
 	check("a commuter on the line: struck (%d strike), still in traffic (%s), the missile spent after %.2f s (%d in flight); its raider untouched (%s, kills %d -> %d)" % [
 		g.commuter_strikes - strikes, v.traffic_net.cars.has(commuter), frames * DT, m.missiles.size(), g.alive(raider), kills, g.kills],
 		g.commuter_strikes == strikes + 1 and v.traffic_net.cars.has(commuter) and m.missiles.is_empty() and frames * DT < 1.0 and g.alive(raider) and g.kills == kills)
+	_clear(v, g)
+
+
+## A drone close beside the craft (300 m off its left, still, a little up), locked and fired at: its missile leaves along
+## its rail at 900 m/s, whose turn at 120 degrees a second is some 430 m round, and still reaches it within lifeS (a
+## missile pulling its hardest bleeds speed, so its turn tightens). Task 10's raid bot found missiles circling drones 250
+## to 490 m off the nose for their whole life.
+func check_close_beside(v, g) -> void:
+	var m = g.mount
+	var at := _ahead(v, 0.0, 300.0)
+	var drone = _flyer("drone", Vector3(at.x, at.y, v.sim.pod.z + 20.0))
+	var locked := _lock(v, g, drone)
+	_press(v, g)
+	g.hold_fire = false
+	var frames := 0
+	var slowest := INF
+	while not m.missiles.is_empty() and frames < int(float(ROW.lifeS) / DT) + 2:
+		slowest = minf(slowest, (m.missiles[0].v as Vector3).length())
+		_frame(v, g)
+		frames += 1
+	check("a still drone 300 m off the craft's left, a little up: locked (%s); its missile %s in %.2f s (lifeS %.0f), at its slowest %.0f m/s" % [
+		locked, "shot it down" if not g.alive(drone) else "missed it", frames * DT, float(ROW.lifeS), slowest],
+		locked and not g.alive(drone) and frames * DT < float(ROW.lifeS))
 	_clear(v, g)
 
 
